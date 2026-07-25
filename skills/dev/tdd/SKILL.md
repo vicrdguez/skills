@@ -18,9 +18,9 @@ See [tests.md](./reference/tests.md) for examples and [mocking.md](./reference/m
 
 ## Seams — where tests go
 
-A **seam** is the public boundary you test at: the interface where you observe behavior without reaching inside. Tests live at seams, never against internals.
+A **seam** is the public boundary you test at: the interface where you observe behavior without reaching inside (full vocabulary in `/design`). Tests live at seams, never against internals.
 
-**Test only at pre-agreed seams.** Before writing any test, write down the seams under test and confirm them with the user. No test is written at an unconfirmed seam. You can't test everything — agreeing the seams up front is how testing effort lands on the critical paths and complex logic instead of every edge case.
+**Test only at pre-agreed seams.** Before writing any test, write down the seams under test and confirm them with the user — unless they are already pinned in the change artifacts (`plan.md` / `behavior.md`), which count as the pre-agreement. No test is written at an unconfirmed seam. You can't test everything — agreeing the seams up front is how testing effort lands on the critical paths and complex logic instead of every edge case.
 
 Ask: "What's the public interface, and which seams should we test?"
 
@@ -34,5 +34,5 @@ Ask: "What's the public interface, and which seams should we test?"
 
 - **Red before green.** Write the failing test first, then only enough code to pass it. Don't anticipate future tests or add speculative features.
 - **One slice at a time.** One seam, one test, one minimal implementation per cycle.
-- **Refactoring is not part of the loop.** It belongs to the review stage (see the `code-review` skill), not the red → green implementation cycle.
-- **Commit**: Once done with the slice, create one ligical commit for it with a tight message and mentioning the ticket it was made for. Per-slice commits are cheap and reworkable (they live on the change branch not on `main`) and make the eventual PR readable
+- **Refactoring is not part of the loop.** It belongs to the review stage after the whole implementation is done (see the `/review` skill), not the red → green implementation cycle.
+- **Commit**: Once done with the slice, create one logical commit for it with a tight message and mentioning the ticket it was made for. Per-slice commits are cheap and reworkable (they live on the change branch not on `main`) and make the eventual PR readable
