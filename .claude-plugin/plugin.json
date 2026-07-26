@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "skills",
+  "description": "A staged dev pipeline — explore, propose, implement, watchdog — with design, domain, tdd and audit as reference skills.",
+  "author": {
+    "name": "Víctor Reyes Rodríguez",
+    "email": "contact@vicrodriguez.dev"
+  },
+  "homepage": "https://github.com/vicrdguez/skills",
+  "repository": "https://github.com/vicrdguez/skills",
+  "license": "MIT",
+  "keywords": ["tdd", "code-review", "domain-modeling", "workflow"],
+  "skills": ["./skills/dev/"]
+}
