@@ -6,7 +6,9 @@ disable-model-invocation: true
 
 
 Review and validate the changes in an adversarial, guilty-until-proven code review that earns its
-place before the human approval. It sits between build and the human's merge: a **model** reviews; the **human** accepts. **The trust boundary (non-negotiable):** This skill **never runs in the context that built the change**. 
+place before the human approval. It sits between build and the human's merge: a **model** reviews; the **human** accepts. **The trust boundary (non-negotiable):** This skill **never runs in the context that built the change**.
+
+**Direct invocation:** When invoked directly, execute the watchdog workflow in the current session. Do not launch `watchdog-runner`; the caller is responsible for starting this skill in a fresh session.
 
  This skill **edits no code**: on a pass it lands; on a fail it comments and bounces.
  It works on a single unit of work (ticket/PR).

@@ -45,19 +45,26 @@ Anything in the repo that documents how code should be written, such as `CODING_
 
 On top of whatever the repo documents, the Standards axis always carries the **smell baseline** in [smells.md](./reference/smells.md) — a fixed set of Fowler code smells (_Refactoring_, ch.3) that applies even when a repo documents nothing, plus the two rules that bind it. Paste that file's full contents into the Standards sub-agent prompt — the sub-agent has no other access to it.
 
+#### Optional Ponytail review
+
+Check the available skills for `ponytail-review`. When present, include it only in the Standards axis as an additional over-engineering lens. For pi, pass `skill: "ponytail-review"` on the Standards task; do not pass it to the Artifacts task. If the skill is absent, omit the override and continue normally.
+
+Ponytail findings are judgement calls, not documented-standard violations. Keep them separate from the ordinary Standards findings, and do not let them replace the documented standards or smell baseline.
+
 ### 4. Spawn both sub-agents in parallel
 
 Dispatch both axes as parallel sub-agents, each in a fresh context carrying its brief:
 
 - **Claude Code**: a single message with two `Agent` tool calls, using the `general-purpose` subagent for both.
-- **pi** ([pi-subagents](https://github.com/nicobailon/pi-subagents)): a single `subagent` tool call with a parallel `tasks` array — `{ tasks: [{ agent: "reviewer", task: "<standards brief>" }, { agent: "reviewer", task: "<artifacts brief>" }] }`.
+- **pi** ([pi-subagents](https://github.com/nicobailon/pi-subagents)): a single `subagent` tool call with a parallel `tasks` array and `context: "fresh"`. When `ponytail-review` is available, inject it into the Standards task only — `{ tasks: [{ agent: "reviewer", task: "<standards brief>", skill: "ponytail-review" }, { agent: "reviewer", task: "<artifacts brief>" }], context: "fresh" }`. Omit `skill` when unavailable.
 - **No sub-agent mechanism available**: run the two axes sequentially, Standards first.
 
 **Standards sub-agent prompt** — include:
 
 - The full diff command and commit list.
 - The list of standards-source files you found in step 3, **plus [smells.md](./reference/smells.md) pasted in full** — the sub-agent has no other access to it.
-- The brief: "Report — per file/hunk where relevant — (a) every place the diff violates a documented standard: cite the standard (file + the rule); and (b) any baseline smell you spot: name it and quote the hunk. Distinguish hard violations from judgement calls — documented-standard breaches can be hard, but baseline smells are always judgement calls, and a documented repo standard overrides the baseline. Skip anything tooling enforces. Report each finding as its own bullet, anchored to `file:line`. Under 500 words — compress findings rather than omit any."
+- When `ponytail-review` was provided, instruct the sub-agent to load and apply it as an additional lens. Put its output under `### Ponytail review`, preserve its concise finding format and final net-lines estimate, and treat every Ponytail finding as a judgement call. It must still complete the documented-standards and smell-baseline review.
+- The brief: "Report — per file/hunk where relevant — (a) every place the diff violates a documented standard: cite the standard (file + the rule); and (b) any baseline smell you spot: name it and quote the hunk. Distinguish hard violations from judgement calls — documented-standard breaches can be hard, but baseline smells are always judgement calls, and a documented repo standard overrides the baseline. Skip anything tooling enforces. Report each finding as its own bullet, anchored to `file:line`. Under 500 words, or 750 when `ponytail-review` is included. Compress findings rather than omit any; Ponytail findings must retain their one-line format."
 
 **Artifacts sub-agent prompt** — include:
 
@@ -69,9 +76,9 @@ If the Artifacts is missing, skip the Artifacts sub-agent and note this in the f
 
 ### 5. Aggregate
 
-Present the two reports under `## Standards` and `## Artifacts` headings, verbatim or lightly cleaned. Do **not** merge or rerank findings — the two axes are deliberately separate (see _Why two axes_).
+Present the two reports under `## Standards` and `## Artifacts` headings, verbatim or lightly cleaned. Keep any `### Ponytail review` subsection inside `## Standards`. Do **not** merge or rerank findings — the two axes are deliberately separate (see _Why two axes_).
 
-End with a one-line summary: total findings per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes — that's the reranking the separation exists to prevent.
+End with a one-line summary: total findings per axis, counting Ponytail findings in Standards, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes — that's the reranking the separation exists to prevent.
 
 ## Why two axes
 
