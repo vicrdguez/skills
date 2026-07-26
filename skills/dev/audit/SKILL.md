@@ -1,5 +1,5 @@
 ---
-name: review
+name: audit
 description: Review the changes since a fixed point (commit, branch, tag or merge-base) along two axes - Standards (does the code follow this repo documented coding standards) and change Artifacts (does the code match what the originating change asked for?) Runs both reviews in parallel subagents and reports them side by side. Use when the user wants to review a branch, a PR, work-in-progress changes or asks to "review since X"
 ---
 
@@ -14,7 +14,7 @@ Two-axis review of the diff between `HEAD` and a fixed point the user supplies:
 
 Both axes run as **parallel sub-agents** so they don't pollute each other's context, then this skill aggregates their findings.
 
-Use `docs/github.md` only for fetching originating issues or PRs — this skill performs no board operations; label transitions belong to `/watchdog`.
+Use `docs/github.md` only for fetching originating issues or PRs — this skill performs no board operations and no label transitions.
 
 
 ## Process

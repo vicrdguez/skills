@@ -16,7 +16,7 @@ place before the human approval. It sits between build and the human's merge: a 
  
 ## Verify independently — never on trust
 
-**Re-run the mechanical verification yourself** using `/review` — its Artifacts axis checklist is the single source of what must hold. Do not accept the implementor's green suite as sufficient: a green suite you did not run yourself does not count. The implementor already ran `/review` as their refactor step; that pass ran in the context that built the change and does not count either.
+**Re-run the mechanical verification yourself** using `audit` — its Artifacts axis checklist is the single source of what must hold. Do not accept the implementor's green suite as sufficient: a green suite you did not run yourself does not count. The implementor already ran `audit` as their refactor step; that pass ran in the context that built the change and does not count either.
 
 ## Review guilty-until-proven — behavior, style, hygiene
 
@@ -27,10 +27,10 @@ sufficient — weak tests pass too.
   the behavior broke?* Mentally (or actually) break the behavior and check the test catches it. A test
   that asserts nothing meaningful — tautological, over-mocked so it exercises the mock, asserting a
   constant — is a **finding**, even though it is green.
-- **Ground style and hygiene in the target project's own quality skills** — its linters, formatters, style guides, and framework-convention skills installed in *that* repo — **not the model's priors**. If the project ships a `/review`/quality skill, run it.
+- **Ground style and hygiene in the target project's own quality skills** — its linters, formatters, style guides, and framework-convention skills installed in *that* repo — **not the model's priors**. If the project ships an `audit`/quality skill, run it.
 - Read the diff for the ordinary defects too: correctness, edge cases, missed scenarios, mocking the
   code under test, plan drift against `plan.md`.
-- Apply the principles from `/design` and `/domain`
+- Apply the principles from `design` and `domain`
 
 If the change is high-stakes or considered critical you can do an **Independent test re-implementation**, writing the tests yourself from `behavior.md` and diffing intent. However,  is an **opt-in escalation**  that should be requested by the user explicitly, not the default. The standing default is this adversarial test-strength read.
 
@@ -54,7 +54,7 @@ Hand off through the Board reference: remove `review` and `wip` as it adds `done
 
 When verification fails **or** the review surfaces a blocking issue:
 
-1. **Leave findings as PR comments before the handoff** — a summary verdict comment plus inline comments anchored to the offending lines. Map `/review`'s findings onto them 1:1: each finding's file/line anchors an inline comment; the summary comment carries the verdict. Be specific: which check failed and where, which test is weak and why it wouldn't catch a regression, which quality-skill rule tripped.
+1. **Leave findings as PR comments before the handoff** — a summary verdict comment plus inline comments anchored to the offending lines. Map `audit`'s findings onto them 1:1: each finding's file/line anchors an inline comment; the summary comment carries the verdict. Be specific: which check failed and where, which test is weak and why it wouldn't catch a regression, which quality-skill rule tripped.
 2. Through the Board reference, remove `review` and `wip` as it adds `rework` to hand it back to the implementor.
 3. **Modify no code.** Fixing is the implementor's job; collapsing that boundary is exactly what this stage exists to prevent. Do not archive, do not mark as `done`.
 

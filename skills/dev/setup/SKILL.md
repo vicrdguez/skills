@@ -1,10 +1,9 @@
 ---
 name: dev-setup
 description: One-time project setup for the dev pipeline -- stamps the pipeline map into AGENTS.md/CLAUDE.md and bootstraps the issue board. Idempotent, re-run to refresh.
-disable-model-invocation: true
 ---
 
-One-time setup that makes a repo ready for the dev pipeline (`/explore` → `/propose` → `/implement` → `/watchdog` → human merge). Every step is idempotent: re-running refreshes only what this skill owns and touches nothing else.
+One-time setup that makes a repo ready for the dev pipeline (`explore` → `propose` → `implement` → `watchdog` → human merge). Every step is idempotent: re-running refreshes only what this skill owns and touches nothing else.
 
 ## 1. Stamp the pipeline map
 
@@ -20,13 +19,13 @@ This repo is developed through a staged pipeline. Each stage is a skill; invoke 
 
 | Stage | Skill | When |
 |---|---|---|
-| Explore | `/explore` | Interview to reach shared understanding; durable docs via `/domain` |
-| Propose | `/propose` | Materialize the conversation into tracer-bullet slices on the board |
-| Implement | `/implement` | Claim one slice, TDD it at the pinned seams, refactor via `/review`, submit |
-| Watchdog | `/watchdog` | Adversarial double verification in a fresh context; lands or bounces |
+| Explore | `explore` | Interview to reach shared understanding; durable docs via `domain` |
+| Propose | `propose` | Materialize the conversation into tracer-bullet slices on the board |
+| Implement | `implement` | Claim one slice, TDD it at the pinned seams, refactor via `audit`, submit |
+| Watchdog | `watchdog` | Adversarial double verification in a fresh context; lands or bounces |
 | Merge | human | Accepts the change; the acceptance gate |
 
-Reference skills: `/design` (deep modules & seams), `/domain` (glossary, ADRs, capabilities), `/tdd` (the red → green loop), `/review` (two-axis review engine).
+Reference skills: `design` (deep modules & seams), `domain` (glossary, ADRs, capabilities), `tdd` (the red → green loop), `audit` (two-axis review engine).
 
 - Board protocol: `docs/github.md`. Labels: `ready` → `wip` → `review` → `done`, with `rework` for bounces.
 - Change artifacts: `.changes/<slug>/` on the slice branch; archived to `.changes/archive/<date>-<slug>/` on a watchdog pass.

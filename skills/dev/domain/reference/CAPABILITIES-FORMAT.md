@@ -2,7 +2,7 @@
 
 Capability docs live in `docs/capabilities/` — one capability per file, kebab-case (`order-cancellation.md`). They answer "what can the system do?" at the level of observable behavior, complementing `CONTEXT.md` (what words mean) and ADRs (why it is this way).
 
-Create the directory and files lazily — only when there is a capability worth recording. Update a capability doc in the same change that alters, extends, or retires its behavior (`/propose` reads these to see what a change touches; `tasks.md` carries the update as the final doc task).
+Create the directory and files lazily — only when there is a capability worth recording. Update a capability doc in the same change that alters, extends, or retires its behavior (`propose` reads these to see what a change touches; `tasks.md` carries the update as the final doc task).
 
 ## Template
 

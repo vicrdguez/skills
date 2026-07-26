@@ -29,7 +29,7 @@ Break the work into **tracer-bullets** tickets.
 - Each slice is sized to fit in a single fresh context window
 - Write the artifacts, then publish them to the project's issue tracker as explained below. 
 
-Use `/design` to sketch the seams at which this change will be tested. 
+Use the `design` skill to sketch the seams at which this change will be tested.
 - Always prefer existing seams rather than new ones
 - Use the highest seam possible
 - If new seams are needed, propose them at the highest point you can. The fewer seams across the codebase, the better.
@@ -54,7 +54,7 @@ Iterate until the user approves the breakdown. A single ticket is possible if th
 
 ### 5. Publishing and required Setup
 
-Use `docs/github.md` as a reference of how to handle the issue board. If the file does not exist, run `/dev-setup` first.
+Use `docs/github.md` as a reference of how to handle the issue board. If the file does not exist, run `dev-setup` first.
 
 If the change is split in multiple slices, create one parent issue holding the overall decisions so far and any notes relevant to all slices. *Each slice then will become a child issue*, tied to the parent. The parent issue is coordination only — it gets no branch, worktree or artifacts of its own. Publish all tickets in dependency order (blockers first). Then
 
@@ -69,7 +69,7 @@ These are the artifacts that each vertical slice will use for implementation:
 
 **Always**:
 - `intent.md`: Why / What / Scope / Out of scope / Definition of Done. Follow the [intent.md](./reference/intent.md) template
-- `behavior.md`: The exact required behavior(s) to implement, in *Gherkin notation* that map to `intent.md` *Definition of Done* section. Since seams are where we test at, use `/tdd` to define good tests and avoid anti-patterns. The final list of behaviours will translate directly to what should be implemented and tested. Follow the [behavior.md](./reference/behavior.md) template 
+- `behavior.md`: The exact required behavior(s) to implement, in *Gherkin notation* that map to `intent.md` *Definition of Done* section. Since seams are where we test at, use `tdd` to define good tests and avoid anti-patterns. The final list of behaviours will translate directly to what should be implemented and tested. Follow the [behavior.md](./reference/behavior.md) template
 
 **When warranted**:
 - `plan.md`: The approach, the module shapes and seams chosen for implementation and any pinned decision the implementer MUST NOT make on its own. Follow the [plan.md](./reference/plan.md) template

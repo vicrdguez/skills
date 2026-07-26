@@ -1,7 +1,7 @@
 # {change title} Acceptance
 
 <!--
-Written by /watchdog on a pass, as a new artifact in `.changes/<slug>/`. This is
+Written by `watchdog` on a pass, as a new artifact in `.changes/<slug>/`. This is
 the acceptance gap: everything the human must validate manually because an agent
 cannot run or observe it. Keep every item concrete and checkable in minutes.
 Delete this comment in the real file.

@@ -12,7 +12,7 @@ If a fact can be found by exploring the environment (filesystem, tools, codebase
 
 Do not act on it until I confirm we have reached a shared understanding.
 
-Use `/domain` skill throughout the session.
+Use `domain` skill throughout the session.
 
 
 ## Question Format

@@ -75,7 +75,7 @@ test("calculateTotal sums line items", () => {
 
 The rule is *don't reach **past** a module's interface into its private internals* — But it is **not** "only
 test the topmost public API." A substantial internal module (a slippage model, a state-machine guard)
-is itself a module with an interface; write its tests against **that** interface. Use `/design` to tell a real internal module (test it) from incidental plumbing (don't pin it).
+is itself a module with an interface; write its tests against **that** interface. Use `design` to tell a real internal module (test it) from incidental plumbing (don't pin it).
 
 ## Materializing a Gherkin scenario
 

@@ -23,7 +23,7 @@ gh label create "<name>" --repo "<owner>/<repo>" --description "<desc>" --color 
 
 ## Creating Issues
 
-Used by `/propose`. The issue is a **thin pointer** to the brief on the pushed branch, not a copy of it. Push the branch first (`git push -u origin <slug>`), then:
+Used by `propose`. The issue is a **thin pointer** to the brief on the pushed branch, not a copy of it. Push the branch first (`git push -u origin <slug>`), then:
 
 ```sh
 gh issue create --repo "<owner>/<repo>" \
@@ -38,7 +38,7 @@ gh issue create --repo "<owner>/<repo>" \
 
 ## Claiming work
 
-Used by `/implement` and `/watchdog`. Claims issues labeled as `ready`, `rework` or `review` by adding `wip`
+Used by `implement` and `watchdog`. Claims issues labeled as `ready`, `rework` or `review` by adding `wip`
 
 As an implementor:
 - Always prefer `rework` PRs over `ready` issues.
@@ -78,7 +78,7 @@ Failed or interrupted stays claimed. A human requeues manually.
 
 ## Submit for review
 
-Used by `/implement`. 
+Used by `implement`.
 
 Does a PR already exist for this branch?
 
@@ -118,7 +118,7 @@ gh pr view <pr-number> --repo "<owner>/<repo>" --comments
 
 ## After review
 
-Used by `/watchdog`. Submit the review, as either needing `rework` or as `done`
+Used by `watchdog`. Submit the review, as either needing `rework` or as `done`
 
 ```sh
 # reviewer bounces:  review + wip → rework
