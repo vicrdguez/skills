@@ -60,8 +60,9 @@ When verification fails **or** the review surfaces a blocking issue:
 
 ## Confirm every handoff completed
 
-After each handoff command, inspect the Board state. A successful handoff ends at `done` or `rework` with `wip` removed. If a comment, label operation, or Board lookup fails or leaves
-any other state, report the exact incomplete Board state and stop. Do not present the review as successfully handed off, and never remove `wip` just to clean up a partial handoff.
+After each handoff operation, verify its outcome. If a command fails before any remote side effect occurs—for example, local CLI argument validation—correct the command and retry once. 
+
+If a remote side effect may have occurred, inspect GitHub before retrying to avoid duplicate comments or transitions. Stop when the outcome cannot be established, or when the final Board state is not `done` or `rework` with `wip` removed. Never remove `wip` just to clean up a partial handoff.
 
 ## Hand-off
 
