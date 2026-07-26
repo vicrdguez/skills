@@ -17,7 +17,7 @@ I think his skill repository is full of great ideas and skill implementations th
 
 ## The staged workflow
 
-The collection is a pipeline of five stages. Each stage is a skill, entered cold and left behind when it hands off:
+The collection is a pipeline of five stages. Each stage is a skill, entered cold and left behind when it hands off. The only exception is `propose`, that is run directly in the same session as `explore`:
 
 ```mermaid
 flowchart LR
@@ -47,7 +47,7 @@ Four rules hold it together:
 
 **From OpenSpec** (`explore` → `propose` → `apply` → `archive`): the first two stage names are borrowed outright. The divergence is that `apply` splits into `implement` plus an adversarial `watchdog` stage and then the human merge — review becomes a stage with its own trust boundary instead of a step inside implementation. There is also no spec store: durable knowledge is `CONTEXT.md`, ADRs and capability docs on `main`, and in-flight state lives on the issue board rather than in a change folder.
 
-**From Matt's skills**: that repo is a composable collection — you reach for whichever skill fits the moment. This is an ordered pipeline where each stage has entry and exit conditions, which is what makes the cold handoff between stages possible at all. Several skill files here are near-verbatim from his; the pipeline wrapped around them is the part I added.
+**From Matt's skills**: his repo is a composable collection, you reach for whichever skill fits the moment. This is an ordered pipeline where each stage has entry and exit conditions, which is what makes the cold handoff between stages possible at all. Several skill files here are near-verbatim from his; the pipeline wrapped around them is the part I added.
 
 ## Installation
 ### Install with Pi
