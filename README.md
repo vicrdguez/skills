@@ -62,3 +62,40 @@ pi install git:github.com/vicrdguez/skills
 /plugin marketplace add vicrdguez/skills
 /plugin install skills@vicrdguez
 ```
+
+## Pi subagent loops
+
+The Pi package uses [pi-subagents](https://github.com/nicobailon/pi-subagents) to drain each board queue sequentially. Install that extension separately with `pi install npm:pi-subagents`.
+
+- `/implement-loop [max-items]` launches one fresh `implement-runner` per `ready` or `rework` item. A verified `review` handoff starts the next worker.
+- `/watchdog-loop [max-items]` launches one fresh `watchdog-runner` per `review` item. A verified `done` or `rework` handoff starts the next worker.
+
+The scheduler and every worker have separate contexts. Run the two schedulers in different Pi sessions so implementation and review history never mix:
+
+```sh
+pi --name implement-loop --model openai-codex/gpt-5.6-luna --thinking medium
+pi --name watchdog-loop --model openai-codex/gpt-5.6-luna --thinking medium
+```
+
+The worker defaults are:
+
+| Agent | Model | Thinking | Fallback |
+|---|---|---|---|
+| `implement-runner` | `openai-codex/gpt-5.6-sol` | medium | `openai-codex/gpt-5.6-terra:high` |
+| `watchdog-runner` | `openai-codex/gpt-5.6-sol` | high | `openai-codex/gpt-5.6-terra:high` |
+
+For a critical watchdog run, override only that loop invocation:
+
+```text
+/watchdog-loop 10 model=openai-codex/gpt-5.6-sol:xhigh
+```
+
+The loop passes this as the `model` override on every fresh `watchdog-runner` launch; it does not change the saved default. The direct pi-subagents equivalent for one item is:
+
+```text
+/run watchdog-runner[model=openai-codex/gpt-5.6-sol:xhigh] "Load and follow the watchdog skill exactly. Process one eligible work item and exit."
+```
+
+Use `xhigh` for security, authorization, billing, destructive migrations, irreversible data operations, public API compatibility, repeated rework, or the watchdog's opt-in independent test reimplementation. Keep `high` for normal reviews: extra reasoning can otherwise increase latency and speculative edge-case findings.
+
+Both loops stop when the queue is empty, their item limit is reached, or a claimed item has an incomplete or unverified handoff. A normal watchdog rejection that reaches verified `rework` is complete, so the loop continues.
