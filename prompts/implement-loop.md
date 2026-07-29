@@ -16,15 +16,15 @@ For each iteration, launch exactly one foreground subagent with `agent: "impleme
 Wait for it to finish, then record its issue or PR URL and board state.
 
 Continue with another fresh runner when:
-- the item reached verified `review`; or
+- the item reached verified `review` or `needs-human`; or
 - the runner definitively failed before claiming an item.
 
 Stop when:
 - no eligible `ready` or `rework` item remains;
-- a claimed item did not reach verified `review`;
+- a claimed item did not reach verified `review` or `needs-human`;
 - the result does not establish whether an item was claimed;
 - the item limit is reached.
 
-Never resume or reuse a previous runner. Never pass one runner's conversation into the next. Do not implement, audit, or reinterpret findings yourself. The skill owns the work contract; you own only sequential lifecycle control.
+Never resume or reuse a previous runner. Never pass one runner's conversation into the next. Do not implement, audit, or reinterpret findings yourself. The skill owns the work contract; you own only sequential lifecycle control. Never launch a runner at a `needs-human` item: only a person requeues those.
 
 At completion, summarize every attempted item and its final board state.

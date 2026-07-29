@@ -7,6 +7,8 @@ Write this file knowing that a different agent with a completely fresh context w
 sure that no context resolution is lost that could drive the implementer to drift from the plan is _crucial_. 
 
 When you include code-snippets anywhere on this document, **trim to the decision-rich parts** - a working demo is not needed, just the important bits
+
+Frozen once published: a decision that turns out wrong is corrected by a new proposal, never by editing this file mid-flight.
 -->
 
 ## Approach

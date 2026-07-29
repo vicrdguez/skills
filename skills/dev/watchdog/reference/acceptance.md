@@ -5,6 +5,10 @@ Written by `watchdog` on a pass, as a new artifact in `.changes/<slug>/`. This i
 the acceptance gap: everything the human must validate manually because an agent
 cannot run or observe it. Keep every item concrete and checkable in minutes.
 Delete this comment in the real file.
+
+This file is written after verification already passed, so it is not a contract
+and no agent may read work out of it. It records what was left over, not what
+was required.
 -->
 
 ## Verification the agent could not run
@@ -17,8 +21,10 @@ dashboards/sandboxes, credentials the agent lacks, production-like data.
 
 ## Human acceptance checklist
 <!--
-One line per intent.md "Definition of Done" item, phrased as something the human
-can demo directly.
+One line per intent.md "Definition of Done" item the human still has to confirm
+by hand, phrased as something they can demo directly. Leave out anything the
+suite or the gate already proved — repeating it invites a second round of
+verification that already happened. "None" is a valid answer.
 -->
 
 - [ ] {check}

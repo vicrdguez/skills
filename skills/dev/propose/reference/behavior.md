@@ -3,6 +3,8 @@
 <!--
 Specify behavior in Gherkin NOTATION (there are no .feature files and no Cucumber and no runtime).
 
+Frozen once published: a scenario discovered during review is a new proposal, never a new scenario here.
+
 Use the keywords that make behavior unambiguous and map cleanly onto a test;
 skip the ones that only exist to drive the Cucumber engine.
 
