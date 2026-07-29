@@ -6,6 +6,8 @@ This the coordination ledger for implementation. Write it when there's more than
 - One behavioral task per Gherkin scenario → each is one red-green TDD cycle.
 - Stable ids (B1, C1, D1…) so an orchestrator can dispatch and track.
 - When relevant include the capability-doc update as the final doc task (format: the `domain` skill's CAPABILITIES-FORMAT).
+
+Frozen once published: the only later edit is `[ ]` → `[x]`. No task is added during implementation or rework.
 -->
 
 ## Behavioral  (one per scenario → a red-green cycle)

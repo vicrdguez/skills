@@ -62,10 +62,14 @@ If the change is split in multiple slices, create one parent issue holding the o
 2. **Commit durable docs**: Any `CONTEXT.md` or ADR edits/additions left in the working tree from the explore session are durable, commit them to `main` now so they stay independent of any slice branch
 3. **Per slice, pick a slice ID**: A short, verb-led kebab-case slug like `add-order-cancellation`
 4. **Per slice, create its worktree:** `git worktree add .worktrees/<slice-slug> -b <slice-slug>` off up-to-date `main`
-5. **Per slice, write its artifacts**: create `.changes/<slice-slug>/` and all its artifacts directly inside that worktree, commit them, and push the branch (`git push -u origin <slice-slug>`) before creating its issue
+5. **Per slice, write its artifacts**: create `.changes/<slice-slug>/` and all its artifacts directly inside that worktree, commit them, and push the branch (`git push -u origin <slice-slug>`) before creating its issue. Record that commit's SHA as the issue's `Artifact baseline` — every later stage diffs against it to prove the brief didn't move.
 
 ## Writing the change artifacts
 These are the artifacts that each vertical slice will use for implementation:
+
+Publishing them freezes them. From that commit on, the only edit anyone may make is ticking an existing `[ ]` to `[x]` — nothing added, removed, reordered or reworded. This is the acceptance baseline: if it can be rewritten mid-flight to match whatever got built, or grown with things discovered during review, it stops being a contract and the change stops converging. Discoveries belong in PR findings or in a new proposal. `acceptance.md` is the one later addition, written by `watchdog` after it validates the work.
+
+So resolve the contradictions now, while you still can — between the artifacts themselves, and between them and the project's own rules. Afterwards nobody downstream can fix them; they can only stop and ask you.
 
 **Always**:
 - `intent.md`: Why / What / Scope / Out of scope / Definition of Done. Follow the [intent.md](./reference/intent.md) template

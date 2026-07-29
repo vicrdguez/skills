@@ -24,6 +24,8 @@ flowchart LR
     explore[explore] --> propose[propose] --> implement[implement] --> watchdog[watchdog]
     watchdog -->|pass| merge([human merge])
     watchdog -->|rework| implement
+    implement -->|blocked decision| human[needs-human]
+    watchdog -->|blocked decision / two bounces| human
 ```
 
 | Stage | Skill | What it hands off |
@@ -39,8 +41,8 @@ The rest are reference skills the stages pull in rather than stages of their own
 Four rules hold it together:
 
 - **A fresh context per stage.** Handoff happens through the board and the filesystem, never through conversation history. The watchdog is the strict case: it never runs in the context that built the change, so a green suite it did not run itself does not count.
-- **The board is the queue.** GitHub issues and PRs carry the state — `ready` → `wip` → `review` → `done`, with `rework` for bounces. One branch and one worktree per slice under `.worktrees/<slug>`, so slices don't step on each other.
-- **Two document lifetimes.** Change artifacts (`intent.md`, `behavior.md`, and when warranted `plan.md` / `tasks.md`) live in `.changes/<slug>/` on the slice branch and are archived once the change lands. Durable docs — `CONTEXT.md`, `docs/adr/`, `docs/capabilities/` — are committed to `main` and outlive every change that touched them.
+- **The board is the queue.** GitHub issues and PRs carry the state — `ready` → `wip` → `review` → `done`, with `rework` for bounces and `needs-human` for the rare paused decision. One branch and one worktree per slice under `.worktrees/<slug>`, so slices don't step on each other.
+- **Two document lifetimes.** Change artifacts (`intent.md`, `behavior.md`, and when warranted `plan.md` / `tasks.md`) live in `.changes/<slug>/` on the slice branch and are archived once the change lands. They freeze the moment they are published — ticking a box is the only edit anyone downstream may make, so the contract can't drift to meet whatever got built. Durable docs — `CONTEXT.md`, `docs/adr/`, `docs/capabilities/` — are committed to `main` and outlive every change that touched them.
 - **Slices are tracer bullets.** Each one cuts a complete path through every layer, is demoable on its own, declares its blocking edges, and is sized to fit a single fresh context window.
 
 ### How this differs
@@ -70,6 +72,8 @@ The Pi package uses [pi-subagents](https://github.com/nicobailon/pi-subagents) t
 - `/implement-loop [max-items]` launches one fresh `implement-runner` per `ready` or `rework` item. A verified `review` handoff starts the next worker.
 - `/watchdog-loop [max-items]` launches one fresh `watchdog-runner` per `review` item. A verified `done` or `rework` handoff starts the next worker.
 
+Review findings carry stable per-PR IDs (`W1`, `W2`, …) so a round can be compared with the last one. The first watchdog review is complete; later rounds verify the open findings and read only what changed since the previous `Reviewed head`, and after two bounces the PR pauses at `needs-human` rather than starting a third cycle. A verified `needs-human` is a complete handoff — the loop moves on, and nothing reclaims that item until a person does.
+
 The scheduler and every worker have separate contexts. Run the two schedulers in different Pi sessions so implementation and review history never mix:
 
 ```sh
@@ -96,6 +100,6 @@ The loop passes this as the `model` override on every fresh `watchdog-runner` la
 /run watchdog-runner[model=openai-codex/gpt-5.6-sol:xhigh] "Load and follow the watchdog skill exactly. Process one eligible work item and exit."
 ```
 
-Use `xhigh` for security, authorization, billing, destructive migrations, irreversible data operations, public API compatibility, repeated rework, or the watchdog's opt-in independent test reimplementation. Keep `high` for normal reviews: extra reasoning can otherwise increase latency and speculative edge-case findings.
+Use `xhigh` for security, authorization, billing, destructive migrations, irreversible data operations, public API compatibility, or the watchdog's opt-in independent test reimplementation. Keep `high` for normal reviews: extra reasoning can otherwise increase latency and speculative edge-case findings.
 
 Both loops stop when the queue is empty, their item limit is reached, or a claimed item has an incomplete or unverified handoff. A normal watchdog rejection that reaches verified `rework` is complete, so the loop continues.

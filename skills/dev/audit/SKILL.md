@@ -7,10 +7,13 @@ Two-axis review of the diff between `HEAD` and a fixed point the user supplies:
 
 - **Standards** — does the code conform to this repo's documented coding standards? This includes any documented standard in the repo but also make use of project/repo specific skills to aid here. E.g. the repo has a specific skill to review a module or a layer present in the project
 - **Artifacts** — does the code faithfully implement the originating intent, behaviors, plan and tasks?
-  1. Every `intent.md` item in "Definition of Done" is demonstrably met
-  2. Every `behavior.md` scenario has materialized as a test (or for prose changes, encoded)
-  3. The full suite is green
-  4. Read `plan.md` against the diff. If the implementation diverged, note it.
+  1. The artifacts themselves are unchanged since they were published, apart from existing `[ ]` boxes ticked to `[x]`
+  2. Every `intent.md` item in "Definition of Done" is demonstrably met
+  3. Every `behavior.md` scenario has materialized as a test (or for prose changes, encoded)
+  4. The full suite is green
+  5. Read `plan.md` against the diff. If the implementation diverged, note it.
+
+Item 1 is what stops the contract moving to meet the code. The rest are judged against the **complete final implementation**, even when the diff under review is only the latest increment.
 
 Both axes run as **parallel sub-agents** so they don't pollute each other's context, then this skill aggregates their findings.
 
@@ -21,8 +24,12 @@ Use `docs/github.md` only for fetching originating issues or PRs — this skill 
 
 ### 1. Pin the fixed point
 
-Look for the first commit the implementor for this change did. The goal is to review the work done for the single claimed unit of work.
+The goal is to review the work done for the single claimed unit of work. Which point that is depends on the round:
 
+- **First review of a change** — the PR base merge-base, or the parent of the implementor's first commit. Never that first commit itself: `git diff <it>...HEAD` would omit everything it introduced.
+- **Repeat review after a bounce** — the `Reviewed head` recorded in the previous reviewer's summary, so the round reads only what changed since.
+
+Artifact integrity uses its own, unmoving baseline: the `Artifact baseline` SHA recorded in the originating issue, or for legacy changes the first commit containing `.changes/<slug>/`. It never advances with the review rounds — that is the point of it.
 
 If the user provides the fixed point — a commit SHA, branch name, tag, `main`, `HEAD~5`, etc. — use that instead. If this skill was invoked independently of a claimed unit of work and no fixed point was given, ask for one.
 
@@ -51,7 +58,15 @@ Check the available skills for `ponytail-review`. When present, include it only 
 
 Ponytail findings are judgement calls, not documented-standard violations. Keep them separate from the ordinary Standards findings, and do not let them replace the documented standards or smell baseline.
 
-### 4. Spawn both sub-agents in parallel
+### 4. Run the deterministic checks once
+
+These three produce facts, not judgements — a diff read or an exit code. Run them here, before spawning anything, and hand the recorded results to both briefs. Two reviewers running them concurrently would contend over the same worktree, and a fact produced inside a reviewer's context is a fact the two axes can end up reporting differently.
+
+1. **The documented gate** — the project's full suite, typecheck and lint, exactly once per invocation. A red gate is worth knowing before spending two reviewer contexts on it.
+2. **Artifact integrity** — `git diff <artifact-baseline>...HEAD -- .changes/<slug>/`. The only permitted change is a paired replacement where a line's `[ ]` became `[x]`. Anything added, removed, reordered, reworded or unticked is a hard Artifacts finding. `acceptance.md` is excluded — the reviewer writes it after this stage.
+3. **Debt consistency**, when a root `DEBT.md` or any `DEBT(` marker exists — every marker has exactly one index entry and every entry points at a live marker. Orphans either way are a hard Standards finding. Neither file nor marker present is fine.
+
+### 5. Spawn both sub-agents in parallel
 
 Dispatch both axes as parallel sub-agents, each in a fresh context carrying its brief:
 
@@ -63,22 +78,27 @@ Dispatch both axes as parallel sub-agents, each in a fresh context carrying its 
 
 - The full diff command and commit list.
 - The list of standards-source files you found in step 3, **plus [smells.md](./reference/smells.md) pasted in full** — the sub-agent has no other access to it.
+- The gate and debt-consistency results from step 4.
+- The precedence between sources, so the sub-agent knows what outranks what: frozen artifacts, then required tooling and CI, then the project's `AGENTS.md`, standards docs and quality skills, then language and framework correctness, security and accessibility rules, then the generic smell baseline. An explicit project or language `MUST`, `ALWAYS`, `NEVER` or equivalent can be a hard violation; a generic smell stays a judgement call unless a local rule or a concrete behavior or maintenance impact elevates it.
 - When `ponytail-review` was provided, instruct the sub-agent to load and apply it as an additional lens. Put its output under `### Ponytail review`, preserve its concise finding format and final net-lines estimate, and treat every Ponytail finding as a judgement call. It must still complete the documented-standards and smell-baseline review.
 - The brief: "Report — per file/hunk where relevant — (a) every place the diff violates a documented standard: cite the standard (file + the rule); and (b) any baseline smell you spot: name it and quote the hunk. Distinguish hard violations from judgement calls — documented-standard breaches can be hard, but baseline smells are always judgement calls, and a documented repo standard overrides the baseline. Skip anything tooling enforces. Report each finding as its own bullet, anchored to `file:line`. Under 500 words, or 750 when `ponytail-review` is included. Compress findings rather than omit any; Ponytail findings must retain their one-line format."
 
 **Artifacts sub-agent prompt** — include:
 
 - The diff command and commit list.
-- The path or fetched contents of the Artifacts.
-- The brief: "Report: (a) requirements, intent and behaviors the artifacts asked for that are missing or partial; (b) behaviour in the diff that wasn't asked for (scope creep); (c) requirements that look implemented but where the implementation looks wrong; (d) run the full test suite and report if it is not green; (e) read `plan.md` against the diff and note any divergence. Quote the spec line for each finding. Report each finding as its own bullet, anchored to `file:line`. Under 500 words — compress findings rather than omit any."
+- The path or fetched contents of the Artifacts, read at the artifact baseline.
+- The gate and artifact-integrity results from step 4.
+- The brief: "Report: (a) requirements, intent and behaviors the artifacts asked for that are missing or partial; (b) behaviour in the diff that wasn't asked for (scope creep); (c) requirements that look implemented but where the implementation looks wrong; (d) the gate result you were given, if it is not green — do not rerun it; (e) read `plan.md` against the diff and note any divergence; (f) any forbidden artifact mutation the integrity result reports. Judge (a) to (c) against the complete final implementation even when the diff is only the latest increment. Quote the spec line for each finding. Report each finding as its own bullet, anchored to `file:line`. Under 500 words — compress findings rather than omit any."
+
+Nothing written after the artifacts were published is a requirement: not `acceptance.md`, not review comments, not rework notes. They can be evidence, never a spec line to hold the implementation against.
 
 If the Artifacts is missing, skip the Artifacts sub-agent and note this in the final report.
 
-### 5. Aggregate
+### 6. Aggregate
 
 Present the two reports under `## Standards` and `## Artifacts` headings, verbatim or lightly cleaned. Keep any `### Ponytail review` subsection inside `## Standards`. Do **not** merge or rerank findings — the two axes are deliberately separate (see _Why two axes_).
 
-End with a one-line summary: total findings per axis, counting Ponytail findings in Standards, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes — that's the reranking the separation exists to prevent.
+End with a one-line summary: total findings per axis, counting Ponytail findings in Standards, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes — that's the reranking the separation exists to prevent. State the three step-4 results verbatim alongside it; they are the only part of the report that is not a judgement.
 
 ## Why two axes
 
