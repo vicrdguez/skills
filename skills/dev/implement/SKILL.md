@@ -12,7 +12,7 @@ Work only in the claimed slice's worktree, `.worktrees/<slug>`. After claiming, 
 
 Run typechecking regularly, single test files regularly and a full test suite once at the end.
 
-Once the whole implementation is done and every scenario is green, run `audit` against the PR base merge-base — not the first commit of the claim, which `...HEAD` would leave out of the diff. Refactoring happens here, deliberately kept out of the red -> green cycles. Apply its findings yourself (fix the hard violations; use judgement on the judgement calls) and keep the suite green while doing so. This is the pass where ordinary cleanup belongs — smells, readability, maintainability, making the code navigable for the next agent. Whatever survives it, the watchdog sees.
+Once the whole implementation is done and every scenario is green, run `audit` against the PR base merge-base — not the first commit of the claim, which `...HEAD` would leave out of the diff. On a rework round the fixed point moves; **Rework** below pins it. Refactoring happens here, deliberately kept out of the red -> green cycles. Apply its findings yourself (fix the hard violations; use judgement on the judgement calls) and keep the suite green while doing so. This is the pass where ordinary cleanup belongs — smells, readability, maintainability, making the code navigable for the next agent. Whatever survives it, the watchdog sees.
 
 Tick off the `[ ]` boxes the work completed. That is the only edit the change artifacts allow: they froze when they were published, and nothing you learn while implementing gets written back into them.
 
