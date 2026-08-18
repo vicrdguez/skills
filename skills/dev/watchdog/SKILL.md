@@ -104,7 +104,7 @@ Neither this skill nor the implementor opens follow-up issues. That stays human 
 ## Pass → land and mark done
 
 When verification passes **and** no `BLOCK` or `HUMAN` finding is still active, **land the change** by
-- Gathering the acceptance gap that is meant for the human to validate manually. These are the verification steps an agent can't run itself and the human acceptance checklist. Use [acceptance.md](./reference/acceptance.md) as the template, write as a new artifact for the change in `.changes/<slug>`. It is the one artifact added after the proposal, and it collects only what the human must check by hand — the template says what belongs in it.
+- Copying the `Manual verification` section of `intent.md` into the PR body verbatim, as the human's checklist. You tick nothing in it: by definition those are the checks no agent can run.
 - archiving the change **inside the branch** (`.changes/<slug>/` → `.changes/archive/<YYYY-MM-DD>-<slug>/`), commit, and finalize the PR body as the human acceptance checklist. Then **label the PR `done`** (swap off `review`). Push the archive commit to the PR branch.
 
 Hand off through the Board reference: remove `review` and `wip` as it adds `done`. The change now awaits the **human's merge**. The watchdog does not merge.

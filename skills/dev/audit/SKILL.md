@@ -63,7 +63,7 @@ Ponytail findings are judgement calls, not documented-standard violations. Keep 
 These two produce facts, not judgements — a diff read or an exit code. Run them here, before spawning anything, and hand the recorded results to both briefs. Two reviewers running them concurrently would contend over the same worktree, and a fact produced inside a reviewer's context is a fact the two axes can end up reporting differently.
 
 1. **The documented gate** — the project's full suite, typecheck and lint, exactly once per invocation. A red gate is worth knowing before spending two reviewer contexts on it.
-2. **Artifact integrity** — `git diff <artifact-baseline>...HEAD -- .changes/<slug>/`. The only permitted change is a paired replacement where a line's `[ ]` became `[x]`. Anything added, removed, reordered, reworded or unticked is a hard Artifacts finding. `acceptance.md` is excluded — the reviewer writes it after this stage.
+2. **Artifact integrity** — `git diff <artifact-baseline>...HEAD -- .changes/<slug>/`. The only permitted change is a paired replacement where a line's `[ ]` became `[x]`. Anything added, removed, reordered, reworded or unticked is a hard Artifacts finding.
 
 ### 5. Spawn both sub-agents in parallel
 
@@ -89,7 +89,7 @@ Dispatch both axes as parallel sub-agents, each in a fresh context carrying its 
 - The gate and artifact-integrity results from step 4.
 - The brief: "Report: (a) requirements, intent and behaviors the artifacts asked for that are missing or partial; (b) behaviour in the diff that wasn't asked for (scope creep); (c) requirements that look implemented but where the implementation looks wrong; (d) the gate result you were given, if it is not green — do not rerun it; (e) read `plan.md` against the diff and note any divergence; (f) any forbidden artifact mutation the integrity result reports. Judge (a) to (c) against the complete final implementation even when the diff is only the latest increment. Quote the spec line for each finding. Tag each finding `HARD` or `JUDGEMENT` as its first token: (a), (b), (c) and (f) are `HARD`; (d) is `HARD` when the gate is red; (e) is `JUDGEMENT` unless the divergence breaks a frozen requirement. Report each finding as its own bullet, anchored to `file:line`. Under 500 words — compress findings rather than omit any."
 
-Nothing written after the artifacts were published is a requirement: not `acceptance.md`, not review comments, not rework notes. They can be evidence, never a spec line to hold the implementation against.
+Nothing written after the artifacts were published is a requirement: not review comments, not rework notes. They can be evidence, never a spec line to hold the implementation against.
 
 If the Artifacts is missing, skip the Artifacts sub-agent and note this in the final report.
 

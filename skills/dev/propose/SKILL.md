@@ -67,7 +67,7 @@ If the change is split in multiple slices, create one parent issue holding the o
 ## Writing the change artifacts
 These are the artifacts that each vertical slice will use for implementation:
 
-Publishing them freezes them. From that commit on, the only edit anyone may make is ticking an existing `[ ]` to `[x]` — nothing added, removed, reordered or reworded. This is the acceptance baseline: if it can be rewritten mid-flight to match whatever got built, or grown with things discovered during review, it stops being a contract and the change stops converging. Discoveries belong in PR findings or in a new proposal. `acceptance.md` is the one later addition, written by `watchdog` after it validates the work.
+Publishing them freezes them. From that commit on, the only edit anyone may make is ticking an existing `[ ]` to `[x]` — nothing added, removed, reordered or reworded. This is the acceptance baseline: if it can be rewritten mid-flight to match whatever got built, or grown with things discovered during review, it stops being a contract and the change stops converging. Discoveries belong in PR findings or in a new proposal. There is no later addition and no exception.
 
 So resolve the contradictions now, while you still can — between the artifacts themselves, and between them and the project's own rules. Afterwards nobody downstream can fix them; they can only stop and ask you.
 
