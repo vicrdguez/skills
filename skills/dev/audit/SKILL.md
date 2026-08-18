@@ -35,7 +35,7 @@ If the user provides the fixed point — a commit SHA, branch name, tag, `main`,
 
 Capture the diff command once: `git diff <fixed-point>...HEAD` (three-dot, so the comparison is against the merge-base). Also note the list of commits via `git log <fixed-point>..HEAD --oneline`.
 
-Before going further, confirm the fixed point resolves (`git rev-parse <fixed-point>`) and the diff is non-empty. A bad ref or empty diff should fail here — not inside two parallel sub-agents.
+Before going further, confirm the fixed point resolves (`git rev-parse <fixed-point>`) and the diff is non-empty. A bad ref or empty diff should fail here, not inside two parallel sub-agents. An empty diff is legal in one case: a repeat review the caller says resolved by human disposition alone. Nothing was supposed to change so run the deterministic checks, judge the final state, report no new findings.
 
 ### 2. Identify the artifacts source
 
