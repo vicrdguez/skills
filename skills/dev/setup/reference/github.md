@@ -47,7 +47,7 @@ Used by `implement` and `watchdog`. Claims issues labeled as `ready`, `rework` o
 As an implementor:
 - Always prefer `rework` PRs over `ready` issues.
 - Fetch the oldest open `rework` PR without `wip`; if none, the oldest open `ready` issue without `wip`.
-- After a successful claim, check out the slice's worktree (`.worktrees/<slug>`, creating it from the pushed branch if absent) and rebase the branch onto up-to-date `main` before starting.
+- After a successful claim, check out the slice's worktree (`.worktrees/<slug>`, creating it from the pushed branch if absent). On a first claim, merge up-to-date `main` into the branch; on a rework round sync nothing. Never rebase: it rewrites the `Artifact baseline` commit and orphans the previeous `Reviewed head`.
 
 ```sh
 gh pr list --repo "<owner>/<repo>" --label "rework" --state open \
