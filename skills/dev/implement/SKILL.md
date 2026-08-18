@@ -32,7 +32,7 @@ Read the callers of any shared code you change — a regression **this** change 
 
 The latest watchdog summary is the ledger of what was found. Read it, the inline comments carrying its evidence, and any human disposition posted since — `docs/github.md` explains both.
 
-Resolve every finding that is still `BLOCK`. Findings left as `NOTE` are debt, not work to skip: materialize the code-local ones as `DEBT(#<pr>/W<n>)` comments with their matching `DEBT.md` entries, exactly as the watchdog's contract describes. Open no follow-up issues — that stays human or `propose` work.
+Resolve every finding that is still `BLOCK`. Findings left as `NOTE` are debt, not work to skip: materialize the code-local ones as `DEBT(#<pr>/W<n>)` comments, exactly as the watchdog's contract describes. Open no follow-up issues — that stays human or `propose` work.
 
 Review your own rework against `previous-reviewed-head...HEAD`. Do not re-clean the whole PR: a second sweep across untouched code grows the diff, adds regressions, and gives the next review more surface than it had last round.
 

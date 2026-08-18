@@ -85,21 +85,15 @@ Do not turn every declaration, smell, edge case or review observation into a tes
 
 ### NOTE and debt
 
-A `NOTE` is real and actionable but safe to carry. When it has a place in the code, it lives in two places at once — beside the offending code, using whatever comment syntax the language takes:
+A `NOTE` is real and actionable but safe to carry. When it has a place in the code, it lives beside that code, using whatever comment syntax the language takes:
 
 ```text
 DEBT(#<pr>/W<n>): one-line debt
 ```
 
-and as one line in a root `DEBT.md`, keyed by `path · symbol` rather than a line number so it survives edits:
+The marker is the record and `grep -rn 'DEBT('` is the index. There is no second copy to keep in sync. A note with no code location stays in the PR or an already-linked issue, do not invent a location to hang it on.
 
-```md
-- `#17/W2` — `path · symbol` — one-line debt
-```
-
-Create `DEBT.md` lazily, on the first item. Every marker has exactly one index entry and every entry has a live marker; removing the debt removes both. `audit` checks that. A note with no honest code location stays in the PR or an already-linked issue — do not invent a location to hang it on.
-
-The implementor materializes surviving notes during rework. If a PR passes with notes outstanding and no rework round is coming, you may add the markers and index entries yourself as part of finalizing. That is bookkeeping, not review: run the formatter or parser for the files you touched, `git diff --check`, and the debt consistency check — not `audit`, and not the full suite, for comments.
+The implementor materializes surviving notes during rework. If a PR passes with notes outstanding and no rework round is coming, you may add the markers entries yourself as part of finalizing. That is bookkeeping, not review: run the formatter or parser for the files you touched and `git diff --check`, not `audit` and not the full suite just for comments.
 
 ## Human dispositions
 
