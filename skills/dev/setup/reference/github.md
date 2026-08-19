@@ -193,7 +193,7 @@ Only commands posted **after** the finding count, and the latest one wins. Never
 
 ## Rare human-decision handoff
 
-Scope is settled by the frozen artifacts, so this handoff is rare. Adjacent improvements, unspecified sibling behavior, optional polish and implementation preferences never justify it. It is for contradictory or impossible artifacts, a conflict with a mandatory project/language/security/accessibility rule, a fix that cannot avoid changing frozen behavior or interface, a disputed blocker, or the two-bounce cap.
+Scope is settled by the frozen artifacts, so this handoff is rare. Adjacent improvements, unspecified sibling behavior, optional polish and implementation preferences never justify it. It is for contradictory or impossible artifacts, a conflict with a mandatory project/language/security/accessibility rule, a fix that cannot avoid changing frozen behavior or interface, a disputed blocker, or the bounce cap.
 
 **When no implementation work exists**, keep the decision on the originating issue and never open a PR just to ask a question:
 

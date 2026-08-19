@@ -72,7 +72,7 @@ The Pi package uses [pi-subagents](https://github.com/nicobailon/pi-subagents) t
 - `/implement-loop [max-items]` launches one fresh `implement-runner` per `ready` or `rework` item. A verified `review` handoff starts the next worker.
 - `/watchdog-loop [max-items]` launches one fresh `watchdog-runner` per `review` item. A verified `done` or `rework` handoff starts the next worker.
 
-Review findings carry stable per-PR IDs (`W1`, `W2`, …) so a round can be compared with the last one. The first watchdog review is complete; later rounds verify the open findings and read only what changed since the previous `Reviewed head`, and after two bounces the PR pauses at `needs-human` rather than starting a third cycle. A verified `needs-human` is a complete handoff — the loop moves on, and nothing reclaims that item until a person does.
+Review findings carry stable per-PR IDs (`W1`, `W2`, …) so a round can be compared with the last one. The first watchdog review is complete; later rounds verify the open findings and read only what changed since the previous `Reviewed head`, and a second failing review pauses at `needs-human` rather than bouncing again. A verified `needs-human` is a complete handoff — the loop moves on, and nothing reclaims that item until a person does.
 
 The scheduler and every worker have separate contexts. Run the two schedulers in different Pi sessions so implementation and review history never mix:
 

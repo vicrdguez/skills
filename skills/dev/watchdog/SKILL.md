@@ -44,7 +44,7 @@ The first review of a PR is complete: read all of it, batch every finding, publi
 
 Assign a new ID only for a defect the rework introduced or a critical discovery of that last kind. A pre-existing, noncritical thing you merely noticed this round is a `NOTE`, not another bounce. A finding that was `NOTE` last round cannot become `BLOCK` this round without new material evidence or a human's `BLOCK`.
 
-**After two completed bounces, stop.** Do not open a third rework cycle: publish the ledger, pause at `needs-human`, and let a human break the tie.
+**You may issue one bounce.** If a second review still fails, do not bounce again: publish the ledger, pause at `needs-human`, and let a human break the tie. Counting *completed* bounces instead spends another build and another review before the human ever sees it.
 
 ## Findings
 
@@ -103,7 +103,7 @@ Hand off through the Board reference: remove `review` and `wip` as it adds `done
 
 ## Pause → hand the decision to a human
 
-Some things are genuinely not yours to decide. Pause when the frozen artifacts contradict each other, when they conflict with a mandatory project, language, security or accessibility rule, when what they require is impossible under the pinned constraints, when every safe fix would change frozen behavior, interface or scope, when a blocker is disputed, or when the two-bounce limit is reached.
+Some things are genuinely not yours to decide. Pause when the frozen artifacts contradict each other, when they conflict with a mandatory project, language, security or accessibility rule, when what they require is impossible under the pinned constraints, when every safe fix would change frozen behavior, interface or scope, when a blocker is disputed, or when the bounce limit is reached.
 
 Nothing else qualifies. An adjacent improvement, a sibling behavior nobody specified, optional polish, a preference between two workable implementations — decide those yourself or leave them alone. Absence of a decision in the artifacts is not a question for a human; it is a choice already delegated to whoever implements it.
 
