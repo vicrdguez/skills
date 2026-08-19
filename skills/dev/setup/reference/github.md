@@ -219,3 +219,13 @@ A human requeues it explicitly: `rework` when implementation must continue, `rev
 gh pr ready <pr-number> --repo "<owner>/<repo>"
 ```
 
+Or they end it. **Supersede**: the change is not worth merging, and what it taught belongs in a fresh slice. Close the PR unmerged and the issue as not planned, then hand the slug to a `propose`. Discarding a change is a proposal-level decision, which is why no other stage may take it.
+
+```sh
+gh pr close <pr-number> --repo "<owner>/<repo>" --comment "Superseded: <reason>."
+gh issue close <issue-number> --repo "<owner>/<repo>" --reason "not planned" \
+--comment "Superseded: <reason>."
+# from main, never from inside the worktree being removed
+git worktree remove .worktrees/<slug> && git branch -D <slug>
+```
+

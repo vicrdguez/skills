@@ -26,6 +26,7 @@ flowchart LR
     watchdog -->|rework| implement
     implement -->|blocked decision| human[needs-human]
     watchdog -->|blocked decision / two bounces| human
+    human -->|supersede | propose
 ```
 
 | Stage | Skill | What it hands off |

@@ -107,7 +107,7 @@ Some things are genuinely not yours to decide. Pause when the frozen artifacts c
 
 Nothing else qualifies. An adjacent improvement, a sibling behavior nobody specified, optional polish, a preference between two workable implementations — decide those yourself or leave them alone. Absence of a decision in the artifacts is not a question for a human; it is a choice already delegated to whoever implements it.
 
-Publish the ledger and the inline evidence first, then transition to `needs-human` through the Board reference and exit. Do not bounce an undecided question to an implementor: they cannot answer it either, and the PR will come straight back. A human requeues it once they have answered.
+Publish the ledger and the inline evidence first, then transition to `needs-human` through the Board reference and exit. Do not bounce an undecided question to an implementor: they cannot answer it either, and the PR will come straight back. A human answers three ways: requeue to `rework` when implementation must continue, to `review` when only verification remains, or supersede, closing the PR unmerged and letting `propose` cut a better slice. Say which you recommend and why.
 
 ## Fail → bounce to rework, edit no code
 
