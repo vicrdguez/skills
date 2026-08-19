@@ -12,7 +12,7 @@ Work only in the claimed slice's worktree, `.worktrees/<slug>`. After claiming, 
 
 Work only in the claimed slice's worktree, `.worktrees/<slug>`. On a first claim, merge up-to-date `main` iinto its branch before starting; on a rework round sync nothing. Never rebase: it orphans the _Artifact Baseline_ and the previous _Reviewed head_, and every three-dot diff taking against them silently widens to the old merge-base.
 
-Run typechecking regularly, single test files regularly and a full test suite once at the end.
+Run typechecking and single test files regularly. `audit` runs the full suit as its gate at the end of this stage, so don't run it separately first.
 
 Once the whole implementation is done and every scenario is green, run `audit` against the PR base merge-base — not the first commit of the claim, which `...HEAD` would leave out of the diff. On a rework round the fixed point moves; **Rework** below pins it. Refactoring happens here, deliberately kept out of the red -> green cycles. Apply its findings yourself, fix the `HARD` and on each `JUDGEMENT`, either fix it, deline it with a stated reason, or carry it as debt. Declining `HARD` is not yours to do. Keep the suite green while doing so. This is the pass where ordinary cleanup and refactoring belongs — smells, readability, maintainability, making the code navigable for the next agent. Whatever survives it, the watchdog sees.
 
