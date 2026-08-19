@@ -27,9 +27,8 @@ This repo is developed through a staged pipeline. Each stage is a skill; invoke 
 
 Reference skills: `design` (deep modules & seams), `domain` (glossary, ADRs, capabilities), `tdd` (the red → green loop), `audit` (two-axis review engine).
 
-- Board protocol: `docs/github.md`. Labels: `ready` → `wip` → `review` → `done`, with `rework` for bounces and `needs-human` for a paused decision.
-- Change artifacts: `.changes/<slug>/` on the slice branch, frozen at proposal apart from `[ ]` → `[x]`; archived to `.changes/archive/<date>-<slug>/` on a watchdog pass.
-- Review findings: stable `W1`, `W2`, … IDs per PR. The first review is complete; later rounds read only what changed since the previous `Reviewed head`.
+- Board protocol, labels, finding ledger and disposition grammer: `docs/github.md`. Authoritative, never restated elsewhere.
+- Change artifacts: `.changes/<slug>/` on the slice branch, frozen at proposal apart from `[ ]` -> `[x]`; archived on a watchdog pass.
 - Worktrees: `.worktrees/<slug>`, one per slice, gitignored.
 - Durable docs: `CONTEXT.md` (glossary), `docs/adr/`, `docs/capabilities/`.
 <!-- dev-pipeline:end -->
