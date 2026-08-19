@@ -14,13 +14,25 @@ Work only in the claimed slice's worktree, `.worktrees/<slug>`. On a first claim
 
 Run typechecking regularly, single test files regularly and a full test suite once at the end.
 
-Once the whole implementation is done and every scenario is green, run `audit` against the PR base merge-base — not the first commit of the claim, which `...HEAD` would leave out of the diff. On a rework round the fixed point moves; **Rework** below pins it. Refactoring happens here, deliberately kept out of the red -> green cycles. Apply its findings yourself, fix the `HARD` and on each `JUDGEMENT`, either fix it, deline it with a stated reason, or carry it as debt. Declining `HARD` is not yours to do. Keep the suite while doing so. This is the pass where ordinary cleanup and refactoring belongs — smells, readability, maintainability, making the code navigable for the next agent. Whatever survives it, the watchdog sees.
+Once the whole implementation is done and every scenario is green, run `audit` against the PR base merge-base — not the first commit of the claim, which `...HEAD` would leave out of the diff. On a rework round the fixed point moves; **Rework** below pins it. Refactoring happens here, deliberately kept out of the red -> green cycles. Apply its findings yourself, fix the `HARD` and on each `JUDGEMENT`, either fix it, deline it with a stated reason, or carry it as debt. Declining `HARD` is not yours to do. Keep the suite green while doing so. This is the pass where ordinary cleanup and refactoring belongs — smells, readability, maintainability, making the code navigable for the next agent. Whatever survives it, the watchdog sees.
+
+Record what the pass decided. Every `audit` finding goes into the PR body under `## Audit ledger`: ID, axis, severity as `audit` assigned it, and `fixed` / `declined` / `debt` with one line of reasoning:
+
+```text
+## Audit ledger --<fixed-point>..<head>
+A1  Standards  HARD       fixed    — order total computed in two places; extracted to `OrderTotal` (def456)
+A2  Standards  JUDGEMENT  declined — "Feature Envy" on `Cart.price`: moving it splits the pricing rule across two modules
+A3  Standards  JUDGEMENT  debt     — DEBT(#17/A3) `String` currency; typed when the payments slice lands
+
+A4  Artifacts  HARD       fixed    — DoD item 3 had no test; added `cancel_shipped_order_test` (abc789)
+```
+A declined judgement call with a stated reason is a decision, not an omission. This ledget is what the watchdog verifies and the human approves; without it, the next context re-derives the same calls from scratch and files them as new findings.
 
 Tick off the `[ ]` boxes the work completed. That is the only edit the change artifacts allow: they froze when they were published, and nothing you learn while implementing gets written back into them.
 
 Then present the work by pushing the branch and submitting it for review as described in `docs/github.md`. Never archive or bless the changes — that is the watchdog's job.
 
-The work is done only when every `behavior.md` scenario has a materialized test, every `intent.md` "Definition of Done" box is demonstrably met, the `audit` findings are applied, the full suite is green, and the PR is labeled `review`.
+The work is done only when every `behavior.md` scenario has a materialized test, every `intent.md` "Definition of Done" box is demonstrably met, every `audit` finding carries a disposition in the PR ledger, the full suite is green and the PR is labeled `review`.
 
 ## The scope is already decided
 
@@ -44,7 +56,7 @@ W1 resolved — def456; covered by <check>
 W2 debt — DEBT(#17/W2) in <path · symbol>
 ```
 
-That is a claim, not proof. The next watchdog verifies it independently.
+That is a claim, not proof. The next watchdog verifies it independently. Update the `## Audit ledger` in the PR body in the same push: it must describe the current head, not the first one
 
 ## When only a human can decide
 

@@ -35,6 +35,13 @@ Observable, testable acceptance criteria. The conditions that determine if this 
 Use markdown task-bullets: `- [ ]`
 -->
 
+## Manual verification
+<!--
+What a human must check by hand because no agent can run or observe it: visual checks, third-party dashboards or sandboxes, credentials the agent lacks, production-like data. Frozen like everything else: the reviewer copies it into the PR body, nobody authors it after the fact. "None" is a valid answer.
+
+Use markdown task-bullets `- [ ]`
+-->
+
 ------
 ## Example
 
@@ -60,4 +67,7 @@ Let a customer cancel an order before it ships; refund the full amount automatic
 - [ ] A customer can cancel an order while it is unshipped, and the order becomes "cancelled".
 - [ ] Cancelling an unshipped order initiates a full refund.
 - [ ] Cancelling a shipped order is rejected and leaves the order unchanged.
+
+## Manual verification
+- [ ] Cancel an order and confirm the refund shows as initiated in the Stripe test dashboard
 ```

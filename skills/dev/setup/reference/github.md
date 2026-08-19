@@ -90,7 +90,7 @@ Does a PR already exist for this branch?
 gh pr list --repo "<owner>/<repo>" --head "<slug>" --state open --json number,isDraft,url
 ```
 
-If one exists, **update** it (below) instead of creating a new one.
+If one exists, **update** it (below) instead of creating a new one. The PR body carries the implementor's `## Audit ledger`. It is part of the submission, not commentary: the reviewer verifies it and the human reads it.
 
 **For work done on `ready` issues**: Open a `review` PR, close the `ready` issue, and only then remove its Claim:
 

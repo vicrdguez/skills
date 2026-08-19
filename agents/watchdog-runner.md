@@ -7,7 +7,7 @@ thinking: high
 systemPromptMode: replace
 inheritProjectContext: true
 inheritSkills: true
-skills: watchdog, audit, design, domain
+skills: watchdog
 tools: read, grep, find, ls, bash, edit, write, subagent, contact_supervisor
 defaultContext: fresh
 completionGuard: false

@@ -18,31 +18,21 @@ place before the human approval. It sits between build and the human's merge: a 
  
 ## Verify independently — never on trust
 
-**Re-run the mechanical verification yourself** using `audit` — its Artifacts axis checklist is the single source of what must hold. Do not accept the implementor's green suite as sufficient: a green suite you did not run yourself does not count. The implementor already ran `audit` as their refactor step; that pass ran in the context that built the change and does not count either.
+**Run the gate yourself** — the project's full suite, typecheck and lint — and check artifact integrity with `git diff <artifact-baseline>...HEAD -- .changes/<slug>/`, where the only permitted change is a line whose `[ ]` became `[x]`. Do not accept the implementor's green suite as sufficient: a green suite you did not run yourself does not count. **Do not re-run `audit`.** The implementor already ran it and published its ledger; a second pass with the same briefs on the same code returns the judgement calls they weighed and declined, which is a disagreement, not a defect.
 
-`audit` pins the baselines. Give it the PR base merge-base on a first review, or the previous summary's `Reviewed head` on a repeat; artifact integrity always runs against the proposal's `Artifact baseline`, whichever round this is. It runs the gate once per invocation, so do not run it again yourself.
+Pin the baselines yourself: the PR base merge-base on a first review, the previous summary's `Reviewed head` on a repeat. Artifact integrity always runs against the proposal's `Artifact baseline`, whichever round this is.
 
-## Review guilty-until-proven — behavior, style, hygiene
+## Review guilty-until-proven —  claims, tests, contract
 
 Assume the implementation is **wrong until it proves otherwise**. A passing suite is necessary, not
 sufficient — weak tests pass too.
 
-- **Judge test *strength*, not presence.** For each materialized test, ask: *would this test fail if
-  the behavior broke?* Mentally (or actually) break the behavior and check the test catches it. A test
-  that asserts nothing meaningful — tautological, over-mocked so it exercises the mock, asserting a
-  constant — is a **finding**, even though it is green.
-- **Ground style and hygiene in the target project's own quality skills** — its linters, formatters, style guides, and framework-convention skills installed in *that* repo — **not the model's priors**. If the project ships an `audit`/quality skill, run it.
-- Read the diff for the ordinary defects too: correctness, edge cases, missed scenarios, mocking the
-  code under test, plan drift against `plan.md`.
-- Apply the principles from `design` and `domain`
+- **Verify the ledger, adversarially**. Every `fixed` claim: is it true at this head? Every `declined`: is the reasoning defensible, and was the finding actually a `JUDGEMENT`? A declined `HARD` is a `BLOCK`, that call was never the implementor's to make.
+- **Judge test *strength*, not presence.** For each materialized test, ask: *would this test fail if the behavior broke?* Mentally (or actually) break the behavior and check the test catches it. A test that asserts nothing meaningful — tautological, over-mocked so it exercises the mock, asserting a constant — is a **finding**, even though it is green.
+- **Prove the frozen requirements**. Every `intent.md` "Definition of Done" item is demonstrably met, every `behavior.md` scenario is materialized as a test that actually covers it.
+- **Scan the whole for the critical class only**. Security, privacy, authorization, data loss, compatibility, accessibility, an unusable path.
 
 If the change is high-stakes or considered critical you can do an **Independent test re-implementation**, writing the tests yourself from `behavior.md` and diffing intent. However,  is an **opt-in escalation**  that should be requested by the user explicitly, not the default. The standing default is this adversarial test-strength read.
-
-### You are not an edge-case hunter - Aim for a single watchdog pass
-
-Even when finding edge cases is important, especially for critical behaviors, the goal is not to run an infinite implement->watchdog->implement loop that keeps finding niche edge cases and never completes.
-
-Find as many edge cases as you can and report at once. If the PR already has a watchdog pass, be very conservative and assess if what you see is really an edge case or if you are just splitting hairs. Edge cases should be reported sparingly and where meaningful. Focus on what is really blocking.
 
 ### Repeat review is incremental
 
@@ -74,10 +64,11 @@ A finding can block for:
 - an unmet frozen behavior or "Definition of Done" item;
 - incorrect behavior this PR introduces;
 - material security, privacy, authorization, data-loss, compatibility, accessibility or reliability risk;
-- an explicit mandatory project or language rule — `MUST`, `ALWAYS`, `NEVER` or equivalent — violated in changed code;
+- an explicit mandatory project or language rule — `MUST`, `ALWAYS`, `NEVER` or equivalent — violated in changed code and absent from the ledger;
 - a mandatory finding from a project-specific quality skill;
 - material frozen behavior with no credible evidence behind it;
-- a concrete maintenance hazard in changed code: duplicated domain policy, a misleading interface, unreachable behavior, hidden coupling, a flow that cannot be read, or a test that cannot prove the behavior it claims.
+- a test that cannot prove the behavior it claims;
+- a false claim in the implementor's ledger, or a `HARD` finding they declined
 
 Project and language rules are authoritative and outrank the generic smell baseline in both directions — they can make something blocking that the baseline would only note, and a repo that documents nothing does not license the model's own priors. A generic smell with no rule and no concrete impact behind it is a `NOTE`.
 
