@@ -22,7 +22,7 @@ place before the human approval. It sits between build and the human's merge: a 
 
 Pin the baselines yourself: the PR base merge-base on a first review, the previous summary's `Reviewed head` on a repeat. Artifact integrity always runs against the proposal's `Artifact baseline`, whichever round this is.
 
-## Review guilty-until-proven —  claims, tests, contract
+## Review guilty-until-proven — claims, tests, contract
 
 Assume the implementation is **wrong until it proves otherwise**. A passing suite is necessary, not
 sufficient — weak tests pass too.
@@ -32,19 +32,21 @@ sufficient — weak tests pass too.
 - **Prove the frozen requirements**. Every `intent.md` "Definition of Done" item is demonstrably met, every `behavior.md` scenario is materialized as a test that actually covers it.
 - **Scan the whole for the critical class only**. Security, privacy, authorization, data loss, compatibility, accessibility, an unusable path.
 
-If the change is high-stakes or considered critical you can do an **Independent test re-implementation**, writing the tests yourself from `behavior.md` and diffing intent. However,  is an **opt-in escalation**  that should be requested by the user explicitly, not the default. The standing default is this adversarial test-strength read.
+If the change is high-stakes or considered critical you can do an **Independent test re-implementation**, writing the tests yourself from `behavior.md` and diffing intent. However, is an **opt-in escalation** that should be requested by the user explicitly, not the default. The standing default is this adversarial test-strength read.
 
 ### Repeat review is incremental
 
 The first review of a PR is complete: read all of it, batch every finding, publish them together. A repeat review is not a second complete review — restarting an unconstrained search is how a PR gets four rounds of new blockers and never converges. Instead:
 
-1. Rerun the gate through `audit` and verify every still-active finding against the final state.
-2. Read only `previous-reviewed-head...HEAD` for new defects, standards, hygiene, and regressions the rework introduced.
+1. Rerun the gate yourself and verify every still-active finding against the final state.
+2. Read only `previous-reviewed-head...HEAD` for regressions the rework introduced and for false claims in the updated ledger.
 3. Scan the resulting whole only for the critical class — security, privacy, data loss, compatibility, accessibility, an unusable path.
 
 Assign a new ID only for a defect the rework introduced or a critical discovery of that last kind. A pre-existing, noncritical thing you merely noticed this round is a `NOTE`, not another bounce. A finding that was `NOTE` last round cannot become `BLOCK` this round without new material evidence or a human's `BLOCK`.
 
 **You may issue one bounce.** If a second review still fails, do not bounce again: publish the ledger, pause at `needs-human`, and let a human break the tie. Counting *completed* bounces instead spends another build and another review before the human ever sees it.
+
+A repeat review with no new commits is legal: a human resolved everything by disposition. Tun the gate and the artifact check, honor the dispositions and pass or pause on what remains.
 
 ## Findings
 
@@ -68,9 +70,7 @@ A finding can block for:
 - a mandatory finding from a project-specific quality skill;
 - material frozen behavior with no credible evidence behind it;
 - a test that cannot prove the behavior it claims;
-- a false claim in the implementor's ledger, or a `HARD` finding they declined
-
-Project and language rules are authoritative and outrank the generic smell baseline in both directions — they can make something blocking that the baseline would only note, and a repo that documents nothing does not license the model's own priors. A generic smell with no rule and no concrete impact behind it is a `NOTE`.
+- a false claim in the implementor's ledger, or a `HARD` finding they declined.
 
 Do not turn every declaration, smell, edge case or review observation into a test or a blocker. The implementor's own `audit` pass is where ordinary polish, readability and navigability cleanup belongs, so very little of it should still be here.
 
@@ -96,7 +96,7 @@ Neither this skill nor the implementor opens follow-up issues. That stays human 
 
 When verification passes **and** no `BLOCK` or `HUMAN` finding is still active, **land the change** by
 - Copying the `Manual verification` section of `intent.md` into the PR body verbatim, as the human's checklist. You tick nothing in it: by definition those are the checks no agent can run.
-- archiving the change **inside the branch** (`.changes/<slug>/` → `.changes/archive/<YYYY-MM-DD>-<slug>/`), commit, and finalize the PR body as the human acceptance checklist. Then **label the PR `done`** (swap off `review`). Push the archive commit to the PR branch.
+- archiving the change **inside the branch** (`.changes/<slug>/` → `.changes/archive/<YYYY-MM-DD>-<slug>/`), commit. Then **label the PR `done`** (swap off `review`). Push the archive commit to the PR branch.
 
 Hand off through the Board reference: remove `review` and `wip` as it adds `done`. The change now awaits the **human's merge**. The watchdog does not merge.
 

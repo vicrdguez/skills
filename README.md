@@ -25,8 +25,8 @@ flowchart LR
     watchdog -->|pass| merge([human merge])
     watchdog -->|rework| implement
     implement -->|blocked decision| human[needs-human]
-    watchdog -->|blocked decision / two bounces| human
-    human -->|supersede | propose
+    watchdog -->|blocked decision / bounce cap| human
+    human -->|supersede| propose
 ```
 
 | Stage | Skill | What it hands off |

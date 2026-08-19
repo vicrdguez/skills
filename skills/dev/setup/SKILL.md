@@ -27,7 +27,7 @@ This repo is developed through a staged pipeline. Each stage is a skill; invoke 
 
 Reference skills: `design` (deep modules & seams), `domain` (glossary, ADRs, capabilities), `tdd` (the red → green loop), `audit` (two-axis review engine).
 
-- Board protocol, labels, finding ledger and disposition grammer: `docs/github.md`. Authoritative, never restated elsewhere.
+- Board protocol, labels, finding ledger and disposition grammar: `docs/github.md`. Authoritative, never restated elsewhere.
 - Change artifacts: `.changes/<slug>/` on the slice branch, frozen at proposal apart from `[ ]` -> `[x]`; archived on a watchdog pass.
 - Worktrees: `.worktrees/<slug>`, one per slice, gitignored.
 - Durable docs: `CONTEXT.md` (glossary), `docs/adr/`, `docs/capabilities/`.

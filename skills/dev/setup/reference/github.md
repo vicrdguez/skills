@@ -37,7 +37,7 @@ Artifact baseline: <proposal-commit-sha>"
 The `Artifact baseline` line is the SHA of the commit that published the artifacts. Later stages diff against it to prove the artifacts were not rewritten mid-flight. Legacy changes without one fall back to the first commit containing `.changes/<slug>/`.
 
 - **Child issues**: issue linked to the parent issue as a GitHub sub-issue (`gh api` on the sub-issues endpoint).
-- **Blocking**: GitHub's native issue dependencies — the canonical, UI-visible representation. Add an edge with `gh api --method POST repos/<owner>/<repo>/issues/<child>/dependencies/blocked_by -F issue_id=<blocker-db-id>`, where `<blocker-db-id>` is the blocker's numeric database id (`gh api repos/<owner>/<repo>/issues/<n> --jq .id`, not the `#number` or `node_id`). GitHub reports `issue_dependencies_summary.blocked_by` (open blockers only — the live gate). Where dependencies aren't available, fall back to a `Blocked by: #<n>, #<n>` line at the top of the child body. A ticket is unblocked when every blocker is closed **and the blocker's PR is merged** — a blocker issue closes when its PR opens for review, so also check the PR state (`gh pr list --head "<blocker-slug>" --state merged`) before claiming.
+- **Blocking**: GitHub's native issue dependencies — the canonical, UI-visible representation. Add an edge with `gh api --method POST repos/<owner>/<repo>/issues/<child>/dependencies/blocked_by -F issue_id=<blocker-db-id>`, where `<blocker-db-id>` is the blocker's numeric database id (`gh api repos/<owner>/<repo>/issues/<n> --jq .id`, not the `#number` or `node_id`). GitHub reports `issue_dependencies_summary.blocked_by` (open blockers only — the live gate). Where dependencies aren't available, fall back to a `Blocked by: #<n>, #<n>` line at the top of the child body. A ticket is unblocked when every blocker is closed **and the blocker's PR is merged** — a blocker issue closes when its PR passes review before the human merges it, so also check the PR state (`gh pr list --head "<blocker-slug>" --state merged`) before claiming.
 
 
 ## Claiming work
@@ -47,7 +47,7 @@ Used by `implement` and `watchdog`. Claims issues labeled as `ready`, `rework` o
 As an implementor:
 - Always prefer `rework` PRs over `ready` issues.
 - Fetch the oldest open `rework` PR without `wip`; if none, the oldest open `ready` issue without `wip`.
-- After a successful claim, check out the slice's worktree (`.worktrees/<slug>`, creating it from the pushed branch if absent). On a first claim, merge up-to-date `main` into the branch; on a rework round sync nothing. Never rebase: it rewrites the `Artifact baseline` commit and orphans the previeous `Reviewed head`.
+- After a successful claim, check out the slice's worktree (`.worktrees/<slug>`, creating it from the pushed branch if absent). On a first claim, merge up-to-date `main` into the branch; on a rework round sync nothing. Never rebase: it rewrites the `Artifact baseline` commit and orphans the previous `Reviewed head`.
 
 ```sh
 gh pr list --repo "<owner>/<repo>" --label "rework" --state open \
@@ -92,16 +92,14 @@ gh pr list --repo "<owner>/<repo>" --head "<slug>" --state open --json number,is
 
 If one exists, **update** it (below) instead of creating a new one. The PR body carries the implementor's `## Audit ledger`. It is part of the submission, not commentary: the reviewer verifies it and the human reads it.
 
-**For work done on `ready` issues**: Open a `review` PR, close the `ready` issue, and only then remove its Claim:
+**For work done on `ready` issues**: Open a `review` PR, and only then remove the `ready` label from the issue, and remove its Claim:
 
 ```sh
 gh pr create --repo "<owner>/<repo>" --label "review" \
   --title "<title>" --body-file body.md --base main --head "<slug>"
 
-gh issue close <issue-number> --repo "<owner>/<repo>" \
-  --comment "Built and opened for review in #<pr-number>."
+gh issue edit <issue-number> --repo "<owner>/<repo>" --remove-label "ready,wip" 
 
-gh issue edit <issue-number> --repo "<owner>/<repo>" --remove-label "wip"
 ```
 
 
@@ -129,13 +127,17 @@ gh api --paginate "repos/<owner>/<repo>/pulls/<pr-number>/comments"   # inline, 
 
 ## After review
 
-Used by `watchdog`. Submit the review, as either needing `rework` or as `done` — or pause it for a human when the decision is genuinely not the reviewer's to make
+Used by `watchdog`. Submit the review, as either needing `rework` or as `done` — or pause it for a human when the decision is genuinely not the reviewer's to make.
 
 ```sh
 # reviewer bounces:  review + wip → rework
 gh pr edit <pr-number> --repo "<owner>/<repo>" --remove-label "review,wip" --add-label "rework"
-# reviewer passes:  review + wip → done
+
+# reviewer passes:  review + wip → done / closes the original issue
 gh pr edit <pr-number> --repo "<owner>/<repo>" --remove-label "review,wip" --add-label "done"
+gh issue close <issue-number> --repo "<owner>/<repo>" \
+  --comment "Closes with #<pr-number>."
+
 # reviewer pauses:  review/rework + wip → needs-human
 gh pr edit <pr-number> --repo "<owner>/<repo>" --remove-label "review,rework,wip" --add-label "needs-human"
 ```
@@ -219,7 +221,7 @@ A human requeues it explicitly: `rework` when implementation must continue, `rev
 gh pr ready <pr-number> --repo "<owner>/<repo>"
 ```
 
-Or they end it. **Supersede**: the change is not worth merging, and what it taught belongs in a fresh slice. Close the PR unmerged and the issue as not planned, then hand the slug to a `propose`. Discarding a change is a proposal-level decision, which is why no other stage may take it.
+Or they end it. **Supersede**: the change is not worth merging, and what it taught belongs in a fresh slice. Close the PR unmerged and the issue as not planned, then hand the slug to `propose`. Discarding a change is a proposal-level decision, which is why no other stage may take it.
 
 ```sh
 gh pr close <pr-number> --repo "<owner>/<repo>" --comment "Superseded: <reason>."

@@ -8,25 +8,23 @@ Implement a single change proposal, materializing each Gherkin scenario in `beha
 
 Use `docs/github.md` to know how to claim a single unit of work from Github. Once you claimed it, the change details are described in `.changes/<slug>`. Remember that you can't claim items with the `wip` or `needs-human` label.
 
-Work only in the claimed slice's worktree, `.worktrees/<slug>`. After claiming, rebase its branch onto up-to-date `main` before starting.
+Work only in the claimed slice's worktree, `.worktrees/<slug>`. On a first claim, merge up-to-date `main` into its branch before starting; on a rework round sync nothing. Never rebase: it orphans the Artifact baseline and the previous _Reviewed head_, and every three-dot diff taken against them silently widens to the old merge-base.
 
-Work only in the claimed slice's worktree, `.worktrees/<slug>`. On a first claim, merge up-to-date `main` iinto its branch before starting; on a rework round sync nothing. Never rebase: it orphans the _Artifact Baseline_ and the previous _Reviewed head_, and every three-dot diff taking against them silently widens to the old merge-base.
+Run typechecking and single test files regularly. `audit` runs the full suite as its gate at the end of this stage, so don't run it separately first.
 
-Run typechecking and single test files regularly. `audit` runs the full suit as its gate at the end of this stage, so don't run it separately first.
-
-Once the whole implementation is done and every scenario is green, run `audit` against the PR base merge-base — not the first commit of the claim, which `...HEAD` would leave out of the diff. On a rework round the fixed point moves; **Rework** below pins it. Refactoring happens here, deliberately kept out of the red -> green cycles. Apply its findings yourself, fix the `HARD` and on each `JUDGEMENT`, either fix it, deline it with a stated reason, or carry it as debt. Declining `HARD` is not yours to do. Keep the suite green while doing so. This is the pass where ordinary cleanup and refactoring belongs — smells, readability, maintainability, making the code navigable for the next agent. Whatever survives it, the watchdog sees.
+Once the whole implementation is done and every scenario is green, run `audit` against the PR base merge-base — not the first commit of the claim, which `...HEAD` would leave out of the diff. On a rework round the fixed point moves; **Rework** below pins it. Refactoring happens here, deliberately kept out of the red -> green cycles. Apply its findings yourself, fix the `HARD` and on each `JUDGEMENT`, either fix it, decline it with a stated reason, or carry it as debt. Declining `HARD` is not yours to do. Keep the suite green while doing so. This is the pass where ordinary cleanup and refactoring belongs — smells, readability, maintainability, making the code navigable for the next agent. Whatever survives it, the watchdog sees.
 
 Record what the pass decided. Every `audit` finding goes into the PR body under `## Audit ledger`: ID, axis, severity as `audit` assigned it, and `fixed` / `declined` / `debt` with one line of reasoning:
 
 ```text
-## Audit ledger --<fixed-point>..<head>
+## Audit ledger --<fixed-point>...<head>
 A1  Standards  HARD       fixed    — order total computed in two places; extracted to `OrderTotal` (def456)
 A2  Standards  JUDGEMENT  declined — "Feature Envy" on `Cart.price`: moving it splits the pricing rule across two modules
 A3  Standards  JUDGEMENT  debt     — DEBT(#17/A3) `String` currency; typed when the payments slice lands
-
 A4  Artifacts  HARD       fixed    — DoD item 3 had no test; added `cancel_shipped_order_test` (abc789)
+
 ```
-A declined judgement call with a stated reason is a decision, not an omission. This ledget is what the watchdog verifies and the human approves; without it, the next context re-derives the same calls from scratch and files them as new findings.
+A declined judgement call with a stated reason is a decision, not an omission. This ledger is what the watchdog verifies and the human approves; without it, the next context re-derives the same calls from scratch and files them as new findings.
 
 Tick off the `[ ]` boxes the work completed. That is the only edit the change artifacts allow: they froze when they were published, and nothing you learn while implementing gets written back into them.
 
@@ -56,7 +54,7 @@ W1 resolved — def456; covered by <check>
 W2 debt — DEBT(#17/W2) in <path · symbol>
 ```
 
-That is a claim, not proof. The next watchdog verifies it independently. Update the `## Audit ledger` in the PR body in the same push: it must describe the current head, not the first one
+That is a claim, not proof. The next watchdog verifies it independently. Update the `## Audit ledger` in the PR body in the same push: it must describe the current head, not the first one.
 
 ## When only a human can decide
 
