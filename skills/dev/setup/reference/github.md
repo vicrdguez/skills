@@ -37,7 +37,7 @@ Artifact baseline: <proposal-commit-sha>"
 The `Artifact baseline` line is the SHA of the commit that published the artifacts. Later stages diff against it to prove the artifacts were not rewritten mid-flight. Legacy changes without one fall back to the first commit containing `.changes/<slug>/`.
 
 - **Child issues**: issue linked to the parent issue as a GitHub sub-issue (`gh api` on the sub-issues endpoint).
-- **Blocking**: GitHub's native issue dependencies — the canonical, UI-visible representation. Add an edge with `gh api --method POST repos/<owner>/<repo>/issues/<child>/dependencies/blocked_by -F issue_id=<blocker-db-id>`, where `<blocker-db-id>` is the blocker's numeric database id (`gh api repos/<owner>/<repo>/issues/<n> --jq .id`, not the `#number` or `node_id`). GitHub reports `issue_dependencies_summary.blocked_by` (open blockers only — the live gate). Where dependencies aren't available, fall back to a `Blocked by: #<n>, #<n>` line at the top of the child body. A ticket is unblocked when every blocker is closed **and the blocker's PR is merged** — a blocker issue closes when its PR passes review before the human merges it, so also check the PR state (`gh pr list --head "<blocker-slug>" --state merged`) before claiming.
+- **Blocking**: GitHub's native issue dependencies — the canonical, UI-visible representation. Add an edge with `gh api --method POST repos/<owner>/<repo>/issues/<child>/dependencies/blocked_by -F issue_id=<blocker-db-id>`, where `<blocker-db-id>` is the blocker's numeric database id (`gh api repos/<owner>/<repo>/issues/<n> --jq .id`, not the `#number` or `node_id`). GitHub reports `issue_dependencies_summary.blocked_by` (open blockers only — the live gate). Where dependencies aren't available, fall back to a `Blocked by: #<n>, #<n>` line at the top of the child body. A ticket is unblocked when every blocker is closed **and the blocker's PR is merged** — a blocker issue closes when its PR passes review, before the human merges it, so also check the PR state (`gh pr list --head "<blocker-slug>" --state merged`) before claiming.
 
 
 ## Claiming work
@@ -98,8 +98,7 @@ If one exists, **update** it (below) instead of creating a new one. The PR body 
 gh pr create --repo "<owner>/<repo>" --label "review" \
   --title "<title>" --body-file body.md --base main --head "<slug>"
 
-gh issue edit <issue-number> --repo "<owner>/<repo>" --remove-label "ready,wip" 
-
+gh issue edit <issue-number> --repo "<owner>/<repo>" --remove-label "ready,wip"
 ```
 
 
