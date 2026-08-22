@@ -4,30 +4,31 @@ description: A relentless interview to sharpen a plan, design or idea which also
 disable-model-invocation: true
 ---
 
-Interview me relentlessly about every aspect of this until we reach a shared understanding. Walk down each branch of the decision tree, resolving dependencies between decisions one-by-one. **For each question, provide your recommended answer**. Use the `domain` skill throughout the session to aid your questions.
+Interview the user relentlessly until you reach a shared understanding. Map this as a **design tree**: every decision branches into the decisions that hang off it.
 
-*Ask the questions one at a time*, waiting for feedback on each question before continuing. Asking multiple questions at once is bewildering.
+Use the `domain` skill throughout the session to sharpen the project's language and write durable docs as decisions crystallise.
 
-Finding _facts_ is your job never the mine. If a fact can be found by exploring the environment (filesystem, tools, codebase etc.), look it up rather than asking me --dispatch a sub-agent to find it when the lookup is slow and keep interviewing while it runs, don't ask me for anything you could lookup yourself. Don't block on it: a running exploration is an unsettled prerequisite so only any question downstream of it wait for the sub-agent to report -- ask the rest addressable questions now. The decisions, though, are mine so put each one to me and wait for an answer.
+Work the tree in **rounds**. The **frontier** is every decision whose prerequisites are already settled: the questions you can ask _now_ without guessing at answers you haven't heard yet. Ask the whole frontier in one round: number each question and give your recommended answer. Then wait for the user's answers before the next round.
 
-
-The session is done when nothing is left unresolved: every branch of the decision tree visited, nothing left silently assumed. Do not decide that yourself, when you see nothing left to ask, say so and wait for me to confirm we have reached a shared understanding.
-
-After confirmation, stop and let the user decide the next step. Suggest running the `propose` skill but never run it yourself.
-
-
-## Question Format
-Follow this format explicitly. Avoid using `AskUserQuestion` or `functions.request_user_input` or any similar
-tool. 
+Format a round like so:
 
 ```
-Q<question number>: <question>
+❓ **Q1** - **<question title>**: <question body, might be multiple paragraphs, including multiple choices>
 
-<question context (the "why the question is asked"), brief but clear with just enough detail>
+➡️ <your recommended answer>
 
-<answer options>
+---
 
-<your recommendation from within the options>
+❓ **Q2** - **<question title>**: <question body, might be multiple paragraphs, including multiple choices>
+
+➡️ <your recommended answer>
 ```
 
+Each round the user answers reshapes the tree: settled decisions push the frontier outward and unblock questions that depended on them. Recompute the frontier and ask the next round. A question whose answer depends on another question still open in this round belongs to a _later_ round, not this one.
+
+Finding _facts_ is your job, never the user's. When a frontier question needs a fact from the environment (filesystem, tools, etc.), dispatch a sub-agent to find it; don't ask the user for anything you could look up yourself. Don't block on it: a running exploration is an unsettled prerequisite, so only the questions downstream of it wait for the sub-agent to report; ask the rest of the frontier now. The _decisions_ are the user's: put each to them and wait.
+
+The session is done when the frontier is empty: every branch of the design tree visited, nothing left silently assumed. Do not act on it until the user confirms you have reached a shared understanding.
+
+After confirmation, stop. Suggest running the `propose` skill in the same session so it can materialize the shared understanding, but never run it yourself.
 

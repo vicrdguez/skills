@@ -31,7 +31,7 @@ flowchart LR
 
 | Stage | Skill | What it hands off |
 |---|---|---|
-| Explore | `explore` | Shared understanding, one question at a time; durable docs written inline via `domain` |
+| Explore | `explore` | Shared understanding through frontier rounds; durable docs written inline via `domain` |
 | Propose | `propose` | Tracer-bullet vertical slices published to the board, each with its artifacts, branch and worktree |
 | Implement | `implement` | One claimed slice, TDD'd at pinned seams, refactored via `audit`, PR labeled `review` |
 | Watchdog | `watchdog` | A verdict reached in a fresh context — lands it (`done`) or bounces it (`rework`). Edits no code |
