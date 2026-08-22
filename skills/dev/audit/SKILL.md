@@ -50,7 +50,7 @@ Look for the originating artifacts, in this order:
 
 Anything in the repo that documents how code should be written, such as `CODING_STANDARDS.md` or `CONTRIBUTING.md`.
 
-On top of whatever the repo documents, the Standards axis always carries the **smell baseline** in [smells.md](./reference/smells.md) — a fixed set of Fowler code smells (_Refactoring_, ch.3) that applies even when a repo documents nothing, plus the two rules that bind it. Paste that file's full contents into the Standards sub-agent prompt — the sub-agent has no other access to it.
+On top of whatever the repo documents, the Standards axis always carries the **smell baseline** in [smells.md](./reference/smells.md) — a fixed set of Fowler code smells (_Refactoring_, ch.3) that applies even when a repo documents nothing, plus the two rules that bind it.
 
 #### Optional Ponytail review
 
@@ -70,13 +70,13 @@ These two produce facts, not judgements — a diff read or an exit code. Run the
 Dispatch both axes as parallel sub-agents, each in a fresh context carrying its brief:
 
 - **Claude Code**: a single message with two `Agent` tool calls, using the `general-purpose` subagent for both.
-- **pi** ([pi-subagents](https://github.com/nicobailon/pi-subagents)): a single `subagent` tool call with a parallel `tasks` array and `context: "fresh"`. When `ponytail-review` is available, inject it into the Standards task only — `{ tasks: [{ agent: "reviewer", task: "<standards brief>", skill: "ponytail-review" }, { agent: "reviewer", task: "<artifacts brief>" }], context: "fresh" }`. Omit `skill` when unavailable.
+- **pi** ([pi-subagents](https://github.com/nicobailon/pi-subagents)): a single asynchronous `subagent` call with a `workflowScript` using `runs.all` to launch both reviewers in fresh contexts. When `ponytail-review` is available, pass it to the Standards task only.
 - **No sub-agent mechanism available**: run the two axes sequentially, Standards first.
 
 **Standards sub-agent prompt** — include:
 
 - The full diff command and commit list.
-- The list of standards-source files you found in step 3, **plus [smells.md](./reference/smells.md) pasted in full** — the sub-agent has no other access to it.
+- The list of standards-source files you found in step 3, plus the absolute path to [smells.md](./reference/smells.md). Instruct the sub-agent to read them.
 - The gate results from step 4.
 - The precedence between sources, so the sub-agent knows what outranks what: frozen artifacts, then required tooling and CI, then the project's `AGENTS.md`, standards docs and quality skills, then language and framework correctness, security and accessibility rules, then the generic smell baseline. An explicit project or language `MUST`, `ALWAYS`, `NEVER` or equivalent can be a hard violation; a generic smell stays a judgement call unless a local rule or a concrete behavior or maintenance impact elevates it.
 - When `ponytail-review` was provided, instruct the sub-agent to load and apply it as an additional lens. Put its output under `### Ponytail review`, preserve its concise finding format and final net-lines estimate, and treat every Ponytail finding as a judgement call. It must still complete the documented-standards and smell-baseline review.

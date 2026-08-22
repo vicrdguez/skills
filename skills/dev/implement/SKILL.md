@@ -26,7 +26,7 @@ A4  Artifacts  HARD       fixed    — DoD item 3 had no test; added `cancel_shi
 ```
 A declined judgement call with a stated reason is a decision, not an omission. This ledger is what the watchdog verifies and the human approves; without it, the next context re-derives the same calls from scratch and files them as new findings.
 
-Tick off the `[ ]` boxes the work completed. That is the only edit the change artifacts allow: they froze when they were published, and nothing you learn while implementing gets written back into them.
+Tick off the `[ ]` boxes the work completed, except those under `Manual verification`. That is the only edit the change artifacts allow: they froze when they were published, and nothing you learn while implementing gets written back into them.
 
 Then present the work by pushing the branch and submitting it for review as described in `docs/github.md`. Never archive or bless the changes — that is the watchdog's job.
 
@@ -57,7 +57,5 @@ W2 debt — DEBT(#17/W2) in <path · symbol>
 That is a claim, not proof. The next watchdog verifies it independently. Update the `## Audit ledger` in the PR body in the same push: it must describe the current head, not the first one.
 
 ## When only a human can decide
-
-Rare, and never about scope. If the artifacts contradict each other, conflict with a mandatory project, language, security or accessibility rule, require something impossible under the pinned constraints, or leave no safe fix that does not change frozen behavior, interface or scope — stop and hand it over.
 
 Finish everything that is not blocked first. Then follow the human-decision handoff in `docs/github.md`: the decision goes on the issue when no code exists yet, or on a draft PR carrying the completed work when it does. Never leave the question only in your own session.
