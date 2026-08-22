@@ -220,7 +220,7 @@ A human requeues it explicitly: `rework` when implementation must continue, `rev
 gh pr ready <pr-number> --repo "<owner>/<repo>"
 ```
 
-Or they end it. **Supersede**: the change is not worth merging, and what it taught belongs in a fresh slice. Close the PR unmerged and the issue as not planned, then hand the slug to `propose`. Discarding a change is a proposal-level decision, which is why no other stage may take it.
+Or they end it. **Supersede**: the change is not worth merging, and what it taught belongs in a fresh slice. Close the PR unmerged and the issue as not planned, then hand the slug to `explore`; `propose` follows once shared understanding is renewed. Discarding a change is a proposal-level decision, which is why no other stage may take it.
 
 ```sh
 gh pr close <pr-number> --repo "<owner>/<repo>" --comment "Superseded: <reason>."

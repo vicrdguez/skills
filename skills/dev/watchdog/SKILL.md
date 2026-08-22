@@ -97,7 +97,7 @@ Hand off through the Board reference: remove `review` and `wip` as it adds `done
 
 Follow the rare human-decision handoff in `docs/github.md`.
 
-Publish the ledger and the inline evidence first, then transition to `needs-human` through the Board reference and exit. Do not bounce an undecided question to an implementor: they cannot answer it either, and the PR will come straight back. A human answers three ways: requeue to `rework` when implementation must continue, to `review` when only verification remains, or supersede, closing the PR unmerged and letting `propose` cut a better slice. Say which you recommend and why.
+Publish the ledger and the inline evidence first, then transition to `needs-human` through the Board reference and exit. Do not bounce an undecided question to an implementor: they cannot answer it either, and the PR will come straight back. A human answers three ways: requeue to `rework` when implementation must continue, to `review` when only verification remains, or supersede, closing the PR unmerged and letting `explore` revisit the slice before `propose` cuts its replacement. Say which you recommend and why.
 
 ## Fail → bounce to rework, edit no code
 

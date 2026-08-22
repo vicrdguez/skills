@@ -6,6 +6,8 @@ disable-model-invocation: true
 
 Interview the user relentlessly until you reach a shared understanding. Map this as a **design tree**: every decision branches into the decisions that hang off it.
 
+If the user names a superseded slug or its closed issue/PR, first read that issue, the PR's audit ledger and review findings, and the abandoned artifacts. Use the failed attempt as evidence when mapping the design tree: keep what it established and reopen the decisions implicated in its supersession.
+
 Use the `domain` skill throughout the session to sharpen the project's language and write durable docs as decisions crystallise.
 
 Work the tree in **rounds**. The **frontier** is every decision whose prerequisites are already settled: the questions you can ask _now_ without guessing at answers you haven't heard yet. Ask the whole frontier in one round: number each question and give your recommended answer. Then wait for the user's answers before the next round.

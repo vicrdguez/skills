@@ -16,7 +16,7 @@ The thinking and decision making already happened, thus this stage is just preci
 Work from what is already in the conversation context. 
 - If the user passes a reference (a spec path, an issue number or URL) as an argument, fetch it and read its full body and context. 
 - Then read the relevant capabilities (`docs/capabilities/*`) as well to understand which ones are changing, potentially getting deprecated/removed or which new capabilities this change will bring
-- If the user names a superseded slug or its closed issue, read that issue, the PR's audit ledger and review findings, and the abandoned artifacts before drafting. The failed attempt is evidence: the new slice must not re-derive what it already proved wrong.
+- A superseded change enters through `explore`. Proceed only if this conversation contains the user's confirmation of renewed shared understanding; otherwise stop and suggest running `explore`.
 
 ### 2. Explore the repo to understand the current state of the codebase (optional)
 
