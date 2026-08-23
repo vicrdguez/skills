@@ -10,5 +10,5 @@
   "repository": "https://github.com/vicrdguez/skills",
   "license": "MIT",
   "keywords": ["tdd", "code-review", "domain-modeling", "workflow"],
-  "skills": ["./skills/dev/"]
+  "skills": ["./skills/dev/", "./skills/thinking/"]
 }

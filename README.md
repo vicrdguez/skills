@@ -8,6 +8,10 @@ In that sense, this collection is not inventing anything new but remixing mulitp
 
 The only thing I'm bringing here is the way these ideas are remixed to work for me. So all props both projects.
 
+## Optional thinking tools
+
+`brainstorm` and `shape` are manually invoked thinking tools outside the development pipeline. `brainstorm` preserves an open-ended conversation; `shape` turns selected thinking into a faithful, implementation-independent design. Their artifacts stay local under `.thinking/`, excluded through Git's repository-local exclude, and are read only when their exact path is supplied.
+
 ## Why I'm not using Matt's skills directly
 
 I think his skill repository is full of great ideas and skill implementations that I've benefited multiple times from. However I wanted mi pipeline to use different artifacts with different goals to aid Agent implementations, all while keeping a set of durable docs that persist across changes, even when those artifacts are deleted.

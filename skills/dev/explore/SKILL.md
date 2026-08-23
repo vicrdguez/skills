@@ -6,6 +6,8 @@ disable-model-invocation: true
 
 Interview the user relentlessly until you reach a shared understanding. Map this as a **design tree**: every decision branches into the decisions that hang off it.
 
+When the user supplies the exact path to a `.thinking` artifact, read it as starting context and carry its settled concepts forward unless project evidence contradicts them. Never enumerate `.thinking` or select an artifact on the user's behalf.
+
 If the user names a superseded slug or its closed issue/PR, first read that issue, the PR's audit ledger and review findings, and the abandoned artifacts. Use the failed attempt as evidence when mapping the design tree: keep what it established and reopen the decisions implicated in its supersession.
 
 Use the `domain` skill throughout the session to sharpen the project's language and write durable docs as decisions crystallise.
