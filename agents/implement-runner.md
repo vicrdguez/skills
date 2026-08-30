@@ -8,8 +8,9 @@ systemPromptMode: replace
 inheritProjectContext: true
 inheritSkills: true
 skills: implement, tdd, audit, design, domain
-tools: read, grep, find, ls, bash, edit, write, subagent, contact_supervisor
+tools: read, grep, find, ls, bash, edit, write, subagent, subagent_wait, contact_supervisor
 defaultContext: fresh
+timeoutMs: 7200000
 completionGuard: false
 maxSubagentDepth: 2
 acceptance: {"level":"none","reason":"The implement skill owns its handoff contract."}

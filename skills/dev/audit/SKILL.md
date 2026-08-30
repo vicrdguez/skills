@@ -70,7 +70,7 @@ These two produce facts, not judgements — a diff read or an exit code. Run the
 Dispatch both axes as parallel sub-agents, each in a fresh context carrying its brief:
 
 - **Claude Code**: a single message with two `Agent` tool calls, using the `general-purpose` subagent for both.
-- **pi** ([pi-subagents](https://github.com/nicobailon/pi-subagents)): a single asynchronous `subagent` call with a `workflowScript` using `runs.all` to launch both reviewers in fresh contexts. When `ponytail-review` is available, pass it to the Standards task only.
+- **pi** ([pi-subagents](https://github.com/nicobailon/pi-subagents)): a single asynchronous `subagent` call with a `workflowScript` using `runs.all` to launch both reviewers in fresh contexts. Set `timeoutMs: 3600000` on the workflow call and both reviewer items. When `ponytail-review` is available, pass it to the Standards task only.
 - **No sub-agent mechanism available**: run the two axes sequentially, Standards first.
 
 **Standards sub-agent prompt** — include:

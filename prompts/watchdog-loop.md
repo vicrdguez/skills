@@ -5,9 +5,14 @@ argument-hint: "[max-items] [model=provider/model:thinking]"
 
 Act only as the scheduler for the watchdog queue. This Pi session is dedicated to the watchdog loop and must not run the implementation loop.
 
-Process at most ${1:-10} work items. Arguments: $@
+Arguments: $@
 
-If an argument starts with `model=`, use its value as the per-run `model` override on every `watchdog-runner` launch. Otherwise use the agent's configured default. Ignore the first argument as a model override when it is only the item limit.
+Parse them before launching:
+- the first decimal argument is the item limit, defaulting to `10`;
+- at most one `model=provider/model:thinking` argument is the per-run `model` override; and
+- any other argument is invalid: stop and report it.
+
+Process at most the parsed item limit. Without a model override, use the agent's configured default.
 
 For each iteration, launch exactly one foreground subagent with `agent: "watchdog-runner"`, `context: "fresh"`, the current project as `cwd`, and this task:
 

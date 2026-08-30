@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 Implement a single change proposal, materializing each Gherkin scenario in `behavior.md` into an idiomatic test and following a red -> green loop using the `tdd` skill at the seams pinned in the change artifacts.
 
-Use `docs/github.md` to know how to claim a single unit of work from Github. Once you claimed it, the change details are described in `.changes/<slug>`. Remember that you can't claim items with the `wip` or `needs-human` label.
+Use `docs/github.md` to claim a single unit of work from Github. Follow its dependency preflight before adding `wip`: scan candidates oldest-first, leave blocked items untouched, and claim the first eligible item. Once claimed, the change details are described in `.changes/<slug>`.
 
 Work only in the claimed slice's worktree, `.worktrees/<slug>`. On a first claim, merge up-to-date `main` into its branch before starting; on a rework round sync nothing. Never rebase: it orphans the Artifact baseline and the previous _Reviewed head_, and every three-dot diff taken against them silently widens to the old merge-base.
 

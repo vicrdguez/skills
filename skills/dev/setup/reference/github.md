@@ -45,8 +45,8 @@ The `Artifact baseline` line is the SHA of the commit that published the artifac
 Used by `implement` and `watchdog`. Claims issues labeled as `ready`, `rework` or `review` by adding `wip`. Anything carrying `needs-human` is never eligible: it stays paused until a human records the decision and relabels it back into the queue.
 
 As an implementor:
-- Always prefer `rework` PRs over `ready` issues.
-- Fetch the oldest open `rework` PR without `wip`; if none, the oldest open `ready` issue without `wip`.
+- Always prefer the oldest open `rework` PR without `wip`.
+- If none exists, fetch open `ready` issues without `wip`, oldest first. Preflight each issue's blockers and claim the first eligible one; blocked issues stay untouched.
 - After a successful claim, check out the slice's worktree (`.worktrees/<slug>`, creating it from the pushed branch if absent). On a first claim, merge up-to-date `main` into the branch; on a rework round sync nothing. Never rebase: it rewrites the `Artifact baseline` commit and orphans the previous `Reviewed head`.
 
 ```sh
@@ -57,9 +57,11 @@ gh pr list --repo "<owner>/<repo>" --label "rework" --state open \
 
 ```sh
 gh issue list --repo "<owner>/<repo>" --label "ready" --state open \
-  --search "-label:wip sort:created-asc" --limit 1 \
-  --json number,title --jq '.[0]'
+  --search "-label:wip sort:created-asc" --limit 1000 \
+  --json number,title
 ```
+
+For each returned issue, inspect its native dependencies and the fallback `Blocked by:` line. It is eligible only when every blocker issue is closed and every blocker's PR is merged. Continue past blocked issues; if none pass, report that no item is eligible without adding `wip` anywhere.
 
 
 As a reviewer
@@ -78,7 +80,7 @@ gh issue edit <issue-number> --repo "<owner>/<repo>" --add-label "wip" # ready i
 gh pr edit <pr-number> --repo "<owner>/<repo>" --add-label "wip"       # rework PR or review PR
 ```
 
-Failed or interrupted stays claimed. A human requeues manually.
+Read the labels back and proceed only when both the lifecycle label and `wip` are present. Failed or interrupted stays claimed. A human requeues manually.
 
 ## Submit for review
 
@@ -110,6 +112,8 @@ gh issue edit <issue-number> --repo "<owner>/<repo>" --remove-label "ready,wip"
 gh pr edit <pr-number> --repo "<owner>/<repo>" \
   --remove-label "rework,wip" --add-label "review"
 ```
+
+After either transition, read the labels back before reporting success. The PR must carry `review` without `wip` or `rework`; after a first claim, the source issue must carry neither `ready` nor `wip`.
 
 The implementor reads the bounce feedback with:
 
