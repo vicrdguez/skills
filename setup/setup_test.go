@@ -97,6 +97,55 @@ func TestSetupRefusesMalformedAgentsOwnershipMarkers(t *testing.T) {
 	}
 }
 
+func TestSetupOffersSafeClaudeSymlinkMigration(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		existing *string
+		accept   bool
+		linked   bool
+		prompted bool
+	}{
+		{name: "absent", accept: true, linked: true, prompted: true},
+		{name: "legacy import", existing: stringPointer("@AGENTS.md\n"), accept: true, linked: true, prompted: true},
+		{name: "substantive guidance", existing: stringPointer("Keep this guidance.\n"), accept: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := newRepository(t)
+			runGit(t, root, "remote", "add", "origin", "https://github.com/acme/widgets.git")
+			claudePath := filepath.Join(root, "CLAUDE.md")
+			if test.existing != nil {
+				if err := os.WriteFile(claudePath, []byte(*test.existing), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			prompted := false
+			_, err := setup.Run(context.Background(), setup.Request{
+				Location: root,
+				Confirm: func(string) (bool, error) {
+					prompted = true
+					return test.accept, nil
+				},
+			}, &recordingBackend{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if prompted != test.prompted {
+				t.Fatalf("prompted = %v", prompted)
+			}
+			if test.linked {
+				target, err := os.Readlink(claudePath)
+				if err != nil || target != "AGENTS.md" {
+					t.Fatalf("CLAUDE.md link = %q, %v", target, err)
+				}
+			} else if got := readFile(t, claudePath); got != *test.existing {
+				t.Fatalf("CLAUDE.md = %q", got)
+			}
+		})
+	}
+}
+
+func stringPointer(value string) *string { return &value }
+
 func newRepository(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.EvalSymlinks(t.TempDir())

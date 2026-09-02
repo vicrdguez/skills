@@ -79,12 +79,17 @@ func Run(ctx context.Context, request Request, backend Backend) (Outcome, error)
 	if err != nil {
 		return Outcome{}, err
 	}
+	claudePath := filepath.Join(root, "CLAUDE.md")
+	offerClaude, err := shouldOfferClaudeLink(claudePath)
+	if err != nil {
+		return Outcome{}, err
+	}
 	targetBranch, err := backend.Validate(ctx, repository)
 	if err != nil {
 		return Outcome{}, fmt.Errorf("validate GitHub repository: %w", err)
 	}
 	linkClaude := false
-	if request.Confirm != nil {
+	if offerClaude && request.Confirm != nil {
 		linkClaude, err = request.Confirm("Link CLAUDE.md to AGENTS.md? [y/N] ")
 		if err != nil {
 			return Outcome{}, err
@@ -101,11 +106,33 @@ func Run(ctx context.Context, request Request, backend Backend) (Outcome, error)
 		return Outcome{}, err
 	}
 	if linkClaude {
-		if err := os.Symlink("AGENTS.md", filepath.Join(root, "CLAUDE.md")); err != nil {
+		if err := os.Remove(claudePath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return Outcome{}, err
+		}
+		if err := os.Symlink("AGENTS.md", claudePath); err != nil {
 			return Outcome{}, err
 		}
 	}
 	return Outcome{Root: root, Repository: repository, TargetBranch: targetBranch}, nil
+}
+
+func shouldOfferClaudeLink(path string) (bool, error) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		target, err := os.Readlink(path)
+		return target != "AGENTS.md", err
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+	return string(contents) == "@AGENTS.md" || string(contents) == "@AGENTS.md\n", nil
 }
 
 func planAgents(path string) ([]byte, error) {
