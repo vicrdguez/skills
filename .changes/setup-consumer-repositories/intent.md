@@ -36,12 +36,12 @@ Introduce the Go `skl` executable and an idempotent `skl setup` command that pre
 - Storing credentials
 
 ## Definition of Done
-- [ ] `skl setup` resolves the intended Consumer Repository and GitHub backend without configuration, or refuses before mutation when resolution is ambiguous or invalid.
-- [ ] Setup prepares the existing workflow labels through authenticated direct GitHub API calls and preserves unrelated labels.
-- [ ] Setup creates or refreshes only its minimal owned `AGENTS.md` block and refuses malformed or duplicate marker layouts without changing the file.
-- [ ] Setup safely offers the `CLAUDE.md` symlink migration while preserving substantive existing content unless replacement is explicitly authorized.
-- [ ] Setup ensures the worktree ignore, removes legacy `docs/github.md`, and preserves unrelated repository files and ignore entries.
-- [ ] Repeating Setup against an already prepared Consumer Repository produces the same owned repository and GitHub state and no workflow configuration file.
+- [x] `skl setup` resolves the intended Consumer Repository and GitHub backend without configuration, or refuses before mutation when resolution is ambiguous or invalid.
+- [x] Setup prepares the existing workflow labels through authenticated direct GitHub API calls and preserves unrelated labels.
+- [x] Setup creates or refreshes only its minimal owned `AGENTS.md` block and refuses malformed or duplicate marker layouts without changing the file.
+- [x] Setup safely offers the `CLAUDE.md` symlink migration while preserving substantive existing content unless replacement is explicitly authorized.
+- [x] Setup ensures the worktree ignore, removes legacy `docs/github.md`, and preserves unrelated repository files and ignore entries.
+- [x] Repeating Setup against an already prepared Consumer Repository produces the same owned repository and GitHub state and no workflow configuration file.
 
 ## Manual verification
 None.
