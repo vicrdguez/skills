@@ -66,6 +66,37 @@ func TestSetupMaintainsOnlyOwnedAgentsBlock(t *testing.T) {
 	}
 }
 
+func TestSetupRefusesMalformedAgentsOwnershipMarkers(t *testing.T) {
+	cases := map[string]string{
+		"missing":   "<!-- dev-pipeline:start -->\n",
+		"nested":    "<!-- dev-pipeline:start -->\n<!-- dev-pipeline:start -->\n<!-- dev-pipeline:end -->\n<!-- dev-pipeline:end -->\n",
+		"reversed":  "<!-- dev-pipeline:end -->\n<!-- dev-pipeline:start -->\n",
+		"duplicate": "<!-- dev-pipeline:start -->\n<!-- dev-pipeline:end -->\n<!-- dev-pipeline:start -->\n<!-- dev-pipeline:end -->\n",
+	}
+	for name, original := range cases {
+		t.Run(name, func(t *testing.T) {
+			root := newRepository(t)
+			runGit(t, root, "remote", "add", "origin", "https://github.com/acme/widgets.git")
+			path := filepath.Join(root, "AGENTS.md")
+			if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			backend := &recordingBackend{}
+
+			_, err := setup.Run(context.Background(), setup.Request{Location: root}, backend)
+			if err == nil || !strings.Contains(err.Error(), "malformed workflow markers") {
+				t.Fatalf("error = %v", err)
+			}
+			if backend.validated != 0 || backend.labels != 0 {
+				t.Fatalf("backend mutated: %#v", backend)
+			}
+			if got := readFile(t, path); got != original {
+				t.Fatalf("AGENTS.md = %q", got)
+			}
+		})
+	}
+}
+
 func newRepository(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.EvalSymlinks(t.TempDir())

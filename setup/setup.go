@@ -118,8 +118,16 @@ func planAgents(path string) ([]byte, error) {
 	}
 	const start = "<!-- dev-pipeline:start -->"
 	const end = "<!-- dev-pipeline:end -->"
-	startAt := strings.Index(string(contents), start)
-	endAt := strings.Index(string(contents), end)
+	text := string(contents)
+	starts, ends := strings.Count(text, start), strings.Count(text, end)
+	if starts != ends || starts > 1 {
+		return nil, errors.New("AGENTS.md has malformed workflow markers")
+	}
+	startAt := strings.Index(text, start)
+	endAt := strings.Index(text, end)
+	if starts == 1 && startAt > endAt {
+		return nil, errors.New("AGENTS.md has malformed workflow markers")
+	}
 	if startAt >= 0 && endAt >= 0 {
 		endAt += len(end)
 		return []byte(string(contents[:startAt]) + strings.TrimSuffix(AgentsBlock, "\n") + string(contents[endAt:])), nil
