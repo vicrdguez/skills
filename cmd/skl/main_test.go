@@ -228,6 +228,34 @@ func TestBundleGuaranteedSupportingSkills(t *testing.T) {
 	}
 }
 
+func TestIgnoreConsumerRepositoryOverrides(t *testing.T) {
+	repository := t.TempDir()
+	override := filepath.Join(repository, "skills/dev/tdd/SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(override), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(override, []byte("consumer override"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	previous, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(repository); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(previous) })
+
+	var stdout, stderr bytes.Buffer
+	app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, t.TempDir())
+	if err := app.Run([]string{"skl", "skill", "tdd"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := stdout.String(); !strings.Contains(got, "# Test-Driven Development") || strings.Contains(got, "consumer override") {
+		t.Fatalf("consumer repository overrode embedded definition:\n%s", got)
+	}
+}
+
 func readFile(t *testing.T, path string) string {
 	t.Helper()
 	contents, err := os.ReadFile(path)
