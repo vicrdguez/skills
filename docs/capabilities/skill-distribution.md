@@ -6,8 +6,10 @@
 
 - Installs the user-level binary from this repository through Go.
 - Installs embedded common Skill Stubs into the Pi, Codex, and Claude Code user skill directories.
+- Refreshes only stubs carrying the `skl.stub/v1` ownership protocol and preserves unrelated harness files.
 - Retrieves a concrete Instruction Packet for an invoked skill as rendered Markdown or equivalent typed JSON.
 - Includes guaranteed supporting Skill Definitions once per packet and retrieves conditional Skill Resources only when needed.
+- Resolves definitions and resources only from the running binary's embedded catalog; Consumer Repository files cannot override them.
 - Keeps Setup as a direct deterministic command rather than an agent skill.
 
 ## Out of scope

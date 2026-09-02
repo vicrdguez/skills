@@ -69,18 +69,14 @@ skl setup
 
 Use `skl setup --repo <path>` to target another checkout. If that repository has multiple GitHub remotes and no GitHub `origin`, select one with `--remote <name>`. Authentication is read from `GH_TOKEN`, then `GITHUB_TOKEN`, then `gh auth token`; Setup stores no credentials.
 
-### Install with Pi
+### Install skills
 
 ```sh
-pi install git:github.com/vicrdguez/skills
+go install ./cmd/skl
+skl install
 ```
 
-### Install with Claude Code
-
-```
-/plugin marketplace add vicrdguez/skills
-/plugin install skills@vicrdguez
-```
+`skl install` refreshes its owned Skill Stubs in Pi, Codex, and Claude Code without touching unrelated user files. Run `skl skill <name>` for rendered instructions, add `--format json` for the typed packet, or add `--resource <path>` for one named resource.
 
 ## Pi subagent loops
 

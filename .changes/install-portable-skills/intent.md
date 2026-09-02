@@ -32,13 +32,13 @@ Embed this repository's Skill Definitions, resources, templates, and common Skil
 - Conditional supporting-skill dependency resolution beyond named resource retrieval
 
 ## Definition of Done
-- [ ] `skl install` writes owned common Skill Stubs for every supported current skill into Pi, Codex, and Claude Code user skill locations without using plugin packaging.
-- [ ] Repeating installation refreshes owned stubs without changing unrelated harness files.
-- [ ] Invoking a non-workflow skill through `skl` returns its authoritative embedded instructions as rendered Markdown.
-- [ ] Requesting JSON returns the same Instruction Packet facts and instructions in a typed machine-readable representation.
-- [ ] Named supporting resources remain absent from the initial packet and can be retrieved explicitly from the embedded catalog.
-- [ ] Guaranteed supporting Skill Definitions are bundled exactly once and declared in `included_skills`.
-- [ ] Stubs and packets expose compatible protocol versions and no Consumer Repository skill override is read.
+- [x] `skl install` writes owned common Skill Stubs for every supported current skill into Pi, Codex, and Claude Code user skill locations without using plugin packaging.
+- [x] Repeating installation refreshes owned stubs without changing unrelated harness files.
+- [x] Invoking a non-workflow skill through `skl` returns its authoritative embedded instructions as rendered Markdown.
+- [x] Requesting JSON returns the same Instruction Packet facts and instructions in a typed machine-readable representation.
+- [x] Named supporting resources remain absent from the initial packet and can be retrieved explicitly from the embedded catalog.
+- [x] Guaranteed supporting Skill Definitions are bundled exactly once and declared in `included_skills`.
+- [x] Stubs and packets expose compatible protocol versions and no Consumer Repository skill override is read.
 
 ## Manual verification
 - [ ] Invoke one installed stub in each of Pi, Codex, and Claude Code and confirm that the harness discovers it and follows the delegated `skl` instruction.
