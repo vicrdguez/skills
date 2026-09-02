@@ -23,27 +23,23 @@ type RepositoryID struct {
 }
 
 type Label struct {
-	Name        string
-	Color       string
-	Description string
+	Name        string `json:"name"`
+	Color       string `json:"color"`
+	Description string `json:"description"`
 }
 
 var WorkflowLabels = []Label{
-	{Name: "ready", Color: "0e8a16", Description: "Proposed change awaiting an implementor"},
-	{Name: "wip", Color: "fbca04", Description: "Additive Worker Claim"},
-	{Name: "review", Color: "1d76db", Description: "Built change awaiting a reviewer"},
-	{Name: "rework", Color: "d93f0b", Description: "Reviewer bounced it back to the implementor"},
-	{Name: "needs-human", Color: "b60205", Description: "Automation paused for a narrow human decision"},
-	{Name: "done", Color: "5319e7", Description: "Passed review, awaiting human approval to merge"},
+	{Name: "ready", Color: "0e8a16", Description: "proposed change awaiting an implementor"},
+	{Name: "wip", Color: "fbca04", Description: "additive Worker Claim. An agent is working on it"},
+	{Name: "review", Color: "1d76db", Description: "built change awaiting a reviewer"},
+	{Name: "rework", Color: "d93f0b", Description: "reviewer bounced it back to the implementor after review"},
+	{Name: "needs-human", Color: "b60205", Description: "automation paused for a narrow human decision"},
+	{Name: "done", Color: "5319e7", Description: "passed review, awaiting the human's approval to merge"},
 }
 
 type Backend interface {
 	Validate(context.Context, RepositoryID) (targetBranch string, err error)
 	EnsureLabels(context.Context, RepositoryID, []Label) error
-}
-
-func NewGitHubBackendFromEnv() (Backend, error) {
-	return nil, errors.New("GitHub backend is not configured")
 }
 
 type Request struct {
