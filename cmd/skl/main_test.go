@@ -74,6 +74,22 @@ func TestSetupInfersGitHubConsumerRepository(t *testing.T) {
 	}
 }
 
+func TestSetupDeclinesClaudeMigrationAtEndOfInput(t *testing.T) {
+	root := t.TempDir()
+	runGit(t, root, "init")
+	runGit(t, root, "remote", "add", "origin", "https://github.com/acme/widgets.git")
+	backend := &memoryBackend{}
+	var output bytes.Buffer
+	app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+
+	if err := app.Run([]string{"skl", "setup", "--repo", root}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "CLAUDE.md")); !os.IsNotExist(err) {
+		t.Fatalf("CLAUDE.md created without confirmation: %v", err)
+	}
+}
+
 func readFile(t *testing.T, path string) string {
 	t.Helper()
 	contents, err := os.ReadFile(path)

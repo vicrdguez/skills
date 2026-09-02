@@ -43,6 +43,9 @@ func newApp(newBackend backendFactory, stdin io.Reader, stdout, stderr io.Writer
 						return false, err
 					}
 					answer, err := reader.ReadString('\n')
+					if err == io.EOF {
+						err = nil
+					}
 					return strings.EqualFold(strings.TrimSpace(answer), "y"), err
 				},
 			}, backend)

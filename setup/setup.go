@@ -127,8 +127,8 @@ func Run(ctx context.Context, request Request, backend Backend) (Outcome, error)
 }
 
 func planGitignore(path string) ([]byte, error) {
-	contents, err := os.ReadFile(path)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	contents, err := readOwnedFile(path)
+	if err != nil {
 		return nil, err
 	}
 	var kept strings.Builder
@@ -178,12 +178,12 @@ func shouldOfferClaudeLink(path string) (bool, error) {
 }
 
 func planAgents(path string) ([]byte, error) {
-	contents, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return []byte(AgentsBlock), nil
-	}
+	contents, err := readOwnedFile(path)
 	if err != nil {
 		return nil, err
+	}
+	if contents == nil {
+		return []byte(AgentsBlock), nil
 	}
 	const start = "<!-- dev-pipeline:start -->"
 	const end = "<!-- dev-pipeline:end -->"
@@ -206,6 +206,20 @@ func planAgents(path string) ([]byte, error) {
 		prefix += "\n"
 	}
 	return []byte(prefix + AgentsBlock), nil
+}
+
+func readOwnedFile(path string) ([]byte, error) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("owned file %s must not be a symlink", path)
+	}
+	return os.ReadFile(path)
 }
 
 func resolveRemote(root, explicit string) (string, error) {

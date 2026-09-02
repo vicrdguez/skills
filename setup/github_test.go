@@ -1,13 +1,21 @@
 package setup
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (function roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return function(request)
+}
 
 func TestGitHubBackendMapsRepositoryAndLabels(t *testing.T) {
 	labels := map[string]Label{
@@ -82,5 +90,32 @@ func TestGitHubTokenChain(t *testing.T) {
 				t.Fatalf("resolveGitHubToken() = %q, %v", got, err)
 			}
 		})
+	}
+}
+
+func TestGitHubBackendDefersAuthenticationUntilValidation(t *testing.T) {
+	resolved := 0
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if got := request.Header.Get("Authorization"); got != "Bearer delayed" {
+			t.Fatalf("Authorization = %q", got)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(bytes.NewBufferString(`{"default_branch":"main"}`)),
+			Header:     make(http.Header),
+		}, nil
+	})}
+	backend := newGitHubBackend("https://api.github.test", client, func() (string, error) {
+		resolved++
+		return "delayed", nil
+	})
+	if resolved != 0 {
+		t.Fatal("authentication resolved during backend construction")
+	}
+	if _, err := backend.Validate(context.Background(), RepositoryID{Owner: "acme", Name: "widgets"}); err != nil {
+		t.Fatal(err)
+	}
+	if resolved != 1 {
+		t.Fatalf("authentication resolved %d times", resolved)
 	}
 }

@@ -15,9 +15,10 @@ import (
 )
 
 type GitHubBackend struct {
-	baseURL string
-	token   string
-	client  *http.Client
+	baseURL     string
+	token       string
+	tokenSource func() (string, error)
+	client      *http.Client
 }
 
 func NewGitHubBackend(baseURL, token string, client *http.Client) *GitHubBackend {
@@ -25,14 +26,16 @@ func NewGitHubBackend(baseURL, token string, client *http.Client) *GitHubBackend
 }
 
 func NewGitHubBackendFromEnv() (Backend, error) {
-	token, err := resolveGitHubToken(os.Getenv, func() (string, error) {
-		output, err := exec.Command("gh", "auth", "token").Output()
-		return strings.TrimSpace(string(output)), err
-	})
-	if err != nil {
-		return nil, err
-	}
-	return NewGitHubBackend("https://api.github.com", token, http.DefaultClient), nil
+	return newGitHubBackend("https://api.github.com", http.DefaultClient, func() (string, error) {
+		return resolveGitHubToken(os.Getenv, func() (string, error) {
+			output, err := exec.Command("gh", "auth", "token").Output()
+			return strings.TrimSpace(string(output)), err
+		})
+	}), nil
+}
+
+func newGitHubBackend(baseURL string, client *http.Client, tokenSource func() (string, error)) *GitHubBackend {
+	return &GitHubBackend{baseURL: strings.TrimRight(baseURL, "/"), tokenSource: tokenSource, client: client}
 }
 
 func resolveGitHubToken(getenv func(string) string, ghToken func() (string, error)) (string, error) {
@@ -99,6 +102,16 @@ func (b *GitHubBackend) repositoryPath(repository RepositoryID) string {
 }
 
 func (b *GitHubBackend) request(ctx context.Context, method, path string, body, destination any) error {
+	if b.token == "" {
+		if b.tokenSource == nil {
+			return errors.New("GitHub authentication unavailable")
+		}
+		token, err := b.tokenSource()
+		if err != nil {
+			return err
+		}
+		b.token = token
+	}
 	var encoded io.Reader
 	if body != nil {
 		payload, err := json.Marshal(body)

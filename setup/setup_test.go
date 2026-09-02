@@ -110,6 +110,34 @@ func TestSetupRefusesMalformedAgentsOwnershipMarkers(t *testing.T) {
 	}
 }
 
+func TestSetupRefusesOwnedFileSymlinksBeforeMutation(t *testing.T) {
+	for _, name := range []string{"AGENTS.md", ".gitignore"} {
+		t.Run(name, func(t *testing.T) {
+			root := newRepository(t)
+			runGit(t, root, "remote", "add", "origin", "https://github.com/acme/widgets.git")
+			outside := filepath.Join(t.TempDir(), "outside")
+			if err := os.WriteFile(outside, []byte("keep me\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(outside, filepath.Join(root, name)); err != nil {
+				t.Fatal(err)
+			}
+			backend := &recordingBackend{}
+
+			_, err := setup.Run(context.Background(), setup.Request{Location: root}, backend)
+			if err == nil || !strings.Contains(err.Error(), "must not be a symlink") {
+				t.Fatalf("error = %v", err)
+			}
+			if backend.validated != 0 || backend.labels != 0 {
+				t.Fatalf("backend mutated: %#v", backend)
+			}
+			if got := readFile(t, outside); got != "keep me\n" {
+				t.Fatalf("outside file = %q", got)
+			}
+		})
+	}
+}
+
 func TestSetupOffersSafeClaudeSymlinkMigration(t *testing.T) {
 	for _, test := range []struct {
 		name     string
