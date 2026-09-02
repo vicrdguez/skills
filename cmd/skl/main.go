@@ -31,6 +31,26 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 			return skilldist.Install(home)
 		},
 	}, {
+		Name:      "skill",
+		ArgsUsage: "<name>",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "format", Value: "markdown"},
+		},
+		Action: func(command *cli.Context) error {
+			if command.NArg() != 1 {
+				return fmt.Errorf("skill name is required")
+			}
+			packet, err := skilldist.BuildPacket(command.Args().First(), skilldist.InvocationFacts{})
+			if err != nil {
+				return err
+			}
+			if command.String("format") != "markdown" {
+				return fmt.Errorf("unsupported format %q", command.String("format"))
+			}
+			_, err = fmt.Fprint(stdout, packet.Markdown())
+			return err
+		},
+	}, {
 		Name: "setup",
 		Flags: []cli.Flag{
 			&cli.PathFlag{Name: "repo"},

@@ -141,6 +141,23 @@ func TestInstallRefreshesOnlyOwnedStubs(t *testing.T) {
 	}
 }
 
+func TestRetrieveRenderedSkillInstructions(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, t.TempDir())
+
+	if err := app.Run([]string{"skl", "skill", "tdd"}); err != nil {
+		t.Fatal(err)
+	}
+
+	got := stdout.String()
+	if !strings.Contains(got, "Protocol: skl.instructions/v1") || !strings.Contains(got, "# Test-Driven Development") {
+		t.Fatalf("authoritative instructions absent:\n%s", got)
+	}
+	if strings.Contains(got, "# Good and Bad Tests") {
+		t.Fatalf("unrequested resource included:\n%s", got)
+	}
+}
+
 func readFile(t *testing.T, path string) string {
 	t.Helper()
 	contents, err := os.ReadFile(path)
