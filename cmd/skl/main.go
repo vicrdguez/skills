@@ -9,17 +9,28 @@ import (
 	"strings"
 
 	"github.com/urfave/cli/v2"
+	skilldist "github.com/vicrdguez/skills"
 	"github.com/vicrdguez/skills/setup"
 )
 
 type backendFactory func() (setup.Backend, error)
 
 func newApp(newBackend backendFactory, stdin io.Reader, stdout, stderr io.Writer) *cli.App {
+	home, _ := os.UserHomeDir()
+	return newAppWithSkillHome(newBackend, stdin, stdout, stderr, home)
+}
+
+func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, stderr io.Writer, home string) *cli.App {
 	app := cli.NewApp()
 	app.Name = "skl"
 	app.Writer = stdout
 	app.ErrWriter = stderr
 	app.Commands = []*cli.Command{{
+		Name: "install",
+		Action: func(_ *cli.Context) error {
+			return skilldist.Install(home)
+		},
+	}, {
 		Name: "setup",
 		Flags: []cli.Flag{
 			&cli.PathFlag{Name: "repo"},

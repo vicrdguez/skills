@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/vicrdguez/skills/setup"
@@ -87,6 +88,28 @@ func TestSetupDeclinesClaudeMigrationAtEndOfInput(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(root, "CLAUDE.md")); !os.IsNotExist(err) {
 		t.Fatalf("CLAUDE.md created without confirmation: %v", err)
+	}
+}
+
+func TestInstallSupportedSkillStubs(t *testing.T) {
+	root := t.TempDir()
+	var output bytes.Buffer
+	app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, root)
+
+	if err := app.Run([]string{"skl", "install"}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, harness := range []string{".pi/agent/skills", ".codex/skills", ".claude/skills"} {
+		stub := readFile(t, filepath.Join(root, harness, "tdd", "SKILL.md"))
+		if !strings.Contains(stub, "skl skill tdd") || !strings.Contains(stub, "skl.stub/v1") {
+			t.Fatalf("%s stub does not delegate to skl:\n%s", harness, stub)
+		}
+	}
+	for _, manifest := range []string{".claude-plugin/plugin.json", ".codex-plugin/plugin.json", "package.json"} {
+		if _, err := os.Stat(filepath.Join(root, manifest)); !os.IsNotExist(err) {
+			t.Fatalf("plugin manifest written at %s: %v", manifest, err)
+		}
 	}
 }
 
