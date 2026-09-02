@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 	"text/template"
@@ -42,6 +43,15 @@ var dependencies = map[string][]string{
 	"explore":   {"domain"},
 	"propose":   {"design", "tdd"},
 	"implement": {"tdd", "audit", "design", "domain"},
+}
+
+func SkillNames() []string {
+	names := make([]string, 0, len(definitionPaths))
+	for name := range definitionPaths {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
 }
 
 func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
@@ -129,7 +139,7 @@ func (packet Packet) Markdown() string {
 	if included == "" {
 		included = "none"
 	}
-	return fmt.Sprintf("Protocol: %s\nSkill: %s\nIncluded skills: %s\nResources: %s\n\n%s", packet.Protocol, packet.Skill, included, resources, packet.Instructions)
+	return fmt.Sprintf("Protocol: %s\nSkill: %s\nIncluded skills: %s\nFacts: {}\nResources: %s\n\n%s", packet.Protocol, packet.Skill, included, resources, packet.Instructions)
 }
 
 func (packet Packet) JSON() ([]byte, error) {

@@ -7,7 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -103,16 +103,32 @@ func TestInstallSupportedSkillStubs(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	wantSkills := []string{"audit", "brainstorm", "design", "domain", "explore", "implement", "propose", "shape", "tdd", "watchdog", "writing-for-agents"}
 	for _, harness := range []string{".pi/agent/skills", ".codex/skills", ".claude/skills"} {
-		stub := readFile(t, filepath.Join(root, harness, "tdd", "SKILL.md"))
-		if !strings.Contains(stub, "skl skill tdd") || !strings.Contains(stub, "skl.stub/v1") {
-			t.Fatalf("%s stub does not delegate to skl:\n%s", harness, stub)
+		for _, name := range wantSkills {
+			stub := readFile(t, filepath.Join(root, harness, name, "SKILL.md"))
+			if !strings.Contains(stub, "skl skill "+name) || !strings.Contains(stub, "skl.stub/v1") {
+				t.Fatalf("%s %s stub does not delegate to skl:\n%s", harness, name, stub)
+			}
+		}
+		if _, err := os.Stat(filepath.Join(root, harness, "dev-setup", "SKILL.md")); !os.IsNotExist(err) {
+			t.Fatalf("%s contains retired dev-setup stub: %v", harness, err)
 		}
 	}
 	for _, manifest := range []string{".claude-plugin/plugin.json", ".codex-plugin/plugin.json", "package.json"} {
 		if _, err := os.Stat(filepath.Join(root, manifest)); !os.IsNotExist(err) {
 			t.Fatalf("plugin manifest written at %s: %v", manifest, err)
 		}
+	}
+}
+
+func TestInstallFailsWithoutUserHome(t *testing.T) {
+	t.Setenv("HOME", "")
+	var output bytes.Buffer
+	app := newApp(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output)
+
+	if err := app.Run([]string{"skl", "install"}); err == nil {
+		t.Fatal("install succeeded without a user home")
 	}
 }
 
@@ -125,21 +141,22 @@ func TestInstallRefreshesOnlyOwnedStubs(t *testing.T) {
 	}
 
 	tdd := filepath.Join(root, ".codex/skills/tdd/SKILL.md")
-	if err := os.WriteFile(tdd, []byte("<!-- skl-owned: old -->\nstale"), 0o644); err != nil {
+	wantTDD := readFile(t, tdd)
+	if err := os.WriteFile(tdd, []byte("<!-- skl-owned: skl.stub/v1 -->\nstale"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	audit := filepath.Join(root, ".codex/skills/audit/SKILL.md")
-	if err := os.WriteFile(audit, []byte("my unrelated skill"), 0o644); err != nil {
+	if err := os.WriteFile(audit, []byte("<!-- skl-owned: skl.stub/v2 -->\nmy unrelated skill"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := app.Run([]string{"skl", "install"}); err != nil {
 		t.Fatal(err)
 	}
 
-	if got := readFile(t, tdd); !strings.Contains(got, "skl.stub/v1") {
-		t.Fatalf("owned stub was not refreshed: %q", got)
+	if got := readFile(t, tdd); got != wantTDD {
+		t.Fatalf("owned stub was not refreshed:\n%s", got)
 	}
-	if got := readFile(t, audit); got != "my unrelated skill" {
+	if got := readFile(t, audit); got != "<!-- skl-owned: skl.stub/v2 -->\nmy unrelated skill" {
 		t.Fatalf("unrelated file changed: %q", got)
 	}
 }
@@ -177,7 +194,11 @@ func TestRetrieveEquivalentTypedInstructions(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &packet); err != nil {
 		t.Fatalf("stdout is not a JSON packet: %v\n%s", err, stdout.String())
 	}
-	if packet.Protocol != skilldist.InstructionProtocol || packet.Skill != "tdd" || !strings.Contains(markdown.String(), packet.Instructions) {
+	expected, err := skilldist.BuildPacket("tdd", skilldist.InvocationFacts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if packet.Protocol != expected.Protocol || packet.Skill != expected.Skill || packet.Facts != expected.Facts || !slices.Equal(packet.IncludedSkills, expected.IncludedSkills) || !slices.Equal(packet.Resources, expected.Resources) || packet.Instructions != expected.Instructions || markdown.String() != expected.Markdown() {
 		t.Fatalf("JSON and Markdown packets differ: %#v", packet)
 	}
 	if stderr.Len() != 0 {
@@ -210,7 +231,7 @@ func TestBundleGuaranteedSupportingSkills(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{"tdd", "audit", "design", "domain"}
-	if !reflect.DeepEqual(packet.IncludedSkills, want) {
+	if !slices.Equal(packet.IncludedSkills, want) {
 		t.Fatalf("included_skills = %v, want %v", packet.IncludedSkills, want)
 	}
 	for _, name := range want {

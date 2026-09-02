@@ -16,8 +16,7 @@ import (
 type backendFactory func() (setup.Backend, error)
 
 func newApp(newBackend backendFactory, stdin io.Reader, stdout, stderr io.Writer) *cli.App {
-	home, _ := os.UserHomeDir()
-	return newAppWithSkillHome(newBackend, stdin, stdout, stderr, home)
+	return newAppWithSkillHome(newBackend, stdin, stdout, stderr, "")
 }
 
 func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, stderr io.Writer, home string) *cli.App {
@@ -28,7 +27,15 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 	app.Commands = []*cli.Command{{
 		Name: "install",
 		Action: func(_ *cli.Context) error {
-			return skilldist.Install(home)
+			if home == "" {
+				var err error
+				home, err = os.UserHomeDir()
+				if err != nil {
+					return err
+				}
+			}
+			_, err := skilldist.Install(home)
+			return err
 		},
 	}, {
 		Name:      "skill",
