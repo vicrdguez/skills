@@ -57,6 +57,18 @@ Four rules hold it together:
 **From Matt's skills**: his repo is a composable collection, you reach for whichever skill fits the moment. This is an ordered pipeline where each stage has entry and exit conditions, which is what makes the cold handoff between stages possible at all. Several skill files here are near-verbatim from his; the pipeline wrapped around them is the part I added.
 
 ## Installation
+
+### Prepare a Consumer Repository
+
+From this checkout, install the workflow executable and run Setup anywhere inside the target Git repository:
+
+```sh
+go install ./cmd/skl
+skl setup
+```
+
+Use `skl setup --repo <path>` to target another checkout. If that repository has multiple GitHub remotes and no GitHub `origin`, select one with `--remote <name>`. Authentication is read from `GH_TOKEN`, then `GITHUB_TOKEN`, then `gh auth token`; Setup stores no credentials.
+
 ### Install with Pi
 
 ```sh

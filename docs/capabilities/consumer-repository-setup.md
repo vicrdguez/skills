@@ -2,6 +2,8 @@
 
 `skl setup` prepares a Consumer Repository to use the repository-owned Workflow and its active Workflow Backend.
 
+Run it from any directory inside the Consumer Repository, or pass `--repo <path>`. When GitHub remote inference is ambiguous, rerun with `--remote <name>`.
+
 ## Behaviors
 
 - Validates the repository, backend access, and authentication before changing state.
