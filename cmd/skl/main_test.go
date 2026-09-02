@@ -3,12 +3,14 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	skilldist "github.com/vicrdguez/skills"
 	"github.com/vicrdguez/skills/setup"
 )
 
@@ -155,6 +157,30 @@ func TestRetrieveRenderedSkillInstructions(t *testing.T) {
 	}
 	if strings.Contains(got, "# Good and Bad Tests") {
 		t.Fatalf("unrequested resource included:\n%s", got)
+	}
+}
+
+func TestRetrieveEquivalentTypedInstructions(t *testing.T) {
+	var markdown bytes.Buffer
+	app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &markdown, &markdown, t.TempDir())
+	if err := app.Run([]string{"skl", "skill", "tdd"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	app = newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, t.TempDir())
+	if err := app.Run([]string{"skl", "skill", "--format", "json", "tdd"}); err != nil {
+		t.Fatal(err)
+	}
+	var packet skilldist.Packet
+	if err := json.Unmarshal(stdout.Bytes(), &packet); err != nil {
+		t.Fatalf("stdout is not a JSON packet: %v\n%s", err, stdout.String())
+	}
+	if packet.Protocol != skilldist.InstructionProtocol || packet.Skill != "tdd" || !strings.Contains(markdown.String(), packet.Instructions) {
+		t.Fatalf("JSON and Markdown packets differ: %#v", packet)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
 	}
 }
 

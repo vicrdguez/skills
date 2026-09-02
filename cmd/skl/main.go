@@ -44,11 +44,19 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 			if err != nil {
 				return err
 			}
-			if command.String("format") != "markdown" {
-				return fmt.Errorf("unsupported format %q", command.String("format"))
+			if command.String("format") == "json" {
+				payload, err := packet.JSON()
+				if err != nil {
+					return err
+				}
+				_, err = stdout.Write(payload)
+				return err
 			}
-			_, err = fmt.Fprint(stdout, packet.Markdown())
-			return err
+			if command.String("format") == "markdown" {
+				_, err = fmt.Fprint(stdout, packet.Markdown())
+				return err
+			}
+			return fmt.Errorf("unsupported format %q", command.String("format"))
 		},
 	}, {
 		Name: "setup",
