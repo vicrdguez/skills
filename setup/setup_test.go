@@ -48,6 +48,24 @@ func TestSetupRefusesAmbiguousGitHubRemoteBeforeMutation(t *testing.T) {
 	}
 }
 
+func TestSetupMaintainsOnlyOwnedAgentsBlock(t *testing.T) {
+	root := newRepository(t)
+	runGit(t, root, "remote", "add", "origin", "https://github.com/acme/widgets.git")
+	agentsPath := filepath.Join(root, "AGENTS.md")
+	original := "user before\n<!-- dev-pipeline:start -->\nold workflow\n<!-- dev-pipeline:end -->\nuser after\n"
+	if err := os.WriteFile(agentsPath, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := setup.Run(context.Background(), setup.Request{Location: root}, &recordingBackend{}); err != nil {
+		t.Fatal(err)
+	}
+	want := "user before\n" + setup.AgentsBlock + "user after\n"
+	if got := readFile(t, agentsPath); got != want {
+		t.Fatalf("AGENTS.md = %q, want %q", got, want)
+	}
+}
+
 func newRepository(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.EvalSymlinks(t.TempDir())

@@ -75,6 +75,10 @@ func Run(ctx context.Context, request Request, backend Backend) (Outcome, error)
 	if err != nil {
 		return Outcome{}, err
 	}
+	agents, err := planAgents(filepath.Join(root, "AGENTS.md"))
+	if err != nil {
+		return Outcome{}, err
+	}
 	targetBranch, err := backend.Validate(ctx, repository)
 	if err != nil {
 		return Outcome{}, fmt.Errorf("validate GitHub repository: %w", err)
@@ -90,7 +94,7 @@ func Run(ctx context.Context, request Request, backend Backend) (Outcome, error)
 	if err := backend.EnsureLabels(ctx, repository, WorkflowLabels); err != nil {
 		return Outcome{}, fmt.Errorf("prepare workflow labels: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte(AgentsBlock), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), agents, 0o644); err != nil {
 		return Outcome{}, err
 	}
 	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte(".worktrees/\n"), 0o644); err != nil {
@@ -102,6 +106,29 @@ func Run(ctx context.Context, request Request, backend Backend) (Outcome, error)
 		}
 	}
 	return Outcome{Root: root, Repository: repository, TargetBranch: targetBranch}, nil
+}
+
+func planAgents(path string) ([]byte, error) {
+	contents, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return []byte(AgentsBlock), nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	const start = "<!-- dev-pipeline:start -->"
+	const end = "<!-- dev-pipeline:end -->"
+	startAt := strings.Index(string(contents), start)
+	endAt := strings.Index(string(contents), end)
+	if startAt >= 0 && endAt >= 0 {
+		endAt += len(end)
+		return []byte(string(contents[:startAt]) + strings.TrimSuffix(AgentsBlock, "\n") + string(contents[endAt:])), nil
+	}
+	prefix := string(contents)
+	if prefix != "" && !strings.HasSuffix(prefix, "\n") {
+		prefix += "\n"
+	}
+	return []byte(prefix + AgentsBlock), nil
 }
 
 func resolveRemote(root, explicit string) (string, error) {
