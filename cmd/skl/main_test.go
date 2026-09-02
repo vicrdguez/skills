@@ -184,6 +184,19 @@ func TestRetrieveEquivalentTypedInstructions(t *testing.T) {
 	}
 }
 
+func TestRetrieveOneNamedResource(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, t.TempDir())
+
+	if err := app.Run([]string{"skl", "skill", "--resource", "reference/tests.md", "tdd"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := stdout.String(); !strings.Contains(got, "# Good and Bad Tests") || strings.Contains(got, "# When to Mock") {
+		t.Fatalf("stdout did not contain only the requested resource:\n%s", got)
+	}
+}
+
 func readFile(t *testing.T, path string) string {
 	t.Helper()
 	contents, err := os.ReadFile(path)

@@ -35,12 +35,22 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 		ArgsUsage: "<name>",
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "format", Value: "markdown"},
+			&cli.StringFlag{Name: "resource"},
 		},
 		Action: func(command *cli.Context) error {
 			if command.NArg() != 1 {
 				return fmt.Errorf("skill name is required")
 			}
-			packet, err := skilldist.BuildPacket(command.Args().First(), skilldist.InvocationFacts{})
+			name := command.Args().First()
+			if command.String("resource") != "" {
+				resource, err := skilldist.Resource(name, command.String("resource"))
+				if err != nil {
+					return err
+				}
+				_, err = stdout.Write(resource)
+				return err
+			}
+			packet, err := skilldist.BuildPacket(name, skilldist.InvocationFacts{})
 			if err != nil {
 				return err
 			}

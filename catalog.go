@@ -103,6 +103,23 @@ func resourceNames(definition string) ([]string, error) {
 	return names, err
 }
 
+func Resource(name, resource string) ([]byte, error) {
+	definition, ok := definitionPaths[name]
+	if !ok {
+		return nil, fmt.Errorf("unknown skill %q", name)
+	}
+	resources, err := resourceNames(definition)
+	if err != nil {
+		return nil, err
+	}
+	for _, available := range resources {
+		if resource == available {
+			return fs.ReadFile(embedded, path.Join(path.Dir(definition), resource))
+		}
+	}
+	return nil, fmt.Errorf("unknown resource %q for skill %q", resource, name)
+}
+
 func (packet Packet) Markdown() string {
 	resources := strings.Join(packet.Resources, ", ")
 	if resources == "" {
