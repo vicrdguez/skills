@@ -144,6 +144,33 @@ func TestSetupOffersSafeClaudeSymlinkMigration(t *testing.T) {
 	}
 }
 
+func TestSetupRetiresLegacySetupArtifacts(t *testing.T) {
+	root := newRepository(t)
+	runGit(t, root, "remote", "add", "origin", "https://github.com/acme/widgets.git")
+	gitignore := filepath.Join(root, ".gitignore")
+	if err := os.WriteFile(gitignore, []byte("dist/\n.worktrees/\n*.log\n.worktrees/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	docs := filepath.Join(root, "docs")
+	if err := os.Mkdir(docs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacy := filepath.Join(docs, "github.md")
+	if err := os.WriteFile(legacy, []byte("legacy workflow\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := setup.Run(context.Background(), setup.Request{Location: root}, &recordingBackend{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, gitignore); got != "dist/\n*.log\n.worktrees/\n" {
+		t.Fatalf(".gitignore = %q", got)
+	}
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+		t.Fatalf("docs/github.md still exists: %v", err)
+	}
+}
+
 func stringPointer(value string) *string { return &value }
 
 func newRepository(t *testing.T) string {

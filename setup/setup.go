@@ -84,6 +84,15 @@ func Run(ctx context.Context, request Request, backend Backend) (Outcome, error)
 	if err != nil {
 		return Outcome{}, err
 	}
+	gitignore, err := planGitignore(filepath.Join(root, ".gitignore"))
+	if err != nil {
+		return Outcome{}, err
+	}
+	legacyPath := filepath.Join(root, "docs", "github.md")
+	legacyExists, err := removableFileExists(legacyPath)
+	if err != nil {
+		return Outcome{}, err
+	}
 	targetBranch, err := backend.Validate(ctx, repository)
 	if err != nil {
 		return Outcome{}, fmt.Errorf("validate GitHub repository: %w", err)
@@ -102,8 +111,13 @@ func Run(ctx context.Context, request Request, backend Backend) (Outcome, error)
 	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), agents, 0o644); err != nil {
 		return Outcome{}, err
 	}
-	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte(".worktrees/\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), gitignore, 0o644); err != nil {
 		return Outcome{}, err
+	}
+	if legacyExists {
+		if err := os.Remove(legacyPath); err != nil {
+			return Outcome{}, err
+		}
 	}
 	if linkClaude {
 		if err := os.Remove(claudePath); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -114,6 +128,38 @@ func Run(ctx context.Context, request Request, backend Backend) (Outcome, error)
 		}
 	}
 	return Outcome{Root: root, Repository: repository, TargetBranch: targetBranch}, nil
+}
+
+func planGitignore(path string) ([]byte, error) {
+	contents, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	var kept strings.Builder
+	for _, line := range strings.SplitAfter(string(contents), "\n") {
+		if strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r") != ".worktrees/" {
+			kept.WriteString(line)
+		}
+	}
+	if kept.Len() > 0 && !strings.HasSuffix(kept.String(), "\n") {
+		kept.WriteByte('\n')
+	}
+	kept.WriteString(".worktrees/\n")
+	return []byte(kept.String()), nil
+}
+
+func removableFileExists(path string) (bool, error) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if info.IsDir() {
+		return false, fmt.Errorf("legacy setup path %s is a directory", path)
+	}
+	return true, nil
 }
 
 func shouldOfferClaudeLink(path string) (bool, error) {
