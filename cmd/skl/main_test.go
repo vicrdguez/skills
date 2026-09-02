@@ -113,6 +113,34 @@ func TestInstallSupportedSkillStubs(t *testing.T) {
 	}
 }
 
+func TestInstallRefreshesOnlyOwnedStubs(t *testing.T) {
+	root := t.TempDir()
+	var output bytes.Buffer
+	app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, root)
+	if err := app.Run([]string{"skl", "install"}); err != nil {
+		t.Fatal(err)
+	}
+
+	tdd := filepath.Join(root, ".codex/skills/tdd/SKILL.md")
+	if err := os.WriteFile(tdd, []byte("<!-- skl-owned: old -->\nstale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	audit := filepath.Join(root, ".codex/skills/audit/SKILL.md")
+	if err := os.WriteFile(audit, []byte("my unrelated skill"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.Run([]string{"skl", "install"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := readFile(t, tdd); !strings.Contains(got, "skl.stub/v1") {
+		t.Fatalf("owned stub was not refreshed: %q", got)
+	}
+	if got := readFile(t, audit); got != "my unrelated skill" {
+		t.Fatalf("unrelated file changed: %q", got)
+	}
+}
+
 func readFile(t *testing.T, path string) string {
 	t.Helper()
 	contents, err := os.ReadFile(path)

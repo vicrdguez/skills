@@ -1,6 +1,7 @@
 package skills
 
 import (
+	"bytes"
 	"embed"
 	"fmt"
 	"os"
@@ -34,13 +35,18 @@ func Install(home string) error {
 			if err := os.MkdirAll(directory, 0o755); err != nil {
 				return err
 			}
-			file, err := os.Create(filepath.Join(directory, "SKILL.md"))
-			if err != nil {
+			path := filepath.Join(directory, "SKILL.md")
+			current, err := os.ReadFile(path)
+			if err == nil && !bytes.HasPrefix(current, []byte("<!-- skl-owned:")) {
+				continue
+			}
+			if err != nil && !os.IsNotExist(err) {
 				return err
 			}
-			err = tmpl.Execute(file, stubData{Name: name, Protocol: StubProtocol})
-			if closeErr := file.Close(); err == nil {
-				err = closeErr
+			var contents bytes.Buffer
+			err = tmpl.Execute(&contents, stubData{Name: name, Protocol: StubProtocol})
+			if err == nil {
+				err = os.WriteFile(path, contents.Bytes(), 0o644)
 			}
 			if err != nil {
 				return fmt.Errorf("install %s for %s: %w", name, harness, err)
