@@ -16,6 +16,19 @@ type recordingBackend struct {
 	labels    int
 }
 
+type statefulBackend struct{ labels map[string]setup.Label }
+
+func (b *statefulBackend) Validate(context.Context, setup.RepositoryID) (string, error) {
+	return "main", nil
+}
+
+func (b *statefulBackend) EnsureLabels(_ context.Context, _ setup.RepositoryID, labels []setup.Label) error {
+	for _, label := range labels {
+		b.labels[label.Name] = label
+	}
+	return nil
+}
+
 func (b *recordingBackend) Validate(context.Context, setup.RepositoryID) (string, error) {
 	b.validated++
 	return "main", nil
@@ -168,6 +181,40 @@ func TestSetupRetiresLegacySetupArtifacts(t *testing.T) {
 	}
 	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
 		t.Fatalf("docs/github.md still exists: %v", err)
+	}
+}
+
+func TestSetupRepeatsWithoutDrift(t *testing.T) {
+	root := newRepository(t)
+	runGit(t, root, "remote", "add", "origin", "https://github.com/acme/widgets.git")
+	backend := &statefulBackend{labels: map[string]setup.Label{
+		"ready":  {Name: "ready", Color: "ffffff", Description: "stale"},
+		"custom": {Name: "custom", Color: "123456", Description: "unrelated"},
+	}}
+	confirm := func(string) (bool, error) { return true, nil }
+	request := setup.Request{Location: root, Confirm: confirm}
+
+	if _, err := setup.Run(context.Background(), request, backend); err != nil {
+		t.Fatal(err)
+	}
+	agents := readFile(t, filepath.Join(root, "AGENTS.md"))
+	gitignore := readFile(t, filepath.Join(root, ".gitignore"))
+	if _, err := setup.Run(context.Background(), request, backend); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, filepath.Join(root, "AGENTS.md")); got != agents {
+		t.Fatalf("AGENTS.md drifted: %q", got)
+	}
+	if got := readFile(t, filepath.Join(root, ".gitignore")); got != gitignore {
+		t.Fatalf(".gitignore drifted: %q", got)
+	}
+	for _, want := range setup.WorkflowLabels {
+		if got := backend.labels[want.Name]; got != want {
+			t.Fatalf("label %q = %#v", want.Name, got)
+		}
+	}
+	if got := backend.labels["custom"]; got.Description != "unrelated" {
+		t.Fatalf("unrelated label changed: %#v", got)
 	}
 }
 
