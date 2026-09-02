@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -194,6 +195,36 @@ func TestRetrieveOneNamedResource(t *testing.T) {
 
 	if got := stdout.String(); !strings.Contains(got, "# Good and Bad Tests") || strings.Contains(got, "# When to Mock") {
 		t.Fatalf("stdout did not contain only the requested resource:\n%s", got)
+	}
+}
+
+func TestBundleGuaranteedSupportingSkills(t *testing.T) {
+	root := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, root)
+	if err := app.Run([]string{"skl", "skill", "--format", "json", "implement"}); err != nil {
+		t.Fatal(err)
+	}
+	var packet skilldist.Packet
+	if err := json.Unmarshal(stdout.Bytes(), &packet); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"tdd", "audit", "design", "domain"}
+	if !reflect.DeepEqual(packet.IncludedSkills, want) {
+		t.Fatalf("included_skills = %v, want %v", packet.IncludedSkills, want)
+	}
+	for _, name := range want {
+		if count := strings.Count(packet.Instructions, "## Included Skill: "+name); count != 1 {
+			t.Fatalf("%s included %d times", name, count)
+		}
+	}
+
+	if err := app.Run([]string{"skl", "install"}); err != nil {
+		t.Fatal(err)
+	}
+	stub := readFile(t, filepath.Join(root, ".codex/skills/implement/SKILL.md"))
+	if !strings.Contains(stub, "included_skills") || !strings.Contains(stub, "Skip activation") {
+		t.Fatalf("stub lacks included-skill guard:\n%s", stub)
 	}
 }
 
