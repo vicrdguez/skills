@@ -277,7 +277,7 @@ func TestGitHubBackendFallsBackWhenNativeDependenciesAreUnavailable(t *testing.T
 	if err := backend.AddDependency(context.Background(), workflow.RepositoryID{Owner: "acme", Name: "widgets"}, 2, 1); err != nil {
 		t.Fatal(err)
 	}
-	if patchedBody != "opaque body\n\nBlocked by #1\n" {
+	if patchedBody != "opaque body\n\nBlocked by: #1\n" {
 		t.Fatalf("body = %q", patchedBody)
 	}
 }

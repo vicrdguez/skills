@@ -194,7 +194,7 @@ func (b *GitHubBackend) AddDependency(ctx context.Context, repository workflow.R
 	if !ok {
 		return fmt.Errorf("GitHub issue body unavailable for #%d", dependent)
 	}
-	body = strings.TrimRight(body, "\n") + fmt.Sprintf("\n\nBlocked by #%d\n", blocker)
+	body = strings.TrimRight(body, "\n") + fmt.Sprintf("\n\nBlocked by: #%d\n", blocker)
 	b.issueBodies[dependent] = body
 	return b.request(ctx, http.MethodPatch, b.repositoryPath(repository)+fmt.Sprintf("/issues/%d", dependent), map[string]string{"body": body}, nil)
 }
