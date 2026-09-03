@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/vicrdguez/skills/workflow"
 )
 
 const AgentsBlock = `<!-- dev-pipeline:start -->
@@ -17,10 +19,7 @@ Use ` + "`skl`" + ` as the Workflow entrypoint. Do not manually mutate Workflow 
 <!-- dev-pipeline:end -->
 `
 
-type RepositoryID struct {
-	Owner string
-	Name  string
-}
+type RepositoryID = workflow.RepositoryID
 
 type Label struct {
 	Name        string `json:"name"`
@@ -261,21 +260,5 @@ func git(directory string, args ...string) (string, error) {
 }
 
 func parseGitHubRemote(remote string) (RepositoryID, error) {
-	remote = strings.TrimSuffix(remote, ".git")
-	var path string
-	switch {
-	case strings.HasPrefix(remote, "git@github.com:"):
-		path = strings.TrimPrefix(remote, "git@github.com:")
-	case strings.HasPrefix(remote, "https://github.com/"):
-		path = strings.TrimPrefix(remote, "https://github.com/")
-	case strings.HasPrefix(remote, "ssh://git@github.com/"):
-		path = strings.TrimPrefix(remote, "ssh://git@github.com/")
-	default:
-		return RepositoryID{}, fmt.Errorf("remote %q is not a GitHub repository", remote)
-	}
-	parts := strings.Split(path, "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return RepositoryID{}, fmt.Errorf("invalid GitHub remote %q", remote)
-	}
-	return RepositoryID{Owner: parts[0], Name: parts[1]}, nil
+	return workflow.ParseGitHubRemote(remote)
 }

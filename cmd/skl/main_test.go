@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,11 +17,17 @@ import (
 
 	skilldist "github.com/vicrdguez/skills"
 	"github.com/vicrdguez/skills/setup"
+	"github.com/vicrdguez/skills/workflow"
 )
 
 type memoryBackend struct {
 	repository setup.RepositoryID
 	labels     []setup.Label
+	items      []workflow.WorkItem
+	parents    []workflow.CoordinationItem
+	children   [][2]int
+	blocks     [][2]int
+	failReady  int
 }
 
 func (b *memoryBackend) Validate(_ context.Context, repository setup.RepositoryID) (string, error) {
@@ -28,6 +37,81 @@ func (b *memoryBackend) Validate(_ context.Context, repository setup.RepositoryI
 
 func (b *memoryBackend) EnsureLabels(_ context.Context, _ setup.RepositoryID, labels []setup.Label) error {
 	b.labels = append([]setup.Label(nil), labels...)
+	return nil
+}
+
+func (b *memoryBackend) FindWorkItems(_ context.Context, _ workflow.RepositoryID, titles []string) ([]workflow.WorkItem, error) {
+	var found []workflow.WorkItem
+	for _, item := range b.items {
+		if slices.Contains(titles, item.Title) {
+			found = append(found, item)
+		}
+	}
+	return found, nil
+}
+
+func (b *memoryBackend) ListMergedWorkItems(context.Context, workflow.RepositoryID) ([]workflow.WorkItem, error) {
+	var merged []workflow.WorkItem
+	for _, item := range b.items {
+		if item.Merged {
+			merged = append(merged, item)
+		}
+	}
+	return merged, nil
+}
+
+func (b *memoryBackend) CreateWorkItem(_ context.Context, _ workflow.RepositoryID, item workflow.WorkItem) (workflow.WorkItem, error) {
+	item.Number = len(b.items) + 1
+	b.items = append(b.items, item)
+	return item, nil
+}
+
+func (b *memoryBackend) FindCoordinationItems(_ context.Context, _ workflow.RepositoryID, title string) ([]workflow.CoordinationItem, error) {
+	var found []workflow.CoordinationItem
+	for _, item := range b.parents {
+		if item.Title == title {
+			found = append(found, item)
+		}
+	}
+	return found, nil
+}
+
+func (b *memoryBackend) CreateCoordinationItem(_ context.Context, _ workflow.RepositoryID, item workflow.CoordinationItem) (workflow.CoordinationItem, error) {
+	item.Number = 100 + len(b.parents)
+	b.parents = append(b.parents, item)
+	return item, nil
+}
+
+func (b *memoryBackend) AddChild(_ context.Context, _ workflow.RepositoryID, parent, child int) error {
+	b.children = append(b.children, [2]int{parent, child})
+	for index := range b.items {
+		if b.items[index].Number == child {
+			b.items[index].Parent = parent
+		}
+	}
+	return nil
+}
+
+func (b *memoryBackend) AddDependency(_ context.Context, _ workflow.RepositoryID, dependent, blocker int) error {
+	b.blocks = append(b.blocks, [2]int{dependent, blocker})
+	for index := range b.items {
+		if b.items[index].Number == dependent {
+			b.items[index].Blockers = append(b.items[index].Blockers, blocker)
+		}
+	}
+	return nil
+}
+
+func (b *memoryBackend) SetReady(_ context.Context, _ workflow.RepositoryID, number int) error {
+	if b.failReady == number {
+		b.failReady = 0
+		return errors.New("temporary backend failure")
+	}
+	for index := range b.items {
+		if b.items[index].Number == number {
+			b.items[index].Ready = true
+		}
+	}
 	return nil
 }
 
@@ -194,6 +278,365 @@ func TestRetrieveRenderedSkillInstructions(t *testing.T) {
 	}
 }
 
+func TestRetrieveConcreteProposeInstructions(t *testing.T) {
+	var output bytes.Buffer
+	app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, t.TempDir())
+
+	if err := app.Run([]string{"skl", "skill", "propose"}); err != nil {
+		t.Fatal(err)
+	}
+
+	got := output.String()
+	for _, want := range []string{"tracer-bullet", "skl propose publish", "skl propose cleanup"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("Propose instructions lack %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "docs/github.md") {
+		t.Fatalf("Propose instructions retain copied board protocol:\n%s", got)
+	}
+}
+
+func TestPublishOnePreparedSlice(t *testing.T) {
+	root := proposalRepository(t)
+	baseline := prepareSlice(t, root, "ship-widget")
+	body := filepath.Join(t.TempDir(), "issue.md")
+	if err := os.WriteFile(body, []byte("agent-authored body\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	backend := &memoryBackend{}
+	var output bytes.Buffer
+	app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+
+	err := app.Run([]string{"skl", "propose", "publish", "--repo", root, "--target", "main", "--slice", "ship-widget=" + body})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := output.String(); got != "completed\n" {
+		t.Fatalf("output = %q", got)
+	}
+	if len(backend.items) != 1 {
+		t.Fatalf("items = %#v", backend.items)
+	}
+	item := backend.items[0]
+	if item.Title != "ship-widget" || item.Body != "agent-authored body\n" || item.Branch != "ship-widget" || item.ArtifactBaseline != baseline || !item.Ready {
+		t.Fatalf("item = %#v", item)
+	}
+	if len(backend.parents) != 0 {
+		t.Fatalf("parents = %#v", backend.parents)
+	}
+}
+
+func TestPublishDependencyOrderedMultiSliceProposal(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "foundation")
+	prepareSlice(t, root, "feature")
+	directory := t.TempDir()
+	for name, contents := range map[string]string{"parent.md": "parent prose\n", "foundation.md": "foundation prose\n", "feature.md": "feature prose\n"} {
+		if err := os.WriteFile(filepath.Join(directory, name), []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	backend := &memoryBackend{}
+	var output bytes.Buffer
+	app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+
+	err := app.Run([]string{"skl", "propose", "publish", "--repo", root, "--target", "main",
+		"--slice", "feature=" + filepath.Join(directory, "feature.md"),
+		"--slice", "foundation=" + filepath.Join(directory, "foundation.md"),
+		"--depends", "feature:foundation", "--parent-title", "widgets", "--parent-body", filepath.Join(directory, "parent.md")})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(backend.parents) != 1 || backend.parents[0].Title != "widgets" || backend.parents[0].Body != "parent prose\n" {
+		t.Fatalf("parents = %#v", backend.parents)
+	}
+	if got := []string{backend.items[0].Title, backend.items[1].Title}; !slices.Equal(got, []string{"foundation", "feature"}) {
+		t.Fatalf("publication order = %v", got)
+	}
+	if !slices.Equal(backend.children, [][2]int{{100, 1}, {100, 2}}) {
+		t.Fatalf("children = %v", backend.children)
+	}
+	if !slices.Equal(backend.blocks, [][2]int{{2, 1}}) {
+		t.Fatalf("dependencies = %v", backend.blocks)
+	}
+	if !backend.items[0].Ready || !backend.items[1].Ready {
+		t.Fatalf("items are not Ready: %#v", backend.items)
+	}
+}
+
+func TestRefuseInvalidProposalPreflight(t *testing.T) {
+	tests := map[string]func(*testing.T) (string, []string){
+		"dirty durable document": func(t *testing.T) (string, []string) {
+			root := proposalRepository(t)
+			prepareSlice(t, root, "dirty-docs")
+			if err := os.WriteFile(filepath.Join(root, "CONTEXT.md"), []byte("uncommitted\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			return root, []string{"--slice", proposalSliceFlag(t, "dirty-docs")}
+		},
+		"dirty durable document in main worktree": func(t *testing.T) (string, []string) {
+			root := proposalRepository(t)
+			worktree := filepath.Join(root, ".worktrees", "linked-slice")
+			runGit(t, root, "worktree", "add", worktree, "-b", "linked-slice", "main")
+			writeLedger(t, worktree, "linked-slice", true)
+			runGit(t, worktree, "add", ".changes/linked-slice")
+			runGit(t, worktree, "commit", "-m", "linked slice")
+			runGit(t, root, "update-ref", "refs/remotes/origin/linked-slice", "refs/heads/linked-slice")
+			if err := os.WriteFile(filepath.Join(root, "CONTEXT.md"), []byte("uncommitted\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			return worktree, []string{"--slice", proposalSliceFlag(t, "linked-slice")}
+		},
+		"slice misses target": func(t *testing.T) (string, []string) {
+			root := proposalRepository(t)
+			runGit(t, root, "switch", "--orphan", "divergent")
+			if err := os.Remove(filepath.Join(root, "README.md")); err != nil && !os.IsNotExist(err) {
+				t.Fatal(err)
+			}
+			writeLedger(t, root, "divergent", true)
+			runGit(t, root, "add", "-A")
+			runGit(t, root, "commit", "-m", "divergent")
+			runGit(t, root, "update-ref", "refs/remotes/origin/divergent", "HEAD")
+			return root, []string{"--slice", proposalSliceFlag(t, "divergent")}
+		},
+		"incomplete baseline": func(t *testing.T) (string, []string) {
+			root := proposalRepository(t)
+			runGit(t, root, "switch", "-c", "incomplete", "main")
+			writeLedger(t, root, "incomplete", false)
+			runGit(t, root, "add", ".changes/incomplete")
+			runGit(t, root, "commit", "-m", "incomplete")
+			runGit(t, root, "update-ref", "refs/remotes/origin/incomplete", "HEAD")
+			return root, []string{"--slice", proposalSliceFlag(t, "incomplete")}
+		},
+		"cyclic dependencies": func(t *testing.T) (string, []string) {
+			root := proposalRepository(t)
+			prepareSlice(t, root, "one")
+			prepareSlice(t, root, "two")
+			return root, []string{"--slice", proposalSliceFlag(t, "one"), "--slice", proposalSliceFlag(t, "two"), "--depends", "one:two", "--depends", "two:one"}
+		},
+	}
+	for name, arrange := range tests {
+		t.Run(name, func(t *testing.T) {
+			root, flags := arrange(t)
+			backend := &memoryBackend{}
+			var output bytes.Buffer
+			app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+			arguments := append([]string{"skl", "propose", "publish", "--repo", root, "--target", "main"}, flags...)
+
+			if err := app.Run(arguments); err != nil {
+				t.Fatal(err)
+			}
+
+			if !strings.HasPrefix(output.String(), "fix_required\n") {
+				t.Fatalf("output = %q", output.String())
+			}
+			if len(backend.items)+len(backend.parents)+len(backend.children)+len(backend.blocks) != 0 {
+				t.Fatalf("backend mutated: %#v", backend)
+			}
+		})
+	}
+}
+
+func TestResumePartialProposalPublication(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "base")
+	prepareSlice(t, root, "dependent")
+	directory := t.TempDir()
+	for _, name := range []string{"parent", "base", "dependent"} {
+		if err := os.WriteFile(filepath.Join(directory, name+".md"), []byte(name+" body\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	arguments := []string{"skl", "propose", "publish", "--repo", root, "--target", "main",
+		"--slice", "base=" + filepath.Join(directory, "base.md"), "--slice", "dependent=" + filepath.Join(directory, "dependent.md"),
+		"--depends", "dependent:base", "--parent-title", "proposal", "--parent-body", filepath.Join(directory, "parent.md")}
+	backend := &memoryBackend{failReady: 2}
+	var output bytes.Buffer
+	app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+
+	if err := app.Run(arguments); err == nil || !strings.Contains(err.Error(), "temporary backend failure") {
+		t.Fatalf("first publication error = %v", err)
+	}
+	if err := app.Run(arguments); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(backend.parents) != 1 || len(backend.items) != 2 {
+		t.Fatalf("records duplicated: parents=%#v items=%#v", backend.parents, backend.items)
+	}
+	if !slices.Equal(backend.children, [][2]int{{100, 1}, {100, 2}}) || !slices.Equal(backend.blocks, [][2]int{{2, 1}}) {
+		t.Fatalf("relationships duplicated: children=%v dependencies=%v", backend.children, backend.blocks)
+	}
+	if !backend.items[0].Ready || !backend.items[1].Ready {
+		t.Fatalf("publication did not resume to Ready: %#v", backend.items)
+	}
+}
+
+func TestReconcileCompletedProposalThroughGitHubAdapter(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "base")
+	prepareSlice(t, root, "dependent")
+	directory := t.TempDir()
+	for _, name := range []string{"parent", "base", "dependent"} {
+		if err := os.WriteFile(filepath.Join(directory, name+".md"), []byte(name+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mutations := 0
+	client := &http.Client{Transport: httpRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.Method != http.MethodGet {
+			mutations++
+		}
+		body := ""
+		switch request.URL.Path {
+		case "/repos/acme/widgets/issues":
+			body = `[
+				{"id":500,"number":100,"title":"parent","body":"parent\n"},
+				{"id":501,"number":1,"title":"base","body":"base\n","labels":[{"name":"ready"}]},
+				{"id":502,"number":2,"title":"dependent","body":"dependent\n","labels":[{"name":"ready"}]}
+			]`
+		case "/repos/acme/widgets/issues/1/parent", "/repos/acme/widgets/issues/2/parent":
+			body = `{"id":500,"number":100}`
+		case "/repos/acme/widgets/issues/1/dependencies/blocked_by":
+			body = `[]`
+		case "/repos/acme/widgets/issues/2/dependencies/blocked_by":
+			body = `[{"id":501,"number":1}]`
+		default:
+			t.Fatalf("unexpected request: %s %s", request.Method, request.URL.Path)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+	})}
+	backend := setup.NewGitHubBackend("https://api.github.test", "secret", client)
+	var output bytes.Buffer
+	app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+
+	err := app.Run([]string{"skl", "propose", "publish", "--repo", root, "--target", "main",
+		"--slice", "base=" + filepath.Join(directory, "base.md"), "--slice", "dependent=" + filepath.Join(directory, "dependent.md"),
+		"--depends", "dependent:base", "--parent-title", "parent", "--parent-body", filepath.Join(directory, "parent.md")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output.String() != "completed\n" || mutations != 0 {
+		t.Fatalf("reconciliation = %q with %d mutations", output.String(), mutations)
+	}
+}
+
+type httpRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (function httpRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return function(request)
+}
+
+func TestAmbiguousProposalRetryStopsBeforeMutation(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "one")
+	prepareSlice(t, root, "two")
+	directory := t.TempDir()
+	for _, name := range []string{"parent", "one", "two"} {
+		if err := os.WriteFile(filepath.Join(directory, name+".md"), []byte(name+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	backend := &memoryBackend{items: []workflow.WorkItem{{Number: 1, Title: "one"}, {Number: 2, Title: "one"}}}
+	var output bytes.Buffer
+	app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+
+	err := app.Run([]string{"skl", "propose", "publish", "--repo", root, "--target", "main",
+		"--slice", "one=" + filepath.Join(directory, "one.md"), "--slice", "two=" + filepath.Join(directory, "two.md"),
+		"--parent-title", "parent", "--parent-body", filepath.Join(directory, "parent.md")})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.HasPrefix(output.String(), "needs_human\n") {
+		t.Fatalf("output = %q", output.String())
+	}
+	if len(backend.parents) != 0 || len(backend.items) != 2 {
+		t.Fatalf("backend mutated before ambiguity was reported: %#v", backend)
+	}
+}
+
+func TestContradictoryDependenciesStopBeforeMutation(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "base")
+	prepareSlice(t, root, "dependent")
+	directory := t.TempDir()
+	for _, name := range []string{"parent", "base", "dependent"} {
+		if err := os.WriteFile(filepath.Join(directory, name+".md"), []byte(name+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	backend := &memoryBackend{
+		parents: []workflow.CoordinationItem{{Number: 100, Title: "parent", Body: "parent\n"}},
+		items: []workflow.WorkItem{
+			{Number: 1, Title: "base", Body: "base\n", Parent: 100, Ready: true},
+			{Number: 2, Title: "dependent", Body: "dependent\n", Parent: 100, Blockers: []int{99}, Ready: true},
+		},
+	}
+	var output bytes.Buffer
+	app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+
+	err := app.Run([]string{"skl", "propose", "publish", "--repo", root, "--target", "main",
+		"--slice", "base=" + filepath.Join(directory, "base.md"), "--slice", "dependent=" + filepath.Join(directory, "dependent.md"),
+		"--depends", "dependent:base", "--parent-title", "parent", "--parent-body", filepath.Join(directory, "parent.md")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(output.String(), "needs_human\n") || len(backend.children)+len(backend.blocks) != 0 {
+		t.Fatalf("contradictory retry mutated backend: output=%q backend=%#v", output.String(), backend)
+	}
+}
+
+func TestCleanOnlySafeMergedWorktrees(t *testing.T) {
+	root := proposalRepository(t)
+	worktrees := filepath.Join(root, ".worktrees")
+	for _, slug := range []string{"merged-clean", "merged-dirty", "unrelated"} {
+		runGit(t, root, "worktree", "add", filepath.Join(worktrees, slug), "-b", slug, "main")
+	}
+	unexpected := filepath.Join(root, "elsewhere")
+	runGit(t, root, "worktree", "add", unexpected, "-b", "merged-unexpected", "main")
+	if err := os.WriteFile(filepath.Join(worktrees, "merged-dirty", "local.txt"), []byte("keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, slug := range []string{"merged-clean", "merged-dirty", "merged-unexpected", "unrelated"} {
+		runGit(t, root, "update-ref", "refs/remotes/origin/"+slug, "refs/heads/"+slug)
+	}
+	backend := &memoryBackend{items: []workflow.WorkItem{
+		{Number: 1, Title: "merged-clean", Branch: "merged-clean", Merged: true},
+		{Number: 2, Title: "merged-dirty", Branch: "merged-dirty", Merged: true},
+		{Number: 3, Title: "merged-unexpected", Branch: "merged-unexpected", Merged: true},
+	}}
+	var output bytes.Buffer
+	app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+
+	if err := app.Run([]string{"skl", "propose", "cleanup", "--repo", root}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(filepath.Join(worktrees, "merged-clean")); !os.IsNotExist(err) {
+		t.Fatalf("clean merged worktree remains: %v", err)
+	}
+	if gitRefExists(root, "refs/heads/merged-clean") {
+		t.Fatal("clean merged branch remains")
+	}
+	for _, path := range []string{filepath.Join(worktrees, "merged-dirty"), unexpected, filepath.Join(worktrees, "unrelated")} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("preserved worktree %s: %v", path, err)
+		}
+	}
+	for _, slug := range []string{"merged-clean", "merged-dirty", "merged-unexpected", "unrelated"} {
+		if !gitRefExists(root, "refs/remotes/origin/"+slug) {
+			t.Fatalf("remote branch %s removed", slug)
+		}
+	}
+	if got := output.String(); !strings.Contains(got, "removed merged-clean") || !strings.Contains(got, "preserved merged-dirty") || !strings.Contains(got, "preserved merged-unexpected") {
+		t.Fatalf("cleanup report = %q", got)
+	}
+}
+
 func TestRetrieveEquivalentTypedInstructions(t *testing.T) {
 	wantInstructions := readRepositoryFile(t, "skills/dev/tdd/SKILL.md")
 	wantResources := []string{"reference/mocking.md", "reference/tests.md"}
@@ -332,4 +775,71 @@ func runGit(t *testing.T, directory string, args ...string) {
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, output)
 	}
+}
+
+func proposalRepository(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	runGit(t, root, "init", "-b", "main")
+	runGit(t, root, "config", "user.name", "Test")
+	runGit(t, root, "config", "user.email", "test@example.com")
+	runGit(t, root, "remote", "add", "origin", "git@github.com:acme/widgets.git")
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("widget\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", "README.md")
+	runGit(t, root, "commit", "-m", "initial")
+	runGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
+	return root
+}
+
+func prepareSlice(t *testing.T, root, slug string) string {
+	t.Helper()
+	runGit(t, root, "switch", "-c", slug, "main")
+	writeLedger(t, root, slug, true)
+	runGit(t, root, "add", filepath.Join(".changes", slug))
+	runGit(t, root, "commit", "-m", "Propose "+slug)
+	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	runGit(t, root, "update-ref", "refs/remotes/origin/"+slug, head)
+	return head
+}
+
+func writeLedger(t *testing.T, root, slug string, complete bool) {
+	t.Helper()
+	directory := filepath.Join(root, ".changes", slug)
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	names := []string{"intent.md"}
+	if complete {
+		names = append(names, "behavior.md")
+	}
+	for _, name := range names {
+		if err := os.WriteFile(filepath.Join(directory, name), []byte(name+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func proposalSliceFlag(t *testing.T, slug string) string {
+	t.Helper()
+	body := filepath.Join(t.TempDir(), slug+".md")
+	if err := os.WriteFile(body, []byte(slug+" body\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return slug + "=" + body
+}
+
+func runGitOutput(t *testing.T, directory string, args ...string) string {
+	t.Helper()
+	command := exec.Command("git", append([]string{"-C", directory}, args...)...)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, output)
+	}
+	return string(output)
+}
+
+func gitRefExists(root, ref string) bool {
+	return exec.Command("git", "-C", root, "show-ref", "--verify", "--quiet", ref).Run() == nil
 }
