@@ -354,6 +354,18 @@ func artifactBaseline(root, slug, head string) (string, error) {
 	present := false
 	var baseline string
 	for _, commit := range strings.Fields(commits) {
+		parents, err := git(root, "rev-list", "--parents", "-n", "1", commit)
+		if err != nil {
+			return "", err
+		}
+		parentFields := strings.Fields(parents)
+		if len(parentFields) > 2 {
+			currentTree, _ := git(root, "rev-parse", commit+":"+path)
+			firstParentTree, _ := git(root, "rev-parse", parentFields[1]+":"+path)
+			if currentTree != firstParentTree {
+				return "", errors.New("merge changes the ledger relative to its first parent")
+			}
+		}
 		now := gitOK(root, "cat-file", "-e", commit+":"+path) == nil
 		if !present && now {
 			if baseline != "" {
