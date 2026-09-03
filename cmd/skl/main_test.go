@@ -107,6 +107,9 @@ func TestInstallSupportedSkillStubs(t *testing.T) {
 	for _, harness := range []string{".pi/agent/skills", ".codex/skills", ".claude/skills"} {
 		for _, name := range wantSkills {
 			stub := readFile(t, filepath.Join(root, harness, name, "SKILL.md"))
+			if !strings.HasPrefix(stub, "---\n") {
+				t.Fatalf("%s %s stub has no leading YAML frontmatter:\n%s", harness, name, stub)
+			}
 			if !strings.Contains(stub, "skl skill "+name) || !strings.Contains(stub, "skl.stub/v1") {
 				t.Fatalf("%s %s stub does not delegate to skl:\n%s", harness, name, stub)
 			}
@@ -142,11 +145,11 @@ func TestInstallRefreshesOnlyOwnedStubs(t *testing.T) {
 
 	tdd := filepath.Join(root, ".codex/skills/tdd/SKILL.md")
 	wantTDD := readFile(t, tdd)
-	if err := os.WriteFile(tdd, []byte("<!-- skl-owned: skl.stub/v1 -->\nstale"), 0o644); err != nil {
+	if err := os.WriteFile(tdd, []byte("---\nname: tdd\n---\n\n<!-- skl-owned: skl.stub/v1 -->\nstale"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	audit := filepath.Join(root, ".codex/skills/audit/SKILL.md")
-	if err := os.WriteFile(audit, []byte("<!-- skl-owned: skl.stub/v2 -->\nmy unrelated skill"), 0o644); err != nil {
+	if err := os.WriteFile(audit, []byte("---\nname: audit\n---\n\n<!-- skl-owned: skl.stub/v2 -->\nmy unrelated skill"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := app.Run([]string{"skl", "install"}); err != nil {
@@ -156,7 +159,7 @@ func TestInstallRefreshesOnlyOwnedStubs(t *testing.T) {
 	if got := readFile(t, tdd); got != wantTDD {
 		t.Fatalf("owned stub was not refreshed:\n%s", got)
 	}
-	if got := readFile(t, audit); got != "<!-- skl-owned: skl.stub/v2 -->\nmy unrelated skill" {
+	if got := readFile(t, audit); got != "---\nname: audit\n---\n\n<!-- skl-owned: skl.stub/v2 -->\nmy unrelated skill" {
 		t.Fatalf("unrelated file changed: %q", got)
 	}
 }

@@ -40,7 +40,7 @@ func Install(home string) (InstallOutcome, error) {
 			}
 			path := filepath.Join(directory, "SKILL.md")
 			current, err := os.ReadFile(path)
-			if err == nil && !bytes.HasPrefix(current, ownedMarker) {
+			if err == nil && !bytes.Contains(current, ownedMarker) {
 				outcome.Unchanged++
 				continue
 			}
