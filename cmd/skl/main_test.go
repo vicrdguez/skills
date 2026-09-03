@@ -22,6 +22,8 @@ type memoryBackend struct {
 	labels     []setup.Label
 	items      []workflow.WorkItem
 	parents    []workflow.CoordinationItem
+	children   [][2]int
+	blocks     [][2]int
 }
 
 func (b *memoryBackend) Validate(_ context.Context, repository setup.RepositoryID) (string, error) {
@@ -54,9 +56,13 @@ func (b *memoryBackend) CreateCoordinationItem(_ context.Context, _ workflow.Rep
 	return item, nil
 }
 
-func (b *memoryBackend) AddChild(context.Context, workflow.RepositoryID, int, int) error { return nil }
+func (b *memoryBackend) AddChild(_ context.Context, _ workflow.RepositoryID, parent, child int) error {
+	b.children = append(b.children, [2]int{parent, child})
+	return nil
+}
 
-func (b *memoryBackend) AddDependency(context.Context, workflow.RepositoryID, int, int) error {
+func (b *memoryBackend) AddDependency(_ context.Context, _ workflow.RepositoryID, dependent, blocker int) error {
+	b.blocks = append(b.blocks, [2]int{dependent, blocker})
 	return nil
 }
 
@@ -279,6 +285,45 @@ func TestPublishOnePreparedSlice(t *testing.T) {
 	}
 	if len(backend.parents) != 0 {
 		t.Fatalf("parents = %#v", backend.parents)
+	}
+}
+
+func TestPublishDependencyOrderedMultiSliceProposal(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "foundation")
+	prepareSlice(t, root, "feature")
+	directory := t.TempDir()
+	for name, contents := range map[string]string{"parent.md": "parent prose\n", "foundation.md": "foundation prose\n", "feature.md": "feature prose\n"} {
+		if err := os.WriteFile(filepath.Join(directory, name), []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	backend := &memoryBackend{}
+	var output bytes.Buffer
+	app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+
+	err := app.Run([]string{"skl", "propose", "publish", "--repo", root, "--target", "main",
+		"--slice", "feature=" + filepath.Join(directory, "feature.md"),
+		"--slice", "foundation=" + filepath.Join(directory, "foundation.md"),
+		"--depends", "feature:foundation", "--parent-title", "widgets", "--parent-body", filepath.Join(directory, "parent.md")})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(backend.parents) != 1 || backend.parents[0].Title != "widgets" || backend.parents[0].Body != "parent prose\n" {
+		t.Fatalf("parents = %#v", backend.parents)
+	}
+	if got := []string{backend.items[0].Title, backend.items[1].Title}; !slices.Equal(got, []string{"foundation", "feature"}) {
+		t.Fatalf("publication order = %v", got)
+	}
+	if !slices.Equal(backend.children, [][2]int{{100, 1}, {100, 2}}) {
+		t.Fatalf("children = %v", backend.children)
+	}
+	if !slices.Equal(backend.blocks, [][2]int{{2, 1}}) {
+		t.Fatalf("dependencies = %v", backend.blocks)
+	}
+	if !backend.items[0].Ready || !backend.items[1].Ready {
+		t.Fatalf("items are not Ready: %#v", backend.items)
 	}
 }
 

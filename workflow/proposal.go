@@ -22,6 +22,8 @@ type WorkItem struct {
 	Branch           string
 	ArtifactBaseline string
 	Ready            bool
+	Parent           int
+	Blockers         []int
 }
 
 type CoordinationItem struct {
@@ -70,11 +72,47 @@ func Publish(ctx context.Context, request PublishRequest, backend Backend) (Outc
 	if err != nil || outcome.Status != "" {
 		return outcome, err
 	}
+	ordered, outcome := orderSlices(prepared, request.Dependencies)
+	if outcome.Status != "" {
+		return outcome, nil
+	}
+	var parent CoordinationItem
+	if len(prepared) > 1 {
+		if request.ParentTitle == "" || request.ParentBody == "" {
+			return Outcome{}, errors.New("multi-slice proposals require --parent-title and --parent-body")
+		}
+		body, err := os.ReadFile(request.ParentBody)
+		if err != nil {
+			return Outcome{}, err
+		}
+		parents, err := backend.ListCoordinationItems(ctx, repository)
+		if err != nil {
+			return Outcome{}, err
+		}
+		var matches []CoordinationItem
+		for _, item := range parents {
+			if item.Title == request.ParentTitle {
+				matches = append(matches, item)
+			}
+		}
+		if len(matches) > 1 {
+			return Outcome{Status: "needs_human", Reason: "ambiguous existing Coordination Item " + request.ParentTitle}, nil
+		}
+		if len(matches) == 1 {
+			parent = matches[0]
+		} else {
+			parent, err = backend.CreateCoordinationItem(ctx, repository, CoordinationItem{Title: request.ParentTitle, Body: string(body)})
+			if err != nil {
+				return Outcome{}, err
+			}
+		}
+	}
 	existing, err := backend.ListWorkItems(ctx, repository)
 	if err != nil {
 		return Outcome{}, err
 	}
-	for _, slice := range prepared {
+	published := make(map[string]WorkItem, len(ordered))
+	for _, slice := range ordered {
 		var matches []WorkItem
 		for _, item := range existing {
 			if item.Title == slice.Title {
@@ -93,13 +131,62 @@ func Publish(ctx context.Context, request PublishRequest, backend Backend) (Outc
 		} else {
 			item = matches[0]
 		}
+		if parent.Number != 0 {
+			if err := backend.AddChild(ctx, repository, parent.Number, item.Number); err != nil {
+				return Outcome{}, err
+			}
+		}
+		for _, dependency := range request.Dependencies {
+			if dependency.Dependent == slice.Title {
+				if err := backend.AddDependency(ctx, repository, item.Number, published[dependency.Blocker].Number); err != nil {
+					return Outcome{}, err
+				}
+			}
+		}
 		if !item.Ready {
 			if err := backend.SetReady(ctx, repository, item.Number); err != nil {
 				return Outcome{}, err
 			}
 		}
+		published[slice.Title] = item
 	}
 	return Outcome{Status: "completed"}, nil
+}
+
+func orderSlices(items []WorkItem, dependencies []Dependency) ([]WorkItem, Outcome) {
+	byName := make(map[string]WorkItem, len(items))
+	remaining := make(map[string]int, len(items))
+	for _, item := range items {
+		byName[item.Title] = item
+		remaining[item.Title] = 0
+	}
+	for _, dependency := range dependencies {
+		if dependency.Dependent == dependency.Blocker || byName[dependency.Dependent].Title == "" || byName[dependency.Blocker].Title == "" {
+			return nil, fix("Dependency graph contains an unknown or self-referencing edge", "correct the --depends values")
+		}
+		remaining[dependency.Dependent]++
+	}
+	ordered := make([]WorkItem, 0, len(items))
+	for len(ordered) < len(items) {
+		added := false
+		for _, item := range items {
+			if remaining[item.Title] != 0 {
+				continue
+			}
+			ordered = append(ordered, item)
+			remaining[item.Title] = -1
+			for _, dependency := range dependencies {
+				if dependency.Blocker == item.Title {
+					remaining[dependency.Dependent]--
+				}
+			}
+			added = true
+		}
+		if !added {
+			return nil, fix("Dependency graph contains a cycle", "remove the cyclic --depends edge")
+		}
+	}
+	return ordered, Outcome{}
 }
 
 func preflight(request PublishRequest) ([]WorkItem, RepositoryID, Outcome, error) {
