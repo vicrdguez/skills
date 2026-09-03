@@ -57,18 +57,26 @@ Four rules hold it together:
 **From Matt's skills**: his repo is a composable collection, you reach for whichever skill fits the moment. This is an ordered pipeline where each stage has entry and exit conditions, which is what makes the cold handoff between stages possible at all. Several skill files here are near-verbatim from his; the pipeline wrapped around them is the part I added.
 
 ## Installation
-### Install with Pi
+
+### Prepare a Consumer Repository
+
+From this checkout, install the workflow executable and run Setup anywhere inside the target Git repository:
 
 ```sh
-pi install git:github.com/vicrdguez/skills
+go install ./cmd/skl
+skl setup
 ```
 
-### Install with Claude Code
+Use `skl setup --repo <path>` to target another checkout. If that repository has multiple GitHub remotes and no GitHub `origin`, select one with `--remote <name>`. Authentication is read from `GH_TOKEN`, then `GITHUB_TOKEN`, then `gh auth token`; Setup stores no credentials.
 
+### Install skills
+
+```sh
+go install ./cmd/skl
+skl install
 ```
-/plugin marketplace add vicrdguez/skills
-/plugin install skills@vicrdguez
-```
+
+`skl install` refreshes its owned Skill Stubs in Pi, Codex, and Claude Code without touching unrelated user files. Run `skl skill <name>` for rendered instructions, add `--format json` for the typed packet, or add `--resource <path>` for one named resource.
 
 ## Pi subagent loops
 
