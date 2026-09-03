@@ -327,6 +327,66 @@ func TestPublishDependencyOrderedMultiSliceProposal(t *testing.T) {
 	}
 }
 
+func TestRefuseInvalidProposalPreflight(t *testing.T) {
+	tests := map[string]func(*testing.T) (string, []string){
+		"dirty durable document": func(t *testing.T) (string, []string) {
+			root := proposalRepository(t)
+			prepareSlice(t, root, "dirty-docs")
+			if err := os.WriteFile(filepath.Join(root, "CONTEXT.md"), []byte("uncommitted\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			return root, []string{"--slice", proposalSliceFlag(t, "dirty-docs")}
+		},
+		"slice misses target": func(t *testing.T) (string, []string) {
+			root := proposalRepository(t)
+			runGit(t, root, "switch", "--orphan", "divergent")
+			if err := os.Remove(filepath.Join(root, "README.md")); err != nil && !os.IsNotExist(err) {
+				t.Fatal(err)
+			}
+			writeLedger(t, root, "divergent", true)
+			runGit(t, root, "add", "-A")
+			runGit(t, root, "commit", "-m", "divergent")
+			runGit(t, root, "update-ref", "refs/remotes/origin/divergent", "HEAD")
+			return root, []string{"--slice", proposalSliceFlag(t, "divergent")}
+		},
+		"incomplete baseline": func(t *testing.T) (string, []string) {
+			root := proposalRepository(t)
+			runGit(t, root, "switch", "-c", "incomplete", "main")
+			writeLedger(t, root, "incomplete", false)
+			runGit(t, root, "add", ".changes/incomplete")
+			runGit(t, root, "commit", "-m", "incomplete")
+			runGit(t, root, "update-ref", "refs/remotes/origin/incomplete", "HEAD")
+			return root, []string{"--slice", proposalSliceFlag(t, "incomplete")}
+		},
+		"cyclic dependencies": func(t *testing.T) (string, []string) {
+			root := proposalRepository(t)
+			prepareSlice(t, root, "one")
+			prepareSlice(t, root, "two")
+			return root, []string{"--slice", proposalSliceFlag(t, "one"), "--slice", proposalSliceFlag(t, "two"), "--depends", "one:two", "--depends", "two:one"}
+		},
+	}
+	for name, arrange := range tests {
+		t.Run(name, func(t *testing.T) {
+			root, flags := arrange(t)
+			backend := &memoryBackend{}
+			var output bytes.Buffer
+			app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+			arguments := append([]string{"skl", "propose", "publish", "--repo", root, "--target", "main"}, flags...)
+
+			if err := app.Run(arguments); err != nil {
+				t.Fatal(err)
+			}
+
+			if !strings.HasPrefix(output.String(), "fix_required\n") {
+				t.Fatalf("output = %q", output.String())
+			}
+			if len(backend.items)+len(backend.parents)+len(backend.children)+len(backend.blocks) != 0 {
+				t.Fatalf("backend mutated: %#v", backend)
+			}
+		})
+	}
+}
+
 func TestRetrieveEquivalentTypedInstructions(t *testing.T) {
 	wantInstructions := readRepositoryFile(t, "skills/dev/tdd/SKILL.md")
 	wantResources := []string{"reference/mocking.md", "reference/tests.md"}
@@ -486,20 +546,38 @@ func proposalRepository(t *testing.T) string {
 func prepareSlice(t *testing.T, root, slug string) string {
 	t.Helper()
 	runGit(t, root, "switch", "-c", slug, "main")
-	directory := filepath.Join(root, ".changes", slug)
-	if err := os.MkdirAll(directory, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{"intent.md", "behavior.md"} {
-		if err := os.WriteFile(filepath.Join(directory, name), []byte(name+"\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
+	writeLedger(t, root, slug, true)
 	runGit(t, root, "add", filepath.Join(".changes", slug))
 	runGit(t, root, "commit", "-m", "Propose "+slug)
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	runGit(t, root, "update-ref", "refs/remotes/origin/"+slug, head)
 	return head
+}
+
+func writeLedger(t *testing.T, root, slug string, complete bool) {
+	t.Helper()
+	directory := filepath.Join(root, ".changes", slug)
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	names := []string{"intent.md"}
+	if complete {
+		names = append(names, "behavior.md")
+	}
+	for _, name := range names {
+		if err := os.WriteFile(filepath.Join(directory, name), []byte(name+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func proposalSliceFlag(t *testing.T, slug string) string {
+	t.Helper()
+	body := filepath.Join(t.TempDir(), slug+".md")
+	if err := os.WriteFile(body, []byte(slug+" body\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return slug + "=" + body
 }
 
 func runGitOutput(t *testing.T, directory string, args ...string) string {

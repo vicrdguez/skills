@@ -213,6 +213,13 @@ func preflight(request PublishRequest) ([]WorkItem, RepositoryID, Outcome, error
 	if err != nil {
 		return nil, RepositoryID{}, fix("target branch is unavailable", "fetch the target branch"), nil
 	}
+	dirty, err := git(root, "status", "--porcelain", "--untracked-files=all", "--", "CONTEXT.md", "docs/adr", "docs/capabilities")
+	if err != nil {
+		return nil, RepositoryID{}, Outcome{}, err
+	}
+	if dirty != "" {
+		return nil, RepositoryID{}, fix("durable documents have uncommitted changes", "commit or restore the reported durable-document paths"), nil
+	}
 	seen := make(map[string]bool)
 	prepared := make([]WorkItem, 0, len(request.Slices))
 	for _, slice := range request.Slices {
