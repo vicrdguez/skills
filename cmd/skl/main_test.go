@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -103,12 +104,27 @@ func TestInstallSupportedSkillStubs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	wantSkills := []string{"audit", "brainstorm", "design", "domain", "explore", "implement", "propose", "shape", "tdd", "watchdog", "writing-for-agents"}
+	wantSkills := map[string]string{
+		"audit":              "skills/dev/audit/SKILL.md",
+		"brainstorm":         "skills/thinking/brainstorm/SKILL.md",
+		"design":             "skills/dev/design/SKILL.md",
+		"domain":             "skills/dev/domain/SKILL.md",
+		"explore":            "skills/dev/explore/SKILL.md",
+		"implement":          "skills/dev/implement/SKILL.md",
+		"propose":            "skills/dev/propose/SKILL.md",
+		"shape":              "skills/thinking/shape/SKILL.md",
+		"tdd":                "skills/dev/tdd/SKILL.md",
+		"watchdog":           "skills/dev/watchdog/SKILL.md",
+		"writing-for-agents": "skills/misc/writing-for-agents/SKILL.md",
+	}
 	for _, harness := range []string{".pi/agent/skills", ".codex/skills", ".claude/skills"} {
-		for _, name := range wantSkills {
+		for name, source := range wantSkills {
 			stub := readFile(t, filepath.Join(root, harness, name, "SKILL.md"))
 			if !strings.HasPrefix(stub, "---\n") {
 				t.Fatalf("%s %s stub has no leading YAML frontmatter:\n%s", harness, name, stub)
+			}
+			if want := skillFrontmatter(t, readRepositoryFile(t, source)); !strings.HasPrefix(stub, want+"\n") {
+				t.Fatalf("%s %s stub changed source frontmatter:\n%s", harness, name, stub)
 			}
 			if !strings.Contains(stub, "skl skill "+name) || !strings.Contains(stub, "skl.stub/v1") {
 				t.Fatalf("%s %s stub does not delegate to skl:\n%s", harness, name, stub)
@@ -287,6 +303,24 @@ func readFile(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(contents)
+}
+
+func readRepositoryFile(t *testing.T, path string) string {
+	t.Helper()
+	_, testFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("cannot locate repository root")
+	}
+	return readFile(t, filepath.Join(filepath.Dir(testFile), "..", "..", path))
+}
+
+func skillFrontmatter(t *testing.T, source string) string {
+	t.Helper()
+	end := strings.Index(source[4:], "\n---\n")
+	if !strings.HasPrefix(source, "---\n") || end < 0 {
+		t.Fatal("skill source has invalid frontmatter")
+	}
+	return source[:end+8]
 }
 
 func runGit(t *testing.T, directory string, args ...string) {

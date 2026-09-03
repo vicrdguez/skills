@@ -1,7 +1,4 @@
----
-name: {{.Name}}
-description: Load the authoritative {{.Name}} Skill Definition from skl.
----
+{{.Frontmatter}}
 
 <!-- skl-owned: {{.Protocol}} -->
 

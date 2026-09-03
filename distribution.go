@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"embed"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"text/template"
@@ -17,8 +18,9 @@ var ownedMarker = []byte("<!-- skl-owned: " + StubProtocol + " -->")
 var embedded embed.FS
 
 type stubData struct {
-	Name     string
-	Protocol string
+	Name        string
+	Protocol    string
+	Frontmatter string
 }
 
 type InstallOutcome struct {
@@ -34,6 +36,10 @@ func Install(home string) (InstallOutcome, error) {
 	var outcome InstallOutcome
 	for _, harness := range []string{".pi/agent/skills", ".codex/skills", ".claude/skills"} {
 		for _, name := range SkillNames() {
+			frontmatter, err := definitionFrontmatter(name)
+			if err != nil {
+				return outcome, err
+			}
 			directory := filepath.Join(home, harness, name)
 			if err := os.MkdirAll(directory, 0o755); err != nil {
 				return outcome, err
@@ -48,7 +54,7 @@ func Install(home string) (InstallOutcome, error) {
 				return outcome, err
 			}
 			var contents bytes.Buffer
-			err = tmpl.Execute(&contents, stubData{Name: name, Protocol: StubProtocol})
+			err = tmpl.Execute(&contents, stubData{Name: name, Protocol: StubProtocol, Frontmatter: frontmatter})
 			if err == nil && bytes.Equal(current, contents.Bytes()) {
 				outcome.Unchanged++
 				continue
@@ -63,4 +69,16 @@ func Install(home string) (InstallOutcome, error) {
 		}
 	}
 	return outcome, nil
+}
+
+func definitionFrontmatter(name string) (string, error) {
+	source, err := fs.ReadFile(embedded, definitionPaths[name])
+	if err != nil {
+		return "", err
+	}
+	end := bytes.Index(source[4:], []byte("\n---\n"))
+	if !bytes.HasPrefix(source, []byte("---\n")) || end < 0 {
+		return "", fmt.Errorf("skill %q has invalid frontmatter", name)
+	}
+	return string(source[:end+8]), nil
 }
