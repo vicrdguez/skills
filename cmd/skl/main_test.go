@@ -194,6 +194,25 @@ func TestRetrieveRenderedSkillInstructions(t *testing.T) {
 	}
 }
 
+func TestRetrieveConcreteProposeInstructions(t *testing.T) {
+	var output bytes.Buffer
+	app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, t.TempDir())
+
+	if err := app.Run([]string{"skl", "skill", "propose"}); err != nil {
+		t.Fatal(err)
+	}
+
+	got := output.String()
+	for _, want := range []string{"tracer-bullet", "skl propose publish", "skl propose cleanup"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("Propose instructions lack %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "docs/github.md") {
+		t.Fatalf("Propose instructions retain copied board protocol:\n%s", got)
+	}
+}
+
 func TestRetrieveEquivalentTypedInstructions(t *testing.T) {
 	wantInstructions := readRepositoryFile(t, "skills/dev/tdd/SKILL.md")
 	wantResources := []string{"reference/mocking.md", "reference/tests.md"}

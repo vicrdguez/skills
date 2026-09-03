@@ -53,17 +53,15 @@ Ask the user:
 
 Iterate until the user approves the breakdown. A single ticket is possible if the change is small.
 
-### 5. Publishing and required Setup
+### 5. Prepare and publish
 
-Use `docs/github.md` as a reference of how to handle the issue board. If the file does not exist, run `dev-setup` first.
+1. Run `skl propose cleanup --repo <root>` before preparing new slices. It removes only safe local Git state for Work Items already observed Merged and reports everything it preserves.
+2. Commit any durable `CONTEXT.md`, ADR, or capability changes to the target branch before creating slice branches.
+3. For each slice, choose a short verb-led kebab-case slug, create `.worktrees/<slug>` and its branch from the target, write `.changes/<slug>/`, commit the complete ledger at once, and push that exact head.
+4. Write the parent and child issue bodies to private temporary Markdown files. The files are opaque transport: `skl` neither authors nor interprets them.
+5. Publish the prepared Proposal with `skl propose publish --repo <root> --target <branch> --slice <slug>=<body-file>`. Repeat `--slice` for every child and add `--depends <dependent>:<blocker>` for each Dependency. For a multi-slice Proposal also pass `--parent-title <title> --parent-body <body-file>`.
 
-If the change is split in multiple slices, create one parent issue holding the overall decisions so far and any notes relevant to all slices. *Each slice then will become a child issue*, tied to the parent. The parent issue is coordination only — it gets no branch, worktree or artifacts of its own. Publish all tickets in dependency order (blockers first). Then
-
-1. **Garbage-collect merged worktrees**: Remove any `.worktrees/<other>` whose changes have been already merged (its `.changes/archive/<date>-<other>/` is present on `main`), then delete its corresponding git branch. Run it from main, you are never in the worktree you remove.
-2. **Commit durable docs**: Any `CONTEXT.md` or ADR edits/additions left in the working tree from the explore session are durable, commit them to `main` now so they stay independent of any slice branch
-3. **Per slice, pick a slice ID**: A short, verb-led kebab-case slug like `add-order-cancellation`
-4. **Per slice, create its worktree:** `git worktree add .worktrees/<slice-slug> -b <slice-slug>` off up-to-date `main`
-5. **Per slice, write its artifacts**: create `.changes/<slice-slug>/` and all its artifacts directly inside that worktree, commit them, and push the branch (`git push -u origin <slice-slug>`) before creating its issue. Record that commit's SHA as the issue's `Artifact baseline` — every later stage diffs against it to prove the brief didn't move.
+`skl propose publish` preflights the entire declaration before changing GitHub, creates children in blocker-first order, and applies Ready last. If it returns `fix_required`, make the stated Git repair and repeat the same command. If it returns `needs_human`, stop and present its reason; do not guess which existing record to reuse.
 
 ## Writing the change artifacts
 These are the artifacts that each vertical slice will use for implementation:
@@ -79,5 +77,4 @@ So resolve the contradictions now, while you still can — between the artifacts
 **When warranted**:
 - `plan.md`: The approach, the module shapes and seams chosen for implementation and any pinned decision the implementer MUST NOT make on its own. Follow the [plan.md](./reference/plan.md) template
 - `tasks.md`: Follow the [tasks.md](./reference/tasks.md) template — it states when it is warranted
-
 
