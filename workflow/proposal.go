@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -34,9 +35,10 @@ type CoordinationItem struct {
 }
 
 type Backend interface {
-	ListWorkItems(context.Context, RepositoryID) ([]WorkItem, error)
+	FindWorkItems(context.Context, RepositoryID, []string) ([]WorkItem, error)
+	ListMergedWorkItems(context.Context, RepositoryID) ([]WorkItem, error)
 	CreateWorkItem(context.Context, RepositoryID, WorkItem) (WorkItem, error)
-	ListCoordinationItems(context.Context, RepositoryID) ([]CoordinationItem, error)
+	FindCoordinationItems(context.Context, RepositoryID, string) ([]CoordinationItem, error)
 	CreateCoordinationItem(context.Context, RepositoryID, CoordinationItem) (CoordinationItem, error)
 	AddChild(context.Context, RepositoryID, int, int) error
 	AddDependency(context.Context, RepositoryID, int, int) error
@@ -85,11 +87,11 @@ func Cleanup(ctx context.Context, root, remote string, backend Backend) (Cleanup
 	if err != nil {
 		return CleanupOutcome{}, err
 	}
-	repository, err := parseGitHubRemote(remoteURL)
+	repository, err := ParseGitHubRemote(remoteURL)
 	if err != nil {
 		return CleanupOutcome{}, err
 	}
-	items, err := backend.ListWorkItems(ctx, repository)
+	items, err := backend.ListMergedWorkItems(ctx, repository)
 	if err != nil {
 		return CleanupOutcome{}, err
 	}
@@ -165,7 +167,7 @@ func Publish(ctx context.Context, request PublishRequest, backend Backend) (Outc
 		if err != nil {
 			return Outcome{}, err
 		}
-		parents, err := backend.ListCoordinationItems(ctx, repository)
+		parents, err := backend.FindCoordinationItems(ctx, repository, request.ParentTitle)
 		if err != nil {
 			return Outcome{}, err
 		}
@@ -179,10 +181,17 @@ func Publish(ctx context.Context, request PublishRequest, backend Backend) (Outc
 			return Outcome{Status: "needs_human", Reason: "ambiguous existing Coordination Item " + request.ParentTitle}, nil
 		}
 		if len(matches) == 1 {
+			if matches[0].Body != string(parentBody) {
+				return Outcome{Status: "needs_human", Reason: "existing Coordination Item has conflicting content: " + request.ParentTitle}, nil
+			}
 			parent = matches[0]
 		}
 	}
-	existing, err := backend.ListWorkItems(ctx, repository)
+	titles := make([]string, len(ordered))
+	for index, item := range ordered {
+		titles[index] = item.Title
+	}
+	existing, err := backend.FindWorkItems(ctx, repository, titles)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -194,7 +203,7 @@ func Publish(ctx context.Context, request PublishRequest, backend Backend) (Outc
 			}
 		}
 		matches := matchesByTitle[slice.Title]
-		if len(matches) > 1 || len(matches) == 1 && matches[0].Branch != "" && matches[0].Branch != slice.Branch {
+		if len(matches) > 1 || len(matches) == 1 && (matches[0].Body != slice.Body || matches[0].Branch != "" && matches[0].Branch != slice.Branch) {
 			return Outcome{Status: "needs_human", Reason: "ambiguous existing Work Item " + slice.Title}, nil
 		}
 		if len(matches) == 1 {
@@ -202,6 +211,22 @@ func Publish(ctx context.Context, request PublishRequest, backend Backend) (Outc
 			if matches[0].Parent != 0 && matches[0].Parent != wantedParent {
 				return Outcome{Status: "needs_human", Reason: "existing Work Item has a conflicting parent: " + slice.Title}, nil
 			}
+		}
+	}
+	for _, slice := range ordered {
+		matches := matchesByTitle[slice.Title]
+		if len(matches) != 1 {
+			continue
+		}
+		var wanted []int
+		for _, dependency := range request.Dependencies {
+			blockers := matchesByTitle[dependency.Blocker]
+			if dependency.Dependent == slice.Title && len(blockers) == 1 {
+				wanted = append(wanted, blockers[0].Number)
+			}
+		}
+		if !containsOnly(matches[0].Blockers, wanted) {
+			return Outcome{Status: "needs_human", Reason: "existing Work Item has conflicting Dependencies: " + slice.Title}, nil
 		}
 	}
 	if len(prepared) > 1 && parent.Number == 0 {
@@ -259,6 +284,15 @@ func Publish(ctx context.Context, request PublishRequest, backend Backend) (Outc
 	return Outcome{Status: "completed"}, nil
 }
 
+func containsOnly(existing, wanted []int) bool {
+	for _, number := range existing {
+		if !slices.Contains(wanted, number) {
+			return false
+		}
+	}
+	return true
+}
+
 func orderSlices(items []WorkItem, dependencies []Dependency) ([]WorkItem, Outcome) {
 	byName := make(map[string]WorkItem, len(items))
 	remaining := make(map[string]int, len(items))
@@ -311,7 +345,7 @@ func preflight(request PublishRequest) ([]WorkItem, RepositoryID, Outcome, error
 	if err != nil {
 		return nil, RepositoryID{}, Outcome{}, fmt.Errorf("resolve remote %q: %w", remote, err)
 	}
-	repository, err := parseGitHubRemote(remoteURL)
+	repository, err := ParseGitHubRemote(remoteURL)
 	if err != nil {
 		return nil, RepositoryID{}, Outcome{}, err
 	}
@@ -425,7 +459,7 @@ func fix(invariant, repair string) Outcome {
 	return Outcome{Status: "fix_required", Reason: invariant + "; " + repair}
 }
 
-func parseGitHubRemote(remote string) (RepositoryID, error) {
+func ParseGitHubRemote(remote string) (RepositoryID, error) {
 	remote = strings.TrimSuffix(remote, ".git")
 	for _, prefix := range []string{"git@github.com:", "https://github.com/", "ssh://git@github.com/"} {
 		if strings.HasPrefix(remote, prefix) {

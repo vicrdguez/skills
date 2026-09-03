@@ -215,12 +215,70 @@ func TestGitHubBackendNormalizesProposalState(t *testing.T) {
 	})}
 	backend := NewGitHubBackend("https://api.github.test", "secret", client)
 
-	items, err := backend.ListWorkItems(context.Background(), workflow.RepositoryID{Owner: "acme", Name: "widgets"})
+	items, err := backend.FindWorkItems(context.Background(), workflow.RepositoryID{Owner: "acme", Name: "widgets"}, []string{"slice"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 1 || !items[0].Ready || !items[0].Merged || items[0].Parent != 10 || !slices.Equal(items[0].Blockers, []int{16}) {
+	if len(items) != 1 || !items[0].Ready || items[0].Merged || items[0].Parent != 10 || !slices.Equal(items[0].Blockers, []int{16}) {
 		t.Fatalf("items = %#v", items)
+	}
+}
+
+func TestGitHubBackendReportsOnlyCommitClosedWorkflowItemsAsMerged(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		switch request.URL.Path {
+		case "/repos/acme/widgets/issues":
+			return jsonResponse(http.StatusOK, `[
+				{"id":501,"number":17,"title":"merged","state":"closed","labels":[{"name":"done"}]},
+				{"id":502,"number":18,"title":"manual","state":"closed","labels":[{"name":"done"}]},
+				{"id":503,"number":19,"title":"unrelated","state":"closed","labels":[]}
+			]`), nil
+		case "/repos/acme/widgets/issues/17/timeline":
+			return jsonResponse(http.StatusOK, `[{"event":"closed","commit_id":"abc123"}]`), nil
+		case "/repos/acme/widgets/issues/18/timeline":
+			return jsonResponse(http.StatusOK, `[{"event":"closed","commit_id":null}]`), nil
+		default:
+			t.Fatalf("unexpected request: %s", request.URL.Path)
+			return nil, nil
+		}
+	})}
+	backend := NewGitHubBackend("https://api.github.test", "secret", client)
+
+	items, err := backend.ListMergedWorkItems(context.Background(), workflow.RepositoryID{Owner: "acme", Name: "widgets"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Title != "merged" || !items[0].Merged {
+		t.Fatalf("items = %#v", items)
+	}
+}
+
+func TestGitHubBackendFallsBackWhenNativeDependenciesAreUnavailable(t *testing.T) {
+	var patchedBody string
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/dependencies/blocked_by") {
+			return jsonResponse(http.StatusNotFound, `{"message":"not available"}`), nil
+		}
+		if request.Method == http.MethodPatch && request.URL.Path == "/repos/acme/widgets/issues/2" {
+			var payload map[string]string
+			if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+				t.Fatal(err)
+			}
+			patchedBody = payload["body"]
+			return jsonResponse(http.StatusOK, `{}`), nil
+		}
+		t.Fatalf("unexpected request: %s %s", request.Method, request.URL.Path)
+		return nil, nil
+	})}
+	backend := NewGitHubBackend("https://api.github.test", "secret", client)
+	backend.issueIDs[1] = 501
+	backend.issueBodies[2] = "opaque body\n"
+
+	if err := backend.AddDependency(context.Background(), workflow.RepositoryID{Owner: "acme", Name: "widgets"}, 2, 1); err != nil {
+		t.Fatal(err)
+	}
+	if patchedBody != "opaque body\n\nBlocked by #1\n" {
+		t.Fatalf("body = %q", patchedBody)
 	}
 }
 

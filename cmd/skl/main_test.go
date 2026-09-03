@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -38,8 +40,24 @@ func (b *memoryBackend) EnsureLabels(_ context.Context, _ setup.RepositoryID, la
 	return nil
 }
 
-func (b *memoryBackend) ListWorkItems(context.Context, workflow.RepositoryID) ([]workflow.WorkItem, error) {
-	return append([]workflow.WorkItem(nil), b.items...), nil
+func (b *memoryBackend) FindWorkItems(_ context.Context, _ workflow.RepositoryID, titles []string) ([]workflow.WorkItem, error) {
+	var found []workflow.WorkItem
+	for _, item := range b.items {
+		if slices.Contains(titles, item.Title) {
+			found = append(found, item)
+		}
+	}
+	return found, nil
+}
+
+func (b *memoryBackend) ListMergedWorkItems(context.Context, workflow.RepositoryID) ([]workflow.WorkItem, error) {
+	var merged []workflow.WorkItem
+	for _, item := range b.items {
+		if item.Merged {
+			merged = append(merged, item)
+		}
+	}
+	return merged, nil
 }
 
 func (b *memoryBackend) CreateWorkItem(_ context.Context, _ workflow.RepositoryID, item workflow.WorkItem) (workflow.WorkItem, error) {
@@ -48,8 +66,14 @@ func (b *memoryBackend) CreateWorkItem(_ context.Context, _ workflow.RepositoryI
 	return item, nil
 }
 
-func (b *memoryBackend) ListCoordinationItems(context.Context, workflow.RepositoryID) ([]workflow.CoordinationItem, error) {
-	return append([]workflow.CoordinationItem(nil), b.parents...), nil
+func (b *memoryBackend) FindCoordinationItems(_ context.Context, _ workflow.RepositoryID, title string) ([]workflow.CoordinationItem, error) {
+	var found []workflow.CoordinationItem
+	for _, item := range b.parents {
+		if item.Title == title {
+			found = append(found, item)
+		}
+	}
+	return found, nil
 }
 
 func (b *memoryBackend) CreateCoordinationItem(_ context.Context, _ workflow.RepositoryID, item workflow.CoordinationItem) (workflow.CoordinationItem, error) {
@@ -451,6 +475,61 @@ func TestResumePartialProposalPublication(t *testing.T) {
 	}
 }
 
+func TestReconcileCompletedProposalThroughGitHubAdapter(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "base")
+	prepareSlice(t, root, "dependent")
+	directory := t.TempDir()
+	for _, name := range []string{"parent", "base", "dependent"} {
+		if err := os.WriteFile(filepath.Join(directory, name+".md"), []byte(name+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mutations := 0
+	client := &http.Client{Transport: httpRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.Method != http.MethodGet {
+			mutations++
+		}
+		body := ""
+		switch request.URL.Path {
+		case "/repos/acme/widgets/issues":
+			body = `[
+				{"id":500,"number":100,"title":"parent","body":"parent\n"},
+				{"id":501,"number":1,"title":"base","body":"base\n","labels":[{"name":"ready"}]},
+				{"id":502,"number":2,"title":"dependent","body":"dependent\n","labels":[{"name":"ready"}]}
+			]`
+		case "/repos/acme/widgets/issues/1/parent", "/repos/acme/widgets/issues/2/parent":
+			body = `{"id":500,"number":100}`
+		case "/repos/acme/widgets/issues/1/dependencies/blocked_by":
+			body = `[]`
+		case "/repos/acme/widgets/issues/2/dependencies/blocked_by":
+			body = `[{"id":501,"number":1}]`
+		default:
+			t.Fatalf("unexpected request: %s %s", request.Method, request.URL.Path)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+	})}
+	backend := setup.NewGitHubBackend("https://api.github.test", "secret", client)
+	var output bytes.Buffer
+	app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+
+	err := app.Run([]string{"skl", "propose", "publish", "--repo", root, "--target", "main",
+		"--slice", "base=" + filepath.Join(directory, "base.md"), "--slice", "dependent=" + filepath.Join(directory, "dependent.md"),
+		"--depends", "dependent:base", "--parent-title", "parent", "--parent-body", filepath.Join(directory, "parent.md")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output.String() != "completed\n" || mutations != 0 {
+		t.Fatalf("reconciliation = %q with %d mutations", output.String(), mutations)
+	}
+}
+
+type httpRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (function httpRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return function(request)
+}
+
 func TestAmbiguousProposalRetryStopsBeforeMutation(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "one")
@@ -477,6 +556,37 @@ func TestAmbiguousProposalRetryStopsBeforeMutation(t *testing.T) {
 	}
 	if len(backend.parents) != 0 || len(backend.items) != 2 {
 		t.Fatalf("backend mutated before ambiguity was reported: %#v", backend)
+	}
+}
+
+func TestContradictoryDependenciesStopBeforeMutation(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "base")
+	prepareSlice(t, root, "dependent")
+	directory := t.TempDir()
+	for _, name := range []string{"parent", "base", "dependent"} {
+		if err := os.WriteFile(filepath.Join(directory, name+".md"), []byte(name+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	backend := &memoryBackend{
+		parents: []workflow.CoordinationItem{{Number: 100, Title: "parent", Body: "parent\n"}},
+		items: []workflow.WorkItem{
+			{Number: 1, Title: "base", Body: "base\n", Parent: 100, Ready: true},
+			{Number: 2, Title: "dependent", Body: "dependent\n", Parent: 100, Blockers: []int{99}, Ready: true},
+		},
+	}
+	var output bytes.Buffer
+	app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+
+	err := app.Run([]string{"skl", "propose", "publish", "--repo", root, "--target", "main",
+		"--slice", "base=" + filepath.Join(directory, "base.md"), "--slice", "dependent=" + filepath.Join(directory, "dependent.md"),
+		"--depends", "dependent:base", "--parent-title", "parent", "--parent-body", filepath.Join(directory, "parent.md")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(output.String(), "needs_human\n") || len(backend.children)+len(backend.blocks) != 0 {
+		t.Fatalf("contradictory retry mutated backend: output=%q backend=%#v", output.String(), backend)
 	}
 }
 
