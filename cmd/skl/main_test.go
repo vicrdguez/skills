@@ -188,12 +188,9 @@ func TestRetrieveRenderedSkillInstructions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := stdout.String()
-	if !strings.Contains(got, "Protocol: skl.instructions/v1") || !strings.Contains(got, "# Test-Driven Development") {
-		t.Fatalf("authoritative instructions absent:\n%s", got)
-	}
-	if strings.Contains(got, "# Good and Bad Tests") {
-		t.Fatalf("unrequested resource included:\n%s", got)
+	want := "Protocol: skl.instructions/v1\nSkill: tdd\nIncluded skills: none\nFacts: {}\nResources: reference/mocking.md, reference/tests.md\n\n" + readRepositoryFile(t, "skills/dev/tdd/SKILL.md")
+	if got := stdout.String(); got != want {
+		t.Fatalf("rendered packet differs from canonical definition:\n%s", got)
 	}
 }
 
@@ -232,7 +229,7 @@ func TestRetrieveOneNamedResource(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := stdout.String(); !strings.Contains(got, "# Good and Bad Tests") || strings.Contains(got, "# When to Mock") {
+	if got, want := stdout.String(), readRepositoryFile(t, "skills/dev/tdd/reference/tests.md"); got != want {
 		t.Fatalf("stdout did not contain only the requested resource:\n%s", got)
 	}
 }
@@ -252,10 +249,17 @@ func TestBundleGuaranteedSupportingSkills(t *testing.T) {
 	if !slices.Equal(packet.IncludedSkills, want) {
 		t.Fatalf("included_skills = %v, want %v", packet.IncludedSkills, want)
 	}
-	for _, name := range want {
-		if count := strings.Count(packet.Instructions, "## Included Skill: "+name); count != 1 {
-			t.Fatalf("%s included %d times", name, count)
-		}
+	wantInstructions := readRepositoryFile(t, "skills/dev/implement/SKILL.md")
+	for _, included := range []struct{ name, path string }{
+		{"tdd", "skills/dev/tdd/SKILL.md"},
+		{"audit", "skills/dev/audit/SKILL.md"},
+		{"design", "skills/dev/design/SKILL.md"},
+		{"domain", "skills/dev/domain/SKILL.md"},
+	} {
+		wantInstructions += "\n\n## Included Skill: " + included.name + "\n\n" + readRepositoryFile(t, included.path)
+	}
+	if packet.Instructions != wantInstructions {
+		t.Fatalf("bundled instructions differ from canonical definitions:\n%s", packet.Instructions)
 	}
 
 	if err := app.Run([]string{"skl", "install"}); err != nil {
