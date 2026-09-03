@@ -353,6 +353,19 @@ func TestRefuseInvalidProposalPreflight(t *testing.T) {
 			}
 			return root, []string{"--slice", proposalSliceFlag(t, "dirty-docs")}
 		},
+		"dirty durable document in main worktree": func(t *testing.T) (string, []string) {
+			root := proposalRepository(t)
+			worktree := filepath.Join(root, ".worktrees", "linked-slice")
+			runGit(t, root, "worktree", "add", worktree, "-b", "linked-slice", "main")
+			writeLedger(t, worktree, "linked-slice", true)
+			runGit(t, worktree, "add", ".changes/linked-slice")
+			runGit(t, worktree, "commit", "-m", "linked slice")
+			runGit(t, root, "update-ref", "refs/remotes/origin/linked-slice", "refs/heads/linked-slice")
+			if err := os.WriteFile(filepath.Join(root, "CONTEXT.md"), []byte("uncommitted\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			return worktree, []string{"--slice", proposalSliceFlag(t, "linked-slice")}
+		},
 		"slice misses target": func(t *testing.T) (string, []string) {
 			root := proposalRepository(t)
 			runGit(t, root, "switch", "--orphan", "divergent")

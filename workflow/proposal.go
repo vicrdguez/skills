@@ -197,6 +197,12 @@ func Publish(ctx context.Context, request PublishRequest, backend Backend) (Outc
 		if len(matches) > 1 || len(matches) == 1 && matches[0].Branch != "" && matches[0].Branch != slice.Branch {
 			return Outcome{Status: "needs_human", Reason: "ambiguous existing Work Item " + slice.Title}, nil
 		}
+		if len(matches) == 1 {
+			wantedParent := parent.Number
+			if matches[0].Parent != 0 && matches[0].Parent != wantedParent {
+				return Outcome{Status: "needs_human", Reason: "existing Work Item has a conflicting parent: " + slice.Title}, nil
+			}
+		}
 	}
 	if len(prepared) > 1 && parent.Number == 0 {
 		parent, err = backend.CreateCoordinationItem(ctx, repository, CoordinationItem{Title: request.ParentTitle, Body: string(parentBody)})
@@ -313,7 +319,11 @@ func preflight(request PublishRequest) ([]WorkItem, RepositoryID, Outcome, error
 	if err != nil {
 		return nil, RepositoryID{}, fix("target branch is unavailable", "fetch the target branch"), nil
 	}
-	dirty, err := git(root, "status", "--porcelain", "--untracked-files=all", "--", "CONTEXT.md", "docs/adr", "docs/capabilities")
+	mainWorktree, err := primaryWorktree(root)
+	if err != nil {
+		return nil, RepositoryID{}, Outcome{}, err
+	}
+	dirty, err := git(mainWorktree, "status", "--porcelain", "--untracked-files=all", "--", "CONTEXT.md", "docs/adr", "docs/capabilities")
 	if err != nil {
 		return nil, RepositoryID{}, Outcome{}, err
 	}
@@ -349,6 +359,19 @@ func preflight(request PublishRequest) ([]WorkItem, RepositoryID, Outcome, error
 		prepared = append(prepared, WorkItem{Title: slice.Slug, Body: string(body), Branch: slice.Slug, ArtifactBaseline: baseline})
 	}
 	return prepared, repository, Outcome{}, nil
+}
+
+func primaryWorktree(root string) (string, error) {
+	output, err := git(root, "worktree", "list", "--porcelain")
+	if err != nil {
+		return "", err
+	}
+	first, _, _ := strings.Cut(output, "\n")
+	path, found := strings.CutPrefix(first, "worktree ")
+	if !found {
+		return "", errors.New("Git returned no main worktree")
+	}
+	return path, nil
 }
 
 func artifactBaseline(root, slug, head string) (string, error) {
