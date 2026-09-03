@@ -9,6 +9,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/vicrdguez/skills/workflow"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -117,5 +119,31 @@ func TestGitHubBackendDefersAuthenticationUntilValidation(t *testing.T) {
 	}
 	if resolved != 1 {
 		t.Fatalf("authentication resolved %d times", resolved)
+	}
+}
+
+func TestGitHubBackendPublishesSuppliedMarkdownWithoutInterpretation(t *testing.T) {
+	wantBody := "---\nBlocked by: #not-metadata\n[broken markdown\n"
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.Method != http.MethodPost || request.URL.Path != "/repos/acme/widgets/issues" {
+			t.Fatalf("unexpected request: %s %s", request.Method, request.URL.Path)
+		}
+		var payload map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload["title"] != "opaque-slice" || payload["body"] != wantBody {
+			t.Fatalf("payload = %#v", payload)
+		}
+		return &http.Response{StatusCode: http.StatusCreated, Body: io.NopCloser(bytes.NewBufferString(`{"id":501,"number":17,"title":"opaque-slice","body":"---\nBlocked by: #not-metadata\n[broken markdown\n"}`)), Header: make(http.Header)}, nil
+	})}
+	backend := NewGitHubBackend("https://api.github.test", "secret", client)
+
+	item, err := backend.CreateWorkItem(context.Background(), workflow.RepositoryID{Owner: "acme", Name: "widgets"}, workflow.WorkItem{Title: "opaque-slice", Body: wantBody})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.Number != 17 || item.Title != "opaque-slice" || item.Body != wantBody {
+		t.Fatalf("item = %#v", item)
 	}
 }

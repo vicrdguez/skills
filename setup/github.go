@@ -12,6 +12,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/vicrdguez/skills/workflow"
 )
 
 type GitHubBackend struct {
@@ -19,10 +21,11 @@ type GitHubBackend struct {
 	token       string
 	tokenSource func() (string, error)
 	client      *http.Client
+	issueIDs    map[int]int64
 }
 
 func NewGitHubBackend(baseURL, token string, client *http.Client) *GitHubBackend {
-	return &GitHubBackend{baseURL: strings.TrimRight(baseURL, "/"), token: token, client: client}
+	return &GitHubBackend{baseURL: strings.TrimRight(baseURL, "/"), token: token, client: client, issueIDs: make(map[int]int64)}
 }
 
 func NewGitHubBackendFromEnv() (Backend, error) {
@@ -35,7 +38,138 @@ func NewGitHubBackendFromEnv() (Backend, error) {
 }
 
 func newGitHubBackend(baseURL string, client *http.Client, tokenSource func() (string, error)) *GitHubBackend {
-	return &GitHubBackend{baseURL: strings.TrimRight(baseURL, "/"), tokenSource: tokenSource, client: client}
+	return &GitHubBackend{baseURL: strings.TrimRight(baseURL, "/"), tokenSource: tokenSource, client: client, issueIDs: make(map[int]int64)}
+}
+
+type githubIssue struct {
+	ID     int64  `json:"id"`
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+	Body   string `json:"body"`
+	State  string `json:"state"`
+	Labels []struct {
+		Name string `json:"name"`
+	} `json:"labels"`
+	PullRequest json.RawMessage `json:"pull_request"`
+}
+
+func (b *GitHubBackend) ListWorkItems(ctx context.Context, repository workflow.RepositoryID) ([]workflow.WorkItem, error) {
+	issues, err := b.listIssues(ctx, repository)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]workflow.WorkItem, 0, len(issues))
+	for _, issue := range issues {
+		if len(issue.PullRequest) != 0 {
+			continue
+		}
+		ready := false
+		for _, label := range issue.Labels {
+			ready = ready || label.Name == "ready"
+		}
+		item := workflow.WorkItem{Number: issue.Number, Title: issue.Title, Body: issue.Body, Ready: ready, Merged: issue.State == "closed"}
+		var parent githubIssue
+		found, err := b.requestOptional(ctx, http.MethodGet, b.workflowRepositoryPath(repository)+fmt.Sprintf("/issues/%d/parent", issue.Number), &parent)
+		if err != nil {
+			return nil, err
+		}
+		if found {
+			item.Parent = parent.Number
+			b.issueIDs[parent.Number] = parent.ID
+		}
+		var blockers []githubIssue
+		if err := b.request(ctx, http.MethodGet, b.workflowRepositoryPath(repository)+fmt.Sprintf("/issues/%d/dependencies/blocked_by", issue.Number), nil, &blockers); err != nil {
+			return nil, err
+		}
+		for _, blocker := range blockers {
+			item.Blockers = append(item.Blockers, blocker.Number)
+			b.issueIDs[blocker.Number] = blocker.ID
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
+func (b *GitHubBackend) CreateWorkItem(ctx context.Context, repository workflow.RepositoryID, item workflow.WorkItem) (workflow.WorkItem, error) {
+	issue, err := b.createIssue(ctx, repository, item.Title, item.Body)
+	if err != nil {
+		return workflow.WorkItem{}, err
+	}
+	item.Number = issue.Number
+	b.issueIDs[issue.Number] = issue.ID
+	return item, nil
+}
+
+func (b *GitHubBackend) ListCoordinationItems(ctx context.Context, repository workflow.RepositoryID) ([]workflow.CoordinationItem, error) {
+	issues, err := b.listIssues(ctx, repository)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]workflow.CoordinationItem, 0, len(issues))
+	for _, issue := range issues {
+		if len(issue.PullRequest) == 0 {
+			items = append(items, workflow.CoordinationItem{Number: issue.Number, Title: issue.Title, Body: issue.Body})
+		}
+	}
+	return items, nil
+}
+
+func (b *GitHubBackend) CreateCoordinationItem(ctx context.Context, repository workflow.RepositoryID, item workflow.CoordinationItem) (workflow.CoordinationItem, error) {
+	issue, err := b.createIssue(ctx, repository, item.Title, item.Body)
+	if err != nil {
+		return workflow.CoordinationItem{}, err
+	}
+	item.Number = issue.Number
+	b.issueIDs[issue.Number] = issue.ID
+	return item, nil
+}
+
+func (b *GitHubBackend) AddChild(ctx context.Context, repository workflow.RepositoryID, parent, child int) error {
+	id, ok := b.issueIDs[child]
+	if !ok {
+		return fmt.Errorf("GitHub issue id unavailable for #%d", child)
+	}
+	return b.request(ctx, http.MethodPost, b.workflowRepositoryPath(repository)+fmt.Sprintf("/issues/%d/sub_issues", parent), map[string]int64{"sub_issue_id": id}, nil)
+}
+
+func (b *GitHubBackend) AddDependency(ctx context.Context, repository workflow.RepositoryID, dependent, blocker int) error {
+	id, ok := b.issueIDs[blocker]
+	if !ok {
+		return fmt.Errorf("GitHub issue id unavailable for #%d", blocker)
+	}
+	return b.request(ctx, http.MethodPost, b.workflowRepositoryPath(repository)+fmt.Sprintf("/issues/%d/dependencies/blocked_by", dependent), map[string]int64{"issue_id": id}, nil)
+}
+
+func (b *GitHubBackend) SetReady(ctx context.Context, repository workflow.RepositoryID, number int) error {
+	return b.request(ctx, http.MethodPost, b.workflowRepositoryPath(repository)+fmt.Sprintf("/issues/%d/labels", number), map[string][]string{"labels": {"ready"}}, nil)
+}
+
+func (b *GitHubBackend) listIssues(ctx context.Context, repository workflow.RepositoryID) ([]githubIssue, error) {
+	var all []githubIssue
+	for page := 1; ; page++ {
+		var issues []githubIssue
+		path := fmt.Sprintf("%s/issues?state=all&per_page=100&page=%d", b.workflowRepositoryPath(repository), page)
+		if err := b.request(ctx, http.MethodGet, path, nil, &issues); err != nil {
+			return nil, err
+		}
+		for _, issue := range issues {
+			b.issueIDs[issue.Number] = issue.ID
+		}
+		all = append(all, issues...)
+		if len(issues) < 100 {
+			return all, nil
+		}
+	}
+}
+
+func (b *GitHubBackend) createIssue(ctx context.Context, repository workflow.RepositoryID, title, body string) (githubIssue, error) {
+	var issue githubIssue
+	err := b.request(ctx, http.MethodPost, b.workflowRepositoryPath(repository)+"/issues", map[string]string{"title": title, "body": body}, &issue)
+	return issue, err
+}
+
+func (b *GitHubBackend) workflowRepositoryPath(repository workflow.RepositoryID) string {
+	return "/repos/" + url.PathEscape(repository.Owner) + "/" + url.PathEscape(repository.Name)
 }
 
 func resolveGitHubToken(getenv func(string) string, ghToken func() (string, error)) (string, error) {
@@ -102,13 +236,26 @@ func (b *GitHubBackend) repositoryPath(repository RepositoryID) string {
 }
 
 func (b *GitHubBackend) request(ctx context.Context, method, path string, body, destination any) error {
+	_, err := b.requestStatus(ctx, method, path, body, destination)
+	return err
+}
+
+func (b *GitHubBackend) requestOptional(ctx context.Context, method, path string, destination any) (bool, error) {
+	status, err := b.requestStatus(ctx, method, path, nil, destination)
+	if status == http.StatusNotFound {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func (b *GitHubBackend) requestStatus(ctx context.Context, method, path string, body, destination any) (int, error) {
 	if b.token == "" {
 		if b.tokenSource == nil {
-			return errors.New("GitHub authentication unavailable")
+			return 0, errors.New("GitHub authentication unavailable")
 		}
 		token, err := b.tokenSource()
 		if err != nil {
-			return err
+			return 0, err
 		}
 		b.token = token
 	}
@@ -116,13 +263,13 @@ func (b *GitHubBackend) request(ctx context.Context, method, path string, body, 
 	if body != nil {
 		payload, err := json.Marshal(body)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		encoded = bytes.NewReader(payload)
 	}
 	request, err := http.NewRequestWithContext(ctx, method, b.baseURL+path, encoded)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	request.Header.Set("Accept", "application/vnd.github+json")
 	request.Header.Set("Authorization", "Bearer "+b.token)
@@ -132,15 +279,15 @@ func (b *GitHubBackend) request(ctx context.Context, method, path string, body, 
 	}
 	response, err := b.client.Do(request)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		message, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
-		return fmt.Errorf("GitHub %s %s: %s: %s", method, path, response.Status, strings.TrimSpace(string(message)))
+		return response.StatusCode, fmt.Errorf("GitHub %s %s: %s: %s", method, path, response.Status, strings.TrimSpace(string(message)))
 	}
 	if destination != nil {
-		return json.NewDecoder(response.Body).Decode(destination)
+		return response.StatusCode, json.NewDecoder(response.Body).Decode(destination)
 	}
-	return nil
+	return response.StatusCode, nil
 }
