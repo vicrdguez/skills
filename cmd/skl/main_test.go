@@ -3,11 +3,16 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"slices"
+	"strings"
 	"testing"
 
+	skilldist "github.com/vicrdguez/skills"
 	"github.com/vicrdguez/skills/setup"
 )
 
@@ -90,6 +95,210 @@ func TestSetupDeclinesClaudeMigrationAtEndOfInput(t *testing.T) {
 	}
 }
 
+func TestInstallSupportedSkillStubs(t *testing.T) {
+	root := t.TempDir()
+	var output bytes.Buffer
+	app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, root)
+
+	if err := app.Run([]string{"skl", "install"}); err != nil {
+		t.Fatal(err)
+	}
+
+	wantSkills := map[string]string{
+		"audit":              "skills/dev/audit/SKILL.md",
+		"brainstorm":         "skills/thinking/brainstorm/SKILL.md",
+		"design":             "skills/dev/design/SKILL.md",
+		"domain":             "skills/dev/domain/SKILL.md",
+		"explore":            "skills/dev/explore/SKILL.md",
+		"implement":          "skills/dev/implement/SKILL.md",
+		"propose":            "skills/dev/propose/SKILL.md",
+		"shape":              "skills/thinking/shape/SKILL.md",
+		"tdd":                "skills/dev/tdd/SKILL.md",
+		"watchdog":           "skills/dev/watchdog/SKILL.md",
+		"writing-for-agents": "skills/misc/writing-for-agents/SKILL.md",
+	}
+	for _, harness := range []string{".pi/agent/skills", ".codex/skills", ".claude/skills"} {
+		for name, source := range wantSkills {
+			stub := readFile(t, filepath.Join(root, harness, name, "SKILL.md"))
+			if !strings.HasPrefix(stub, "---\n") {
+				t.Fatalf("%s %s stub has no leading YAML frontmatter:\n%s", harness, name, stub)
+			}
+			if want := skillFrontmatter(t, readRepositoryFile(t, source)); !strings.HasPrefix(stub, want+"\n") {
+				t.Fatalf("%s %s stub changed source frontmatter:\n%s", harness, name, stub)
+			}
+			if !strings.Contains(stub, "skl skill "+name) || !strings.Contains(stub, "skl.stub/v1") {
+				t.Fatalf("%s %s stub does not delegate to skl:\n%s", harness, name, stub)
+			}
+		}
+		if _, err := os.Stat(filepath.Join(root, harness, "dev-setup", "SKILL.md")); !os.IsNotExist(err) {
+			t.Fatalf("%s contains retired dev-setup stub: %v", harness, err)
+		}
+	}
+	for _, manifest := range []string{".claude-plugin/plugin.json", ".codex-plugin/plugin.json", "package.json"} {
+		if _, err := os.Stat(filepath.Join(root, manifest)); !os.IsNotExist(err) {
+			t.Fatalf("plugin manifest written at %s: %v", manifest, err)
+		}
+	}
+}
+
+func TestInstallFailsWithoutUserHome(t *testing.T) {
+	t.Setenv("HOME", "")
+	var output bytes.Buffer
+	app := newApp(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output)
+
+	if err := app.Run([]string{"skl", "install"}); err == nil {
+		t.Fatal("install succeeded without a user home")
+	}
+}
+
+func TestInstallRefreshesOnlyOwnedStubs(t *testing.T) {
+	root := t.TempDir()
+	var output bytes.Buffer
+	app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, root)
+	if err := app.Run([]string{"skl", "install"}); err != nil {
+		t.Fatal(err)
+	}
+
+	tdd := filepath.Join(root, ".codex/skills/tdd/SKILL.md")
+	wantTDD := readFile(t, tdd)
+	if err := os.WriteFile(tdd, []byte("---\nname: tdd\n---\n\n<!-- skl-owned: skl.stub/v1 -->\nstale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	audit := filepath.Join(root, ".codex/skills/audit/SKILL.md")
+	if err := os.WriteFile(audit, []byte("---\nname: audit\n---\n\n<!-- skl-owned: skl.stub/v2 -->\nmy unrelated skill"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.Run([]string{"skl", "install"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := readFile(t, tdd); got != wantTDD {
+		t.Fatalf("owned stub was not refreshed:\n%s", got)
+	}
+	if got := readFile(t, audit); got != "---\nname: audit\n---\n\n<!-- skl-owned: skl.stub/v2 -->\nmy unrelated skill" {
+		t.Fatalf("unrelated file changed: %q", got)
+	}
+}
+
+func TestRetrieveRenderedSkillInstructions(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, t.TempDir())
+
+	if err := app.Run([]string{"skl", "skill", "tdd"}); err != nil {
+		t.Fatal(err)
+	}
+
+	want := "Protocol: skl.instructions/v1\nSkill: tdd\nIncluded skills: none\nFacts: {}\nResources: reference/mocking.md, reference/tests.md\n\n" + readRepositoryFile(t, "skills/dev/tdd/SKILL.md")
+	if got := stdout.String(); got != want {
+		t.Fatalf("rendered packet differs from canonical definition:\n%s", got)
+	}
+}
+
+func TestRetrieveEquivalentTypedInstructions(t *testing.T) {
+	wantInstructions := readRepositoryFile(t, "skills/dev/tdd/SKILL.md")
+	wantResources := []string{"reference/mocking.md", "reference/tests.md"}
+	wantMarkdown := "Protocol: skl.instructions/v1\nSkill: tdd\nIncluded skills: none\nFacts: {}\nResources: reference/mocking.md, reference/tests.md\n\n" + wantInstructions
+	var markdown bytes.Buffer
+	app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &markdown, &markdown, t.TempDir())
+	if err := app.Run([]string{"skl", "skill", "tdd"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	app = newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, t.TempDir())
+	if err := app.Run([]string{"skl", "skill", "--format", "json", "tdd"}); err != nil {
+		t.Fatal(err)
+	}
+	var packet skilldist.Packet
+	if err := json.Unmarshal(stdout.Bytes(), &packet); err != nil {
+		t.Fatalf("stdout is not a JSON packet: %v\n%s", err, stdout.String())
+	}
+	if packet.Protocol != "skl.instructions/v1" || packet.Skill != "tdd" || packet.Facts != (skilldist.InvocationFacts{}) || len(packet.IncludedSkills) != 0 || !slices.Equal(packet.Resources, wantResources) || packet.Instructions != wantInstructions || markdown.String() != wantMarkdown {
+		t.Fatalf("JSON and Markdown packets differ: %#v", packet)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestRetrieveOneNamedResource(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, t.TempDir())
+
+	if err := app.Run([]string{"skl", "skill", "--resource", "reference/tests.md", "tdd"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, want := stdout.String(), readRepositoryFile(t, "skills/dev/tdd/reference/tests.md"); got != want {
+		t.Fatalf("stdout did not contain only the requested resource:\n%s", got)
+	}
+}
+
+func TestBundleGuaranteedSupportingSkills(t *testing.T) {
+	root := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, root)
+	if err := app.Run([]string{"skl", "skill", "--format", "json", "implement"}); err != nil {
+		t.Fatal(err)
+	}
+	var packet skilldist.Packet
+	if err := json.Unmarshal(stdout.Bytes(), &packet); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"tdd", "audit", "design", "domain"}
+	if !slices.Equal(packet.IncludedSkills, want) {
+		t.Fatalf("included_skills = %v, want %v", packet.IncludedSkills, want)
+	}
+	wantInstructions := readRepositoryFile(t, "skills/dev/implement/SKILL.md")
+	for _, included := range []struct{ name, path string }{
+		{"tdd", "skills/dev/tdd/SKILL.md"},
+		{"audit", "skills/dev/audit/SKILL.md"},
+		{"design", "skills/dev/design/SKILL.md"},
+		{"domain", "skills/dev/domain/SKILL.md"},
+	} {
+		wantInstructions += "\n\n## Included Skill: " + included.name + "\n\n" + readRepositoryFile(t, included.path)
+	}
+	if packet.Instructions != wantInstructions {
+		t.Fatalf("bundled instructions differ from canonical definitions:\n%s", packet.Instructions)
+	}
+
+	if err := app.Run([]string{"skl", "install"}); err != nil {
+		t.Fatal(err)
+	}
+	stub := readFile(t, filepath.Join(root, ".codex/skills/implement/SKILL.md"))
+	if !strings.Contains(stub, "included_skills") || !strings.Contains(stub, "Skip activation") {
+		t.Fatalf("stub lacks included-skill guard:\n%s", stub)
+	}
+}
+
+func TestIgnoreConsumerRepositoryOverrides(t *testing.T) {
+	repository := t.TempDir()
+	override := filepath.Join(repository, "skills/dev/tdd/SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(override), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(override, []byte("consumer override"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	previous, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(repository); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(previous) })
+
+	var stdout, stderr bytes.Buffer
+	app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, t.TempDir())
+	if err := app.Run([]string{"skl", "skill", "tdd"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := stdout.String(); !strings.Contains(got, "# Test-Driven Development") || strings.Contains(got, "consumer override") {
+		t.Fatalf("consumer repository overrode embedded definition:\n%s", got)
+	}
+}
+
 func readFile(t *testing.T, path string) string {
 	t.Helper()
 	contents, err := os.ReadFile(path)
@@ -97,6 +306,24 @@ func readFile(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(contents)
+}
+
+func readRepositoryFile(t *testing.T, path string) string {
+	t.Helper()
+	_, testFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("cannot locate repository root")
+	}
+	return readFile(t, filepath.Join(filepath.Dir(testFile), "..", "..", path))
+}
+
+func skillFrontmatter(t *testing.T, source string) string {
+	t.Helper()
+	end := strings.Index(source[4:], "\n---\n")
+	if !strings.HasPrefix(source, "---\n") || end < 0 {
+		t.Fatal("skill source has invalid frontmatter")
+	}
+	return source[:end+8]
 }
 
 func runGit(t *testing.T, directory string, args ...string) {
