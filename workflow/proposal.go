@@ -132,13 +132,28 @@ func Publish(ctx context.Context, request PublishRequest, backend Backend) (Outc
 			item = matches[0]
 		}
 		if parent.Number != 0 {
-			if err := backend.AddChild(ctx, repository, parent.Number, item.Number); err != nil {
-				return Outcome{}, err
+			if item.Parent != 0 && item.Parent != parent.Number {
+				return Outcome{Status: "needs_human", Reason: "existing Work Item has a conflicting parent: " + slice.Title}, nil
+			}
+			if item.Parent == 0 {
+				if err := backend.AddChild(ctx, repository, parent.Number, item.Number); err != nil {
+					return Outcome{}, err
+				}
 			}
 		}
 		for _, dependency := range request.Dependencies {
-			if dependency.Dependent == slice.Title {
-				if err := backend.AddDependency(ctx, repository, item.Number, published[dependency.Blocker].Number); err != nil {
+			if dependency.Dependent != slice.Title {
+				continue
+			}
+			blocker := published[dependency.Blocker].Number
+			alreadyLinked := false
+			for _, existingBlocker := range item.Blockers {
+				if existingBlocker == blocker {
+					alreadyLinked = true
+				}
+			}
+			if !alreadyLinked {
+				if err := backend.AddDependency(ctx, repository, item.Number, blocker); err != nil {
 					return Outcome{}, err
 				}
 			}

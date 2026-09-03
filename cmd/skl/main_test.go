@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,6 +25,7 @@ type memoryBackend struct {
 	parents    []workflow.CoordinationItem
 	children   [][2]int
 	blocks     [][2]int
+	failReady  int
 }
 
 func (b *memoryBackend) Validate(_ context.Context, repository setup.RepositoryID) (string, error) {
@@ -58,15 +60,29 @@ func (b *memoryBackend) CreateCoordinationItem(_ context.Context, _ workflow.Rep
 
 func (b *memoryBackend) AddChild(_ context.Context, _ workflow.RepositoryID, parent, child int) error {
 	b.children = append(b.children, [2]int{parent, child})
+	for index := range b.items {
+		if b.items[index].Number == child {
+			b.items[index].Parent = parent
+		}
+	}
 	return nil
 }
 
 func (b *memoryBackend) AddDependency(_ context.Context, _ workflow.RepositoryID, dependent, blocker int) error {
 	b.blocks = append(b.blocks, [2]int{dependent, blocker})
+	for index := range b.items {
+		if b.items[index].Number == dependent {
+			b.items[index].Blockers = append(b.items[index].Blockers, blocker)
+		}
+	}
 	return nil
 }
 
 func (b *memoryBackend) SetReady(_ context.Context, _ workflow.RepositoryID, number int) error {
+	if b.failReady == number {
+		b.failReady = 0
+		return errors.New("temporary backend failure")
+	}
 	for index := range b.items {
 		if b.items[index].Number == number {
 			b.items[index].Ready = true
@@ -384,6 +400,41 @@ func TestRefuseInvalidProposalPreflight(t *testing.T) {
 				t.Fatalf("backend mutated: %#v", backend)
 			}
 		})
+	}
+}
+
+func TestResumePartialProposalPublication(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "base")
+	prepareSlice(t, root, "dependent")
+	directory := t.TempDir()
+	for _, name := range []string{"parent", "base", "dependent"} {
+		if err := os.WriteFile(filepath.Join(directory, name+".md"), []byte(name+" body\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	arguments := []string{"skl", "propose", "publish", "--repo", root, "--target", "main",
+		"--slice", "base=" + filepath.Join(directory, "base.md"), "--slice", "dependent=" + filepath.Join(directory, "dependent.md"),
+		"--depends", "dependent:base", "--parent-title", "proposal", "--parent-body", filepath.Join(directory, "parent.md")}
+	backend := &memoryBackend{failReady: 2}
+	var output bytes.Buffer
+	app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+
+	if err := app.Run(arguments); err == nil || !strings.Contains(err.Error(), "temporary backend failure") {
+		t.Fatalf("first publication error = %v", err)
+	}
+	if err := app.Run(arguments); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(backend.parents) != 1 || len(backend.items) != 2 {
+		t.Fatalf("records duplicated: parents=%#v items=%#v", backend.parents, backend.items)
+	}
+	if !slices.Equal(backend.children, [][2]int{{100, 1}, {100, 2}}) || !slices.Equal(backend.blocks, [][2]int{{2, 1}}) {
+		t.Fatalf("relationships duplicated: children=%v dependencies=%v", backend.children, backend.blocks)
+	}
+	if !backend.items[0].Ready || !backend.items[1].Ready {
+		t.Fatalf("publication did not resume to Ready: %#v", backend.items)
 	}
 }
 
