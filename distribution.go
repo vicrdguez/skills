@@ -76,8 +76,11 @@ func definitionFrontmatter(name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if !bytes.HasPrefix(source, []byte("---\n")) {
+		return "", fmt.Errorf("skill %q has invalid frontmatter", name)
+	}
 	end := bytes.Index(source[4:], []byte("\n---\n"))
-	if !bytes.HasPrefix(source, []byte("---\n")) || end < 0 {
+	if end < 0 {
 		return "", fmt.Errorf("skill %q has invalid frontmatter", name)
 	}
 	return string(source[:end+8]), nil
