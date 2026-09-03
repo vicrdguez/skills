@@ -198,6 +198,9 @@ func TestRetrieveRenderedSkillInstructions(t *testing.T) {
 }
 
 func TestRetrieveEquivalentTypedInstructions(t *testing.T) {
+	wantInstructions := readRepositoryFile(t, "skills/dev/tdd/SKILL.md")
+	wantResources := []string{"reference/mocking.md", "reference/tests.md"}
+	wantMarkdown := "Protocol: skl.instructions/v1\nSkill: tdd\nIncluded skills: none\nFacts: {}\nResources: reference/mocking.md, reference/tests.md\n\n" + wantInstructions
 	var markdown bytes.Buffer
 	app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &markdown, &markdown, t.TempDir())
 	if err := app.Run([]string{"skl", "skill", "tdd"}); err != nil {
@@ -213,11 +216,7 @@ func TestRetrieveEquivalentTypedInstructions(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &packet); err != nil {
 		t.Fatalf("stdout is not a JSON packet: %v\n%s", err, stdout.String())
 	}
-	expected, err := skilldist.BuildPacket("tdd", skilldist.InvocationFacts{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if packet.Protocol != expected.Protocol || packet.Skill != expected.Skill || packet.Facts != expected.Facts || !slices.Equal(packet.IncludedSkills, expected.IncludedSkills) || !slices.Equal(packet.Resources, expected.Resources) || packet.Instructions != expected.Instructions || markdown.String() != expected.Markdown() {
+	if packet.Protocol != "skl.instructions/v1" || packet.Skill != "tdd" || packet.Facts != (skilldist.InvocationFacts{}) || len(packet.IncludedSkills) != 0 || !slices.Equal(packet.Resources, wantResources) || packet.Instructions != wantInstructions || markdown.String() != wantMarkdown {
 		t.Fatalf("JSON and Markdown packets differ: %#v", packet)
 	}
 	if stderr.Len() != 0 {
