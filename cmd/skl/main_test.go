@@ -438,6 +438,53 @@ func TestResumePartialProposalPublication(t *testing.T) {
 	}
 }
 
+func TestCleanOnlySafeMergedWorktrees(t *testing.T) {
+	root := proposalRepository(t)
+	worktrees := filepath.Join(root, ".worktrees")
+	for _, slug := range []string{"merged-clean", "merged-dirty", "unrelated"} {
+		runGit(t, root, "worktree", "add", filepath.Join(worktrees, slug), "-b", slug, "main")
+	}
+	unexpected := filepath.Join(root, "elsewhere")
+	runGit(t, root, "worktree", "add", unexpected, "-b", "merged-unexpected", "main")
+	if err := os.WriteFile(filepath.Join(worktrees, "merged-dirty", "local.txt"), []byte("keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, slug := range []string{"merged-clean", "merged-dirty", "merged-unexpected", "unrelated"} {
+		runGit(t, root, "update-ref", "refs/remotes/origin/"+slug, "refs/heads/"+slug)
+	}
+	backend := &memoryBackend{items: []workflow.WorkItem{
+		{Number: 1, Title: "merged-clean", Branch: "merged-clean", Merged: true},
+		{Number: 2, Title: "merged-dirty", Branch: "merged-dirty", Merged: true},
+		{Number: 3, Title: "merged-unexpected", Branch: "merged-unexpected", Merged: true},
+	}}
+	var output bytes.Buffer
+	app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+
+	if err := app.Run([]string{"skl", "propose", "cleanup", "--repo", root}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(filepath.Join(worktrees, "merged-clean")); !os.IsNotExist(err) {
+		t.Fatalf("clean merged worktree remains: %v", err)
+	}
+	if gitRefExists(root, "refs/heads/merged-clean") {
+		t.Fatal("clean merged branch remains")
+	}
+	for _, path := range []string{filepath.Join(worktrees, "merged-dirty"), unexpected, filepath.Join(worktrees, "unrelated")} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("preserved worktree %s: %v", path, err)
+		}
+	}
+	for _, slug := range []string{"merged-clean", "merged-dirty", "merged-unexpected", "unrelated"} {
+		if !gitRefExists(root, "refs/remotes/origin/"+slug) {
+			t.Fatalf("remote branch %s removed", slug)
+		}
+	}
+	if got := output.String(); !strings.Contains(got, "removed merged-clean") || !strings.Contains(got, "preserved merged-dirty") || !strings.Contains(got, "preserved merged-unexpected") {
+		t.Fatalf("cleanup report = %q", got)
+	}
+}
+
 func TestRetrieveEquivalentTypedInstructions(t *testing.T) {
 	wantInstructions := readRepositoryFile(t, "skills/dev/tdd/SKILL.md")
 	wantResources := []string{"reference/mocking.md", "reference/tests.md"}
@@ -639,4 +686,8 @@ func runGitOutput(t *testing.T, directory string, args ...string) string {
 		t.Fatalf("git %v: %v\n%s", args, err, output)
 	}
 	return string(output)
+}
+
+func gitRefExists(root, ref string) bool {
+	return exec.Command("git", "-C", root, "show-ref", "--verify", "--quiet", ref).Run() == nil
 }

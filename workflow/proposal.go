@@ -24,6 +24,7 @@ type WorkItem struct {
 	Ready            bool
 	Parent           int
 	Blockers         []int
+	Merged           bool
 }
 
 type CoordinationItem struct {
@@ -65,6 +66,84 @@ type PublishRequest struct {
 type Outcome struct {
 	Status string
 	Reason string
+}
+
+type CleanupOutcome struct {
+	Removed   []string
+	Preserved []string
+}
+
+func Cleanup(ctx context.Context, root, remote string, backend Backend) (CleanupOutcome, error) {
+	root, err := git(root, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return CleanupOutcome{}, errors.New("not a Git repository")
+	}
+	if remote == "" {
+		remote = "origin"
+	}
+	remoteURL, err := git(root, "remote", "get-url", remote)
+	if err != nil {
+		return CleanupOutcome{}, err
+	}
+	repository, err := parseGitHubRemote(remoteURL)
+	if err != nil {
+		return CleanupOutcome{}, err
+	}
+	items, err := backend.ListWorkItems(ctx, repository)
+	if err != nil {
+		return CleanupOutcome{}, err
+	}
+	registered, err := registeredWorktrees(root)
+	if err != nil {
+		return CleanupOutcome{}, err
+	}
+	var outcome CleanupOutcome
+	for _, item := range items {
+		if !item.Merged {
+			continue
+		}
+		branch := item.Branch
+		if branch == "" {
+			branch = item.Title
+		}
+		path := registered[branch]
+		expected := filepath.Join(root, ".worktrees", branch)
+		if filepath.Clean(path) != filepath.Clean(expected) {
+			outcome.Preserved = append(outcome.Preserved, branch)
+			continue
+		}
+		dirty, err := git(path, "status", "--porcelain", "--untracked-files=all")
+		if err != nil || dirty != "" {
+			outcome.Preserved = append(outcome.Preserved, branch)
+			continue
+		}
+		if err := gitOK(root, "worktree", "remove", path); err != nil {
+			return outcome, fmt.Errorf("remove worktree %s: %w", branch, err)
+		}
+		if err := gitOK(root, "branch", "-d", branch); err != nil {
+			return outcome, fmt.Errorf("remove branch %s: %w", branch, err)
+		}
+		outcome.Removed = append(outcome.Removed, branch)
+	}
+	return outcome, nil
+}
+
+func registeredWorktrees(root string) (map[string]string, error) {
+	output, err := git(root, "worktree", "list", "--porcelain")
+	if err != nil {
+		return nil, err
+	}
+	registered := make(map[string]string)
+	var worktree string
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(line, "worktree ") {
+			worktree = strings.TrimPrefix(line, "worktree ")
+		}
+		if strings.HasPrefix(line, "branch refs/heads/") {
+			registered[strings.TrimPrefix(line, "branch refs/heads/")] = worktree
+		}
+	}
+	return registered, nil
 }
 
 func Publish(ctx context.Context, request PublishRequest, backend Backend) (Outcome, error) {

@@ -114,6 +114,37 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 				}
 				return err
 			},
+		}, {
+			Name: "cleanup",
+			Flags: []cli.Flag{
+				&cli.PathFlag{Name: "repo"},
+				&cli.StringFlag{Name: "remote"},
+			},
+			Action: func(command *cli.Context) error {
+				backend, err := newBackend()
+				if err != nil {
+					return err
+				}
+				proposalBackend, ok := backend.(workflow.Backend)
+				if !ok {
+					return fmt.Errorf("workflow backend does not support proposal cleanup")
+				}
+				root := command.Path("repo")
+				if root == "" {
+					root = "."
+				}
+				outcome, err := workflow.Cleanup(command.Context, root, command.String("remote"), proposalBackend)
+				if err != nil {
+					return err
+				}
+				for _, slug := range outcome.Removed {
+					fmt.Fprintln(stdout, "removed", slug)
+				}
+				for _, slug := range outcome.Preserved {
+					fmt.Fprintln(stdout, "preserved", slug)
+				}
+				return nil
+			},
 		}},
 	}, {
 		Name: "setup",
