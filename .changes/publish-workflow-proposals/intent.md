@@ -37,13 +37,13 @@ Add semantic Propose commands and specialized instructions that let the agent au
 - Implementing work or opening review Submissions
 
 ## Definition of Done
-- [ ] Propose instructions leave slice design and artifact authorship with the Agent Worker while replacing deterministic publication prose with semantic `skl` operations.
-- [ ] A valid single-slice Proposal becomes one Ready Work Item linked to its pushed branch and identifiable Artifact Baseline.
-- [ ] A valid multi-slice Proposal becomes one Coordination Item and dependency-ordered child Work Items with explicit parent and Dependency relationships.
-- [ ] Invalid durable-document, branch, baseline, artifact-shape, or graph preconditions refuse publication before the first GitHub mutation and explain the repair.
-- [ ] A failed partial publication can be retried forward without duplicate unambiguous records or rollback of valid completed children.
-- [ ] Proposal cleanup removes only safe local Git state for Merged Work Items and preserves every unsafe, remote, or unrelated candidate.
-- [ ] Work Item Markdown remains agent-authored and opaque to `skl`, with no proposal bundle or metadata file added to the repository.
+- [x] Propose instructions leave slice design and artifact authorship with the Agent Worker while replacing deterministic publication prose with semantic `skl` operations.
+- [x] A valid single-slice Proposal becomes one Ready Work Item linked to its pushed branch and identifiable Artifact Baseline.
+- [x] A valid multi-slice Proposal becomes one Coordination Item and dependency-ordered child Work Items with explicit parent and Dependency relationships.
+- [x] Invalid durable-document, branch, baseline, artifact-shape, or graph preconditions refuse publication before the first GitHub mutation and explain the repair.
+- [x] A failed partial publication can be retried forward without duplicate unambiguous records or rollback of valid completed children.
+- [x] Proposal cleanup removes only safe local Git state for Merged Work Items and preserves every unsafe, remote, or unrelated candidate.
+- [x] Work Item Markdown remains agent-authored and opaque to `skl`, with no proposal bundle or metadata file added to the repository.
 
 ## Manual verification
 - [ ] Open the published GitHub Coordination Item and children and confirm that native parent and Dependency relationships are visible in the GitHub interface.
