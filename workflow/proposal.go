@@ -156,11 +156,12 @@ func Publish(ctx context.Context, request PublishRequest, backend Backend) (Outc
 		return outcome, nil
 	}
 	var parent CoordinationItem
+	var parentBody []byte
 	if len(prepared) > 1 {
 		if request.ParentTitle == "" || request.ParentBody == "" {
 			return Outcome{}, errors.New("multi-slice proposals require --parent-title and --parent-body")
 		}
-		body, err := os.ReadFile(request.ParentBody)
+		parentBody, err = os.ReadFile(request.ParentBody)
 		if err != nil {
 			return Outcome{}, err
 		}
@@ -179,28 +180,33 @@ func Publish(ctx context.Context, request PublishRequest, backend Backend) (Outc
 		}
 		if len(matches) == 1 {
 			parent = matches[0]
-		} else {
-			parent, err = backend.CreateCoordinationItem(ctx, repository, CoordinationItem{Title: request.ParentTitle, Body: string(body)})
-			if err != nil {
-				return Outcome{}, err
-			}
 		}
 	}
 	existing, err := backend.ListWorkItems(ctx, repository)
 	if err != nil {
 		return Outcome{}, err
 	}
-	published := make(map[string]WorkItem, len(ordered))
+	matchesByTitle := make(map[string][]WorkItem, len(ordered))
 	for _, slice := range ordered {
-		var matches []WorkItem
 		for _, item := range existing {
 			if item.Title == slice.Title {
-				matches = append(matches, item)
+				matchesByTitle[slice.Title] = append(matchesByTitle[slice.Title], item)
 			}
 		}
+		matches := matchesByTitle[slice.Title]
 		if len(matches) > 1 || len(matches) == 1 && matches[0].Branch != "" && matches[0].Branch != slice.Branch {
 			return Outcome{Status: "needs_human", Reason: "ambiguous existing Work Item " + slice.Title}, nil
 		}
+	}
+	if len(prepared) > 1 && parent.Number == 0 {
+		parent, err = backend.CreateCoordinationItem(ctx, repository, CoordinationItem{Title: request.ParentTitle, Body: string(parentBody)})
+		if err != nil {
+			return Outcome{}, err
+		}
+	}
+	published := make(map[string]WorkItem, len(ordered))
+	for _, slice := range ordered {
+		matches := matchesByTitle[slice.Title]
 		item := slice
 		if len(matches) == 0 {
 			item, err = backend.CreateWorkItem(ctx, repository, slice)

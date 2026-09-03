@@ -438,6 +438,35 @@ func TestResumePartialProposalPublication(t *testing.T) {
 	}
 }
 
+func TestAmbiguousProposalRetryStopsBeforeMutation(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "one")
+	prepareSlice(t, root, "two")
+	directory := t.TempDir()
+	for _, name := range []string{"parent", "one", "two"} {
+		if err := os.WriteFile(filepath.Join(directory, name+".md"), []byte(name+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	backend := &memoryBackend{items: []workflow.WorkItem{{Number: 1, Title: "one"}, {Number: 2, Title: "one"}}}
+	var output bytes.Buffer
+	app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+
+	err := app.Run([]string{"skl", "propose", "publish", "--repo", root, "--target", "main",
+		"--slice", "one=" + filepath.Join(directory, "one.md"), "--slice", "two=" + filepath.Join(directory, "two.md"),
+		"--parent-title", "parent", "--parent-body", filepath.Join(directory, "parent.md")})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.HasPrefix(output.String(), "needs_human\n") {
+		t.Fatalf("output = %q", output.String())
+	}
+	if len(backend.parents) != 0 || len(backend.items) != 2 {
+		t.Fatalf("backend mutated before ambiguity was reported: %#v", backend)
+	}
+}
+
 func TestCleanOnlySafeMergedWorktrees(t *testing.T) {
 	root := proposalRepository(t)
 	worktrees := filepath.Join(root, ".worktrees")
