@@ -14,11 +14,14 @@ import (
 
 	skilldist "github.com/vicrdguez/skills"
 	"github.com/vicrdguez/skills/setup"
+	"github.com/vicrdguez/skills/workflow"
 )
 
 type memoryBackend struct {
 	repository setup.RepositoryID
 	labels     []setup.Label
+	items      []workflow.WorkItem
+	parents    []workflow.CoordinationItem
 }
 
 func (b *memoryBackend) Validate(_ context.Context, repository setup.RepositoryID) (string, error) {
@@ -28,6 +31,41 @@ func (b *memoryBackend) Validate(_ context.Context, repository setup.RepositoryI
 
 func (b *memoryBackend) EnsureLabels(_ context.Context, _ setup.RepositoryID, labels []setup.Label) error {
 	b.labels = append([]setup.Label(nil), labels...)
+	return nil
+}
+
+func (b *memoryBackend) ListWorkItems(context.Context, workflow.RepositoryID) ([]workflow.WorkItem, error) {
+	return append([]workflow.WorkItem(nil), b.items...), nil
+}
+
+func (b *memoryBackend) CreateWorkItem(_ context.Context, _ workflow.RepositoryID, item workflow.WorkItem) (workflow.WorkItem, error) {
+	item.Number = len(b.items) + 1
+	b.items = append(b.items, item)
+	return item, nil
+}
+
+func (b *memoryBackend) ListCoordinationItems(context.Context, workflow.RepositoryID) ([]workflow.CoordinationItem, error) {
+	return append([]workflow.CoordinationItem(nil), b.parents...), nil
+}
+
+func (b *memoryBackend) CreateCoordinationItem(_ context.Context, _ workflow.RepositoryID, item workflow.CoordinationItem) (workflow.CoordinationItem, error) {
+	item.Number = 100 + len(b.parents)
+	b.parents = append(b.parents, item)
+	return item, nil
+}
+
+func (b *memoryBackend) AddChild(context.Context, workflow.RepositoryID, int, int) error { return nil }
+
+func (b *memoryBackend) AddDependency(context.Context, workflow.RepositoryID, int, int) error {
+	return nil
+}
+
+func (b *memoryBackend) SetReady(_ context.Context, _ workflow.RepositoryID, number int) error {
+	for index := range b.items {
+		if b.items[index].Number == number {
+			b.items[index].Ready = true
+		}
+	}
 	return nil
 }
 
@@ -213,6 +251,37 @@ func TestRetrieveConcreteProposeInstructions(t *testing.T) {
 	}
 }
 
+func TestPublishOnePreparedSlice(t *testing.T) {
+	root := proposalRepository(t)
+	baseline := prepareSlice(t, root, "ship-widget")
+	body := filepath.Join(t.TempDir(), "issue.md")
+	if err := os.WriteFile(body, []byte("agent-authored body\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	backend := &memoryBackend{}
+	var output bytes.Buffer
+	app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+
+	err := app.Run([]string{"skl", "propose", "publish", "--repo", root, "--target", "main", "--slice", "ship-widget=" + body})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := output.String(); got != "completed\n" {
+		t.Fatalf("output = %q", got)
+	}
+	if len(backend.items) != 1 {
+		t.Fatalf("items = %#v", backend.items)
+	}
+	item := backend.items[0]
+	if item.Title != "ship-widget" || item.Body != "agent-authored body\n" || item.Branch != "ship-widget" || item.ArtifactBaseline != baseline || !item.Ready {
+		t.Fatalf("item = %#v", item)
+	}
+	if len(backend.parents) != 0 {
+		t.Fatalf("parents = %#v", backend.parents)
+	}
+}
+
 func TestRetrieveEquivalentTypedInstructions(t *testing.T) {
 	wantInstructions := readRepositoryFile(t, "skills/dev/tdd/SKILL.md")
 	wantResources := []string{"reference/mocking.md", "reference/tests.md"}
@@ -351,4 +420,49 @@ func runGit(t *testing.T, directory string, args ...string) {
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, output)
 	}
+}
+
+func proposalRepository(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	runGit(t, root, "init", "-b", "main")
+	runGit(t, root, "config", "user.name", "Test")
+	runGit(t, root, "config", "user.email", "test@example.com")
+	runGit(t, root, "remote", "add", "origin", "git@github.com:acme/widgets.git")
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("widget\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", "README.md")
+	runGit(t, root, "commit", "-m", "initial")
+	runGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
+	return root
+}
+
+func prepareSlice(t *testing.T, root, slug string) string {
+	t.Helper()
+	runGit(t, root, "switch", "-c", slug, "main")
+	directory := filepath.Join(root, ".changes", slug)
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"intent.md", "behavior.md"} {
+		if err := os.WriteFile(filepath.Join(directory, name), []byte(name+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runGit(t, root, "add", filepath.Join(".changes", slug))
+	runGit(t, root, "commit", "-m", "Propose "+slug)
+	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	runGit(t, root, "update-ref", "refs/remotes/origin/"+slug, head)
+	return head
+}
+
+func runGitOutput(t *testing.T, directory string, args ...string) string {
+	t.Helper()
+	command := exec.Command("git", append([]string{"-C", directory}, args...)...)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, output)
+	}
+	return string(output)
 }
