@@ -42,14 +42,14 @@ Add semantic Implement operations that select or resume one Work Item, return a 
 - Merging code
 
 ## Definition of Done
-- [ ] Implement selection deterministically returns and claims the correct oldest eligible Rework or Ready Work Item, or reports `no_work` without mutation.
-- [ ] Interrupted claimed work resumes by stable identity while ordinary selection continues to skip it.
-- [ ] A new implementation receives a fixed Target Snapshot and concrete once-only bundled instructions while the Agent Worker retains all code, test, Audit, commit, and push behavior.
-- [ ] A valid first-pass implementation with a completed and retired ledger becomes one Awaiting Review Submission whose source issue remains open and whose body will close it on merge.
-- [ ] A valid Rework implementation updates the existing Submission and returns it to Awaiting Review without recreating artifacts or synchronizing the target again.
-- [ ] Invalid target, remote-head, artifact, or state preconditions return `fix_required`, retain the Claim and state, and can be repaired and retried.
-- [ ] An implementation-stage human decision is durably published on the issue when no code exists or on a draft Submission when work exists, then enters Needs Human.
-- [ ] Implement and Audit Skill Definitions preserve their judgment behavior while removing only deterministic mechanics now owned by `skl`.
+- [x] Implement selection deterministically returns and claims the correct oldest eligible Rework or Ready Work Item, or reports `no_work` without mutation.
+- [x] Interrupted claimed work resumes by stable identity while ordinary selection continues to skip it.
+- [x] A new implementation receives a fixed Target Snapshot and concrete once-only bundled instructions while the Agent Worker retains all code, test, Audit, commit, and push behavior.
+- [x] A valid first-pass implementation with a completed and retired ledger becomes one Awaiting Review Submission whose source issue remains open and whose body will close it on merge.
+- [x] A valid Rework implementation updates the existing Submission and returns it to Awaiting Review without recreating artifacts or synchronizing the target again.
+- [x] Invalid target, remote-head, artifact, or state preconditions return `fix_required`, retain the Claim and state, and can be repaired and retried.
+- [x] An implementation-stage human decision is durably published on the issue when no code exists or on a draft Submission when work exists, then enters Needs Human.
+- [x] Implement and Audit Skill Definitions preserve their judgment behavior while removing only deterministic mechanics now owned by `skl`.
 
 ## Manual verification
 - [ ] Run an Implement Skill Stub in a fresh Agent Harness context and confirm the worker follows the concrete packet, runs Audit, and reaches the expected GitHub handoff without consulting `docs/github.md`.
