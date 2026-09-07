@@ -3,9 +3,11 @@ package setup
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -66,6 +68,9 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 		case path == "/issues":
 			result = []any{issue(7)}
 		case path == "/pulls" && r.Method == http.MethodGet:
+			for _, pull := range pulls {
+				pull["labels"] = issue(11)["labels"]
+			}
 			result = pulls
 		case path == "/pulls" && r.Method == http.MethodPost:
 			var payload map[string]any
@@ -75,7 +80,16 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 			http.Error(w, "response lost after creation", 500)
 			return
 		case path == "/pulls/11" && r.Method == http.MethodGet:
+			pulls[0]["labels"] = issue(11)["labels"]
 			result = pulls[0]
+		case path == "/graphql":
+			var payload map[string]any
+			json.NewDecoder(r.Body).Decode(&payload)
+			pulls[0]["draft"] = strings.Contains(payload["query"].(string), "convertPullRequestToDraft")
+			http.Error(w, "response lost after draft conversion", 500)
+			return
+		case path == "/pulls/11/reviews":
+			result = []any{}
 		case path == "/pulls/11" && r.Method == http.MethodPatch:
 			var payload map[string]any
 			json.NewDecoder(r.Body).Decode(&payload)
@@ -162,6 +176,41 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 	}
 	if fmt.Sprint(labels[7]) != "[external]" || fmt.Sprint(labels[11]) != "[review]" {
 		t.Fatalf("labels=%v", labels)
+	}
+	labels[11] = []string{"rework", "wip"}
+	item.State = workflow.Rework
+	item.Claimed = true
+	transition := workflow.ImplementationTransition{From: workflow.Rework, Target: workflow.NeedsHuman, Head: "fixed"}
+	if err := b.RecordImplementationTransition(ctx, repo, item, transition); err != nil {
+		t.Fatal(err)
+	}
+	updated.Draft = true
+	draft, err := b.PublishImplementation(ctx, repo, item, updated)
+	if err != nil || !draft.Draft {
+		t.Fatalf("draft = %#v %v", draft, err)
+	}
+	item.Submission = &draft
+	interrupted := false
+	guard := func() error {
+		if !interrupted && slices.Contains(labels[11], "needs-human") && slices.Contains(labels[11], "rework") {
+			interrupted = true
+			return errors.New("interrupted before final projection")
+		}
+		return nil
+	}
+	if err := b.PauseImplementation(ctx, repo, item, "opaque decision", guard); err == nil {
+		t.Fatal("fixture did not interrupt pause")
+	}
+	items, err = b.ImplementationItems(ctx, repo)
+	if err != nil || len(items) != 1 || items[0].Problem != "" || items[0].State != workflow.Rework || !items[0].Claimed {
+		t.Fatalf("interrupted pause = %#v %v", items, err)
+	}
+	if err := b.PauseImplementation(ctx, repo, item, "opaque decision", guard); err != nil {
+		t.Fatal(err)
+	}
+	items, err = b.ImplementationItems(ctx, repo)
+	if err != nil || items[0].State != workflow.NeedsHuman || items[0].Claimed || items[0].ResumeState != workflow.Rework || !items[0].Submission.Draft {
+		t.Fatalf("completed pause = %#v %v", items, err)
 	}
 }
 

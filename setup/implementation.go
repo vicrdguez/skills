@@ -516,6 +516,8 @@ func (b *GitHubBackend) ImplementationTarget(ctx context.Context, repository wor
 func implementationLabels(issue githubIssue) (workflow.State, bool, string) {
 	var state workflow.State
 	claimed := false
+	problem := ""
+	paused := false
 	for _, label := range issue.Labels {
 		var next workflow.State
 		switch label.Name {
@@ -529,17 +531,23 @@ func implementationLabels(issue githubIssue) (workflow.State, bool, string) {
 			next = workflow.ReadyForMerge
 		case "needs-human":
 			next = workflow.NeedsHuman
+			paused = true
 		case "wip":
 			claimed = true
 		}
 		if next != "" {
 			if state != "" && state != next {
-				return state, claimed, "contradictory lifecycle projections"
+				problem = "contradictory lifecycle projections"
 			}
-			state = next
+			if state == "" {
+				state = next
+			}
 		}
 	}
-	return state, claimed, ""
+	if paused {
+		state = workflow.NeedsHuman
+	}
+	return state, claimed, problem
 }
 
 func (b *GitHubBackend) implementationComments(ctx context.Context, repository workflow.RepositoryID, stream string) ([]skilldist.ReviewComment, error) {

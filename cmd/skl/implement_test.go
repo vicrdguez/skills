@@ -309,6 +309,16 @@ func TestImplementPinsTargetAndBundlesInstructions(t *testing.T) {
 	if !strings.Contains(got.Packet.Markdown(), "git merge "+target) || !strings.Contains(got.Packet.Facts.Implementation.ResumeCommand, target) {
 		t.Fatalf("missing concrete Git/retry facts: %s", got.Packet.Markdown())
 	}
+	_, markdown, found := strings.Cut(got.Packet.Markdown(), "\n\n## Work Start\n")
+	if !found {
+		t.Fatal("packet lacks Work Start instructions")
+	}
+	facts := got.Packet.Facts.Implementation
+	golden := readRepositoryFile(t, "cmd/skl/testdata/implement-start.golden.md")
+	normalized := strings.NewReplacer(facts.Worktree, "<worktree>", facts.ResultDirectory, "<result>", baseline, "<baseline>", target, "<target>").Replace("## Work Start\n" + markdown)
+	if normalized != golden {
+		t.Fatalf("Work Start Markdown differs from golden:\n%s", normalized)
+	}
 	if strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD")) != baseline {
 		t.Fatal("Work Start changed Git")
 	}
