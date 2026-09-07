@@ -155,7 +155,7 @@ func TestImplementSubmitsCompletedFirstImplementation(t *testing.T) {
 		t.Fatalf("submit: %#v %#v", got, backend.work)
 	}
 	submission := backend.work[0].Submission
-	if submission == nil || submission.Number != 11 || submission.Head != backend.remoteHeads["widget"] || submission.Body != "opaque audit [not even Markdown\n\nCloses #7\n" {
+	if submission == nil || submission.Number != 11 || submission.Head != backend.remoteHeads["widget"] || submission.Body != "opaque audit [not even Markdown\n\n\nCloses #7\n" {
 		t.Fatalf("submission = %#v", submission)
 	}
 }
@@ -321,5 +321,28 @@ func TestImplementPausesPreservingWork(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, ".changes/widget/intent.md")); err != nil {
 		t.Fatal("draft retired incomplete artifacts")
+	}
+}
+
+func TestImplementPublishesOpaqueResultAndCleansSuccessfulDirectory(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "widget")
+	backend := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{}}
+	start := implementCLI(t, root, backend, "next")
+	directory := start.Packet.Facts.Implementation.ResultDirectory
+	body := filepath.Join(directory, "submission.md")
+	prose := "\x00[ broken Markdown\nVerdict: needs-human\n\n\n"
+	if err := os.WriteFile(body, []byte(prose), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "rm", "-r", ".changes/widget")
+	runGit(t, root, "commit", "-m", "retire")
+	backend.remoteHeads["widget"] = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	got := implementCLI(t, root, backend, "submit", "--item", "7", "--body", body)
+	if got.Status != "awaiting_review" || backend.work[0].Submission.Body != prose+"\n\nCloses #7\n" {
+		t.Fatalf("opaque publication = %#v", got)
+	}
+	if _, err := os.Stat(directory); !os.IsNotExist(err) {
+		t.Fatalf("successful operation remains: %v", err)
 	}
 }

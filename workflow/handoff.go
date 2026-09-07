@@ -14,6 +14,12 @@ func PauseImplementation(ctx context.Context, root string, number int, reason, d
 	if number <= 0 || decisionPath == "" || !slices.Contains([]string{"contradictory_artifacts", "mandatory_rule", "frozen_interface", "disputed_blocker", "bounce_cap"}, reason) {
 		return ImplementationOutcome{}, errors.New("Needs Human requires --item, --decision and a permitted --reason")
 	}
+	if err := validateResultDirectory(decisionPath); err != nil {
+		return ImplementationOutcome{}, err
+	}
+	if bodyPath != "" && filepath.Dir(bodyPath) != filepath.Dir(decisionPath) {
+		return ImplementationOutcome{}, errors.New("decision and Submission must share one private operation directory")
+	}
 	remote, err := git(root, "remote", "get-url", "origin")
 	if err != nil {
 		return ImplementationOutcome{}, err
@@ -55,7 +61,7 @@ func PauseImplementation(ctx context.Context, root string, number int, reason, d
 		if err != nil {
 			return ImplementationOutcome{}, err
 		}
-		submission := Submission{Head: head, Base: "main", Draft: true, Body: strings.TrimRight(string(body), "\n") + fmt.Sprintf("\n\nCloses #%d\n", number)}
+		submission := Submission{Head: head, Base: "main", Draft: true, Body: string(body) + fmt.Sprintf("\n\nCloses #%d\n", number)}
 		if item.Submission != nil {
 			submission.Number = item.Submission.Number
 		}
@@ -101,6 +107,9 @@ func PauseImplementation(ctx context.Context, root string, number int, reason, d
 	}
 	for _, current := range observed {
 		if current.Number == number && current.State == NeedsHuman && !current.Claimed && current.ResumeState == item.State {
+			if err := removeResultDirectory(decisionPath); err != nil {
+				return ImplementationOutcome{}, err
+			}
 			return ImplementationOutcome{Status: "needs_human", Item: &current}, nil
 		}
 	}
@@ -110,6 +119,9 @@ func PauseImplementation(ctx context.Context, root string, number int, reason, d
 func SubmitImplementation(ctx context.Context, root string, number int, bodyPath string, backend ImplementationBackend) (ImplementationOutcome, error) {
 	if number <= 0 || bodyPath == "" {
 		return ImplementationOutcome{}, errors.New("submit requires --item and --body")
+	}
+	if err := validateResultDirectory(bodyPath); err != nil {
+		return ImplementationOutcome{}, err
 	}
 	remote, err := git(root, "remote", "get-url", "origin")
 	if err != nil {
@@ -160,7 +172,7 @@ func SubmitImplementation(ctx context.Context, root string, number int, bodyPath
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
-	submission := Submission{Head: head, Base: "main", Body: strings.TrimRight(string(body), "\n") + fmt.Sprintf("\n\nCloses #%d\n", number)}
+	submission := Submission{Head: head, Base: "main", Body: string(body) + fmt.Sprintf("\n\nCloses #%d\n", number)}
 	if item.Submission != nil {
 		submission.Number = item.Submission.Number
 	}
@@ -186,6 +198,9 @@ func SubmitImplementation(ctx context.Context, root string, number int, bodyPath
 	}
 	for _, current := range observed {
 		if current.Number == item.Number && current.State == AwaitingReview && !current.Claimed && current.Submission != nil && current.Submission.Head == head {
+			if err := removeResultDirectory(bodyPath); err != nil {
+				return ImplementationOutcome{}, err
+			}
 			return ImplementationOutcome{Status: "awaiting_review", Item: &current}, nil
 		}
 	}
@@ -193,10 +208,38 @@ func SubmitImplementation(ctx context.Context, root string, number int, bodyPath
 }
 
 func removeResultDirectory(bodyPath string) error {
+	if err := validateResultDirectory(bodyPath); err != nil {
+		return err
+	}
+	return os.RemoveAll(filepath.Dir(bodyPath))
+}
+
+func validateResultDirectory(bodyPath string) error {
 	directory := filepath.Dir(bodyPath)
+	if !filepath.IsAbs(bodyPath) || !slices.Contains([]string{"submission.md", "decision.md"}, filepath.Base(bodyPath)) {
+		return errors.New("use the absolute Result Document path from the packet")
+	}
+	info, err := os.Lstat(directory)
+	if err != nil || !info.IsDir() || info.Mode().Perm()&0077 != 0 {
+		return errors.New("Result Document directory must be private and not a symlink")
+	}
+	parent, err := filepath.EvalSymlinks(filepath.Dir(directory))
+	temporary, tempErr := filepath.EvalSymlinks(os.TempDir())
+	if err != nil || tempErr != nil || parent != temporary {
+		return errors.New("Result Document directory must be engine-created outside the repository")
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if !slices.Contains([]string{".skl-result", "submission.md", "decision.md"}, entry.Name()) || !entry.Type().IsRegular() {
+			return errors.New("private Result Document directory contains unexpected files or symlinks")
+		}
+	}
 	marker, err := os.ReadFile(filepath.Join(directory, ".skl-result"))
 	if err != nil || string(marker) != "skl.implement/v1\n" || !strings.HasPrefix(filepath.Base(directory), "skl-implement-") {
 		return errors.New("Result Document must be in an engine-created private operation directory")
 	}
-	return os.RemoveAll(directory)
+	return nil
 }
