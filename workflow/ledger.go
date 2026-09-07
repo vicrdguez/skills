@@ -79,7 +79,7 @@ func InspectLedger(root, ref, slug string) (LedgerHistory, error) {
 			result.Phase = "present"
 			for _, required := range []string{"intent.md", "behavior.md"} {
 				if _, ok := files[path+"/"+required]; !ok {
-					result.Violations = append(result.Violations, "Artifact Baseline misses "+required)
+					result.Violations = append(result.Violations, "ledger misses "+required+" at Artifact Baseline")
 				}
 			}
 		}
@@ -93,7 +93,7 @@ func InspectLedger(root, ref, slug string) (LedgerHistory, error) {
 		previousFiles = files
 	}
 	if result.Baseline == "" {
-		result.Violations = append(result.Violations, fmt.Sprintf("ledger %s is missing", path))
+		result.Violations = append(result.Violations, fmt.Sprintf("ledger is missing at %s", path))
 	}
 	slices.Sort(result.Violations)
 	return result, nil
@@ -123,7 +123,7 @@ func ledgerFiles(root, commit, path string) (map[string]string, error) {
 	return files, nil
 }
 
-var ledgerCheckbox = regexp.MustCompile(`^(\s*(?:[-*+]|[0-9]+[.)])\s+\[)([ x])(\].*)$`)
+var ledgerCheckbox = regexp.MustCompile(`^(\s*(?:[-*+]|[0-9]+[.)])\s+\[)([ xX])(\].*)$`)
 
 func permittedTicks(old, current string) bool {
 	before, after := strings.Split(old, "\n"), strings.Split(current, "\n")
@@ -153,7 +153,7 @@ func ledgerBoxes(contents string, complete bool, location string) []string {
 			if level <= manualLevel {
 				manualLevel = 0
 			}
-			if strings.EqualFold(strings.TrimSpace(heading), "Manual verification") {
+			if strings.EqualFold(strings.TrimSpace(strings.TrimRight(heading, "#")), "Manual verification") {
 				manualLevel = level
 			}
 		}

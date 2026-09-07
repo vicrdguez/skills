@@ -46,7 +46,7 @@ The rest are reference skills the stages pull in rather than stages of their own
 Four rules hold it together:
 
 - **A fresh context per stage.** Handoff happens through the board and the filesystem, never through conversation history. The watchdog is the strict case: it never runs in the context that built the change, so a green suite it did not run itself does not count.
-- **The board is the queue.** GitHub issues and PRs carry the state — `ready` → `wip` → `review` → `done`, with `rework` for bounces and `needs-human` for the rare paused decision. One branch and one worktree per slice under `.worktrees/<slug>`, so slices don't step on each other.
+- **The backend projects the queue.** GitHub issues and PRs project Workflow State through `ready`, `review`, `rework`, `needs-human`, and `done`; `wip` is an additive Claim, not a lifecycle state. `done` means Ready for Merge, not Merged. Each slice has one branch and one conventional worktree under `.worktrees/<slug>`.
 - **Two document lifetimes.** Implementation Ledgers (`intent.md`, `behavior.md`, and optional `plan.md` / `tasks.md`) live in `.changes/<slug>/` on the slice branch. They freeze on publication: only existing non-manual boxes may be ticked. The implementer commits Artifact Completion, then removes the ledger in a separate child commit before review. Review and Rework read historical snapshots rather than restoring or archiving the ledger. Durable docs (`CONTEXT.md`, `docs/adr/`, `docs/capabilities/`) outlive the change.
 - **Slices are tracer bullets.** Each one cuts a complete path through every layer, is demoable on its own, declares its blocking edges, and is sized to fit a single fresh context window.
 
