@@ -36,6 +36,7 @@ type ImplementationItem struct {
 	CreatedAt      string
 	Claimed        bool
 	Blockers       []int
+	Transition     *ImplementationTransition
 }
 
 type Submission struct {
@@ -56,9 +57,25 @@ type ImplementationBackend interface {
 	ClaimImplementation(context.Context, RepositoryID, ImplementationItem) error
 	ImplementationHead(context.Context, RepositoryID, string) (string, error)
 	PublishImplementation(context.Context, RepositoryID, ImplementationItem, Submission) (Submission, error)
-	AwaitImplementationReview(context.Context, RepositoryID, ImplementationItem) error
-	PauseImplementation(context.Context, RepositoryID, ImplementationItem, string) error
+	RecordImplementationTransition(context.Context, RepositoryID, ImplementationItem, ImplementationTransition) error
+	AwaitImplementationReview(context.Context, RepositoryID, ImplementationItem, func() error) error
+	PauseImplementation(context.Context, RepositoryID, ImplementationItem, string, func() error) error
 }
+
+type ImplementationTransition struct {
+	From           State  `json:"from"`
+	Target         State  `json:"target"`
+	Head           string `json:"head"`
+	BodyDigest     string `json:"body_digest"`
+	DecisionDigest string `json:"decision_digest"`
+	Directory      string `json:"directory"`
+	Completed      bool   `json:"completed"`
+}
+
+type InvariantError struct{ Reason string }
+
+func (e *InvariantError) Error() string { return e.Reason }
+func Refuse(reason string) error        { return &InvariantError{Reason: reason} }
 
 type ImplementationOutcome struct {
 	Ledger *LedgerHistory      `json:"ledger,omitempty"`
@@ -69,16 +86,21 @@ type ImplementationOutcome struct {
 	Item   *ImplementationItem `json:"item,omitempty"`
 }
 
-func InspectImplementation(ctx context.Context, root string, number int, backend ImplementationBackend) (ImplementationOutcome, error) {
+func loadImplementation(ctx context.Context, root string, backend ImplementationBackend) (RepositoryID, []ImplementationItem, error) {
 	remote, err := git(root, "remote", "get-url", "origin")
 	if err != nil {
-		return ImplementationOutcome{}, err
+		return RepositoryID{}, nil, err
 	}
 	repository, err := ParseGitHubRemote(remote)
 	if err != nil {
-		return ImplementationOutcome{}, err
+		return RepositoryID{}, nil, err
 	}
 	items, err := backend.ImplementationItems(ctx, repository)
+	return repository, items, err
+}
+
+func InspectImplementation(ctx context.Context, root string, number int, backend ImplementationBackend) (ImplementationOutcome, error) {
+	_, items, err := loadImplementation(ctx, root, backend)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
@@ -97,15 +119,7 @@ func InspectImplementation(ctx context.Context, root string, number int, backend
 }
 
 func StartImplementation(ctx context.Context, root string, number int, snapshot, reviewedHead string, backend ImplementationBackend) (ImplementationOutcome, error) {
-	remote, err := git(root, "remote", "get-url", "origin")
-	if err != nil {
-		return ImplementationOutcome{}, err
-	}
-	repository, err := ParseGitHubRemote(remote)
-	if err != nil {
-		return ImplementationOutcome{}, err
-	}
-	items, err := backend.ImplementationItems(ctx, repository)
+	repository, items, err := loadImplementation(ctx, root, backend)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
@@ -162,7 +176,7 @@ func StartImplementation(ctx context.Context, root string, number int, snapshot,
 		return cmp.Compare(a.Number, b.Number)
 	})
 	for _, item := range items {
-		if item.Claimed || item.State != Ready && item.State != Rework {
+		if item.Claimed || item.Transition != nil && !item.Transition.Completed || item.State != Ready && item.State != Rework {
 			continue
 		}
 		blocked := false

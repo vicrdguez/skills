@@ -81,6 +81,11 @@ func TestInspectLedgerRejectsInvalidGraphs(t *testing.T) {
 			commitFile(t, root, ".changes/slice/intent.md", "changed\n")
 			commitFile(t, root, ".changes/slice/intent.md", "intent\n")
 		},
+		"executable ledger": func(t *testing.T, root string) {
+			commitLedger(t, root, "slice", true)
+			runGit(t, root, "update-index", "--chmod=+x", ".changes/slice/intent.md")
+			runGit(t, root, "commit", "-m", "mode drift")
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			root := newGitRepository(t)
@@ -90,5 +95,35 @@ func TestInspectLedgerRejectsInvalidGraphs(t *testing.T) {
 				t.Fatalf("accepted invalid graph: %#v %v", got, err)
 			}
 		})
+	}
+}
+
+func TestInspectLedgerAllowsMultipleTicksAndUnchangedMerges(t *testing.T) {
+	root := newGitRepository(t)
+	runGit(t, root, "switch", "-c", "before")
+	commitFile(t, root, "before", "before\n")
+	runGit(t, root, "switch", "main")
+	runGit(t, root, "merge", "--no-ff", "before", "-m", "before ledger")
+	commitLedger(t, root, "slice", true)
+	runGit(t, root, "reset", "--soft", "HEAD~1")
+	commitFile(t, root, ".changes/slice/intent.md", "- [ ] First\n- [ ] Second\n## Manual verification\n- [ ] Human\n")
+	baseline := gitOutput(t, root, "rev-parse", "HEAD")
+	commitFile(t, root, ".changes/slice/intent.md", "- [x] First\n- [ ] Second\n## Manual verification\n- [ ] Human\n")
+	runGit(t, root, "switch", "-c", "during")
+	commitFile(t, root, "code", "code\n")
+	runGit(t, root, "switch", "main")
+	runGit(t, root, "merge", "--no-ff", "during", "-m", "during ledger")
+	commitFile(t, root, ".changes/slice/intent.md", "- [x] First\n- [x] Second\n## Manual verification\n- [ ] Human\n")
+	completion := gitOutput(t, root, "rev-parse", "HEAD")
+	runGit(t, root, "rm", "-r", ".changes/slice")
+	runGit(t, root, "commit", "-m", "retire")
+	deletion := gitOutput(t, root, "rev-parse", "HEAD")
+	runGit(t, root, "switch", "-c", "after")
+	commitFile(t, root, "after", "after\n")
+	runGit(t, root, "switch", "main")
+	runGit(t, root, "merge", "--no-ff", "after", "-m", "after ledger")
+	got, err := InspectLedger(root, "HEAD", "slice")
+	if err != nil || len(got.Violations) != 0 || got.Baseline != baseline || got.Completion != completion || got.Deletion != deletion {
+		t.Fatalf("valid graph rejected: %#v %v", got, err)
 	}
 }

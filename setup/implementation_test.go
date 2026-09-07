@@ -157,7 +157,7 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 		t.Fatalf("update = %#v, %v, creations=%d", updated, err, creations)
 	}
 	item.Submission = &updated
-	if err := b.AwaitImplementationReview(ctx, repo, item); err != nil {
+	if err := b.AwaitImplementationReview(ctx, repo, item, func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if fmt.Sprint(labels[7]) != "[external]" || fmt.Sprint(labels[11]) != "[review]" {

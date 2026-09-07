@@ -1,9 +1,11 @@
 package workflow
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -18,6 +20,10 @@ type LedgerHistory struct {
 // InspectLedger resolves immutable snapshots from first-parent trees, not prose.
 func InspectLedger(root, ref, slug string) (LedgerHistory, error) {
 	result := LedgerHistory{Phase: "absent"}
+	if slug == "" || strings.ContainsAny(slug, "/\\") || slug == "." || slug == ".." {
+		result.Violations = []string{"invalid ledger slug; use the conventional branch identity"}
+		return result, nil
+	}
 	commits, err := git(root, "rev-list", "--first-parent", "--reverse", ref)
 	if err != nil {
 		return result, err
@@ -32,8 +38,8 @@ func InspectLedger(root, ref, slug string) (LedgerHistory, error) {
 			return result, err
 		}
 		if len(strings.Fields(parents)) > 2 {
-			currentTree, _ := git(root, "rev-parse", commit+":"+path)
-			parentTree, _ := git(root, "rev-parse", previous+":"+path)
+			currentTree, _ := git(root, "rev-parse", "--verify", commit+":"+path)
+			parentTree, _ := git(root, "rev-parse", "--verify", previous+":"+path)
 			if currentTree != parentTree {
 				result.Violations = append(result.Violations, "merge changes ledger relative to first parent at "+commit)
 			}
@@ -43,6 +49,12 @@ func InspectLedger(root, ref, slug string) (LedgerHistory, error) {
 		if now {
 			files, err = ledgerFiles(root, commit, path)
 			if err != nil {
+				var violation *InvariantError
+				if errors.As(err, &violation) {
+					result.Violations = append(result.Violations, violation.Reason)
+					slices.Sort(result.Violations)
+					return result, nil
+				}
 				return result, err
 			}
 			for name, contents := range files {
@@ -83,6 +95,7 @@ func InspectLedger(root, ref, slug string) (LedgerHistory, error) {
 	if result.Baseline == "" {
 		result.Violations = append(result.Violations, fmt.Sprintf("ledger %s is missing", path))
 	}
+	slices.Sort(result.Violations)
 	return result, nil
 }
 
@@ -99,7 +112,7 @@ func ledgerFiles(root, commit, path string) (map[string]string, error) {
 		metadata, name, ok := strings.Cut(entry, "\t")
 		fields := strings.Fields(metadata)
 		if !ok || len(fields) != 3 || fields[0] != "100644" || fields[1] != "blob" {
-			return nil, fmt.Errorf("ledger must contain regular non-executable files: %s", entry)
+			return nil, Refuse(fmt.Sprintf("ledger must contain regular non-executable files at %s: %s; restore the frozen file mode", commit, entry))
 		}
 		contents, err := exec.Command("git", "-C", root, "cat-file", "blob", fields[2]).Output()
 		if err != nil {

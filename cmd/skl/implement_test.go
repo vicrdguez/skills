@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	skilldist "github.com/vicrdguez/skills"
 	"os"
@@ -18,17 +19,34 @@ import (
 
 type implementationMemory struct {
 	memoryBackend
-	work         []workflow.ImplementationItem
-	remoteHeads  map[string]string
-	afterPublish func()
-	decisions    map[int]string
+	work             []workflow.ImplementationItem
+	remoteHeads      map[string]string
+	afterPublish     func()
+	decisions        map[int]string
+	failTransition   bool
+	beforeTransition func()
+}
+
+func (b *implementationMemory) RecordImplementationTransition(_ context.Context, _ workflow.RepositoryID, item workflow.ImplementationItem, transition workflow.ImplementationTransition) error {
+	for i := range b.work {
+		if b.work[i].Number == item.Number {
+			b.work[i].Transition = &transition
+		}
+	}
+	return nil
 }
 
 func (b *implementationMemory) ImplementationTarget(context.Context, workflow.RepositoryID) (string, error) {
 	return "main", nil
 }
 
-func (b *implementationMemory) PauseImplementation(_ context.Context, _ workflow.RepositoryID, item workflow.ImplementationItem, decision string) error {
+func (b *implementationMemory) PauseImplementation(_ context.Context, _ workflow.RepositoryID, item workflow.ImplementationItem, decision string, guard func() error) error {
+	if b.beforeTransition != nil {
+		b.beforeTransition()
+	}
+	if err := guard(); err != nil {
+		return err
+	}
 	if b.decisions == nil {
 		b.decisions = make(map[int]string)
 	}
@@ -37,6 +55,10 @@ func (b *implementationMemory) PauseImplementation(_ context.Context, _ workflow
 		if b.work[i].Number == item.Number {
 			b.work[i].ResumeState = item.State
 			b.work[i].State = workflow.NeedsHuman
+			if b.failTransition {
+				b.failTransition = false
+				return errors.New("interrupted projection")
+			}
 			b.work[i].Claimed = false
 		}
 	}
@@ -100,10 +122,20 @@ func TestImplementRefusesInvalidHandoff(t *testing.T) {
 	}
 }
 
-func (b *implementationMemory) AwaitImplementationReview(_ context.Context, _ workflow.RepositoryID, item workflow.ImplementationItem) error {
+func (b *implementationMemory) AwaitImplementationReview(_ context.Context, _ workflow.RepositoryID, item workflow.ImplementationItem, guard func() error) error {
+	if b.beforeTransition != nil {
+		b.beforeTransition()
+	}
+	if err := guard(); err != nil {
+		return err
+	}
 	for i := range b.work {
 		if b.work[i].Number == item.Number {
 			b.work[i].State = workflow.AwaitingReview
+			if b.failTransition {
+				b.failTransition = false
+				return errors.New("interrupted projection")
+			}
 			b.work[i].Claimed = false
 		}
 	}
@@ -423,5 +455,80 @@ func TestImplementInspectionSuppliesFixedLedgerEvidenceWithoutClaiming(t *testin
 	got := implementCLI(t, root, backend, "inspect", "--item", "7")
 	if got.Status != "inspected" || got.Ledger == nil || got.Ledger.Baseline != baseline || got.Head != baseline || backend.work[0].Claimed {
 		t.Fatalf("inspection = %#v", got)
+	}
+}
+
+func TestImplementReconcilesInterruptedHandoffs(t *testing.T) {
+	for _, kind := range []string{"submit", "needs-human"} {
+		t.Run(kind, func(t *testing.T) {
+			root := proposalRepository(t)
+			prepareSlice(t, root, "widget")
+			b := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{}}
+			start := implementCLI(t, root, b, "next")
+			dir := start.Packet.Facts.Implementation.ResultDirectory
+			for _, name := range []string{"submission.md", "decision.md"} {
+				if err := os.WriteFile(filepath.Join(dir, name), []byte("opaque\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			args := []string{kind, "--item", "7"}
+			if kind == "submit" {
+				runGit(t, root, "rm", "-r", ".changes/widget")
+				runGit(t, root, "commit", "-m", "retire")
+				args = append(args, "--body", filepath.Join(dir, "submission.md"))
+			} else {
+				args = append(args, "--reason", "mandatory_rule", "--decision", filepath.Join(dir, "decision.md"))
+			}
+			b.remoteHeads["widget"] = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+			b.failTransition = true
+			var output bytes.Buffer
+			app := newApp(func() (setup.Backend, error) { return b, nil }, bytes.NewReader(nil), &output, &output)
+			command := append([]string{"skl", "implement"}, args...)
+			command = append(command, "--repo", root)
+			if err := app.Run(command); err == nil {
+				t.Fatal("fixture did not interrupt transition")
+			}
+			got := implementCLI(t, root, b, args...)
+			want := "awaiting_review"
+			if kind == "needs-human" {
+				want = "needs_human"
+			}
+			if got.Status != want || got.Item.Claimed || got.Item.Transition == nil || !got.Item.Transition.Completed {
+				t.Fatalf("retry did not reconcile: %#v", got)
+			}
+			if got := implementCLI(t, root, b, args...); got.Status != want {
+				t.Fatalf("completed retry: %#v", got)
+			}
+		})
+	}
+}
+
+func TestImplementChecksContradictionsAndHeadDuringProjection(t *testing.T) {
+	for _, fault := range []string{"contradiction", "local movement", "remote movement"} {
+		t.Run(fault, func(t *testing.T) {
+			root := proposalRepository(t)
+			prepareSlice(t, root, "widget")
+			b := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{}}
+			start := implementCLI(t, root, b, "next")
+			body := filepath.Join(start.Packet.Facts.Implementation.ResultDirectory, "submission.md")
+			if err := os.WriteFile(body, []byte("opaque"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			runGit(t, root, "rm", "-r", ".changes/widget")
+			runGit(t, root, "commit", "-m", "retire")
+			b.remoteHeads["widget"] = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+			switch fault {
+			case "contradiction":
+				b.work[0].Problem = "contradictory lifecycle projections"
+			case "local movement":
+				b.beforeTransition = func() { runGit(t, root, "commit", "--allow-empty", "-m", "movement") }
+			case "remote movement":
+				b.beforeTransition = func() { b.remoteHeads["widget"] = "moved" }
+			}
+			got := implementCLI(t, root, b, "submit", "--item", "7", "--body", body)
+			if got.Status != "fix_required" || !b.work[0].Claimed || b.work[0].State != workflow.Ready {
+				t.Fatalf("unsafe projection: %#v %#v", got, b.work)
+			}
+		})
 	}
 }

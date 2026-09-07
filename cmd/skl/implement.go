@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 
@@ -15,6 +16,9 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 		commands = append(commands, &cli.Command{Name: name,
 			Flags: []cli.Flag{&cli.PathFlag{Name: "repo", Value: "."}, &cli.IntFlag{Name: "item"}, &cli.PathFlag{Name: "body"}, &cli.PathFlag{Name: "decision"}, &cli.StringFlag{Name: "reason"}, &cli.StringFlag{Name: "target-snapshot"}, &cli.StringFlag{Name: "reviewed-head"}},
 			Action: func(command *cli.Context) error {
+				if command.Int("item") < 0 || command.NArg() != 0 {
+					return fmt.Errorf("invalid implementation invocation: use flags and a positive Work Item identity")
+				}
 				backend, err := newBackend()
 				if err != nil {
 					return err
@@ -41,6 +45,10 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 					outcome, err = workflow.StartImplementation(command.Context, command.Path("repo"), number, command.String("target-snapshot"), command.String("reviewed-head"), port)
 				}
 				if err != nil {
+					var violation *workflow.InvariantError
+					if errors.As(err, &violation) {
+						return json.NewEncoder(stdout).Encode(workflow.ImplementationOutcome{Status: "fix_required", Reason: violation.Reason})
+					}
 					return err
 				}
 				return json.NewEncoder(stdout).Encode(outcome)
