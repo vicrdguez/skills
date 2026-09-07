@@ -215,12 +215,52 @@ func TestGitHubBackendNormalizesProposalState(t *testing.T) {
 	})}
 	backend := NewGitHubBackend("https://api.github.test", "secret", client)
 
-	items, err := backend.FindWorkItems(context.Background(), workflow.RepositoryID{Owner: "acme", Name: "widgets"}, []string{"slice"})
+	items, err := backend.FindWorkItems(context.Background(), workflow.RepositoryID{Owner: "acme", Name: "widgets"}, []workflow.WorkItem{{Title: "slice"}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(items) != 1 || !items[0].Ready || items[0].Merged || items[0].Parent != 10 || !slices.Equal(items[0].Blockers, []int{16}) {
 		t.Fatalf("items = %#v", items)
+	}
+}
+
+func TestGitHubBackendReconcilesDeclaredFallback(t *testing.T) {
+	for _, test := range []struct {
+		name, supplied, persisted string
+		blockers                  []int
+	}{
+		{"declared fallback", "opaque\n", "opaque\n\nBlocked by: #1\n", []int{1}},
+		{"authored lookalike", "opaque\n\nBlocked by: #1\n", "opaque\n\nBlocked by: #1\n", nil},
+		{"conflicting prose", "opaque\n", "changed\n\nBlocked by: #1\n", nil},
+		{"undeclared suffix", "opaque\n", "opaque\n\nBlocked by: #99\n", nil},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				if request.Method != http.MethodGet {
+					t.Fatalf("normalization mutated backend: %s", request.Method)
+				}
+				switch {
+				case request.URL.Path == "/repos/acme/widgets/issues":
+					return jsonResponse(http.StatusOK, fmt.Sprintf(`[{"number":1,"title":"base","body":"base"},{"number":2,"title":"dependent","body":%q}]`, test.persisted)), nil
+				case strings.HasSuffix(request.URL.Path, "/parent"), strings.HasSuffix(request.URL.Path, "/dependencies/blocked_by"):
+					return jsonResponse(http.StatusNotFound, `{}`), nil
+				default:
+					t.Fatalf("unexpected request: %s", request.URL)
+					return nil, nil
+				}
+			})}
+			backend := NewGitHubBackend("https://api.github.test", "secret", client)
+			items, err := backend.FindWorkItems(context.Background(), workflow.RepositoryID{Owner: "acme", Name: "widgets"},
+				[]workflow.WorkItem{{Title: "base", Body: "base"}, {Title: "dependent", Body: test.supplied}},
+				[]workflow.Dependency{{Dependent: "dependent", Blocker: "base"}})
+			wantBody := test.persisted
+			if len(test.blockers) > 0 {
+				wantBody = test.supplied
+			}
+			if err != nil || len(items) != 2 || items[1].Body != wantBody || !slices.Equal(items[1].Blockers, test.blockers) {
+				t.Fatalf("normalized records = %#v, %v; want body %q blockers %v", items, err, wantBody, test.blockers)
+			}
+		})
 	}
 }
 

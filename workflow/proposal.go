@@ -38,7 +38,7 @@ type CoordinationItem struct {
 }
 
 type Backend interface {
-	FindWorkItems(context.Context, RepositoryID, []string) ([]WorkItem, error)
+	FindWorkItems(context.Context, RepositoryID, []WorkItem, []Dependency) ([]WorkItem, error)
 	ListMergedWorkItems(context.Context, RepositoryID) ([]WorkItem, error)
 	CreateWorkItem(context.Context, RepositoryID, WorkItem) (WorkItem, error)
 	FindCoordinationItems(context.Context, RepositoryID, string) ([]CoordinationItem, error)
@@ -199,11 +199,7 @@ func Publish(ctx context.Context, request PublishRequest, backend Backend) (Outc
 			parent = matches[0]
 		}
 	}
-	titles := make([]string, len(ordered))
-	for index, item := range ordered {
-		titles[index] = item.Title
-	}
-	existing, err := backend.FindWorkItems(ctx, repository, titles)
+	existing, err := backend.FindWorkItems(ctx, repository, ordered, request.Dependencies)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -219,31 +215,6 @@ func Publish(ctx context.Context, request PublishRequest, backend Backend) (Outc
 		matches := matchesByTitle[slice.Title]
 		if len(matches) == 1 && matches[0].Closed {
 			return Outcome{Status: "needs_human", Reason: "existing Work Item is closed: " + slice.Title}, nil
-		}
-		if len(matches) == 1 && matches[0].Body != slice.Body {
-			// Recognize only the exact suffixes implied by this declaration, not prose.
-			body := strings.TrimRight(matches[0].Body, "\n")
-			var fallback []int
-			for _, dependency := range slices.Backward(request.Dependencies) {
-				blockers := matchesByTitle[dependency.Blocker]
-				if dependency.Dependent != slice.Title || len(blockers) != 1 {
-					continue
-				}
-				number := blockers[0].Number
-				suffix := fmt.Sprintf("\n\nBlocked by: #%d", number)
-				if strings.HasSuffix(body, suffix) {
-					body = strings.TrimSuffix(body, suffix)
-					fallback = append(fallback, number)
-				}
-			}
-			if len(fallback) > 0 && body == strings.TrimRight(slice.Body, "\n") {
-				matches[0].Body = slice.Body
-				for _, number := range fallback {
-					if !slices.Contains(matches[0].Blockers, number) {
-						matches[0].Blockers = append(matches[0].Blockers, number)
-					}
-				}
-			}
 		}
 		if len(matches) > 1 || len(matches) == 1 && (matches[0].Body != slice.Body || matches[0].Branch != "" && matches[0].Branch != slice.Branch) {
 			return Outcome{Status: "needs_human", Reason: "ambiguous existing Work Item " + slice.Title}, nil

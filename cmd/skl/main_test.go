@@ -41,11 +41,13 @@ func (b *memoryBackend) EnsureLabels(_ context.Context, _ setup.RepositoryID, la
 	return nil
 }
 
-func (b *memoryBackend) FindWorkItems(_ context.Context, _ workflow.RepositoryID, titles []string) ([]workflow.WorkItem, error) {
+func (b *memoryBackend) FindWorkItems(_ context.Context, _ workflow.RepositoryID, prepared []workflow.WorkItem, _ []workflow.Dependency) ([]workflow.WorkItem, error) {
 	var found []workflow.WorkItem
 	for _, item := range b.items {
-		if slices.Contains(titles, item.Title) {
-			found = append(found, item)
+		for _, wanted := range prepared {
+			if wanted.Title == item.Title {
+				found = append(found, item)
+			}
 		}
 	}
 	return found, nil

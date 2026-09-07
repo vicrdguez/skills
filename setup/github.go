@@ -55,7 +55,11 @@ type githubIssue struct {
 	PullRequest json.RawMessage `json:"pull_request"`
 }
 
-func (b *GitHubBackend) FindWorkItems(ctx context.Context, repository workflow.RepositoryID, titles []string) ([]workflow.WorkItem, error) {
+func (b *GitHubBackend) FindWorkItems(ctx context.Context, repository workflow.RepositoryID, prepared []workflow.WorkItem, dependencies []workflow.Dependency) ([]workflow.WorkItem, error) {
+	titles := make([]string, len(prepared))
+	for index, item := range prepared {
+		titles[index] = item.Title
+	}
 	issues, err := b.listIssues(ctx, repository)
 	if err != nil {
 		return nil, err
@@ -70,6 +74,43 @@ func (b *GitHubBackend) FindWorkItems(ctx context.Context, repository workflow.R
 			return nil, err
 		}
 		items = append(items, item)
+	}
+	matchesByTitle := make(map[string][]int)
+	for index, item := range items {
+		matchesByTitle[item.Title] = append(matchesByTitle[item.Title], index)
+	}
+	for _, wanted := range prepared {
+		matches := matchesByTitle[wanted.Title]
+		if len(matches) != 1 {
+			continue
+		}
+		item := &items[matches[0]]
+		if item.Body == wanted.Body {
+			continue
+		}
+		// Recognize only our exact declared suffixes; supplied Markdown is opaque.
+		body := strings.TrimRight(item.Body, "\n")
+		var fallback []int
+		for _, dependency := range slices.Backward(dependencies) {
+			blockers := matchesByTitle[dependency.Blocker]
+			if dependency.Dependent != wanted.Title || len(blockers) != 1 {
+				continue
+			}
+			number := items[blockers[0]].Number
+			suffix := dependencySuffix(number)
+			if strings.HasSuffix(body, suffix) {
+				body = strings.TrimSuffix(body, suffix)
+				fallback = append(fallback, number)
+			}
+		}
+		if len(fallback) > 0 && body == strings.TrimRight(wanted.Body, "\n") {
+			item.Body = wanted.Body
+			for _, number := range fallback {
+				if !slices.Contains(item.Blockers, number) {
+					item.Blockers = append(item.Blockers, number)
+				}
+			}
+		}
 	}
 	return items, nil
 }
@@ -238,9 +279,13 @@ func (b *GitHubBackend) AddDependency(ctx context.Context, repository workflow.R
 	if !ok {
 		return fmt.Errorf("GitHub issue body unavailable for #%d", dependent)
 	}
-	body = strings.TrimRight(body, "\n") + fmt.Sprintf("\n\nBlocked by: #%d\n", blocker)
+	body = strings.TrimRight(body, "\n") + dependencySuffix(blocker) + "\n"
 	b.issueBodies[dependent] = body
 	return b.request(ctx, http.MethodPatch, b.repositoryPath(repository)+fmt.Sprintf("/issues/%d", dependent), map[string]string{"body": body}, nil)
+}
+
+func dependencySuffix(blocker int) string {
+	return fmt.Sprintf("\n\nBlocked by: #%d", blocker)
 }
 
 func (b *GitHubBackend) SetReady(ctx context.Context, repository workflow.RepositoryID, number int) error {
