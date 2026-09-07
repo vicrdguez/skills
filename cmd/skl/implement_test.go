@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	skilldist "github.com/vicrdguez/skills"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -15,7 +17,34 @@ import (
 
 type implementationMemory struct {
 	memoryBackend
-	work []workflow.ImplementationItem
+	work        []workflow.ImplementationItem
+	remoteHeads map[string]string
+}
+
+func (b *implementationMemory) ImplementationHead(_ context.Context, _ workflow.RepositoryID, branch string) (string, error) {
+	return b.remoteHeads[branch], nil
+}
+
+func (b *implementationMemory) PublishImplementation(_ context.Context, _ workflow.RepositoryID, item workflow.ImplementationItem, submission workflow.Submission) (workflow.Submission, error) {
+	if submission.Number == 0 {
+		submission.Number = 11
+	}
+	for i := range b.work {
+		if b.work[i].Number == item.Number {
+			b.work[i].Submission = &submission
+		}
+	}
+	return submission, nil
+}
+
+func (b *implementationMemory) AwaitImplementationReview(_ context.Context, _ workflow.RepositoryID, item workflow.ImplementationItem) error {
+	for i := range b.work {
+		if b.work[i].Number == item.Number {
+			b.work[i].State = workflow.AwaitingReview
+			b.work[i].Claimed = false
+		}
+	}
+	return nil
 }
 
 func (b *implementationMemory) ImplementationItems(context.Context, workflow.RepositoryID) ([]workflow.ImplementationItem, error) {
@@ -45,7 +74,32 @@ func implementCLI(t *testing.T, root string, backend *implementationMemory, args
 	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
 		t.Fatalf("%v: %s", err, &output)
 	}
+	if result.Packet != nil && result.Packet.Facts.Implementation.ResultDirectory != "" {
+		t.Cleanup(func() { os.RemoveAll(result.Packet.Facts.Implementation.ResultDirectory) })
+	}
 	return result
+}
+
+func TestImplementSubmitsCompletedFirstImplementation(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "widget")
+	backend := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{}}
+	start := implementCLI(t, root, backend, "next")
+	body := filepath.Join(start.Packet.Facts.Implementation.ResultDirectory, "submission.md")
+	if err := os.WriteFile(body, []byte("opaque audit [not even Markdown\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "rm", "-r", ".changes/widget")
+	runGit(t, root, "commit", "-m", "retire")
+	backend.remoteHeads["widget"] = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	got := implementCLI(t, root, backend, "submit", "--item", "7", "--body", body)
+	if got.Status != "awaiting_review" || backend.work[0].Claimed || backend.work[0].State != workflow.AwaitingReview {
+		t.Fatalf("submit: %#v %#v", got, backend.work)
+	}
+	submission := backend.work[0].Submission
+	if submission == nil || submission.Number != 11 || submission.Head != backend.remoteHeads["widget"] || submission.Body != "opaque audit [not even Markdown\n\nCloses #7\n" {
+		t.Fatalf("submission = %#v", submission)
+	}
 }
 
 func TestImplementClaimsOldestEligibleWork(t *testing.T) {

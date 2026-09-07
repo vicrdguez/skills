@@ -19,6 +19,7 @@ type InvocationFacts struct {
 }
 
 type ImplementationFacts struct {
+	ResultDirectory      string          `json:"result_directory"`
 	Submission           int             `json:"submission,omitempty"`
 	PreviousReviewedHead string          `json:"previous_reviewed_head,omitempty"`
 	Comments             []ReviewComment `json:"comments,omitempty"`

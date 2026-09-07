@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	skilldist "github.com/vicrdguez/skills"
+	"os"
 	"path/filepath"
 	"slices"
 )
@@ -45,6 +46,9 @@ type Submission struct {
 type ImplementationBackend interface {
 	ImplementationItems(context.Context, RepositoryID) ([]ImplementationItem, error)
 	ClaimImplementation(context.Context, RepositoryID, ImplementationItem) error
+	ImplementationHead(context.Context, RepositoryID, string) (string, error)
+	PublishImplementation(context.Context, RepositoryID, ImplementationItem, Submission) (Submission, error)
+	AwaitImplementationReview(context.Context, RepositoryID, ImplementationItem) error
 }
 
 type ImplementationOutcome struct {
@@ -164,5 +168,16 @@ func implementationPacket(root string, item ImplementationItem) (ImplementationO
 		facts.ResumeCommand = fmt.Sprintf("skl implement resume --item %d", item.Number)
 	}
 	packet, err := skilldist.BuildPacket("implement", skilldist.InvocationFacts{Implementation: &facts})
+	if err != nil {
+		return ImplementationOutcome{}, err
+	}
+	facts.ResultDirectory, err = os.MkdirTemp("", "skl-implement-")
+	if err != nil {
+		return ImplementationOutcome{}, err
+	}
+	if err := os.WriteFile(filepath.Join(facts.ResultDirectory, ".skl-result"), []byte("skl.implement/v1\n"), 0600); err != nil {
+		os.RemoveAll(facts.ResultDirectory)
+		return ImplementationOutcome{}, err
+	}
 	return ImplementationOutcome{Status: "work_available", Item: &item, Packet: &packet}, err
 }
