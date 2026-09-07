@@ -287,11 +287,20 @@ func TestRetrieveConcreteProposeInstructions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := output.String()
-	for _, want := range []string{"tracer-bullet", "skl propose publish", "skl propose cleanup"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("Propose instructions lack %q:\n%s", want, got)
-		}
+	got, _, _ := strings.Cut(output.String(), "\n\n## Included Skill:")
+	for section, requirements := range map[string][]string{
+		"slice judgment":      {"COMPLETE path through every layer", "demoable and verifiable on its own", "single fresh context window", "Iterate until the user approves the breakdown"},
+		"seam judgment":       {"Use the `design` skill", "Always prefer existing seams", "Use the highest seam possible", "Check with the user if the seams match their expectations"},
+		"artifact authorship": {"## Writing the change artifacts", "`intent.md`: Why / What / Scope / Out of scope / Definition of Done", "*Gherkin notation*", "module shapes and seams chosen for implementation", "Discoveries belong in PR findings or in a new proposal", "./reference/tasks.md"},
+		"publication":         {"skl propose publish", "skl propose cleanup"},
+	} {
+		t.Run(section, func(t *testing.T) {
+			for _, want := range requirements {
+				if !strings.Contains(got, want) {
+					t.Errorf("Propose instructions lack %q", want)
+				}
+			}
+		})
 	}
 	if strings.Contains(got, "docs/github.md") {
 		t.Fatalf("Propose instructions retain copied board protocol:\n%s", got)
