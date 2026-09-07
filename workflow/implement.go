@@ -3,6 +3,9 @@ package workflow
 import (
 	"cmp"
 	"context"
+	"fmt"
+	skilldist "github.com/vicrdguez/skills"
+	"path/filepath"
 	"slices"
 )
 
@@ -19,19 +22,22 @@ const (
 )
 
 type ImplementationItem struct {
-	Number    int
-	State     State
-	CreatedAt string
-	Claimed   bool
-	Blockers  []int
+	Branch         string
+	TargetSnapshot string
+	Number         int
+	State          State
+	CreatedAt      string
+	Claimed        bool
+	Blockers       []int
 }
 
 type ImplementationBackend interface {
 	ImplementationItems(context.Context, RepositoryID) ([]ImplementationItem, error)
-	ClaimImplementation(context.Context, RepositoryID, int) error
+	ClaimImplementation(context.Context, RepositoryID, ImplementationItem) error
 }
 
 type ImplementationOutcome struct {
+	Packet *skilldist.Packet   `json:"packet,omitempty"`
 	Status string              `json:"status"`
 	Reason string              `json:"reason,omitempty"`
 	Item   *ImplementationItem `json:"item,omitempty"`
@@ -53,7 +59,7 @@ func StartImplementation(ctx context.Context, root string, number int, backend I
 	if number != 0 {
 		for _, item := range items {
 			if item.Number == number && item.Claimed && (item.State == Ready || item.State == Rework) {
-				return ImplementationOutcome{Status: "work_available", Item: &item}, nil
+				return implementationPacket(root, item)
 			}
 		}
 		return ImplementationOutcome{Status: "fix_required", Reason: "explicit Work Item is not an unambiguous implementation Claim; repair its projections before resuming"}, nil
@@ -89,14 +95,20 @@ func StartImplementation(ctx context.Context, root string, number int, backend I
 		if blocked {
 			continue
 		}
-		claimErr := backend.ClaimImplementation(ctx, repository, item.Number)
+		if item.State == Ready {
+			item.TargetSnapshot, err = git(root, "rev-parse", "refs/remotes/origin/main")
+			if err != nil {
+				return ImplementationOutcome{Status: "fix_required", Reason: "target unavailable; fetch origin/main and retry"}, nil
+			}
+		}
+		claimErr := backend.ClaimImplementation(ctx, repository, item)
 		observed, err := backend.ImplementationItems(ctx, repository)
 		if err != nil {
 			return ImplementationOutcome{}, err
 		}
 		for _, current := range observed {
 			if current.Number == item.Number && current.Claimed && current.State == item.State {
-				return ImplementationOutcome{Status: "work_available", Item: &current}, nil
+				return implementationPacket(root, current)
 			}
 		}
 		if claimErr != nil {
@@ -105,4 +117,35 @@ func StartImplementation(ctx context.Context, root string, number int, backend I
 		return ImplementationOutcome{Status: "fix_required", Reason: "Claim read-back contradicts selected state; repair the Work Item projections and explicitly resume"}, nil
 	}
 	return ImplementationOutcome{Status: "no_work"}, nil
+}
+
+func implementationPacket(root string, item ImplementationItem) (ImplementationOutcome, error) {
+	main, err := primaryWorktree(root)
+	if err != nil {
+		return ImplementationOutcome{}, err
+	}
+	target := item.TargetSnapshot
+	if target == "" && item.State == Ready {
+		target, err = git(root, "rev-parse", "refs/remotes/origin/main")
+		if err != nil {
+			return ImplementationOutcome{Status: "fix_required", Reason: "target unavailable; fetch origin/main and resume"}, nil
+		}
+	}
+	baseline := ""
+	if item.Branch != "" {
+		head, headErr := git(root, "rev-parse", "refs/heads/"+item.Branch)
+		if headErr != nil {
+			return ImplementationOutcome{Status: "fix_required", Reason: "branch unavailable; fetch and create the conventional worktree before resuming"}, nil
+		}
+		if headErr == nil {
+			baseline, err = artifactBaseline(root, item.Branch, head)
+		}
+		if err != nil {
+			return ImplementationOutcome{Status: "fix_required", Reason: err.Error() + "; repair ledger history and resume"}, nil
+		}
+	}
+	facts := skilldist.ImplementationFacts{WorkItem: item.Number, Branch: item.Branch, Worktree: filepath.Join(main, ".worktrees", item.Branch), TargetSnapshot: target, ArtifactBaseline: baseline,
+		ResumeCommand: fmt.Sprintf("skl implement resume --item %d --target-snapshot %s", item.Number, target)}
+	packet, err := skilldist.BuildPacket("implement", skilldist.InvocationFacts{Implementation: &facts})
+	return ImplementationOutcome{Status: "work_available", Item: &item, Packet: &packet}, err
 }

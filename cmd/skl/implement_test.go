@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/vicrdguez/skills/setup"
@@ -20,9 +21,10 @@ func (b *implementationMemory) ImplementationItems(context.Context, workflow.Rep
 	return append([]workflow.ImplementationItem(nil), b.work...), nil
 }
 
-func (b *implementationMemory) ClaimImplementation(_ context.Context, _ workflow.RepositoryID, number int) error {
+func (b *implementationMemory) ClaimImplementation(_ context.Context, _ workflow.RepositoryID, item workflow.ImplementationItem) error {
 	for i := range b.work {
-		if b.work[i].Number == number {
+		if b.work[i].Number == item.Number {
+			b.work[i].TargetSnapshot = item.TargetSnapshot
 			b.work[i].Claimed = true
 		}
 	}
@@ -92,5 +94,25 @@ func TestImplementResumesInterruptedClaim(t *testing.T) {
 	got := implementCLI(t, proposalRepository(t), backend, "resume", "--item", "7")
 	if got.Status != "work_available" || got.Item.Number != 7 || !got.Item.Claimed || backend.work[0].Claimed {
 		t.Fatalf("resume: %#v %#v", got, backend.work)
+	}
+}
+
+func TestImplementPinsTargetAndBundlesInstructions(t *testing.T) {
+	root := proposalRepository(t)
+	baseline := prepareSlice(t, root, "widget")
+	target := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "origin/main"))
+	backend := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.Ready}}}
+	got := implementCLI(t, root, backend, "next")
+	if got.Packet == nil || got.Packet.Facts.Implementation.TargetSnapshot != target || got.Packet.Facts.Implementation.ArtifactBaseline != baseline {
+		t.Fatalf("packet = %#v", got)
+	}
+	if got.Packet.Skill != "implement" || !reflect.DeepEqual(got.Packet.IncludedSkills, []string{"tdd", "audit", "design", "domain"}) {
+		t.Fatalf("manifest = %#v", got.Packet)
+	}
+	if !strings.Contains(got.Packet.Markdown(), "git merge "+target) || !strings.Contains(got.Packet.Facts.Implementation.ResumeCommand, target) {
+		t.Fatalf("missing concrete Git/retry facts: %s", got.Packet.Markdown())
+	}
+	if strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD")) != baseline {
+		t.Fatal("Work Start changed Git")
 	}
 }
