@@ -20,6 +20,22 @@ type implementationMemory struct {
 	work         []workflow.ImplementationItem
 	remoteHeads  map[string]string
 	afterPublish func()
+	decisions    map[int]string
+}
+
+func (b *implementationMemory) PauseImplementation(_ context.Context, _ workflow.RepositoryID, item workflow.ImplementationItem, decision string) error {
+	if b.decisions == nil {
+		b.decisions = make(map[int]string)
+	}
+	b.decisions[item.Number] = decision
+	for i := range b.work {
+		if b.work[i].Number == item.Number {
+			b.work[i].ResumeState = item.State
+			b.work[i].State = workflow.NeedsHuman
+			b.work[i].Claimed = false
+		}
+	}
+	return nil
 }
 
 func (b *implementationMemory) ImplementationHead(_ context.Context, _ workflow.RepositoryID, branch string) (string, error) {
@@ -261,5 +277,23 @@ func TestImplementResubmitsExistingRework(t *testing.T) {
 		} else if got.Status != "fix_required" || backend.work[0].Submission != nil {
 			t.Fatalf("rework created new PR: %#v", got)
 		}
+	}
+}
+
+func TestImplementPausesBeforeCodeExists(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "widget")
+	backend := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.Ready}}}
+	start := implementCLI(t, root, backend, "next")
+	decision := filepath.Join(start.Packet.Facts.Implementation.ResultDirectory, "decision.md")
+	if err := os.WriteFile(decision, []byte("contradiction and recommendation\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got := implementCLI(t, root, backend, "needs-human", "--item", "7", "--reason", "contradictory_artifacts", "--decision", decision)
+	if got.Status != "needs_human" || backend.work[0].Claimed || backend.work[0].ResumeState != workflow.Ready || backend.work[0].Submission != nil || backend.decisions[7] != "contradiction and recommendation\n" {
+		t.Fatalf("pause: %#v %#v", got, backend)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".changes/widget/intent.md")); err != nil {
+		t.Fatal("pause retired incomplete ledger")
 	}
 }

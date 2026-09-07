@@ -6,8 +6,53 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
+
+func PauseImplementation(ctx context.Context, root string, number int, reason, decisionPath, bodyPath string, backend ImplementationBackend) (ImplementationOutcome, error) {
+	if number <= 0 || decisionPath == "" || !slices.Contains([]string{"contradictory_artifacts", "mandatory_rule", "frozen_interface", "disputed_blocker", "bounce_cap"}, reason) {
+		return ImplementationOutcome{}, errors.New("Needs Human requires --item, --decision and a permitted --reason")
+	}
+	remote, err := git(root, "remote", "get-url", "origin")
+	if err != nil {
+		return ImplementationOutcome{}, err
+	}
+	repository, err := ParseGitHubRemote(remote)
+	if err != nil {
+		return ImplementationOutcome{}, err
+	}
+	items, err := backend.ImplementationItems(ctx, repository)
+	if err != nil {
+		return ImplementationOutcome{}, err
+	}
+	var item ImplementationItem
+	for _, candidate := range items {
+		if candidate.Number == number {
+			item = candidate
+		}
+	}
+	if !item.Claimed || item.State != Ready && item.State != Rework {
+		return ImplementationOutcome{Status: "fix_required", Reason: "Workflow State contradicts pause; repair the implementation Claim and retry"}, nil
+	}
+	decision, err := os.ReadFile(decisionPath)
+	if err != nil {
+		return ImplementationOutcome{}, err
+	}
+	if err := backend.PauseImplementation(ctx, repository, item, string(decision)); err != nil {
+		return ImplementationOutcome{}, err
+	}
+	observed, err := backend.ImplementationItems(ctx, repository)
+	if err != nil {
+		return ImplementationOutcome{}, err
+	}
+	for _, current := range observed {
+		if current.Number == number && current.State == NeedsHuman && !current.Claimed && current.ResumeState == item.State {
+			return ImplementationOutcome{Status: "needs_human", Item: &current}, nil
+		}
+	}
+	return ImplementationOutcome{Status: "fix_required", Reason: "Needs Human publication is incomplete; retry the same handoff"}, nil
+}
 
 func SubmitImplementation(ctx context.Context, root string, number int, bodyPath string, backend ImplementationBackend) (ImplementationOutcome, error) {
 	if number <= 0 || bodyPath == "" {

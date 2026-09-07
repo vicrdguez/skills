@@ -11,9 +11,9 @@ import (
 
 func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.Command {
 	var commands []*cli.Command
-	for _, name := range []string{"next", "resume", "submit"} {
+	for _, name := range []string{"next", "resume", "submit", "needs-human"} {
 		commands = append(commands, &cli.Command{Name: name,
-			Flags: []cli.Flag{&cli.PathFlag{Name: "repo", Value: "."}, &cli.IntFlag{Name: "item"}, &cli.PathFlag{Name: "body"}, &cli.StringFlag{Name: "target-snapshot"}},
+			Flags: []cli.Flag{&cli.PathFlag{Name: "repo", Value: "."}, &cli.IntFlag{Name: "item"}, &cli.PathFlag{Name: "body"}, &cli.PathFlag{Name: "decision"}, &cli.StringFlag{Name: "reason"}, &cli.StringFlag{Name: "target-snapshot"}},
 			Action: func(command *cli.Context) error {
 				backend, err := newBackend()
 				if err != nil {
@@ -24,7 +24,9 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 					return fmt.Errorf("workflow backend does not support implementation")
 				}
 				var outcome workflow.ImplementationOutcome
-				if name == "submit" {
+				if name == "needs-human" {
+					outcome, err = workflow.PauseImplementation(command.Context, command.Path("repo"), command.Int("item"), command.String("reason"), command.Path("decision"), command.Path("body"), port)
+				} else if name == "submit" {
 					outcome, err = workflow.SubmitImplementation(command.Context, command.Path("repo"), command.Int("item"), command.Path("body"), port)
 				} else {
 					if name == "resume" && command.Int("item") == 0 {

@@ -23,6 +23,7 @@ const (
 )
 
 type ImplementationItem struct {
+	ResumeState    State
 	Submission     *Submission
 	Branch         string
 	TargetSnapshot string
@@ -49,6 +50,7 @@ type ImplementationBackend interface {
 	ImplementationHead(context.Context, RepositoryID, string) (string, error)
 	PublishImplementation(context.Context, RepositoryID, ImplementationItem, Submission) (Submission, error)
 	AwaitImplementationReview(context.Context, RepositoryID, ImplementationItem) error
+	PauseImplementation(context.Context, RepositoryID, ImplementationItem, string) error
 }
 
 type ImplementationOutcome struct {
