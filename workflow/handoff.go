@@ -39,6 +39,59 @@ func PauseImplementation(ctx context.Context, root string, number int, reason, d
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
+	if bodyPath != "" {
+		head, err := git(root, "rev-parse", "refs/heads/"+item.Branch)
+		if err != nil {
+			return ImplementationOutcome{}, err
+		}
+		remoteHead, err := backend.ImplementationHead(ctx, repository, item.Branch)
+		if err != nil {
+			return ImplementationOutcome{}, err
+		}
+		if head != remoteHead {
+			return ImplementationOutcome{Status: "fix_required", Reason: "local and remote heads differ; push the work before pausing"}, nil
+		}
+		body, err := os.ReadFile(bodyPath)
+		if err != nil {
+			return ImplementationOutcome{}, err
+		}
+		submission := Submission{Head: head, Base: "main", Draft: true, Body: strings.TrimRight(string(body), "\n") + fmt.Sprintf("\n\nCloses #%d\n", number)}
+		if item.Submission != nil {
+			submission.Number = item.Submission.Number
+		}
+		submission, err = backend.PublishImplementation(ctx, repository, item, submission)
+		if err != nil {
+			return ImplementationOutcome{}, err
+		}
+		current, localErr := git(root, "rev-parse", "refs/heads/"+item.Branch)
+		remoteHead, err = backend.ImplementationHead(ctx, repository, item.Branch)
+		if err != nil {
+			return ImplementationOutcome{}, err
+		}
+		if localErr != nil || current != head || remoteHead != head || submission.Head != head || !submission.Draft {
+			return ImplementationOutcome{Status: "fix_required", Reason: "draft head changed or draft is not durable; inspect the Submission and retry"}, nil
+		}
+		item.Submission = &submission
+	} else {
+		head, err := git(root, "rev-parse", "refs/heads/"+item.Branch)
+		if err != nil {
+			return ImplementationOutcome{}, err
+		}
+		history, err := InspectLedger(root, head, item.Branch)
+		if err != nil {
+			return ImplementationOutcome{}, err
+		}
+		if history.Baseline == "" {
+			return ImplementationOutcome{Status: "fix_required", Reason: "ledger baseline missing; repair history before pausing"}, nil
+		}
+		changed, err := git(root, "diff", "--name-only", history.Baseline, head, "--", ".", ":(exclude).changes/"+item.Branch)
+		if err != nil {
+			return ImplementationOutcome{}, err
+		}
+		if changed != "" || item.Submission != nil {
+			return ImplementationOutcome{Status: "fix_required", Reason: "implementation work needs preservation; push and supply --body for a draft Submission"}, nil
+		}
+	}
 	if err := backend.PauseImplementation(ctx, repository, item, string(decision)); err != nil {
 		return ImplementationOutcome{}, err
 	}

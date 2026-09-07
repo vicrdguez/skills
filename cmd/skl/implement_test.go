@@ -297,3 +297,29 @@ func TestImplementPausesBeforeCodeExists(t *testing.T) {
 		t.Fatal("pause retired incomplete ledger")
 	}
 }
+
+func TestImplementPausesPreservingWork(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "widget")
+	backend := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{}}
+	start := implementCLI(t, root, backend, "next")
+	directory := start.Packet.Facts.Implementation.ResultDirectory
+	for _, name := range []string{"submission.md", "decision.md"} {
+		if err := os.WriteFile(filepath.Join(directory, name), []byte(name+" opaque\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("completed work\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "commit", "-am", "implement")
+	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	backend.remoteHeads["widget"] = head
+	got := implementCLI(t, root, backend, "needs-human", "--item", "7", "--reason", "mandatory_rule", "--decision", filepath.Join(directory, "decision.md"), "--body", filepath.Join(directory, "submission.md"))
+	if got.Status != "needs_human" || got.Item.Submission == nil || !got.Item.Submission.Draft || got.Item.Submission.Head != head || got.Item.Claimed || got.Item.ResumeState != workflow.Ready {
+		t.Fatalf("draft pause: %#v", got)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".changes/widget/intent.md")); err != nil {
+		t.Fatal("draft retired incomplete artifacts")
+	}
+}
