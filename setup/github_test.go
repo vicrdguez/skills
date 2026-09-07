@@ -229,14 +229,16 @@ func TestGitHubBackendReportsOnlyCommitClosedWorkflowItemsAsMerged(t *testing.T)
 		switch request.URL.Path {
 		case "/repos/acme/widgets/issues":
 			return jsonResponse(http.StatusOK, `[
-				{"id":501,"number":17,"title":"merged","state":"closed","labels":[{"name":"done"}]},
+				{"id":501,"number":17,"title":"merged","state":"closed","labels":[]},
 				{"id":502,"number":18,"title":"manual","state":"closed","labels":[{"name":"done"}]},
 				{"id":503,"number":19,"title":"unrelated","state":"closed","labels":[]}
 			]`), nil
 		case "/repos/acme/widgets/issues/17/timeline":
-			return jsonResponse(http.StatusOK, `[{"event":"closed","commit_id":"abc123"}]`), nil
+			return jsonResponse(http.StatusOK, `[{"event":"labeled","label":{"name":"ready"}},{"event":"labeled","label":{"name":"wip"}},{"event":"unlabeled","label":{"name":"ready"}},{"event":"unlabeled","label":{"name":"wip"}},{"event":"closed","commit_id":"abc123"}]`), nil
 		case "/repos/acme/widgets/issues/18/timeline":
 			return jsonResponse(http.StatusOK, `[{"event":"closed","commit_id":null}]`), nil
+		case "/repos/acme/widgets/issues/19/timeline":
+			return jsonResponse(http.StatusOK, `[{"event":"closed","commit_id":"def456"}]`), nil
 		default:
 			t.Fatalf("unexpected request: %s", request.URL.Path)
 			return nil, nil
