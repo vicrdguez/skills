@@ -442,7 +442,61 @@ func TestPublishDependencyOrderedMultiSliceProposal(t *testing.T) {
 }
 
 func TestRefuseInvalidProposalPreflight(t *testing.T) {
+	diagnostics := map[string][2]string{
+		"dirty durable document":                  {"durable documents have uncommitted changes", "commit or restore the reported durable-document paths"},
+		"dirty durable document in main worktree": {"durable documents have uncommitted changes", "commit or restore the reported durable-document paths"},
+		"slice misses target":                     {"slice branch divergent misses the observed target", "merge the target branch into the slice"},
+		"incomplete baseline":                     {"ledger misses behavior.md", "commit the complete ledger once at the published branch head"},
+		"cyclic dependencies":                     {"Dependency graph contains a cycle", "remove the cyclic --depends edge"},
+		"missing target":                          {"target branch is unavailable", "fetch the target branch"},
+		"missing slice branch":                    {"slice branch missing is unavailable", "create the local slice branch"},
+		"unpushed slice":                          {"slice branch unpushed is not pushed at its local head", "push the slice branch"},
+		"missing ledger":                          {"ledger is missing", "commit the complete ledger once at the published branch head"},
+		"baseline not at head":                    {"Artifact Baseline is not the published branch head", "commit the complete ledger once at the published branch head"},
+		"unknown dependency":                      {"Dependency graph contains an unknown or self-referencing edge", "correct the --depends values"},
+		"self dependency":                         {"Dependency graph contains an unknown or self-referencing edge", "correct the --depends values"},
+	}
 	tests := map[string]func(*testing.T) (string, []string){
+		"missing target": func(t *testing.T) (string, []string) {
+			root := proposalRepository(t)
+			runGit(t, root, "update-ref", "-d", "refs/remotes/origin/main")
+			return root, []string{"--slice", proposalSliceFlag(t, "missing")}
+		},
+		"missing slice branch": func(t *testing.T) (string, []string) {
+			return proposalRepository(t), []string{"--slice", proposalSliceFlag(t, "missing")}
+		},
+		"unpushed slice": func(t *testing.T) (string, []string) {
+			root := proposalRepository(t)
+			prepareSlice(t, root, "unpushed")
+			runGit(t, root, "update-ref", "-d", "refs/remotes/origin/unpushed")
+			return root, []string{"--slice", proposalSliceFlag(t, "unpushed")}
+		},
+		"missing ledger": func(t *testing.T) (string, []string) {
+			root := proposalRepository(t)
+			runGit(t, root, "branch", "missing", "main")
+			runGit(t, root, "update-ref", "refs/remotes/origin/missing", "main")
+			return root, []string{"--slice", proposalSliceFlag(t, "missing")}
+		},
+		"baseline not at head": func(t *testing.T) (string, []string) {
+			root := proposalRepository(t)
+			prepareSlice(t, root, "later")
+			if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("later\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			runGit(t, root, "commit", "-am", "later change")
+			runGit(t, root, "update-ref", "refs/remotes/origin/later", "HEAD")
+			return root, []string{"--slice", proposalSliceFlag(t, "later")}
+		},
+		"unknown dependency": func(t *testing.T) (string, []string) {
+			root := proposalRepository(t)
+			prepareSlice(t, root, "one")
+			return root, []string{"--slice", proposalSliceFlag(t, "one"), "--depends", "one:unknown"}
+		},
+		"self dependency": func(t *testing.T) (string, []string) {
+			root := proposalRepository(t)
+			prepareSlice(t, root, "one")
+			return root, []string{"--slice", proposalSliceFlag(t, "one"), "--depends", "one:one"}
+		},
 		"dirty durable document": func(t *testing.T) (string, []string) {
 			root := proposalRepository(t)
 			prepareSlice(t, root, "dirty-docs")
@@ -506,6 +560,15 @@ func TestRefuseInvalidProposalPreflight(t *testing.T) {
 
 			if !strings.HasPrefix(output.String(), "fix_required\n") {
 				t.Fatalf("output = %q", output.String())
+			}
+			want, ok := diagnostics[name]
+			if !ok {
+				t.Fatal("preflight case lacks invariant and repair expectations")
+			}
+			for _, message := range want {
+				if message == "" || !strings.Contains(output.String(), message) {
+					t.Errorf("output lacks %q: %q", message, output.String())
+				}
 			}
 			if len(backend.items)+len(backend.parents)+len(backend.children)+len(backend.blocks) != 0 {
 				t.Fatalf("backend mutated: %#v", backend)
