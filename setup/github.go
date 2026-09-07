@@ -126,7 +126,8 @@ func (b *GitHubBackend) ListMergedWorkItems(ctx context.Context, repository work
 			continue
 		}
 		merged := false
-		var closingCommit string
+		closed := false
+		var commits []string
 		workflowItem := hasWorkflowLabel(issue)
 		for page := 1; ; page++ {
 			var events []struct {
@@ -144,44 +145,53 @@ func (b *GitHubBackend) ListMergedWorkItems(ctx context.Context, repository work
 				// Submission handoff removes these labels from the source issue.
 				workflowItem = workflowItem || event.Event == "labeled" && slices.Contains([]string{"ready", "wip"}, event.Label.Name)
 				if event.Event == "closed" || event.Event == "reopened" {
-					merged = event.Event == "closed" && event.CommitID != ""
-					closingCommit = event.CommitID
+					closed = event.Event == "closed"
+					merged = closed && event.CommitID != ""
+					commits = nil
+				}
+				// Ready for Merge closes the issue before the merge is referenced.
+				if closed && (event.Event == "closed" || event.Event == "referenced") && event.CommitID != "" && !slices.Contains(commits, event.CommitID) {
+					commits = append(commits, event.CommitID)
 				}
 			}
 			if len(events) < 100 {
 				break
 			}
 		}
-		if workflowItem && merged {
+		if workflowItem && closed {
 			item := workflow.WorkItem{Number: issue.Number, Title: issue.Title, Body: issue.Body, Branch: issue.Title, Merged: true}
 			matches := 0
-			for page := 1; ; page++ {
-				var pulls []struct {
-					MergedAt    string `json:"merged_at"`
-					MergeCommit string `json:"merge_commit_sha"`
-					Head        struct {
-						Ref string `json:"ref"`
-						SHA string `json:"sha"`
-					} `json:"head"`
-				}
-				path := b.repositoryPath(repository) + fmt.Sprintf("/commits/%s/pulls?per_page=100&page=%d", url.PathEscape(closingCommit), page)
-				if err := b.request(ctx, http.MethodGet, path, nil, &pulls); err != nil {
-					return nil, err
-				}
-				for _, pull := range pulls {
-					if pull.MergedAt != "" && pull.MergeCommit == closingCommit && pull.Head.Ref == item.Branch {
-						matches++
-						item.AcceptedHead = pull.Head.SHA
+			for _, commit := range commits {
+				for page := 1; ; page++ {
+					var pulls []struct {
+						MergedAt    string `json:"merged_at"`
+						MergeCommit string `json:"merge_commit_sha"`
+						Head        struct {
+							Ref string `json:"ref"`
+							SHA string `json:"sha"`
+						} `json:"head"`
 					}
-				}
-				if len(pulls) < 100 {
-					break
+					path := b.repositoryPath(repository) + fmt.Sprintf("/commits/%s/pulls?per_page=100&page=%d", url.PathEscape(commit), page)
+					if err := b.request(ctx, http.MethodGet, path, nil, &pulls); err != nil {
+						return nil, err
+					}
+					for _, pull := range pulls {
+						if pull.MergedAt != "" && pull.MergeCommit == commit && pull.Head.Ref == item.Branch {
+							matches++
+							item.AcceptedHead = pull.Head.SHA
+						}
+					}
+					if len(pulls) < 100 {
+						break
+					}
 				}
 			}
 			if matches != 1 {
 				item.AcceptedHead = ""
 			}
-			items = append(items, item)
+			if merged || matches > 0 {
+				items = append(items, item)
+			}
 		}
 	}
 	return items, nil
