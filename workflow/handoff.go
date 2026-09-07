@@ -34,6 +34,9 @@ func SubmitImplementation(ctx context.Context, root string, number int, bodyPath
 	if item.Number == 0 || !item.Claimed || item.State != Ready && item.State != Rework {
 		return ImplementationOutcome{Status: "fix_required", Reason: "Workflow State contradicts submission; repair the claimed Ready or Rework projections and retry"}, nil
 	}
+	if item.State == Rework && item.Submission == nil {
+		return ImplementationOutcome{Status: "fix_required", Reason: "Rework has no existing Submission; repair its attachment before resubmitting"}, nil
+	}
 	head, err := git(root, "rev-parse", "refs/heads/"+item.Branch)
 	if err != nil {
 		return ImplementationOutcome{Status: "fix_required", Reason: "local branch unavailable; restore its conventional worktree"}, nil

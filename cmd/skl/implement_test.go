@@ -234,3 +234,32 @@ func TestImplementStartsFindingDrivenRework(t *testing.T) {
 		t.Fatal("rework packet synchronizes target or lacks review fixed point")
 	}
 }
+
+func TestImplementResubmitsExistingRework(t *testing.T) {
+	for _, hasSubmission := range []bool{true, false} {
+		root := proposalRepository(t)
+		prepareSlice(t, root, "widget")
+		backend := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{}}
+		start := implementCLI(t, root, backend, "next")
+		body := filepath.Join(start.Packet.Facts.Implementation.ResultDirectory, "submission.md")
+		if err := os.WriteFile(body, []byte("current Audit and rework dispositions\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, root, "rm", "-r", ".changes/widget")
+		runGit(t, root, "commit", "-m", "retire")
+		head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+		backend.work[0].State, backend.work[0].TargetSnapshot = workflow.Rework, ""
+		if hasSubmission {
+			backend.work[0].Submission = &workflow.Submission{Number: 42, Head: head, PreviousReviewedHead: head}
+		}
+		backend.remoteHeads["widget"] = head
+		got := implementCLI(t, root, backend, "submit", "--item", "7", "--body", body)
+		if hasSubmission {
+			if got.Status != "awaiting_review" || backend.work[0].Submission.Number != 42 {
+				t.Fatalf("rework = %#v", got)
+			}
+		} else if got.Status != "fix_required" || backend.work[0].Submission != nil {
+			t.Fatalf("rework created new PR: %#v", got)
+		}
+	}
+}
