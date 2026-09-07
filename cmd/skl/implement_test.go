@@ -346,3 +346,20 @@ func TestImplementPublishesOpaqueResultAndCleansSuccessfulDirectory(t *testing.T
 		t.Fatalf("successful operation remains: %v", err)
 	}
 }
+
+func TestImplementResumesConventionalWorktreeWithoutSelectingAnotherItem(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "widget")
+	runGit(t, root, "switch", "main")
+	worktree := filepath.Join(root, ".worktrees", "widget")
+	runGit(t, root, "worktree", "add", worktree, "widget")
+	backend := &implementationMemory{work: []workflow.ImplementationItem{{Number: 1, Branch: "other", State: workflow.Ready}, {Number: 7, Branch: "widget", State: workflow.Ready, Claimed: true}}}
+	got := implementCLI(t, worktree, backend, "resume")
+	if got.Status != "work_available" || got.Item.Number != 7 || backend.work[0].Claimed {
+		t.Fatalf("resume = %#v", got)
+	}
+	got = implementCLI(t, root, backend, "resume")
+	if got.Status != "fix_required" || backend.work[0].Claimed {
+		t.Fatalf("root resume claimed another item: %#v", got)
+	}
+}

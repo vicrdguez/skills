@@ -29,10 +29,11 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 				} else if name == "submit" {
 					outcome, err = workflow.SubmitImplementation(command.Context, command.Path("repo"), command.Int("item"), command.Path("body"), port)
 				} else {
-					if name == "resume" && command.Int("item") == 0 {
-						return fmt.Errorf("resume requires --item")
+					number := command.Int("item")
+					if name == "resume" && number == 0 {
+						number = -1
 					}
-					outcome, err = workflow.StartImplementation(command.Context, command.Path("repo"), command.Int("item"), port)
+					outcome, err = workflow.StartImplementation(command.Context, command.Path("repo"), number, port)
 				}
 				if err != nil {
 					return err

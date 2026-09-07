@@ -77,6 +77,24 @@ func StartImplementation(ctx context.Context, root string, number int, backend I
 		return ImplementationOutcome{}, err
 	}
 	if number != 0 {
+		if number == -1 {
+			main, err := primaryWorktree(root)
+			if err != nil {
+				return ImplementationOutcome{}, err
+			}
+			location, err := git(root, "rev-parse", "--show-toplevel")
+			if err != nil {
+				return ImplementationOutcome{}, err
+			}
+			for _, item := range items {
+				if item.Claimed && filepath.Clean(location) == filepath.Join(main, ".worktrees", item.Branch) {
+					if number != -1 {
+						return ImplementationOutcome{Status: "fix_required", Reason: "worktree identity is ambiguous; resume with --item after repairing attachments"}, nil
+					}
+					number = item.Number
+				}
+			}
+		}
 		for _, item := range items {
 			if item.Number == number && item.Claimed && (item.State == Ready || item.State == Rework) {
 				return implementationPacket(root, item)
