@@ -22,13 +22,15 @@ import (
 )
 
 type memoryBackend struct {
-	repository setup.RepositoryID
-	labels     []setup.Label
-	items      []workflow.WorkItem
-	parents    []workflow.CoordinationItem
-	children   [][2]int
-	blocks     [][2]int
-	failReady  int
+	repository     setup.RepositoryID
+	labels         []setup.Label
+	items          []workflow.WorkItem
+	parents        []workflow.CoordinationItem
+	children       [][2]int
+	blocks         [][2]int
+	failReady      int
+	failChild      int
+	failDependency int
 }
 
 func (b *memoryBackend) Validate(_ context.Context, repository setup.RepositoryID) (string, error) {
@@ -86,6 +88,10 @@ func (b *memoryBackend) CreateCoordinationItem(_ context.Context, _ workflow.Rep
 }
 
 func (b *memoryBackend) AddChild(_ context.Context, _ workflow.RepositoryID, parent, child int) error {
+	if b.failChild == child {
+		b.failChild = 0
+		return errors.New("temporary parent relationship failure")
+	}
 	b.children = append(b.children, [2]int{parent, child})
 	for index := range b.items {
 		if b.items[index].Number == child {
@@ -96,6 +102,10 @@ func (b *memoryBackend) AddChild(_ context.Context, _ workflow.RepositoryID, par
 }
 
 func (b *memoryBackend) AddDependency(_ context.Context, _ workflow.RepositoryID, dependent, blocker int) error {
+	if b.failDependency == dependent {
+		b.failDependency = 0
+		return errors.New("temporary dependency relationship failure")
+	}
 	b.blocks = append(b.blocks, [2]int{dependent, blocker})
 	for index := range b.items {
 		if b.items[index].Number == dependent {
@@ -440,6 +450,45 @@ func TestPublishDependencyOrderedMultiSliceProposal(t *testing.T) {
 	}
 	if !backend.items[0].Ready || !backend.items[1].Ready {
 		t.Fatalf("items are not Ready: %#v", backend.items)
+	}
+}
+
+func TestPublicationRelationshipFailureLeavesChildNotReady(t *testing.T) {
+	for _, relationship := range []string{"parent", "dependency"} {
+		t.Run(relationship, func(t *testing.T) {
+			root := proposalRepository(t)
+			prepareSlice(t, root, "base")
+			prepareSlice(t, root, "dependent")
+			directory := t.TempDir()
+			for _, name := range []string{"parent", "base", "dependent"} {
+				if err := os.WriteFile(filepath.Join(directory, name+".md"), []byte(name+"\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			backend := &memoryBackend{}
+			if relationship == "parent" {
+				backend.failChild = 2
+			} else {
+				backend.failDependency = 2
+			}
+			var output bytes.Buffer
+			app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+			arguments := []string{"skl", "propose", "publish", "--repo", root, "--target", "main",
+				"--slice", "dependent=" + filepath.Join(directory, "dependent.md"), "--slice", "base=" + filepath.Join(directory, "base.md"),
+				"--depends", "dependent:base", "--parent-title", "parent", "--parent-body", filepath.Join(directory, "parent.md")}
+			if err := app.Run(arguments); err == nil || !strings.Contains(err.Error(), relationship+" relationship failure") {
+				t.Fatalf("publication error = %v", err)
+			}
+			if len(backend.items) != 2 || backend.items[0].Title != "base" || !backend.items[0].Ready || backend.items[1].Title != "dependent" || backend.items[1].Ready {
+				t.Fatalf("failed relationship must retain completed child Ready and affected child non-Ready: %#v", backend.items)
+			}
+			if err := app.Run(arguments); err != nil {
+				t.Fatal(err)
+			}
+			if output.String() != "completed\n" || len(backend.items) != 2 || !backend.items[0].Ready || !backend.items[1].Ready || len(backend.parents) != 1 || !slices.Equal(backend.children, [][2]int{{100, 1}, {100, 2}}) || !slices.Equal(backend.blocks, [][2]int{{2, 1}}) {
+				t.Fatalf("forward retry = %q backend=%#v", output.String(), backend)
+			}
+		})
 	}
 }
 
