@@ -637,6 +637,38 @@ func TestCleanOnlySafeMergedWorktrees(t *testing.T) {
 	}
 }
 
+func TestCleanMergedBranchWithPrunedUpstream(t *testing.T) {
+	root := proposalRepository(t)
+	path := filepath.Join(root, ".worktrees", "squashed")
+	runGit(t, root, "worktree", "add", path, "-b", "squashed", "main")
+	if err := os.WriteFile(filepath.Join(path, "README.md"), []byte("accepted change\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, path, "commit", "-am", "slice change")
+	runGit(t, root, "update-ref", "refs/remotes/origin/squashed", "refs/heads/squashed")
+	runGit(t, root, "branch", "--set-upstream-to=origin/squashed", "squashed")
+	runGit(t, root, "update-ref", "-d", "refs/remotes/origin/squashed")
+	// A squash puts the same change on main without the slice commit's ancestry.
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("accepted change\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "commit", "-am", "accepted squash")
+	backend := &memoryBackend{items: []workflow.WorkItem{{Title: "squashed", Branch: "squashed", Merged: true}}}
+	var output bytes.Buffer
+	app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+	for range 2 {
+		if err := app.Run([]string{"skl", "propose", "cleanup", "--repo", root}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) || gitRefExists(root, "refs/heads/squashed") {
+		t.Fatalf("Merged local state remains: worktree error=%v", err)
+	}
+	if !strings.Contains(output.String(), "removed squashed") {
+		t.Fatalf("cleanup report = %q", output.String())
+	}
+}
+
 func TestRetrieveEquivalentTypedInstructions(t *testing.T) {
 	wantInstructions := readRepositoryFile(t, "skills/dev/tdd/SKILL.md")
 	wantResources := []string{"reference/mocking.md", "reference/tests.md"}

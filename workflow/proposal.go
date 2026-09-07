@@ -122,7 +122,8 @@ func Cleanup(ctx context.Context, root, remote string, backend Backend) (Cleanup
 		if err := gitOK(root, "worktree", "remove", path); err != nil {
 			return outcome, fmt.Errorf("remove worktree %s: %w", branch, err)
 		}
-		if err := gitOK(root, "branch", "-d", branch); err != nil {
+		// Merged is backend-confirmed; squash merges need not preserve ancestry.
+		if err := gitOK(root, "branch", "-D", branch); err != nil {
 			return outcome, fmt.Errorf("remove branch %s: %w", branch, err)
 		}
 		outcome.Removed = append(outcome.Removed, branch)
