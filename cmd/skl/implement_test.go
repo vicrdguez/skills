@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	skilldist "github.com/vicrdguez/skills"
 	"reflect"
 	"strings"
 	"testing"
@@ -114,5 +115,26 @@ func TestImplementPinsTargetAndBundlesInstructions(t *testing.T) {
 	}
 	if strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD")) != baseline {
 		t.Fatal("Work Start changed Git")
+	}
+}
+
+func TestImplementStartsFindingDrivenRework(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "widget")
+	runGit(t, root, "rm", "-r", ".changes/widget")
+	runGit(t, root, "commit", "-m", "retire")
+	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	comments := []skilldist.ReviewComment{{Body: "W1 BLOCK evidence", Author: "reviewer"}, {Body: "W1 NOTE reason", Author: "owner", Association: "OWNER"}}
+	backend := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.Rework, Submission: &workflow.Submission{Number: 11, Head: head, PreviousReviewedHead: head, Comments: comments}}}}
+	got := implementCLI(t, root, backend, "next")
+	if got.Status != "work_available" || got.Packet == nil {
+		t.Fatalf("rework = %#v", got)
+	}
+	facts := got.Packet.Facts.Implementation
+	if facts.Submission != 11 || facts.PreviousReviewedHead != head || !reflect.DeepEqual(facts.Comments, comments) || facts.TargetSnapshot != "" {
+		t.Fatalf("facts = %#v", facts)
+	}
+	if !strings.Contains(got.Packet.Markdown(), head+"...HEAD") || strings.Contains(got.Packet.Markdown(), "git merge ") {
+		t.Fatal("rework packet synchronizes target or lacks review fixed point")
 	}
 }

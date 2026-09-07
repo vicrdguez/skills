@@ -22,6 +22,7 @@ const (
 )
 
 type ImplementationItem struct {
+	Submission     *Submission
 	Branch         string
 	TargetSnapshot string
 	Number         int
@@ -29,6 +30,16 @@ type ImplementationItem struct {
 	CreatedAt      string
 	Claimed        bool
 	Blockers       []int
+}
+
+type Submission struct {
+	Number               int
+	Head                 string
+	Base                 string
+	Body                 string
+	Draft                bool
+	PreviousReviewedHead string
+	Comments             []skilldist.ReviewComment
 }
 
 type ImplementationBackend interface {
@@ -131,21 +142,27 @@ func implementationPacket(root string, item ImplementationItem) (ImplementationO
 			return ImplementationOutcome{Status: "fix_required", Reason: "target unavailable; fetch origin/main and resume"}, nil
 		}
 	}
-	baseline := ""
+	history := LedgerHistory{}
 	if item.Branch != "" {
 		head, headErr := git(root, "rev-parse", "refs/heads/"+item.Branch)
 		if headErr != nil {
 			return ImplementationOutcome{Status: "fix_required", Reason: "branch unavailable; fetch and create the conventional worktree before resuming"}, nil
 		}
-		if headErr == nil {
-			baseline, err = artifactBaseline(root, item.Branch, head)
-		}
+		history, err = InspectLedger(root, head, item.Branch)
 		if err != nil {
-			return ImplementationOutcome{Status: "fix_required", Reason: err.Error() + "; repair ledger history and resume"}, nil
+			return ImplementationOutcome{}, err
+		}
+		if len(history.Violations) != 0 {
+			return ImplementationOutcome{Status: "fix_required", Reason: fmt.Sprint(history.Violations) + "; repair ledger history and resume"}, nil
 		}
 	}
-	facts := skilldist.ImplementationFacts{WorkItem: item.Number, Branch: item.Branch, Worktree: filepath.Join(main, ".worktrees", item.Branch), TargetSnapshot: target, ArtifactBaseline: baseline,
+	facts := skilldist.ImplementationFacts{WorkItem: item.Number, Branch: item.Branch, Worktree: filepath.Join(main, ".worktrees", item.Branch), TargetSnapshot: target, ArtifactBaseline: history.Baseline, ArtifactCompletion: history.Completion,
 		ResumeCommand: fmt.Sprintf("skl implement resume --item %d --target-snapshot %s", item.Number, target)}
+	if item.Submission != nil {
+		facts.Submission, facts.PreviousReviewedHead, facts.Comments = item.Submission.Number, item.Submission.PreviousReviewedHead, item.Submission.Comments
+		facts.TargetSnapshot = ""
+		facts.ResumeCommand = fmt.Sprintf("skl implement resume --item %d", item.Number)
+	}
 	packet, err := skilldist.BuildPacket("implement", skilldist.InvocationFacts{Implementation: &facts})
 	return ImplementationOutcome{Status: "work_available", Item: &item, Packet: &packet}, err
 }
