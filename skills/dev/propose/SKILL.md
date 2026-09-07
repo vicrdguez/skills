@@ -58,10 +58,20 @@ Iterate until the user approves the breakdown. A single ticket is possible if th
 1. Run `skl propose cleanup --repo <root>` before preparing new slices. It removes only safe local Git state for Work Items already observed Merged and reports everything it preserves.
 2. Commit any durable `CONTEXT.md`, ADR, or capability changes to the target branch before creating slice branches.
 3. For each slice, choose a short verb-led kebab-case slug, create `.worktrees/<slug>` and its branch from the target, write `.changes/<slug>/`, commit the complete ledger at once, and push that exact head.
-4. Write the parent and child issue bodies to private temporary Markdown files. The files are opaque transport: `skl` neither authors nor interprets them.
+4. Write the parent and child issue bodies to private temporary Markdown files. For every child, use the thin-pointer template below. Replace every placeholder with the slice summary, branch slug, and full commit SHA from `git rev-parse HEAD` in that slice worktree after committing the complete ledger; that pushed head is its Artifact Baseline. Keep artifact prose in Git, not in the issue. The files are opaque transport: `skl` neither authors nor interprets them.
 5. Publish the prepared Proposal with `skl propose publish --repo <root> --target <branch> --slice <slug>=<body-file>`. Repeat `--slice` for every child and add `--depends <dependent>:<blocker>` for each Dependency. For a multi-slice Proposal also pass `--parent-title <title> --parent-body <body-file>`.
 
 `skl propose publish` preflights the entire declaration before changing GitHub, creates children in blocker-first order, and applies Ready last. If it returns `fix_required`, make the stated Git repair and repeat the same command. If it returns `needs_human`, stop and present its reason; do not guess which existing record to reuse.
+
+Child thin-pointer template:
+
+```markdown
+<summary>
+
+Branch: `<slug>`
+Artifact Baseline: `<baseline-sha>`
+Implementation Ledger: `.changes/<slug>/` at the Artifact Baseline.
+```
 
 ## Writing the change artifacts
 These are the artifacts that each vertical slice will use for implementation:
@@ -77,4 +87,3 @@ So resolve the contradictions now, while you still can — between the artifacts
 **When warranted**:
 - `plan.md`: The approach, the module shapes and seams chosen for implementation and any pinned decision the implementer MUST NOT make on its own. Follow the [plan.md](./reference/plan.md) template
 - `tasks.md`: Follow the [tasks.md](./reference/tasks.md) template — it states when it is warranted
-

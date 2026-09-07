@@ -298,6 +298,70 @@ func TestRetrieveConcreteProposeInstructions(t *testing.T) {
 	}
 }
 
+func TestProposePacketPublishesDurableThinPointer(t *testing.T) {
+	var output bytes.Buffer
+	app := newApp(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output)
+	if err := app.Run([]string{"skl", "skill", "propose"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"thin-pointer template", "git rev-parse HEAD", "full commit SHA", "Replace every placeholder"} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("packet lacks %q", want)
+		}
+	}
+	_, template, found := strings.Cut(output.String(), "```markdown\n")
+	if !found {
+		t.Fatal("packet lacks thin-pointer Markdown template")
+	}
+	template, _, _ = strings.Cut(template, "\n```")
+	root := proposalRepository(t)
+	baseline := prepareSlice(t, root, "ship-widget")
+	authored := strings.NewReplacer("<summary>", "Ship widgets [opaque prose", "<slug>", "ship-widget", "<baseline-sha>", baseline).Replace(template) + "\n"
+	for _, want := range []string{"Branch: `ship-widget`", "Artifact Baseline: `" + baseline + "`", "`.changes/ship-widget/`"} {
+		if !strings.Contains(authored, want) {
+			t.Fatalf("thin pointer lacks %q: %s", want, authored)
+		}
+	}
+	bodyPath := filepath.Join(t.TempDir(), "body.md")
+	if err := os.WriteFile(bodyPath, []byte(authored), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var durableBody string
+	ready := false
+	client := &http.Client{Transport: httpRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		body := `{}`
+		switch {
+		case request.Method == http.MethodGet && request.URL.Path == "/repos/acme/widgets/issues":
+			body = `[]`
+		case request.Method == http.MethodPost && request.URL.Path == "/repos/acme/widgets/issues":
+			var payload map[string]string
+			if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+				t.Fatal(err)
+			}
+			durableBody = payload["body"]
+			body = `{"id":501,"number":1}`
+		case request.Method == http.MethodPost && request.URL.Path == "/repos/acme/widgets/issues/1/labels":
+			if durableBody != authored {
+				t.Fatalf("Ready before opaque thin pointer was durable: %q", durableBody)
+			}
+			ready = true
+		default:
+			t.Fatalf("unexpected request: %s %s", request.Method, request.URL.Path)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+	})}
+	output.Reset()
+	app = newApp(func() (setup.Backend, error) {
+		return setup.NewGitHubBackend("https://api.github.test", "secret", client), nil
+	}, bytes.NewReader(nil), &output, &output)
+	if err := app.Run([]string{"skl", "propose", "publish", "--repo", root, "--target", "main", "--slice", "ship-widget=" + bodyPath}); err != nil {
+		t.Fatal(err)
+	}
+	if output.String() != "completed\n" || !ready || durableBody != authored {
+		t.Fatalf("publication = %q ready=%v body=%q", output.String(), ready, durableBody)
+	}
+}
+
 func TestPublishOnePreparedSlice(t *testing.T) {
 	root := proposalRepository(t)
 	baseline := prepareSlice(t, root, "ship-widget")
