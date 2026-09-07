@@ -28,7 +28,7 @@ A declined judgement call with a stated reason is a decision, not an omission. T
 
 Tick off the `[ ]` boxes the work completed, except those under `Manual verification`. That is the only content edit the Implementation Ledger allows. Record Artifact Completion in a commit, then remove the entire `.changes/<slug>/` ledger in a separate subsequent commit before review. Keep Artifact Baseline and Completion reachable in Git history; retirement does not relax the content freeze.
 
-Then present the work by pushing the branch and submitting it for review as described in `docs/github.md`. Never archive or bless the changes — that is the watchdog's job.
+Then present the work by pushing the branch and submitting it for review as described in `docs/github.md`. Never bless the changes — that is the watchdog's job.
 
 The work is done only when every `behavior.md` scenario has a materialized test, every `intent.md` "Definition of Done" box is demonstrably met, every `audit` finding carries a disposition in the PR ledger, the full suite is green and the PR is labeled `review`.
 

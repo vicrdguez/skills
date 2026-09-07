@@ -319,6 +319,47 @@ func TestRetrieveConcreteProposeInstructions(t *testing.T) {
 	}
 }
 
+func TestRetrieveRetiredLedgerInstructions(t *testing.T) {
+	for skill, required := range map[string][]string{
+		"watchdog": {
+			"## Pass -> Ready for Merge",
+			"git show <artifact-baseline>:.changes/<slug>/intent.md",
+			"Copy its `Manual verification` section into the PR body verbatim, with every checkbox unchecked",
+			"Keep the retired Implementation Ledger absent; do not restore or archive it.",
+			"The change now awaits the **human's merge**. The watchdog does not merge.",
+		},
+		"implement": {
+			"remove the entire `.changes/<slug>/` ledger in a separate subsequent commit before review",
+			"Never bless the changes — that is the watchdog's job.",
+			"rework must not recreate or revise it",
+		},
+	} {
+		t.Run(skill, func(t *testing.T) {
+			var output bytes.Buffer
+			app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, t.TempDir())
+			if err := app.Run([]string{"skl", "skill", skill}); err != nil {
+				t.Fatal(err)
+			}
+			got, _, _ := strings.Cut(output.String(), "\n\n## Included Skill:")
+			for _, want := range required {
+				if !strings.Contains(got, want) {
+					t.Errorf("%s instructions lack %q", skill, want)
+				}
+			}
+			for _, forbidden := range []string{
+				"archiving the change **inside the branch**",
+				"`.changes/<slug>/` → `.changes/archive/<YYYY-MM-DD>-<slug>/`",
+				"Push the archive commit to the PR branch",
+				"Never archive or bless the changes — that is the watchdog's job",
+			} {
+				if strings.Contains(got, forbidden) {
+					t.Errorf("%s instructions retain legacy archive action %q", skill, forbidden)
+				}
+			}
+		})
+	}
+}
+
 func TestProposePacketPublishesDurableThinPointer(t *testing.T) {
 	var output bytes.Buffer
 	app := newApp(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output)

@@ -84,11 +84,11 @@ The marker is the record and `grep -rn 'DEBT('` is the index. There is no second
 
 The implementor materializes surviving notes during rework. If a PR passes with notes outstanding and no rework round is coming, you may add the markers entries yourself as part of finalizing. That is bookkeeping, not review: run the formatter or parser for the files you touched and `git diff --check`, not `audit` and not the full suite just for comments.
 
-## Pass → land and mark done
+## Pass -> Ready for Merge
 
-When verification passes **and** no `BLOCK` or `HUMAN` finding is still active, **land the change** by
-- Copying the `Manual verification` section of `intent.md` into the PR body verbatim, as the human's checklist. You tick nothing in it: by definition those are the checks no agent can run.
-- archiving the change **inside the branch** (`.changes/<slug>/` → `.changes/archive/<YYYY-MM-DD>-<slug>/`), commit. Then **label the PR `done`** (swap off `review`). Push the archive commit to the PR branch.
+When verification passes **and** no `BLOCK` or `HUMAN` finding is still active, mark the change **Ready for Merge**:
+- Read the historical `intent.md` with `git show <artifact-baseline>:.changes/<slug>/intent.md`. Copy its `Manual verification` section into the PR body verbatim, with every checkbox unchecked, as the human's checklist. You tick nothing in it: by definition those are the checks no agent can run.
+- Keep the retired Implementation Ledger absent; do not restore or archive it.
 
 Hand off through the Board reference: remove `review` and `wip` as it adds `done`. The change now awaits the **human's merge**. The watchdog does not merge.
 
