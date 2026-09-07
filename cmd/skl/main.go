@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -144,6 +145,27 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 					fmt.Fprintln(stdout, "preserved", slug)
 				}
 				return nil
+			},
+		}},
+	}, {
+		Name: "implement",
+		Subcommands: []*cli.Command{{
+			Name:  "next",
+			Flags: []cli.Flag{&cli.PathFlag{Name: "repo", Value: "."}},
+			Action: func(command *cli.Context) error {
+				backend, err := newBackend()
+				if err != nil {
+					return err
+				}
+				implementationBackend, ok := backend.(workflow.ImplementationBackend)
+				if !ok {
+					return fmt.Errorf("workflow backend does not support implementation")
+				}
+				outcome, err := workflow.StartImplementation(command.Context, command.Path("repo"), implementationBackend)
+				if err != nil {
+					return err
+				}
+				return json.NewEncoder(stdout).Encode(outcome)
 			},
 		}},
 	}, {
