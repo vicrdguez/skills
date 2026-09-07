@@ -261,6 +261,10 @@ func prepareImplementationStart(ctx context.Context, root string, repository Rep
 				return refuse("target unavailable; fetch origin/" + item.TargetBranch + " and resume")
 			}
 		}
+		resolved, err := git(root, "rev-parse", "--verify", "--end-of-options", item.TargetSnapshot+"^{commit}")
+		if err != nil || resolved != item.TargetSnapshot {
+			return refuse("recorded Target Snapshot is not an available full commit SHA; fetch the original snapshot and repair conflicting metadata")
+		}
 	} else {
 		if item.Submission == nil {
 			return refuse("Rework requires its existing Submission; repair the attachment")
@@ -276,6 +280,12 @@ func prepareImplementationStart(ctx context.Context, root string, repository Rep
 		}
 		if !item.Submission.Draft && history.Phase != "retired" {
 			return refuse("finding-driven Rework must keep the ledger retired; restore its deletion history")
+		}
+		if previous := item.Submission.PreviousReviewedHead; previous != "" {
+			resolved, err := git(root, "rev-parse", "--verify", "--end-of-options", previous+"^{commit}")
+			if err != nil || resolved != previous || gitOK(root, "merge-base", "--is-ancestor", previous, head) != nil {
+				return refuse("recorded reviewed head is unavailable or not an ancestor; fetch the reviewed snapshot and repair its metadata")
+			}
 		}
 	}
 	return item, ImplementationOutcome{}, nil
