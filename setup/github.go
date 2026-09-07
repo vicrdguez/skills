@@ -84,24 +84,29 @@ func (b *GitHubBackend) ListMergedWorkItems(ctx context.Context, repository work
 		if len(issue.PullRequest) != 0 || issue.State != "closed" {
 			continue
 		}
-		var events []struct {
-			Event    string `json:"event"`
-			CommitID string `json:"commit_id"`
-			Label    struct {
-				Name string `json:"name"`
-			} `json:"label"`
-		}
-		path := b.repositoryPath(repository) + fmt.Sprintf("/issues/%d/timeline?per_page=100", issue.Number)
-		if err := b.request(ctx, http.MethodGet, path, nil, &events); err != nil {
-			return nil, err
-		}
 		merged := false
 		workflowItem := hasWorkflowLabel(issue)
-		for _, event := range events {
-			// Submission handoff removes these labels from the source issue.
-			workflowItem = workflowItem || event.Event == "labeled" && slices.Contains([]string{"ready", "wip"}, event.Label.Name)
-			if event.Event == "closed" || event.Event == "reopened" {
-				merged = event.Event == "closed" && event.CommitID != ""
+		for page := 1; ; page++ {
+			var events []struct {
+				Event    string `json:"event"`
+				CommitID string `json:"commit_id"`
+				Label    struct {
+					Name string `json:"name"`
+				} `json:"label"`
+			}
+			path := b.repositoryPath(repository) + fmt.Sprintf("/issues/%d/timeline?per_page=100&page=%d", issue.Number, page)
+			if err := b.request(ctx, http.MethodGet, path, nil, &events); err != nil {
+				return nil, err
+			}
+			for _, event := range events {
+				// Submission handoff removes these labels from the source issue.
+				workflowItem = workflowItem || event.Event == "labeled" && slices.Contains([]string{"ready", "wip"}, event.Label.Name)
+				if event.Event == "closed" || event.Event == "reopened" {
+					merged = event.Event == "closed" && event.CommitID != ""
+				}
+			}
+			if len(events) < 100 {
+				break
 			}
 		}
 		if workflowItem && merged {

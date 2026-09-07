@@ -255,6 +255,28 @@ func TestGitHubBackendReportsOnlyCommitClosedWorkflowItemsAsMerged(t *testing.T)
 	}
 }
 
+func TestGitHubBackendReadsMergedLifecycleAcrossTimelinePages(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		switch request.URL.Path {
+		case "/repos/acme/widgets/issues":
+			return jsonResponse(http.StatusOK, `[{"number":17,"title":"merged","state":"closed","labels":[]}]`), nil
+		case "/repos/acme/widgets/issues/17/timeline":
+			if request.URL.Query().Get("page") == "2" {
+				return jsonResponse(http.StatusOK, `[{"event":"unlabeled","label":{"name":"ready"}},{"event":"closed","commit_id":"abc123"}]`), nil
+			}
+			return jsonResponse(http.StatusOK, `[{"event":"labeled","label":{"name":"ready"}}`+strings.Repeat(`,{"event":"commented"}`, 99)+`]`), nil
+		default:
+			t.Fatalf("unexpected request: %s", request.URL)
+			return nil, nil
+		}
+	})}
+	backend := NewGitHubBackend("https://api.github.test", "secret", client)
+	items, err := backend.ListMergedWorkItems(context.Background(), workflow.RepositoryID{Owner: "acme", Name: "widgets"})
+	if err != nil || len(items) != 1 || items[0].Number != 17 || !items[0].Merged {
+		t.Fatalf("Merged lifecycle = %#v, %v", items, err)
+	}
+}
+
 func TestGitHubBackendFallsBackWhenNativeDependenciesAreUnavailable(t *testing.T) {
 	var patchedBody string
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
