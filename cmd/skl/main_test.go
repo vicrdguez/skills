@@ -586,6 +586,57 @@ func (function httpRoundTripFunc) RoundTrip(request *http.Request) (*http.Respon
 	return function(request)
 }
 
+func TestClosedProposalRecordsStopBeforeMutation(t *testing.T) {
+	for _, closed := range []string{"parent", "child"} {
+		t.Run(closed, func(t *testing.T) {
+			root := proposalRepository(t)
+			prepareSlice(t, root, "base")
+			prepareSlice(t, root, "dependent")
+			directory := t.TempDir()
+			for _, name := range []string{"parent", "base", "dependent"} {
+				if err := os.WriteFile(filepath.Join(directory, name+".md"), []byte(name+"\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			parentState, childState := "open", "open"
+			if closed == "parent" {
+				parentState = "closed"
+			} else {
+				childState = "closed"
+			}
+			mutations := 0
+			client := &http.Client{Transport: httpRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+				if request.Method != http.MethodGet {
+					mutations++
+				}
+				body := `{}`
+				switch {
+				case request.Method == http.MethodGet && request.URL.Path == "/repos/acme/widgets/issues":
+					body = fmt.Sprintf(`[{"id":500,"number":100,"title":"parent","body":"parent\n","state":%q},{"id":501,"number":1,"title":"base","body":"base\n","state":%q}]`, parentState, childState)
+				case strings.HasSuffix(request.URL.Path, "/parent"):
+					body = `{"id":500,"number":100}`
+				case strings.HasSuffix(request.URL.Path, "/dependencies/blocked_by"):
+					body = `[]`
+				}
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+			})}
+			var output bytes.Buffer
+			app := newApp(func() (setup.Backend, error) {
+				return setup.NewGitHubBackend("https://api.github.test", "secret", client), nil
+			}, bytes.NewReader(nil), &output, &output)
+			err := app.Run([]string{"skl", "propose", "publish", "--repo", root, "--target", "main",
+				"--slice", "base=" + filepath.Join(directory, "base.md"), "--slice", "dependent=" + filepath.Join(directory, "dependent.md"),
+				"--parent-title", "parent", "--parent-body", filepath.Join(directory, "parent.md")})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.HasPrefix(output.String(), "needs_human\n") || !strings.Contains(output.String(), "closed") || mutations != 0 {
+				t.Fatalf("closed %s: output=%q mutations=%d", closed, output.String(), mutations)
+			}
+		})
+	}
+}
+
 func TestAmbiguousProposalRetryStopsBeforeMutation(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "one")

@@ -26,12 +26,14 @@ type WorkItem struct {
 	Parent           int
 	Blockers         []int
 	Merged           bool
+	Closed           bool
 }
 
 type CoordinationItem struct {
 	Number int
 	Title  string
 	Body   string
+	Closed bool
 }
 
 type Backend interface {
@@ -182,6 +184,9 @@ func Publish(ctx context.Context, request PublishRequest, backend Backend) (Outc
 			return Outcome{Status: "needs_human", Reason: "ambiguous existing Coordination Item " + request.ParentTitle}, nil
 		}
 		if len(matches) == 1 {
+			if matches[0].Closed {
+				return Outcome{Status: "needs_human", Reason: "existing Coordination Item is closed: " + request.ParentTitle}, nil
+			}
 			if matches[0].Body != string(parentBody) {
 				return Outcome{Status: "needs_human", Reason: "existing Coordination Item has conflicting content: " + request.ParentTitle}, nil
 			}
@@ -206,6 +211,9 @@ func Publish(ctx context.Context, request PublishRequest, backend Backend) (Outc
 	}
 	for _, slice := range ordered {
 		matches := matchesByTitle[slice.Title]
+		if len(matches) == 1 && matches[0].Closed {
+			return Outcome{Status: "needs_human", Reason: "existing Work Item is closed: " + slice.Title}, nil
+		}
 		if len(matches) == 1 && matches[0].Body != slice.Body {
 			// Recognize only the exact suffixes implied by this declaration, not prose.
 			body := strings.TrimRight(matches[0].Body, "\n")

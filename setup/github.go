@@ -121,7 +121,7 @@ func hasWorkflowLabel(issue githubIssue) bool {
 }
 
 func (b *GitHubBackend) normalizeWorkItem(ctx context.Context, repository workflow.RepositoryID, issue githubIssue) (workflow.WorkItem, error) {
-	item := workflow.WorkItem{Number: issue.Number, Title: issue.Title, Body: issue.Body}
+	item := workflow.WorkItem{Number: issue.Number, Title: issue.Title, Body: issue.Body, Closed: issue.State == "closed"}
 	for _, label := range issue.Labels {
 		item.Ready = item.Ready || label.Name == "ready"
 	}
@@ -165,7 +165,7 @@ func (b *GitHubBackend) FindCoordinationItems(ctx context.Context, repository wo
 	items := make([]workflow.CoordinationItem, 0, len(issues))
 	for _, issue := range issues {
 		if len(issue.PullRequest) == 0 && issue.Title == title {
-			items = append(items, workflow.CoordinationItem{Number: issue.Number, Title: issue.Title, Body: issue.Body})
+			items = append(items, workflow.CoordinationItem{Number: issue.Number, Title: issue.Title, Body: issue.Body, Closed: issue.State == "closed"})
 		}
 	}
 	return items, nil
