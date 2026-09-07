@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -521,6 +522,61 @@ func TestReconcileCompletedProposalThroughGitHubAdapter(t *testing.T) {
 	}
 	if output.String() != "completed\n" || mutations != 0 {
 		t.Fatalf("reconciliation = %q with %d mutations", output.String(), mutations)
+	}
+}
+
+func TestReconcileFallbackProposalWithoutMutations(t *testing.T) {
+	for _, status := range []int{http.StatusNotFound, http.StatusGone, http.StatusOK} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			root := proposalRepository(t)
+			prepareSlice(t, root, "base")
+			prepareSlice(t, root, "dependent")
+			directory := t.TempDir()
+			for _, name := range []string{"parent", "base", "dependent"} {
+				if err := os.WriteFile(filepath.Join(directory, name+".md"), []byte(name+"\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			mutations := 0
+			client := &http.Client{Transport: httpRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+				if request.Method != http.MethodGet {
+					mutations++
+				}
+				body := ""
+				code := http.StatusOK
+				switch request.URL.Path {
+				case "/repos/acme/widgets/issues":
+					body = `[
+						{"id":500,"number":100,"title":"parent","body":"parent\n","state":"open"},
+						{"id":501,"number":1,"title":"base","body":"base\n","state":"open","labels":[{"name":"ready"}]},
+						{"id":502,"number":2,"title":"dependent","body":"dependent\n\nBlocked by: #1\n","state":"open","labels":[{"name":"ready"}]}
+					]`
+				case "/repos/acme/widgets/issues/1/parent", "/repos/acme/widgets/issues/2/parent":
+					body = `{"id":500,"number":100}`
+				case "/repos/acme/widgets/issues/1/dependencies/blocked_by", "/repos/acme/widgets/issues/2/dependencies/blocked_by":
+					code, body = status, `[]`
+				default:
+					t.Fatalf("unexpected request: %s %s", request.Method, request.URL.Path)
+				}
+				return &http.Response{StatusCode: code, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+			})}
+			var output bytes.Buffer
+			app := newApp(func() (setup.Backend, error) {
+				return setup.NewGitHubBackend("https://api.github.test", "secret", client), nil
+			}, bytes.NewReader(nil), &output, &output)
+			for range 2 {
+				output.Reset()
+				err := app.Run([]string{"skl", "propose", "publish", "--repo", root, "--target", "main",
+					"--slice", "base=" + filepath.Join(directory, "base.md"), "--slice", "dependent=" + filepath.Join(directory, "dependent.md"),
+					"--depends", "dependent:base", "--parent-title", "parent", "--parent-body", filepath.Join(directory, "parent.md")})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if output.String() != "completed\n" || mutations != 0 {
+					t.Fatalf("fallback retry = %q with %d mutations", output.String(), mutations)
+				}
+			}
+		})
 	}
 }
 

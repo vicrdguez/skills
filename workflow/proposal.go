@@ -203,7 +203,34 @@ func Publish(ctx context.Context, request PublishRequest, backend Backend) (Outc
 				matchesByTitle[slice.Title] = append(matchesByTitle[slice.Title], item)
 			}
 		}
+	}
+	for _, slice := range ordered {
 		matches := matchesByTitle[slice.Title]
+		if len(matches) == 1 && matches[0].Body != slice.Body {
+			// Recognize only the exact suffixes implied by this declaration, not prose.
+			body := strings.TrimRight(matches[0].Body, "\n")
+			var fallback []int
+			for _, dependency := range slices.Backward(request.Dependencies) {
+				blockers := matchesByTitle[dependency.Blocker]
+				if dependency.Dependent != slice.Title || len(blockers) != 1 {
+					continue
+				}
+				number := blockers[0].Number
+				suffix := fmt.Sprintf("\n\nBlocked by: #%d", number)
+				if strings.HasSuffix(body, suffix) {
+					body = strings.TrimSuffix(body, suffix)
+					fallback = append(fallback, number)
+				}
+			}
+			if len(fallback) > 0 && body == strings.TrimRight(slice.Body, "\n") {
+				matches[0].Body = slice.Body
+				for _, number := range fallback {
+					if !slices.Contains(matches[0].Blockers, number) {
+						matches[0].Blockers = append(matches[0].Blockers, number)
+					}
+				}
+			}
+		}
 		if len(matches) > 1 || len(matches) == 1 && (matches[0].Body != slice.Body || matches[0].Branch != "" && matches[0].Branch != slice.Branch) {
 			return Outcome{Status: "needs_human", Reason: "ambiguous existing Work Item " + slice.Title}, nil
 		}

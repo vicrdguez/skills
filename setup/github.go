@@ -135,7 +135,8 @@ func (b *GitHubBackend) normalizeWorkItem(ctx context.Context, repository workfl
 		b.issueIDs[parent.Number] = parent.ID
 	}
 	var blockers []githubIssue
-	if err := b.request(ctx, http.MethodGet, b.repositoryPath(repository)+fmt.Sprintf("/issues/%d/dependencies/blocked_by", issue.Number), nil, &blockers); err != nil {
+	status, err := b.requestStatus(ctx, http.MethodGet, b.repositoryPath(repository)+fmt.Sprintf("/issues/%d/dependencies/blocked_by", issue.Number), nil, &blockers)
+	if err != nil && status != http.StatusNotFound && status != http.StatusGone {
 		return workflow.WorkItem{}, err
 	}
 	for _, blocker := range blockers {
