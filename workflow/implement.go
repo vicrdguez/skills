@@ -23,6 +23,7 @@ const (
 )
 
 type ImplementationItem struct {
+	Problem        string
 	ResumeState    State
 	Submission     *Submission
 	Branch         string
@@ -35,6 +36,8 @@ type ImplementationItem struct {
 }
 
 type Submission struct {
+	State                State
+	Claimed              bool
 	Number               int
 	Head                 string
 	Base                 string
