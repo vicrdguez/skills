@@ -67,11 +67,28 @@ func SubmitImplementation(ctx context.Context, root string, number int, bodyPath
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
+	localHead, localErr := git(root, "rev-parse", "refs/heads/"+item.Branch)
+	remoteHead, err = backend.ImplementationHead(ctx, repository, item.Branch)
+	if err != nil {
+		return ImplementationOutcome{}, err
+	}
+	if localErr != nil || localHead != head || remoteHead != head || submission.Head != head {
+		return ImplementationOutcome{Status: "fix_required", Reason: "head changed during publication; inspect the Submission, push a fixed head and retry"}, nil
+	}
 	item.Submission = &submission
 	if err := backend.AwaitImplementationReview(ctx, repository, item); err != nil {
 		return ImplementationOutcome{}, err
 	}
-	return ImplementationOutcome{Status: "awaiting_review", Item: &item}, nil
+	observed, err := backend.ImplementationItems(ctx, repository)
+	if err != nil {
+		return ImplementationOutcome{}, err
+	}
+	for _, current := range observed {
+		if current.Number == item.Number && current.State == AwaitingReview && !current.Claimed && current.Submission != nil && current.Submission.Head == head {
+			return ImplementationOutcome{Status: "awaiting_review", Item: &current}, nil
+		}
+	}
+	return ImplementationOutcome{Status: "fix_required", Reason: "Awaiting Review read-back is incomplete; inspect the projections and retry the same handoff"}, nil
 }
 
 func removeResultDirectory(bodyPath string) error {

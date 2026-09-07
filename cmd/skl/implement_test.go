@@ -17,8 +17,9 @@ import (
 
 type implementationMemory struct {
 	memoryBackend
-	work        []workflow.ImplementationItem
-	remoteHeads map[string]string
+	work         []workflow.ImplementationItem
+	remoteHeads  map[string]string
+	afterPublish func()
 }
 
 func (b *implementationMemory) ImplementationHead(_ context.Context, _ workflow.RepositoryID, branch string) (string, error) {
@@ -34,7 +35,48 @@ func (b *implementationMemory) PublishImplementation(_ context.Context, _ workfl
 			b.work[i].Submission = &submission
 		}
 	}
+	if b.afterPublish != nil {
+		b.afterPublish()
+	}
 	return submission, nil
+}
+
+func TestImplementRefusesInvalidHandoff(t *testing.T) {
+	for _, invariant := range []string{"Target Snapshot", "heads differ", "ledger", "Workflow State", "head changed"} {
+		t.Run(invariant, func(t *testing.T) {
+			root := proposalRepository(t)
+			prepareSlice(t, root, "widget")
+			backend := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{}}
+			start := implementCLI(t, root, backend, "next")
+			body := filepath.Join(start.Packet.Facts.Implementation.ResultDirectory, "submission.md")
+			if err := os.WriteFile(body, []byte("opaque\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if invariant != "ledger" {
+				runGit(t, root, "rm", "-r", ".changes/widget")
+				runGit(t, root, "commit", "-m", "retire")
+			}
+			backend.remoteHeads["widget"] = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+			switch invariant {
+			case "Target Snapshot":
+				backend.work[0].TargetSnapshot = "deadbeef"
+			case "heads differ":
+				backend.remoteHeads["widget"] = "deadbeef"
+			case "Workflow State":
+				backend.work[0].State = workflow.NeedsHuman
+			case "head changed":
+				backend.afterPublish = func() { backend.remoteHeads["widget"] = "deadbeef" }
+			}
+			state := backend.work[0].State
+			got := implementCLI(t, root, backend, "submit", "--item", "7", "--body", body)
+			if got.Status != "fix_required" || !strings.Contains(got.Reason, invariant) || !backend.work[0].Claimed || backend.work[0].State != state {
+				t.Fatalf("invalid handoff: %#v %#v", got, backend.work)
+			}
+			if _, err := os.Stat(body); err != nil {
+				t.Fatalf("failed handoff removed prose: %v", err)
+			}
+		})
+	}
 }
 
 func (b *implementationMemory) AwaitImplementationReview(_ context.Context, _ workflow.RepositoryID, item workflow.ImplementationItem) error {
