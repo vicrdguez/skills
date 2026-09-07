@@ -363,3 +363,13 @@ func TestImplementResumesConventionalWorktreeWithoutSelectingAnotherItem(t *test
 		t.Fatalf("root resume claimed another item: %#v", got)
 	}
 }
+
+func TestImplementInspectionSuppliesFixedLedgerEvidenceWithoutClaiming(t *testing.T) {
+	root := proposalRepository(t)
+	baseline := prepareSlice(t, root, "widget")
+	backend := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.Ready}}}
+	got := implementCLI(t, root, backend, "inspect", "--item", "7")
+	if got.Status != "inspected" || got.Ledger == nil || got.Ledger.Baseline != baseline || got.Head != baseline || backend.work[0].Claimed {
+		t.Fatalf("inspection = %#v", got)
+	}
+}

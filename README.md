@@ -47,7 +47,7 @@ Four rules hold it together:
 
 - **A fresh context per stage.** Handoff happens through the board and the filesystem, never through conversation history. The watchdog is the strict case: it never runs in the context that built the change, so a green suite it did not run itself does not count.
 - **The board is the queue.** GitHub issues and PRs carry the state — `ready` → `wip` → `review` → `done`, with `rework` for bounces and `needs-human` for the rare paused decision. One branch and one worktree per slice under `.worktrees/<slug>`, so slices don't step on each other.
-- **Two document lifetimes.** Change artifacts (`intent.md`, `behavior.md`, and when warranted `plan.md` / `tasks.md`) live in `.changes/<slug>/` on the slice branch and are archived once the change lands. They freeze the moment they are published — ticking a box is the only edit anyone downstream may make, so the contract can't drift to meet whatever got built. Durable docs — `CONTEXT.md`, `docs/adr/`, `docs/capabilities/` — are committed to `main` and outlive every change that touched them.
+- **Two document lifetimes.** Implementation Ledgers (`intent.md`, `behavior.md`, and optional `plan.md` / `tasks.md`) live in `.changes/<slug>/` on the slice branch. They freeze on publication: only existing non-manual boxes may be ticked. The implementer commits Artifact Completion, then removes the ledger in a separate child commit before review. Review and Rework read historical snapshots rather than restoring or archiving the ledger. Durable docs (`CONTEXT.md`, `docs/adr/`, `docs/capabilities/`) outlive the change.
 - **Slices are tracer bullets.** Each one cuts a complete path through every layer, is demoable on its own, declares its blocking edges, and is sized to fit a single fresh context window.
 
 ### How this differs
@@ -83,6 +83,16 @@ skl propose publish --repo <path> --target main \
 ```
 
 Omit the parent flags and repeated slice/dependency flags for a single-slice Proposal. `fix_required` identifies a Git preparation problem to repair before retrying; `needs_human` identifies ambiguous backend state that the engine will not guess through. Issue Markdown remains opaque and is not copied into the repository.
+
+### Implement a Work Item
+
+Run `skl implement next` for one claimed Work Item and its bundled Instruction Packet, or `skl implement resume --item <number>` for interrupted work. Inside its conventional worktree, `skl implement resume` resolves the Claim by location. Selection prefers eligible Rework and skips blocked, claimed, and paused items.
+
+The worker merges the pinned Target Snapshot, writes code and scenario tests in red-green commits, and runs focused checks. At the Audit gate the worker runs the Full Gate and both independent review axes, dispositions every finding, then commits final ticks and ledger retirement and pushes. `skl` runs none of those project checks or Git mutations.
+
+Write the Audit-bearing `submission.md` in the packet's private temporary directory, then run `skl implement submit --item <number> --body <absolute-file>`. A repairable refusal retains the Claim and prose. Successful publication reports `awaiting_review`, removes the temporary directory, and leaves the issue open until human merge. `skl implement inspect --item <number>` supplies current fixed Git and historical ledger evidence for Audit.
+
+For a permitted human decision, use `skl implement needs-human --item <number> --reason <reason> --decision <absolute-decision.md>`; also supply `--body` and push when a draft Submission must preserve implementation work. Retrieve both Result Document templates through `skl skill implement --resource reference/submission.md` or `reference/decision.md`.
 
 ### Install skills
 

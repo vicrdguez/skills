@@ -20,6 +20,7 @@ type InvocationFacts struct {
 
 type ImplementationFacts struct {
 	ResultDirectory      string          `json:"result_directory"`
+	SubmitCommand        string          `json:"submit_command"`
 	Submission           int             `json:"submission,omitempty"`
 	PreviousReviewedHead string          `json:"previous_reviewed_head,omitempty"`
 	Comments             []ReviewComment `json:"comments,omitempty"`
@@ -104,6 +105,7 @@ func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
 		if f.PreviousReviewedHead != "" {
 			instructions += "\nFinding-driven Rework: sync nothing; review only `" + f.PreviousReviewedHead + "...HEAD`. Read the supplied summary, inline evidence, and human comments. Keep the ledger retired.\n"
 		}
+		instructions += "\nWrite the opaque Result Document using the named template, then run `" + f.SubmitCommand + "`. Refresh ledger integrity for Audit with `skl implement inspect --item " + fmt.Sprint(f.WorkItem) + "`.\n"
 	}
 	resources, err := resourceNames(definition)
 	if err != nil {

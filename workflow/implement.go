@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 )
 
 type State string
@@ -57,10 +58,39 @@ type ImplementationBackend interface {
 }
 
 type ImplementationOutcome struct {
+	Ledger *LedgerHistory      `json:"ledger,omitempty"`
+	Head   string              `json:"head,omitempty"`
 	Packet *skilldist.Packet   `json:"packet,omitempty"`
 	Status string              `json:"status"`
 	Reason string              `json:"reason,omitempty"`
 	Item   *ImplementationItem `json:"item,omitempty"`
+}
+
+func InspectImplementation(ctx context.Context, root string, number int, backend ImplementationBackend) (ImplementationOutcome, error) {
+	remote, err := git(root, "remote", "get-url", "origin")
+	if err != nil {
+		return ImplementationOutcome{}, err
+	}
+	repository, err := ParseGitHubRemote(remote)
+	if err != nil {
+		return ImplementationOutcome{}, err
+	}
+	items, err := backend.ImplementationItems(ctx, repository)
+	if err != nil {
+		return ImplementationOutcome{}, err
+	}
+	for _, item := range items {
+		if item.Number != number {
+			continue
+		}
+		head, err := git(root, "rev-parse", "refs/heads/"+item.Branch)
+		if err != nil {
+			return ImplementationOutcome{}, err
+		}
+		history, err := InspectLedger(root, head, item.Branch)
+		return ImplementationOutcome{Status: "inspected", Item: &item, Head: head, Ledger: &history}, err
+	}
+	return ImplementationOutcome{Status: "fix_required", Reason: "Work Item unavailable; supply its explicit stable --item identity"}, nil
 }
 
 func StartImplementation(ctx context.Context, root string, number int, backend ImplementationBackend) (ImplementationOutcome, error) {
@@ -190,12 +220,15 @@ func implementationPacket(root string, item ImplementationItem) (ImplementationO
 		facts.TargetSnapshot = ""
 		facts.ResumeCommand = fmt.Sprintf("skl implement resume --item %d", item.Number)
 	}
-	packet, err := skilldist.BuildPacket("implement", skilldist.InvocationFacts{Implementation: &facts})
+	facts.ResultDirectory, err = os.MkdirTemp("", "skl-implement-")
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
-	facts.ResultDirectory, err = os.MkdirTemp("", "skl-implement-")
+	quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'" }
+	facts.SubmitCommand = fmt.Sprintf("skl implement submit --repo %s --item %d --body %s", quote(facts.Worktree), item.Number, quote(filepath.Join(facts.ResultDirectory, "submission.md")))
+	packet, err := skilldist.BuildPacket("implement", skilldist.InvocationFacts{Implementation: &facts})
 	if err != nil {
+		os.RemoveAll(facts.ResultDirectory)
 		return ImplementationOutcome{}, err
 	}
 	if err := os.WriteFile(filepath.Join(facts.ResultDirectory, ".skl-result"), []byte("skl.implement/v1\n"), 0600); err != nil {

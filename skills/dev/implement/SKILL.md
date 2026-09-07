@@ -6,9 +6,9 @@ disable-model-invocation: true
 
 Implement a single change proposal, materializing each Gherkin scenario in `behavior.md` into an idiomatic test and following a red -> green loop using the `tdd` skill at the seams pinned in the change artifacts.
 
-Use `docs/github.md` to claim a single unit of work from Github. Follow its dependency preflight before adding `wip`: scan candidates oldest-first, leave blocked items untouched, and claim the first eligible item. Once claimed, the change details are described in `.changes/<slug>`.
+If this packet carries Implementation facts, continue with that Work Item. Otherwise run `skl implement next` and follow its concrete packet. `no_work` ends the invocation. Resume interrupted work with `skl implement resume --item <number>` or from its conventional worktree with `skl implement resume`; ordinary selection skips Claims. Keep the packet's fixed Target Snapshot and retry commands.
 
-Work only in the claimed slice's worktree, `.worktrees/<slug>`. On a first claim, merge up-to-date `main` into its branch before starting; on a rework round sync nothing. Never rebase: it orphans the Artifact baseline and the previous _Reviewed head_, and every three-dot diff taken against them silently widens to the old merge-base.
+Work only in the packet's conventional worktree, creating it from the pushed branch with ordinary Git if needed. On first-pass implementation, merge the packet's exact Target Snapshot before coding; on finding-driven Rework sync nothing. Never rebase or force-push: rewriting history orphans the Artifact Baseline and previous _Reviewed head_, and silently widens later three-dot diffs.
 
 Run typechecking and single test files regularly. `audit` runs the full suite as its gate at the end of this stage, so don't run it separately first.
 
@@ -28,9 +28,9 @@ A declined judgement call with a stated reason is a decision, not an omission. T
 
 Tick off the `[ ]` boxes the work completed, except those under `Manual verification`. That is the only content edit the Implementation Ledger allows. Record Artifact Completion in a commit, then remove the entire `.changes/<slug>/` ledger in a separate subsequent commit before review. Keep Artifact Baseline and Completion reachable in Git history; retirement does not relax the content freeze.
 
-Then present the work by pushing the branch and submitting it for review as described in `docs/github.md`. Never bless the changes — that is the watchdog's job.
+Then push the branch with ordinary Git. Write the PR body, including every Audit disposition, to `submission.md` in the packet's private Result Document directory; retrieve the template with `skl skill implement --resource reference/submission.md`. Run the packet's `skl implement submit` command. A `fix_required` outcome retains the Claim and prose: repair the reported invariant, commit and push as needed, and retry the same handoff. Successful publication removes the temporary directory. Never bless the changes — that is the watchdog's job.
 
-The work is done only when every `behavior.md` scenario has a materialized test, every `intent.md` "Definition of Done" box is demonstrably met, every `audit` finding carries a disposition in the PR ledger, the full suite is green and the PR is labeled `review`.
+The work is done only when every `behavior.md` scenario has a materialized test, every `intent.md` "Definition of Done" box is demonstrably met, every `audit` finding carries a disposition in the PR ledger, the full suite is green and `skl implement submit` reports `awaiting_review`.
 
 ## The scope is already decided
 
@@ -40,7 +40,7 @@ Read the callers of any shared code you change — a regression **this** change 
 
 ## Rework
 
-The latest watchdog summary is the ledger of what was found. Read it, the inline comments carrying its evidence, and any human disposition posted since — `docs/github.md` explains both.
+The latest watchdog summary is the ledger of what was found. Read the packet's summary and inline comments carrying its evidence, and any human disposition posted since. Association and commit facts identify their source; interpreting findings remains your judgment.
 
 Read the retired Implementation Ledger from its historical Artifact Baseline and Completion; rework must not recreate or revise it.
 
@@ -48,7 +48,7 @@ Resolve every finding that is still `BLOCK`. Findings left as `NOTE` are debt, n
 
 Review your own rework against `previous-reviewed-head...HEAD`. Do not re-clean the whole PR: a second sweep across untouched code grows the diff, adds regressions, and gives the next review more surface than it had last round.
 
-Before resubmitting, post a comment mapping each finding to how it was resolved — the commit that did it and the evidence that it holds:
+Before resubmitting, include a mapping of each finding to its resolution in the Result Document: the commit that did it and the evidence that it holds:
 
 ```text
 Rework: abc123...def456
@@ -60,4 +60,6 @@ That is a claim, not proof. The next watchdog verifies it independently. Update 
 
 ## When only a human can decide
 
-Finish everything that is not blocked first. Then follow the human-decision handoff in `docs/github.md`: the decision goes on the issue when no code exists yet, or on a draft PR carrying the completed work when it does. Never leave the question only in your own session.
+Finish everything that is not blocked first. This handoff is for contradictory or impossible artifacts, a mandatory project/language/security/accessibility conflict, an unavoidable change to frozen behavior or interface, a disputed blocker, or the bounce cap; adjacent improvements and implementation preferences do not justify it. Write `decision.md` using `skl skill implement --resource reference/decision.md`, then run `skl implement needs-human --item <number> --reason <reason> --decision <absolute-file>`. Reasons are `contradictory_artifacts`, `mandatory_rule`, `frozen_interface`, `disputed_blocker`, and `bounce_cap`.
+
+When implementation work exists, push it and also supply `--body <absolute-submission.md>` from the same private directory to preserve one draft Submission. Incomplete artifacts may remain during this pause. The semantic command publishes the decision and preserves the state to resume; never leave the question only in your own session.
