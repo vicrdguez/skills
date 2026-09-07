@@ -58,6 +58,7 @@ type ImplementationBackend interface {
 	ImplementationHead(context.Context, RepositoryID, string) (string, error)
 	PublishImplementation(context.Context, RepositoryID, ImplementationItem, Submission) (Submission, error)
 	RecordImplementationTransition(context.Context, RepositoryID, ImplementationItem, ImplementationTransition) error
+	RetainImplementationClaim(context.Context, RepositoryID, ImplementationItem) error
 	AwaitImplementationReview(context.Context, RepositoryID, ImplementationItem, func() error) error
 	PauseImplementation(context.Context, RepositoryID, ImplementationItem, string, func() error) error
 }
@@ -199,7 +200,7 @@ func StartImplementation(ctx context.Context, root string, number int, snapshot,
 			return ImplementationOutcome{}, err
 		}
 		for _, current := range observed {
-			if current.Number == item.Number && current.Claimed && current.State == item.State {
+			if current.Number == item.Number && current.Claimed && current.State == item.State && current.Problem == "" && current.Branch == item.Branch && current.TargetSnapshot == item.TargetSnapshot {
 				return implementationPacket(root, current)
 			}
 		}

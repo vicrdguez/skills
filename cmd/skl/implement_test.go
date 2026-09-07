@@ -25,12 +25,26 @@ type implementationMemory struct {
 	decisions        map[int]string
 	failTransition   bool
 	beforeTransition func()
+	afterCompletion  func()
 }
 
 func (b *implementationMemory) RecordImplementationTransition(_ context.Context, _ workflow.RepositoryID, item workflow.ImplementationItem, transition workflow.ImplementationTransition) error {
 	for i := range b.work {
 		if b.work[i].Number == item.Number {
 			b.work[i].Transition = &transition
+		}
+	}
+	if transition.Completed && b.afterCompletion != nil {
+		b.afterCompletion()
+	}
+	return nil
+}
+
+func (b *implementationMemory) RetainImplementationClaim(_ context.Context, _ workflow.RepositoryID, item workflow.ImplementationItem) error {
+	for i := range b.work {
+		if b.work[i].Number == item.Number {
+			b.work[i].Claimed = true
+			b.work[i].State = item.State
 		}
 	}
 	return nil
@@ -514,7 +528,7 @@ func TestImplementReconcilesInterruptedHandoffs(t *testing.T) {
 }
 
 func TestImplementChecksContradictionsAndHeadDuringProjection(t *testing.T) {
-	for _, fault := range []string{"contradiction", "local movement", "remote movement"} {
+	for _, fault := range []string{"contradiction", "local movement", "remote movement", "completion local movement", "completion remote movement"} {
 		t.Run(fault, func(t *testing.T) {
 			root := proposalRepository(t)
 			prepareSlice(t, root, "widget")
@@ -534,6 +548,10 @@ func TestImplementChecksContradictionsAndHeadDuringProjection(t *testing.T) {
 				b.beforeTransition = func() { runGit(t, root, "commit", "--allow-empty", "-m", "movement") }
 			case "remote movement":
 				b.beforeTransition = func() { b.remoteHeads["widget"] = "moved" }
+			case "completion local movement":
+				b.afterCompletion = func() { runGit(t, root, "commit", "--allow-empty", "-m", "late movement") }
+			case "completion remote movement":
+				b.afterCompletion = func() { b.remoteHeads["widget"] = "moved" }
 			}
 			got := implementCLI(t, root, b, "submit", "--item", "7", "--body", body)
 			if got.Status != "fix_required" || !b.work[0].Claimed || b.work[0].State != workflow.Ready {

@@ -25,7 +25,7 @@ func PauseImplementation(ctx context.Context, root string, number int, reason, d
 	return handoffImplementation(ctx, root, number, NeedsHuman, decisionPath, bodyPath, backend)
 }
 
-func handoffImplementation(ctx context.Context, root string, number int, target State, decisionPath, bodyPath string, backend ImplementationBackend) (ImplementationOutcome, error) {
+func handoffImplementation(ctx context.Context, root string, number int, target State, decisionPath, bodyPath string, backend ImplementationBackend) (outcome ImplementationOutcome, err error) {
 	repository, items, err := loadImplementation(ctx, root, backend)
 	if err != nil {
 		return ImplementationOutcome{}, err
@@ -120,7 +120,7 @@ func handoffImplementation(ctx context.Context, root string, number int, target 
 		return ImplementationOutcome{}, err
 	}
 	if target == AwaitingReview {
-		if from == Ready && (item.TargetSnapshot == "" || gitOK(root, "merge-base", "--is-ancestor", item.TargetSnapshot, head) != nil) {
+		if from == Ready && item.TargetSnapshot == "" || item.TargetSnapshot != "" && gitOK(root, "merge-base", "--is-ancestor", item.TargetSnapshot, head) != nil {
 			return ImplementationOutcome{}, Refuse("Target Snapshot is absent; merge the pinned snapshot, commit and push before retrying")
 		}
 		if history.Phase != "retired" || len(history.Violations) > 0 {
@@ -147,6 +147,12 @@ func handoffImplementation(ctx context.Context, root string, number int, target 
 		return ImplementationOutcome{}, err
 	}
 	item.Transition = &transition
+	defer func() {
+		if err != nil {
+			transition.Completed = false
+			err = errors.Join(err, backend.RecordImplementationTransition(ctx, repository, item, transition), backend.RetainImplementationClaim(ctx, repository, item))
+		}
+	}()
 	if bodyPath != "" {
 		base := item.TargetBranch
 		if item.Submission != nil && item.Submission.Base != "" {
@@ -187,6 +193,9 @@ func handoffImplementation(ctx context.Context, root string, number int, target 
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
+	if err := guard(); err != nil {
+		return ImplementationOutcome{}, err
+	}
 	for _, current := range observed {
 		if current.Number != number {
 			continue
@@ -194,6 +203,9 @@ func handoffImplementation(ctx context.Context, root string, number int, target 
 		if current.Problem == "" && current.State == target && !current.Claimed && (bodyPath == "" || current.Submission != nil && current.Submission.Head == head && current.Submission.Draft == (target == NeedsHuman)) {
 			transition.Completed = true
 			if err := backend.RecordImplementationTransition(ctx, repository, current, transition); err != nil {
+				return ImplementationOutcome{}, err
+			}
+			if err := guard(); err != nil {
 				return ImplementationOutcome{}, err
 			}
 			current.Transition = &transition

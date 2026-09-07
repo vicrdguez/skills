@@ -51,7 +51,7 @@ func TestGitHubImplementationNormalizesPaginatedWork(t *testing.T) {
 
 func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 	labels := map[int][]string{7: {"ready", "external"}}
-	comments := map[int][]map[string]any{}
+	comments := map[int][]map[string]any{7: {{"author_association": "NONE", "body": "<!-- skl.implement/v1\n{\"target_snapshot\":\"snapshot\"}\n-->"}}}
 	var pulls []map[string]any
 	creations := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -184,6 +184,12 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 	if err := b.RecordImplementationTransition(ctx, repo, item, transition); err != nil {
 		t.Fatal(err)
 	}
+	labels[7] = []string{"done"}
+	items, err = b.ImplementationItems(ctx, repo)
+	if err != nil || len(items) != 1 || items[0].Problem == "" {
+		t.Fatalf("pending drift accepted: %#v %v", items, err)
+	}
+	labels[7] = []string{"external"}
 	updated.Draft = true
 	draft, err := b.PublishImplementation(ctx, repo, item, updated)
 	if err != nil || !draft.Draft {

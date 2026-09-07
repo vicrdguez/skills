@@ -77,29 +77,38 @@ func (b *GitHubBackend) publishImplementationMetadata(ctx context.Context, repos
 	if err != nil {
 		return err
 	}
-	return b.implementationComment(ctx, repository, number, "<!-- skl.implement/v1\n"+string(payload)+"\n-->")
+	return b.implementationComment(ctx, repository, number, "<!-- skl.implement/v1\n"+string(payload)+"\n-->", true)
 }
 
-func (b *GitHubBackend) implementationComment(ctx context.Context, repository workflow.RepositoryID, number int, body string) error {
+func (b *GitHubBackend) implementationComment(ctx context.Context, repository workflow.RepositoryID, number int, body string, metadata bool) error {
+	published := func(comments []skilldist.ReviewComment) bool {
+		latest := ""
+		for _, comment := range comments {
+			if metadata {
+				if strings.HasPrefix(comment.Body, "<!-- skl.implement/v1\n") && trustedMetadata(comment) {
+					latest = comment.Body
+				}
+			} else if comment.Body == body {
+				return true
+			}
+		}
+		return metadata && latest == body
+	}
 	stream := fmt.Sprintf("/issues/%d/comments", number)
 	comments, err := b.implementationComments(ctx, repository, stream)
 	if err != nil {
 		return err
 	}
-	for _, comment := range comments {
-		if comment.Body == body {
-			return nil
-		}
+	if published(comments) {
+		return nil
 	}
 	writeErr := b.request(ctx, http.MethodPost, b.repositoryPath(repository)+stream, map[string]string{"body": body}, nil)
 	comments, err = b.implementationComments(ctx, repository, stream)
 	if err != nil {
 		return err
 	}
-	for _, comment := range comments {
-		if comment.Body == body {
-			return nil
-		}
+	if published(comments) {
+		return nil
 	}
 	if writeErr != nil {
 		return writeErr
@@ -284,7 +293,7 @@ func (b *GitHubBackend) PauseImplementation(ctx context.Context, repository work
 	if item.Submission != nil {
 		number = item.Submission.Number
 	}
-	if err := b.implementationComment(ctx, repository, number, decision); err != nil {
+	if err := b.implementationComment(ctx, repository, number, decision, false); err != nil {
 		return err
 	}
 	if item.Submission != nil {
@@ -297,6 +306,18 @@ func (b *GitHubBackend) PauseImplementation(ctx context.Context, repository work
 
 func (b *GitHubBackend) RecordImplementationTransition(ctx context.Context, repository workflow.RepositoryID, item workflow.ImplementationItem, transition workflow.ImplementationTransition) error {
 	return b.publishImplementationMetadata(ctx, repository, item.Number, implementationMetadata{Transition: &transition})
+}
+
+func (b *GitHubBackend) RetainImplementationClaim(ctx context.Context, repository workflow.RepositoryID, item workflow.ImplementationItem) error {
+	number := item.Number
+	if item.State == workflow.Rework && item.Submission != nil {
+		number = item.Submission.Number
+	}
+	return b.implementationLabelMutation(ctx, repository, number, []string{"wip"}, nil, nil)
+}
+
+func trustedMetadata(comment skilldist.ReviewComment) bool {
+	return slices.Contains([]string{"OWNER", "MEMBER", "COLLABORATOR"}, comment.Association)
 }
 
 type implementationMetadata struct {
@@ -433,7 +454,7 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository work
 		}
 		for _, comment := range comments {
 			if body, ok := strings.CutPrefix(comment.Body, "<!-- skl.implement/v1\n"); ok && strings.HasSuffix(body, "\n-->") {
-				if !slices.Contains([]string{"OWNER", "MEMBER", "COLLABORATOR"}, comment.Association) {
+				if !trustedMetadata(comment) {
 					continue
 				}
 				var metadata implementationMetadata
@@ -487,6 +508,9 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository work
 				sourceStates = append(sourceStates, workflow.NeedsHuman)
 			}
 			valid := issue.State == "open" && allowed(issue, sourceStates) && (len(matches) == 0 || len(matches) == 1 && matches[0].State == "open" && allowed(matches[0].githubIssue, prStates))
+			if !valid {
+				item.Problem = "projections contradict the pending implementation transition"
+			}
 			if valid && (item.Problem == "" || item.Problem == "contradictory lifecycle projections" || item.Problem == "source Ready contradicts Submission lifecycle") {
 				item.Problem = ""
 				sourceState, sourceClaimed, sourceProblem := implementationLabels(issue)
