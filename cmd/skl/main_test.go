@@ -898,10 +898,11 @@ func TestCleanOnlySafeMergedWorktrees(t *testing.T) {
 	for _, slug := range []string{"merged-clean", "merged-dirty", "merged-unexpected", "unrelated"} {
 		runGit(t, root, "update-ref", "refs/remotes/origin/"+slug, "refs/heads/"+slug)
 	}
+	accepted := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "main"))
 	backend := &memoryBackend{items: []workflow.WorkItem{
-		{Number: 1, Title: "merged-clean", Branch: "merged-clean", Merged: true, AcceptedHead: strings.TrimSpace(runGitOutput(t, root, "rev-parse", "merged-clean"))},
-		{Number: 2, Title: "merged-dirty", Branch: "merged-dirty", Merged: true},
-		{Number: 3, Title: "merged-unexpected", Branch: "merged-unexpected", Merged: true},
+		{Number: 1, Title: "merged-clean", Branch: "merged-clean", Merged: true, AcceptedHead: accepted},
+		{Number: 2, Title: "merged-dirty", Branch: "merged-dirty", Merged: true, AcceptedHead: accepted},
+		{Number: 3, Title: "merged-unexpected", Branch: "merged-unexpected", Merged: true, AcceptedHead: accepted},
 	}}
 	var output bytes.Buffer
 	app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
