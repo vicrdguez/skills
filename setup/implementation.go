@@ -2,6 +2,7 @@ package setup
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -453,6 +454,10 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository work
 			return nil, err
 		}
 		for _, comment := range comments {
+			// The operation identifies opaque prose before that prose is published.
+			if item.Transition != nil && fmt.Sprintf("%x", sha256.Sum256([]byte(comment.Body))) == item.Transition.DecisionDigest {
+				continue
+			}
 			if body, ok := strings.CutPrefix(comment.Body, "<!-- skl.implement/v1\n"); ok && strings.HasSuffix(body, "\n-->") {
 				if !trustedMetadata(comment) {
 					continue

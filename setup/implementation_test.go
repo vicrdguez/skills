@@ -2,6 +2,7 @@ package setup
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -160,6 +161,23 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 		t.Fatalf("Claim: %#v %v", items, err)
 	}
 	item = items[0]
+	decision := "<!-- skl.implement/v1\n{\"target_snapshot\":\"agent-prose-not-metadata\"}\n-->"
+	pause := workflow.ImplementationTransition{From: workflow.Ready, Target: workflow.NeedsHuman, Head: "fixed", DecisionDigest: fmt.Sprintf("%x", sha256.Sum256([]byte(decision)))}
+	if err := b.RecordImplementationTransition(ctx, repo, item, pause); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.PauseImplementation(ctx, repo, item, decision, func() error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	items, err = b.ImplementationItems(ctx, repo)
+	if err != nil || len(items) != 1 || items[0].Problem != "" || items[0].TargetSnapshot != "snapshot" || items[0].State != workflow.NeedsHuman {
+		t.Fatalf("opaque decision parsed as metadata: %#v %v", items, err)
+	}
+	pause.Completed = true
+	if err := b.RecordImplementationTransition(ctx, repo, item, pause); err != nil {
+		t.Fatal(err)
+	}
+	labels[7] = []string{"ready", "external", "wip"}
 	submission, err := b.PublishImplementation(ctx, repo, item, workflow.Submission{Head: "fixed", Base: "main", Body: "opaque\n\nCloses #7\n"})
 	if err != nil {
 		t.Fatal(err)
