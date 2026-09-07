@@ -848,7 +848,7 @@ func TestCleanOnlySafeMergedWorktrees(t *testing.T) {
 		runGit(t, root, "update-ref", "refs/remotes/origin/"+slug, "refs/heads/"+slug)
 	}
 	backend := &memoryBackend{items: []workflow.WorkItem{
-		{Number: 1, Title: "merged-clean", Branch: "merged-clean", Merged: true},
+		{Number: 1, Title: "merged-clean", Branch: "merged-clean", Merged: true, AcceptedHead: strings.TrimSpace(runGitOutput(t, root, "rev-parse", "merged-clean"))},
 		{Number: 2, Title: "merged-dirty", Branch: "merged-dirty", Merged: true},
 		{Number: 3, Title: "merged-unexpected", Branch: "merged-unexpected", Merged: true},
 	}}
@@ -896,7 +896,7 @@ func TestCleanMergedBranchWithPrunedUpstream(t *testing.T) {
 		t.Fatal(err)
 	}
 	runGit(t, root, "commit", "-am", "accepted squash")
-	backend := &memoryBackend{items: []workflow.WorkItem{{Title: "squashed", Branch: "squashed", Merged: true}}}
+	backend := &memoryBackend{items: []workflow.WorkItem{{Title: "squashed", Branch: "squashed", Merged: true, AcceptedHead: strings.TrimSpace(runGitOutput(t, path, "rev-parse", "HEAD"))}}}
 	var output bytes.Buffer
 	app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
 	for range 2 {
@@ -909,6 +909,39 @@ func TestCleanMergedBranchWithPrunedUpstream(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "removed squashed") {
 		t.Fatalf("cleanup report = %q", output.String())
+	}
+}
+
+func TestCleanupPreservesUnacceptedLocalHead(t *testing.T) {
+	for _, evidence := range []string{"extra local commit", "unknown accepted head"} {
+		t.Run(evidence, func(t *testing.T) {
+			root := proposalRepository(t)
+			path := filepath.Join(root, ".worktrees", "merged")
+			runGit(t, root, "worktree", "add", path, "-b", "merged", "main")
+			accepted := strings.TrimSpace(runGitOutput(t, path, "rev-parse", "HEAD"))
+			if evidence == "extra local commit" {
+				if err := os.WriteFile(filepath.Join(path, "local.txt"), []byte("user work\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				runGit(t, path, "add", "local.txt")
+				runGit(t, path, "commit", "-m", "user work after merge")
+			} else {
+				accepted = ""
+			}
+			head := runGitOutput(t, path, "rev-parse", "HEAD")
+			backend := &memoryBackend{items: []workflow.WorkItem{{Title: "merged", Branch: "merged", Merged: true, AcceptedHead: accepted}}}
+			var output bytes.Buffer
+			app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+			if err := app.Run([]string{"skl", "propose", "cleanup", "--repo", root}); err != nil {
+				t.Fatal(err)
+			}
+			if !gitRefExists(root, "refs/heads/merged") {
+				t.Fatal("cleanup deleted an unaccepted local head")
+			}
+			if got := runGitOutput(t, path, "rev-parse", "HEAD"); got != head || output.String() != "preserved merged\n" {
+				t.Fatalf("head=%q report=%q", got, output.String())
+			}
+		})
 	}
 }
 

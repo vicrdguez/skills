@@ -22,6 +22,7 @@ type WorkItem struct {
 	Body             string
 	Branch           string
 	ArtifactBaseline string
+	AcceptedHead     string
 	Ready            bool
 	Parent           int
 	Blockers         []int
@@ -118,6 +119,11 @@ func Cleanup(ctx context.Context, root, remote string, backend Backend) (Cleanup
 		}
 		dirty, err := git(path, "status", "--porcelain", "--untracked-files=all")
 		if err != nil || dirty != "" {
+			outcome.Preserved = append(outcome.Preserved, branch)
+			continue
+		}
+		head, err := git(path, "rev-parse", "HEAD")
+		if err != nil || item.AcceptedHead == "" || head != item.AcceptedHead {
 			outcome.Preserved = append(outcome.Preserved, branch)
 			continue
 		}
