@@ -13,7 +13,7 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 	var commands []*cli.Command
 	for _, name := range []string{"next", "resume", "inspect", "submit", "needs-human"} {
 		commands = append(commands, &cli.Command{Name: name,
-			Flags: []cli.Flag{&cli.PathFlag{Name: "repo", Value: "."}, &cli.IntFlag{Name: "item"}, &cli.PathFlag{Name: "body"}, &cli.PathFlag{Name: "decision"}, &cli.StringFlag{Name: "reason"}, &cli.StringFlag{Name: "target-snapshot"}},
+			Flags: []cli.Flag{&cli.PathFlag{Name: "repo", Value: "."}, &cli.IntFlag{Name: "item"}, &cli.PathFlag{Name: "body"}, &cli.PathFlag{Name: "decision"}, &cli.StringFlag{Name: "reason"}, &cli.StringFlag{Name: "target-snapshot"}, &cli.StringFlag{Name: "reviewed-head"}},
 			Action: func(command *cli.Context) error {
 				backend, err := newBackend()
 				if err != nil {
@@ -38,7 +38,7 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 					if name == "resume" && number == 0 {
 						number = -1
 					}
-					outcome, err = workflow.StartImplementation(command.Context, command.Path("repo"), number, port)
+					outcome, err = workflow.StartImplementation(command.Context, command.Path("repo"), number, command.String("target-snapshot"), command.String("reviewed-head"), port)
 				}
 				if err != nil {
 					return err

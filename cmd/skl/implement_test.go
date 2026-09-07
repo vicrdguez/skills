@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	skilldist "github.com/vicrdguez/skills"
 	"os"
 	"path/filepath"
@@ -21,6 +22,10 @@ type implementationMemory struct {
 	remoteHeads  map[string]string
 	afterPublish func()
 	decisions    map[int]string
+}
+
+func (b *implementationMemory) ImplementationTarget(context.Context, workflow.RepositoryID) (string, error) {
+	return "main", nil
 }
 
 func (b *implementationMemory) PauseImplementation(_ context.Context, _ workflow.RepositoryID, item workflow.ImplementationItem, decision string) error {
@@ -113,6 +118,10 @@ func (b *implementationMemory) ClaimImplementation(_ context.Context, _ workflow
 	for i := range b.work {
 		if b.work[i].Number == item.Number {
 			b.work[i].TargetSnapshot = item.TargetSnapshot
+			b.work[i].TargetBranch = item.TargetBranch
+			if item.Submission != nil {
+				b.work[i].Submission = item.Submission
+			}
 			b.work[i].Claimed = true
 		}
 	}
@@ -172,6 +181,17 @@ func TestImplementClaimsOldestEligibleWork(t *testing.T) {
 		{Number: 7, State: workflow.NeedsHuman, CreatedAt: "2010"},
 		{Number: 9, State: workflow.ReadyForMerge},
 	}}
+	for i := range backend.work {
+		item := &backend.work[i]
+		item.Branch = fmt.Sprintf("slice-%d", item.Number)
+		prepareSlice(t, root, item.Branch)
+		if item.State == workflow.Rework {
+			runGit(t, root, "rm", "-r", ".changes/"+item.Branch)
+			runGit(t, root, "commit", "-m", "retire")
+			head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+			item.Submission = &workflow.Submission{Number: item.Number + 100, Head: head, PreviousReviewedHead: head, Base: "main"}
+		}
+	}
 	for _, want := range []int{4, 5, 3, 2} {
 		got := implementCLI(t, root, backend, "next")
 		if got.Status != "work_available" || got.Item.Number != want || !got.Item.Claimed {
@@ -200,13 +220,45 @@ func TestImplementReportsNoEligibleWork(t *testing.T) {
 }
 
 func TestImplementResumesInterruptedClaim(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "widget")
 	backend := &implementationMemory{work: []workflow.ImplementationItem{
 		{Number: 1, State: workflow.Ready},
-		{Number: 7, State: workflow.Ready, Claimed: true},
+		{Number: 7, Branch: "widget", State: workflow.Ready, Claimed: true},
 	}}
-	got := implementCLI(t, proposalRepository(t), backend, "resume", "--item", "7")
+	got := implementCLI(t, root, backend, "resume", "--item", "7")
 	if got.Status != "work_available" || got.Item.Number != 7 || !got.Item.Claimed || backend.work[0].Claimed {
 		t.Fatalf("resume: %#v %#v", got, backend.work)
+	}
+}
+
+func TestImplementResumePreservesTargetAndRejectsAmbiguousHistory(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "widget")
+	target := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "origin/main"))
+	b := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.Ready, Claimed: true}}}
+	first := implementCLI(t, root, b, "resume", "--item", "7")
+	if first.Packet == nil || b.work[0].TargetSnapshot != target {
+		t.Fatalf("resume did not persist target: %#v", first)
+	}
+	runGit(t, root, "commit", "--allow-empty", "-m", "implementation")
+	runGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
+	second := implementCLI(t, root, b, "resume", "--item", "7", "--target-snapshot", target)
+	if second.Packet == nil || second.Packet.Facts.Implementation.TargetSnapshot != target {
+		t.Fatalf("target moved: %#v", second)
+	}
+	wrong := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	if got := implementCLI(t, root, b, "resume", "--item", "7", "--target-snapshot", wrong); got.Status != "fix_required" {
+		t.Fatalf("accepted changed obligation: %#v", got)
+	}
+	b.work[0].TargetSnapshot = ""
+	if got := implementCLI(t, root, b, "resume", "--item", "7"); got.Status != "fix_required" {
+		t.Fatalf("guessed after history changed: %#v", got)
+	}
+	b.work[0].Submission = &workflow.Submission{Number: 11, Draft: true, Base: "main"}
+	got := implementCLI(t, root, b, "resume", "--item", "7", "--target-snapshot", target)
+	if got.Packet == nil || got.Packet.Facts.Implementation.TargetSnapshot != target {
+		t.Fatalf("draft suppressed target: %#v", got)
 	}
 }
 

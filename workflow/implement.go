@@ -4,11 +4,12 @@ import (
 	"cmp"
 	"context"
 	"fmt"
-	skilldist "github.com/vicrdguez/skills"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+
+	skilldist "github.com/vicrdguez/skills"
 )
 
 type State string
@@ -29,6 +30,7 @@ type ImplementationItem struct {
 	Submission     *Submission
 	Branch         string
 	TargetSnapshot string
+	TargetBranch   string
 	Number         int
 	State          State
 	CreatedAt      string
@@ -49,6 +51,7 @@ type Submission struct {
 }
 
 type ImplementationBackend interface {
+	ImplementationTarget(context.Context, RepositoryID) (string, error)
 	ImplementationItems(context.Context, RepositoryID) ([]ImplementationItem, error)
 	ClaimImplementation(context.Context, RepositoryID, ImplementationItem) error
 	ImplementationHead(context.Context, RepositoryID, string) (string, error)
@@ -93,7 +96,7 @@ func InspectImplementation(ctx context.Context, root string, number int, backend
 	return ImplementationOutcome{Status: "fix_required", Reason: "Work Item unavailable; supply its explicit stable --item identity"}, nil
 }
 
-func StartImplementation(ctx context.Context, root string, number int, backend ImplementationBackend) (ImplementationOutcome, error) {
+func StartImplementation(ctx context.Context, root string, number int, snapshot, reviewedHead string, backend ImplementationBackend) (ImplementationOutcome, error) {
 	remote, err := git(root, "remote", "get-url", "origin")
 	if err != nil {
 		return ImplementationOutcome{}, err
@@ -127,6 +130,14 @@ func StartImplementation(ctx context.Context, root string, number int, backend I
 		}
 		for _, item := range items {
 			if item.Number == number && item.Claimed && (item.State == Ready || item.State == Rework) {
+				prepared, outcome, err := prepareImplementationStart(ctx, root, repository, item, snapshot, reviewedHead, backend)
+				if err != nil || outcome.Status != "" {
+					return outcome, err
+				}
+				if err := backend.ClaimImplementation(ctx, repository, prepared); err != nil {
+					return ImplementationOutcome{}, err
+				}
+				item = prepared
 				return implementationPacket(root, item)
 			}
 		}
@@ -163,12 +174,11 @@ func StartImplementation(ctx context.Context, root string, number int, backend I
 		if blocked {
 			continue
 		}
-		if item.State == Ready {
-			item.TargetSnapshot, err = git(root, "rev-parse", "refs/remotes/origin/main")
-			if err != nil {
-				return ImplementationOutcome{Status: "fix_required", Reason: "target unavailable; fetch origin/main and retry"}, nil
-			}
+		prepared, outcome, err := prepareImplementationStart(ctx, root, repository, item, snapshot, reviewedHead, backend)
+		if err != nil || outcome.Status != "" {
+			return outcome, err
 		}
+		item = prepared
 		claimErr := backend.ClaimImplementation(ctx, repository, item)
 		observed, err := backend.ImplementationItems(ctx, repository)
 		if err != nil {
@@ -187,21 +197,91 @@ func StartImplementation(ctx context.Context, root string, number int, backend I
 	return ImplementationOutcome{Status: "no_work"}, nil
 }
 
+func prepareImplementationStart(ctx context.Context, root string, repository RepositoryID, item ImplementationItem, snapshot, reviewedHead string, backend ImplementationBackend) (ImplementationItem, ImplementationOutcome, error) {
+	refuse := func(reason string) (ImplementationItem, ImplementationOutcome, error) {
+		return item, ImplementationOutcome{Status: "fix_required", Reason: reason, Item: &item}, nil
+	}
+	if item.Problem != "" {
+		return refuse(item.Problem + "; repair contradictory projections before resuming")
+	}
+	if item.Branch == "" || gitOK(root, "check-ref-format", "--branch", item.Branch) != nil || strings.Contains(item.Branch, "/") {
+		return refuse("invalid conventional branch identity; repair the Work Item attachment")
+	}
+	head, err := git(root, "rev-parse", "--verify", "refs/heads/"+item.Branch+"^{commit}")
+	if err != nil {
+		head, err = git(root, "rev-parse", "--verify", "refs/remotes/origin/"+item.Branch+"^{commit}")
+	}
+	if err != nil {
+		return refuse("branch unavailable; fetch the published branch and resume")
+	}
+	history, err := InspectLedger(root, head, item.Branch)
+	if err != nil {
+		return item, ImplementationOutcome{}, err
+	}
+	if len(history.Violations) > 0 {
+		return refuse(fmt.Sprint(history.Violations) + "; repair frozen ledger history")
+	}
+	if item.State == Ready {
+		if snapshot != "" {
+			resolved, err := git(root, "rev-parse", "--verify", snapshot+"^{commit}")
+			if err != nil || resolved != snapshot {
+				return refuse("Target Snapshot must be an available full commit SHA; fetch the pinned commit")
+			}
+			if item.TargetSnapshot != "" && item.TargetSnapshot != snapshot {
+				return refuse("Target Snapshot contradicts the recorded obligation; use the original snapshot")
+			}
+			item.TargetSnapshot = snapshot
+		}
+		if item.TargetBranch == "" {
+			item.TargetBranch, err = backend.ImplementationTarget(ctx, repository)
+			if err != nil {
+				return item, ImplementationOutcome{}, err
+			}
+		}
+		if item.TargetSnapshot == "" {
+			if item.Claimed && head != history.Baseline {
+				return refuse("Target Snapshot is unknown after history changed; read the original packet and resume with --target-snapshot <sha>")
+			}
+			item.TargetSnapshot, err = git(root, "rev-parse", "--verify", "refs/remotes/origin/"+item.TargetBranch+"^{commit}")
+			if err != nil {
+				return refuse("target unavailable; fetch origin/" + item.TargetBranch + " and resume")
+			}
+		}
+	} else {
+		if item.Submission == nil {
+			return refuse("Rework requires its existing Submission; repair the attachment")
+		}
+		if reviewedHead != "" {
+			resolved, err := git(root, "rev-parse", "--verify", reviewedHead+"^{commit}")
+			if err != nil || resolved != reviewedHead || gitOK(root, "merge-base", "--is-ancestor", reviewedHead, head) != nil {
+				return refuse("previous reviewed head must be an available ancestor; fetch the original reviewed commit")
+			}
+			copy := *item.Submission
+			copy.PreviousReviewedHead = reviewedHead
+			item.Submission = &copy
+		}
+		if !item.Submission.Draft && history.Phase != "retired" {
+			return refuse("finding-driven Rework must keep the ledger retired; restore its deletion history")
+		}
+	}
+	return item, ImplementationOutcome{}, nil
+}
+
 func implementationPacket(root string, item ImplementationItem) (ImplementationOutcome, error) {
+	if item.State == Rework && (item.Submission == nil || item.Submission.PreviousReviewedHead == "") {
+		return ImplementationOutcome{Status: "fix_required", Item: &item, Reason: "previous reviewed head needs agent extraction from the supplied watchdog summary; resume --reviewed-head <full-sha> without rewriting history"}, nil
+	}
 	main, err := primaryWorktree(root)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
 	target := item.TargetSnapshot
-	if target == "" && item.State == Ready {
-		target, err = git(root, "rev-parse", "refs/remotes/origin/main")
-		if err != nil {
-			return ImplementationOutcome{Status: "fix_required", Reason: "target unavailable; fetch origin/main and resume"}, nil
-		}
-	}
 	history := LedgerHistory{}
 	if item.Branch != "" {
 		head, headErr := git(root, "rev-parse", "refs/heads/"+item.Branch)
+		if headErr != nil {
+			head, headErr = git(root, "rev-parse", "refs/remotes/origin/"+item.Branch)
+		}
 		if headErr != nil {
 			return ImplementationOutcome{Status: "fix_required", Reason: "branch unavailable; fetch and create the conventional worktree before resuming"}, nil
 		}
@@ -217,6 +297,8 @@ func implementationPacket(root string, item ImplementationItem) (ImplementationO
 		ResumeCommand: fmt.Sprintf("skl implement resume --item %d --target-snapshot %s", item.Number, target)}
 	if item.Submission != nil {
 		facts.Submission, facts.PreviousReviewedHead, facts.Comments = item.Submission.Number, item.Submission.PreviousReviewedHead, item.Submission.Comments
+	}
+	if item.State == Rework {
 		facts.TargetSnapshot = ""
 		facts.ResumeCommand = fmt.Sprintf("skl implement resume --item %d", item.Number)
 	}

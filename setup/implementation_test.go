@@ -71,7 +71,7 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 			var payload map[string]any
 			json.NewDecoder(r.Body).Decode(&payload)
 			creations++
-			pulls = append(pulls, map[string]any{"number": 11, "node_id": "PR_11", "title": "widget", "state": "open", "body": payload["body"], "draft": payload["draft"], "head": map[string]string{"ref": "widget", "sha": "fixed"}, "base": map[string]string{"ref": "main"}})
+			pulls = append(pulls, map[string]any{"number": 11, "node_id": "PR_11", "title": "widget", "state": "open", "body": payload["body"], "draft": payload["draft"], "head": map[string]any{"ref": "widget", "sha": "fixed", "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": "main"}})
 			http.Error(w, "response lost after creation", 500)
 			return
 		case path == "/pulls/11" && r.Method == http.MethodGet:
@@ -95,6 +95,7 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 			if r.Method == http.MethodPost {
 				var payload map[string]any
 				json.NewDecoder(r.Body).Decode(&payload)
+				payload["author_association"] = "OWNER"
 				comments[number] = append(comments[number], payload)
 				http.Error(w, "response lost after comment", 500)
 				return
@@ -161,5 +162,50 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 	}
 	if fmt.Sprint(labels[7]) != "[external]" || fmt.Sprint(labels[11]) != "[review]" {
 		t.Fatalf("labels=%v", labels)
+	}
+}
+
+func TestGitHubImplementationRejectsForeignAttachmentsAndConflictingMetadata(t *testing.T) {
+	for _, kind := range []string{"fork", "untrusted metadata", "conflicting metadata"} {
+		t.Run(kind, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/repos/acme/widgets/issues":
+					fmt.Fprint(w, `[{"number":7,"title":"widget","state":"open","labels":[{"name":"ready"},{"name":"wip"}]}]`)
+				case "/repos/acme/widgets/pulls":
+					if kind == "fork" {
+						fmt.Fprint(w, `[{"number":11,"state":"closed","merged_at":"2020","head":{"ref":"widget","repo":{"full_name":"outsider/widgets"}}}]`)
+					} else {
+						fmt.Fprint(w, `[]`)
+					}
+				case "/repos/acme/widgets/issues/7/dependencies/blocked_by":
+					fmt.Fprint(w, `[]`)
+				case "/repos/acme/widgets/issues/7/comments":
+					comments := []map[string]string{}
+					if kind != "fork" {
+						comments = append(comments, map[string]string{"author_association": "OWNER", "body": "<!-- skl.implement/v1\n{\"target_snapshot\":\"original\"}\n-->"})
+						association := "NONE"
+						if kind == "conflicting metadata" {
+							association = "OWNER"
+						}
+						comments = append(comments, map[string]string{"author_association": association, "body": "<!-- skl.implement/v1\n{\"target_snapshot\":\"replacement\"}\n-->"})
+					}
+					json.NewEncoder(w).Encode(comments)
+				default:
+					t.Errorf("unexpected %s", r.URL)
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+			b := NewGitHubBackend(server.URL, "token", server.Client())
+			items, err := b.ImplementationItems(context.Background(), workflow.RepositoryID{Owner: "acme", Name: "widgets"})
+			if err != nil || len(items) != 1 {
+				t.Fatalf("items = %#v %v", items, err)
+			}
+			item := items[0]
+			if kind == "fork" && (item.Submission != nil || item.State == workflow.Merged) || kind == "untrusted metadata" && item.TargetSnapshot != "original" || kind == "conflicting metadata" && item.Problem == "" {
+				t.Fatalf("unsafe adoption: %#v", item)
+			}
+		})
 	}
 }

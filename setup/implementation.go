@@ -21,8 +21,11 @@ type githubPull struct {
 	Draft    bool   `json:"draft"`
 	MergedAt string `json:"merged_at"`
 	Head     struct {
-		Ref string `json:"ref"`
-		SHA string `json:"sha"`
+		Ref  string `json:"ref"`
+		SHA  string `json:"sha"`
+		Repo struct {
+			FullName string `json:"full_name"`
+		} `json:"repo"`
 	} `json:"head"`
 	Base struct {
 		Ref string `json:"ref"`
@@ -41,13 +44,21 @@ func (b *GitHubBackend) ClaimImplementation(ctx context.Context, repository work
 		if current.Problem != "" || current.State != item.State || current.Branch != item.Branch {
 			return errors.New("implementation state changed before Claim")
 		}
-		if current.Claimed {
-			return nil
-		}
 		if item.TargetSnapshot != "" {
-			if err := b.publishImplementationMetadata(ctx, repository, item.Number, implementationMetadata{TargetSnapshot: item.TargetSnapshot}); err != nil {
+			if current.TargetSnapshot != "" && current.TargetSnapshot != item.TargetSnapshot {
+				return errors.New("Target Snapshot contradicts recorded obligation")
+			}
+			if err := b.publishImplementationMetadata(ctx, repository, item.Number, implementationMetadata{TargetSnapshot: item.TargetSnapshot, TargetBranch: item.TargetBranch}); err != nil {
 				return err
 			}
+		}
+		if item.Submission != nil && item.Submission.PreviousReviewedHead != "" {
+			if err := b.publishImplementationMetadata(ctx, repository, item.Number, implementationMetadata{ReviewedHead: item.Submission.PreviousReviewedHead, ReviewRoundHead: item.Submission.Head}); err != nil {
+				return err
+			}
+		}
+		if current.Claimed {
+			return nil
 		}
 		number := item.Number
 		if item.State == workflow.Rework {
@@ -149,7 +160,7 @@ func (b *GitHubBackend) PublishImplementation(ctx context.Context, repository wo
 			return workflow.Submission{}, err
 		}
 		for _, pull := range pulls {
-			if pull.Head.Ref == item.Branch {
+			if pull.Head.Ref == item.Branch && strings.EqualFold(pull.Head.Repo.FullName, repository.Owner+"/"+repository.Name) {
 				matches = append(matches, pull)
 			}
 		}
@@ -181,7 +192,7 @@ func (b *GitHubBackend) PublishImplementation(ctx context.Context, repository wo
 	} else {
 		pull = matches[0]
 	}
-	if pull.Head.Ref != item.Branch || pull.Head.SHA != wanted.Head || pull.State == "closed" {
+	if pull.Head.Ref != item.Branch || !strings.EqualFold(pull.Head.Repo.FullName, repository.Owner+"/"+repository.Name) || pull.Head.SHA != wanted.Head || pull.State == "closed" {
 		return workflow.Submission{}, errors.New("Submission head or state changed during publication")
 	}
 	if pull.Body != wanted.Body || pull.Base.Ref != wanted.Base {
@@ -255,8 +266,11 @@ func (b *GitHubBackend) PauseImplementation(ctx context.Context, repository work
 }
 
 type implementationMetadata struct {
-	TargetSnapshot string         `json:"target_snapshot,omitempty"`
-	ResumeState    workflow.State `json:"resume_state,omitempty"`
+	TargetSnapshot  string         `json:"target_snapshot,omitempty"`
+	TargetBranch    string         `json:"target_branch,omitempty"`
+	ReviewedHead    string         `json:"reviewed_head,omitempty"`
+	ReviewRoundHead string         `json:"review_round_head,omitempty"`
+	ResumeState     workflow.State `json:"resume_state,omitempty"`
 }
 
 func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository workflow.RepositoryID) ([]workflow.ImplementationItem, error) {
@@ -282,7 +296,7 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository work
 		}
 		var matches []githubPull
 		for _, pull := range pulls {
-			if pull.Head.Ref == issue.Title {
+			if pull.Head.Ref == issue.Title && strings.EqualFold(pull.Head.Repo.FullName, repository.Owner+"/"+repository.Name) {
 				matches = append(matches, pull)
 			}
 		}
@@ -326,16 +340,20 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository work
 				}
 				for page := 1; ; page++ {
 					var reviews []struct {
-						State  string `json:"state"`
-						Commit string `json:"commit_id"`
+						State       string `json:"state"`
+						Commit      string `json:"commit_id"`
+						Body        string `json:"body"`
+						Association string `json:"author_association"`
+						SubmittedAt string `json:"submitted_at"`
+						User        struct {
+							Login string `json:"login"`
+						} `json:"user"`
 					}
 					if err := b.request(ctx, http.MethodGet, b.repositoryPath(repository)+fmt.Sprintf("/pulls/%d/reviews?per_page=100&page=%d", pull.Number, page), nil, &reviews); err != nil {
 						return nil, err
 					}
 					for _, review := range reviews {
-						if review.State == "CHANGES_REQUESTED" {
-							item.Submission.PreviousReviewedHead = review.Commit
-						}
+						item.Submission.Comments = append(item.Submission.Comments, skilldist.ReviewComment{Body: review.Body, Author: review.User.Login, Association: review.Association, Commit: review.Commit, CreatedAt: review.SubmittedAt})
 					}
 					if len(reviews) < 100 {
 						break
@@ -380,13 +398,26 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository work
 		}
 		for _, comment := range comments {
 			if body, ok := strings.CutPrefix(comment.Body, "<!-- skl.implement/v1\n"); ok && strings.HasSuffix(body, "\n-->") {
+				if !slices.Contains([]string{"OWNER", "MEMBER", "COLLABORATOR"}, comment.Association) {
+					continue
+				}
 				var metadata implementationMetadata
 				if err := json.Unmarshal([]byte(strings.TrimSuffix(body, "\n-->")), &metadata); err != nil {
 					item.Problem = "invalid implementation operation metadata"
 					continue
 				}
 				if metadata.TargetSnapshot != "" {
+					if item.TargetSnapshot != "" && item.TargetSnapshot != metadata.TargetSnapshot {
+						item.Problem = "conflicting Target Snapshot metadata"
+						continue
+					}
 					item.TargetSnapshot = metadata.TargetSnapshot
+				}
+				if metadata.TargetBranch != "" {
+					item.TargetBranch = metadata.TargetBranch
+				}
+				if metadata.ReviewedHead != "" && item.Submission != nil && metadata.ReviewRoundHead == item.Submission.Head {
+					item.Submission.PreviousReviewedHead = metadata.ReviewedHead
 				}
 				if metadata.ResumeState != "" {
 					item.ResumeState = metadata.ResumeState
@@ -396,6 +427,10 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository work
 		items = append(items, item)
 	}
 	return items, nil
+}
+
+func (b *GitHubBackend) ImplementationTarget(ctx context.Context, repository workflow.RepositoryID) (string, error) {
+	return b.Validate(ctx, repository)
 }
 
 func implementationLabels(issue githubIssue) (workflow.State, bool, string) {

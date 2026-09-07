@@ -42,6 +42,8 @@ Read the callers of any shared code you change — a regression **this** change 
 
 The latest watchdog summary is the ledger of what was found. Read the packet's summary and inline comments carrying its evidence, and any human disposition posted since. Association and commit facts identify their source; interpreting findings remains your judgment.
 
+For an adopted comment-based review, a `fix_required` response supplies the comments while retaining the Claim. Read its latest watchdog summary and pass the recorded full `Reviewed head` through `skl implement resume --item <number> --reviewed-head <sha>`. The engine validates the supplied Git identity without parsing findings or human prose.
+
 Read the retired Implementation Ledger from its historical Artifact Baseline and Completion; rework must not recreate or revise it.
 
 Resolve every finding that is still `BLOCK`. Findings left as `NOTE` are debt, not work to skip: materialize the code-local ones as `DEBT(#<pr>/W<n>)` comments, exactly as the watchdog's contract describes. Open no follow-up issues — that stays human or `propose` work.
