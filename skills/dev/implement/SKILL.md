@@ -26,9 +26,9 @@ A4  Artifacts  HARD       fixed    — DoD item 3 had no test; added `cancel_shi
 ```
 A declined judgement call with a stated reason is a decision, not an omission. This ledger is what the watchdog verifies and the human approves; without it, the next context re-derives the same calls from scratch and files them as new findings.
 
-Tick off the `[ ]` boxes the work completed, except those under `Manual verification`. That is the only edit the change artifacts allow: they froze when they were published, and nothing you learn while implementing gets written back into them.
+Tick off the `[ ]` boxes the work completed, except those under `Manual verification`. That is the only content edit the Implementation Ledger allows. Record Artifact Completion in a commit, then remove the entire `.changes/<slug>/` ledger in a separate subsequent commit before review. Keep Artifact Baseline and Completion reachable in Git history; retirement does not relax the content freeze.
 
-Then present the work by pushing the branch and submitting it for review as described in `docs/github.md`. Never archive or bless the changes — that is the watchdog's job.
+Then present the work by pushing the branch and submitting it for review as described in `docs/github.md`. Never bless the changes — that is the watchdog's job.
 
 The work is done only when every `behavior.md` scenario has a materialized test, every `intent.md` "Definition of Done" box is demonstrably met, every `audit` finding carries a disposition in the PR ledger, the full suite is green and the PR is labeled `review`.
 
@@ -41,6 +41,8 @@ Read the callers of any shared code you change — a regression **this** change 
 ## Rework
 
 The latest watchdog summary is the ledger of what was found. Read it, the inline comments carrying its evidence, and any human disposition posted since — `docs/github.md` explains both.
+
+Read the retired Implementation Ledger from its historical Artifact Baseline and Completion; rework must not recreate or revise it.
 
 Resolve every finding that is still `BLOCK`. Findings left as `NOTE` are debt, not work to skip: materialize the code-local ones as `DEBT(#<pr>/W<n>)` comments, exactly as the watchdog's contract describes. Open no follow-up issues — that stays human or `propose` work.
 

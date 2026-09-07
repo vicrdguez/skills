@@ -36,7 +36,7 @@ flowchart LR
 | Stage | Skill | What it hands off |
 |---|---|---|
 | Explore | `explore` | Shared understanding through frontier rounds; durable docs written inline via `domain` |
-| Propose | `propose` | Tracer-bullet vertical slices published to the board, each with its artifacts, branch and worktree |
+| Propose | `propose` | Agent-authored tracer-bullet slices prepared in Git, then deterministically published by `skl propose` |
 | Implement | `implement` | One claimed slice, TDD'd at pinned seams, refactored via `audit`, PR labeled `review` |
 | Watchdog | `watchdog` | A verdict reached in a fresh context — lands it (`done`) or bounces it (`rework`). Edits no code |
 | Merge | human | The acceptance gate |
@@ -57,18 +57,41 @@ Four rules hold it together:
 **From Matt's skills**: his repo is a composable collection, you reach for whichever skill fits the moment. This is an ordered pipeline where each stage has entry and exit conditions, which is what makes the cold handoff between stages possible at all. Several skill files here are near-verbatim from his; the pipeline wrapped around them is the part I added.
 
 ## Installation
-### Install with Pi
+
+### Prepare a Consumer Repository
+
+From this checkout, install the workflow executable and run Setup anywhere inside the target Git repository:
 
 ```sh
-pi install git:github.com/vicrdguez/skills
+go install ./cmd/skl
+skl setup
 ```
 
-### Install with Claude Code
+Use `skl setup --repo <path>` to target another checkout. If that repository has multiple GitHub remotes and no GitHub `origin`, select one with `--remote <name>`. Authentication is read from `GH_TOKEN`, then `GITHUB_TOKEN`, then `gh auth token`; Setup stores no credentials.
 
+### Publish a Proposal
+
+After Propose has prepared and pushed each slice branch at its complete Artifact Baseline, remove only safe Merged local state and publish the agent-authored issue bodies:
+
+```sh
+skl propose cleanup --repo <path>
+skl propose publish --repo <path> --target main \
+  --slice add-foundation=/tmp/add-foundation.md \
+  --slice add-feature=/tmp/add-feature.md \
+  --depends add-feature:add-foundation \
+  --parent-title "Build the feature" --parent-body /tmp/proposal.md
 ```
-/plugin marketplace add vicrdguez/skills
-/plugin install skills@vicrdguez
+
+Omit the parent flags and repeated slice/dependency flags for a single-slice Proposal. `fix_required` identifies a Git preparation problem to repair before retrying; `needs_human` identifies ambiguous backend state that the engine will not guess through. Issue Markdown remains opaque and is not copied into the repository.
+
+### Install skills
+
+```sh
+go install ./cmd/skl
+skl install
 ```
+
+`skl install` refreshes its owned Skill Stubs in Pi, Codex, and Claude Code without touching unrelated user files. Run `skl skill <name>` for rendered instructions, add `--format json` for the typed packet, or add `--resource <path>` for one named resource.
 
 ## Pi subagent loops
 
