@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/vicrdguez/skills/setup"
@@ -64,5 +65,32 @@ func TestImplementClaimsOldestEligibleWork(t *testing.T) {
 	}
 	if backend.work[0].Claimed || backend.work[6].Claimed || backend.work[1].State != workflow.Ready {
 		t.Fatalf("unexpected projections: %#v", backend.work)
+	}
+}
+
+func TestImplementReportsNoEligibleWork(t *testing.T) {
+	for _, work := range [][]workflow.ImplementationItem{nil, {
+		{Number: 1, State: workflow.Ready, Blockers: []int{4}},
+		{Number: 2, State: workflow.Rework, Claimed: true},
+		{Number: 3, State: workflow.NeedsHuman},
+		{Number: 4, State: workflow.ReadyForMerge},
+	}} {
+		backend := &implementationMemory{work: work}
+		before := append([]workflow.ImplementationItem(nil), work...)
+		got := implementCLI(t, proposalRepository(t), backend, "next")
+		if got.Status != "no_work" || got.Item != nil || !reflect.DeepEqual(before, backend.work) {
+			t.Fatalf("no-work mutated projections: %#v %#v", got, backend.work)
+		}
+	}
+}
+
+func TestImplementResumesInterruptedClaim(t *testing.T) {
+	backend := &implementationMemory{work: []workflow.ImplementationItem{
+		{Number: 1, State: workflow.Ready},
+		{Number: 7, State: workflow.Ready, Claimed: true},
+	}}
+	got := implementCLI(t, proposalRepository(t), backend, "resume", "--item", "7")
+	if got.Status != "work_available" || got.Item.Number != 7 || !got.Item.Claimed || backend.work[0].Claimed {
+		t.Fatalf("resume: %#v %#v", got, backend.work)
 	}
 }

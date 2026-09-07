@@ -37,7 +37,7 @@ type ImplementationOutcome struct {
 	Item   *ImplementationItem `json:"item,omitempty"`
 }
 
-func StartImplementation(ctx context.Context, root string, backend ImplementationBackend) (ImplementationOutcome, error) {
+func StartImplementation(ctx context.Context, root string, number int, backend ImplementationBackend) (ImplementationOutcome, error) {
 	remote, err := git(root, "remote", "get-url", "origin")
 	if err != nil {
 		return ImplementationOutcome{}, err
@@ -49,6 +49,14 @@ func StartImplementation(ctx context.Context, root string, backend Implementatio
 	items, err := backend.ImplementationItems(ctx, repository)
 	if err != nil {
 		return ImplementationOutcome{}, err
+	}
+	if number != 0 {
+		for _, item := range items {
+			if item.Number == number && item.Claimed && (item.State == Ready || item.State == Rework) {
+				return ImplementationOutcome{Status: "work_available", Item: &item}, nil
+			}
+		}
+		return ImplementationOutcome{Status: "fix_required", Reason: "explicit Work Item is not an unambiguous implementation Claim; repair its projections before resuming"}, nil
 	}
 	merged := make(map[int]bool)
 	for _, item := range items {

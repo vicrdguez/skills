@@ -150,8 +150,9 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 	}, {
 		Name: "implement",
 		Subcommands: []*cli.Command{{
-			Name:  "next",
-			Flags: []cli.Flag{&cli.PathFlag{Name: "repo", Value: "."}},
+			Name:    "next",
+			Aliases: []string{"start", "resume"},
+			Flags:   []cli.Flag{&cli.PathFlag{Name: "repo", Value: "."}, &cli.IntFlag{Name: "item"}},
 			Action: func(command *cli.Context) error {
 				backend, err := newBackend()
 				if err != nil {
@@ -161,7 +162,7 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 				if !ok {
 					return fmt.Errorf("workflow backend does not support implementation")
 				}
-				outcome, err := workflow.StartImplementation(command.Context, command.Path("repo"), implementationBackend)
+				outcome, err := workflow.StartImplementation(command.Context, command.Path("repo"), command.Int("item"), implementationBackend)
 				if err != nil {
 					return err
 				}
