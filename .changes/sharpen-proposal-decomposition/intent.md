@@ -28,12 +28,12 @@ Sharpen Propose's existing decomposition and breakdown-approval guidance so Agen
 
 ## Definition of Done
 
-- [ ] Retrieving Propose instructions supplies the independent-delivery preference, dependency-aware meaning of independence, vertical completeness, and the concrete justification required for combining behaviors.
-- [ ] Retrieving Propose instructions supplies review-burden assessment and a brief explanation in the existing approval list, without line-count targets or exhaustive implementation planning.
-- [ ] Retrieving Propose instructions distinguishes material boundary or Dependency changes that revisit approval before publication from ordinary elaboration, without authorizing changes to frozen Work Items.
-- [ ] Propose prose changes are surgical: surrounding wording, stage order, existing approval questions, seam guidance, and unrelated behavior are preserved without superfluous rephrasing.
-- [ ] Existing public instruction-retrieval tests cover the three delivery scenarios; complete-prose review covers the agreed examples and exceptions. Automated delivery checks are not reported as proof of agent judgment. The current repository Full Gate passes.
-- [ ] `docs/capabilities/work-item-lifecycle.md` describes the delivered decomposition behavior rather than a planned extension, without changing unrelated capability content.
+- [x] Retrieving Propose instructions supplies the independent-delivery preference, dependency-aware meaning of independence, vertical completeness, and the concrete justification required for combining behaviors.
+- [x] Retrieving Propose instructions supplies review-burden assessment and a brief explanation in the existing approval list, without line-count targets or exhaustive implementation planning.
+- [x] Retrieving Propose instructions distinguishes material boundary or Dependency changes that revisit approval before publication from ordinary elaboration, without authorizing changes to frozen Work Items.
+- [x] Propose prose changes are surgical: surrounding wording, stage order, existing approval questions, seam guidance, and unrelated behavior are preserved without superfluous rephrasing.
+- [x] Existing public instruction-retrieval tests cover the three delivery scenarios; complete-prose review covers the agreed examples and exceptions. Automated delivery checks are not reported as proof of agent judgment. The current repository Full Gate passes.
+- [x] `docs/capabilities/work-item-lifecycle.md` describes the delivered decomposition behavior rather than a planned extension, without changing unrelated capability content.
 
 ## Manual verification
 
