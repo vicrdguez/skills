@@ -278,7 +278,7 @@ func TestInstallSupportedSkillStubs(t *testing.T) {
 		"watchdog":           "skills/dev/watchdog/SKILL.md",
 		"writing-for-agents": "skills/misc/writing-for-agents/SKILL.md",
 	}
-	for _, harness := range []string{".pi/agent/skills", ".codex/skills", ".claude/skills"} {
+	for _, harness := range []string{".pi/agent/skills", ".codex/skills", ".claude/skills", ".config/opencode/skills"} {
 		for name, source := range wantSkills {
 			stub := readFile(t, filepath.Join(root, harness, name, "SKILL.md"))
 			if !strings.HasPrefix(stub, "---\n") {
@@ -294,10 +294,41 @@ func TestInstallSupportedSkillStubs(t *testing.T) {
 			if !strings.Contains(stub, command) || !strings.Contains(stub, "skl.stub/v1") {
 				t.Fatalf("%s %s stub does not delegate to skl:\n%s", harness, name, stub)
 			}
+			if harness == ".config/opencode/skills" {
+				path := filepath.Join(root, harness, name, "SKILL.md")
+				info, err := os.Lstat(path)
+				if err != nil || !info.Mode().IsRegular() {
+					t.Fatalf("OpenCode stub is not a regular file: %s: %v", path, err)
+				}
+				for _, other := range []string{".pi/agent/skills", ".codex/skills", ".claude/skills"} {
+					otherPath := filepath.Join(root, other, name, "SKILL.md")
+					otherInfo, err := os.Stat(otherPath)
+					if err != nil || os.SameFile(info, otherInfo) || stub != readFile(t, otherPath) {
+						t.Fatalf("OpenCode stub is not an independent common stub: %s: %v", path, err)
+					}
+				}
+				for _, reference := range []string{".pi/", ".codex/", ".claude/", "skills/dev/", "skills/misc/", "skills/thinking/"} {
+					if strings.Contains(stub, reference) {
+						t.Fatalf("OpenCode stub references %s: %s", reference, path)
+					}
+				}
+				entries, err := os.ReadDir(filepath.Dir(path))
+				if err != nil || len(entries) != 1 || entries[0].Name() != "SKILL.md" {
+					t.Fatalf("unexpected OpenCode skill assets: %v: %v", entries, err)
+				}
+			}
 		}
 		if _, err := os.Stat(filepath.Join(root, harness, "dev-setup", "SKILL.md")); !os.IsNotExist(err) {
 			t.Fatalf("%s contains retired dev-setup stub: %v", harness, err)
 		}
+	}
+	entries, err := os.ReadDir(filepath.Join(root, ".config/opencode"))
+	if err != nil || len(entries) != 1 || entries[0].Name() != "skills" || !entries[0].IsDir() {
+		t.Fatalf("unexpected OpenCode configuration or adapters: %v: %v", entries, err)
+	}
+	entries, err = os.ReadDir(filepath.Join(root, ".config/opencode/skills"))
+	if err != nil || len(entries) != len(wantSkills) {
+		t.Fatalf("unexpected OpenCode catalog: %v: %v", entries, err)
 	}
 	for _, manifest := range []string{".claude-plugin/plugin.json", ".codex-plugin/plugin.json", "package.json"} {
 		if _, err := os.Stat(filepath.Join(root, manifest)); !os.IsNotExist(err) {
@@ -431,31 +462,86 @@ func TestInstallFailsWithoutUserHome(t *testing.T) {
 }
 
 func TestInstallRefreshesOnlyOwnedStubs(t *testing.T) {
+	for _, harness := range []string{".codex/skills", ".config/opencode/skills"} {
+		t.Run(harness, func(t *testing.T) {
+			root := t.TempDir()
+			var output bytes.Buffer
+			app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, root)
+			if err := app.Run([]string{"skl", "install"}); err != nil {
+				t.Fatal(err)
+			}
+
+			tdd := filepath.Join(root, harness, "tdd/SKILL.md")
+			wantTDD := readFile(t, tdd)
+			if err := os.WriteFile(tdd, []byte("---\nname: tdd\n---\n\n<!-- skl-owned: skl.stub/v1 -->\nstale"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			audit := filepath.Join(root, harness, "audit/SKILL.md")
+			if err := os.WriteFile(audit, []byte("---\nname: audit\n---\n\n<!-- skl-owned: skl.stub/v2 -->\nmy unrelated skill"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := app.Run([]string{"skl", "install"}); err != nil {
+				t.Fatal(err)
+			}
+
+			if got := readFile(t, tdd); got != wantTDD {
+				t.Fatalf("owned stub was not refreshed:\n%s", got)
+			}
+			if got := readFile(t, audit); got != "---\nname: audit\n---\n\n<!-- skl-owned: skl.stub/v2 -->\nmy unrelated skill" {
+				t.Fatalf("unrelated file changed: %q", got)
+			}
+			if err := app.Run([]string{"skl", "install"}); err != nil {
+				t.Fatal(err)
+			}
+			if got := readFile(t, tdd); got != wantTDD {
+				t.Fatalf("repeat installation changed current stub:\n%s", got)
+			}
+			if harness == ".config/opencode/skills" {
+				entries, err := os.ReadDir(filepath.Join(root, ".config/opencode"))
+				if err != nil || len(entries) != 1 || entries[0].Name() != "skills" {
+					t.Fatalf("reinstallation wrote OpenCode configuration: %v: %v", entries, err)
+				}
+			}
+		})
+	}
+}
+
+func TestInstallPreservesOpenCodeSkillsAndConfiguration(t *testing.T) {
 	root := t.TempDir()
+	files := map[string]string{
+		"skills/audit/SKILL.md":    "---\nname: audit\n---\nMy own audit skill\n",
+		"skills/personal/SKILL.md": "My unrelated skill\n",
+		"opencode.json":            `{"skills":{"paths":["~/.pi/agent/skills","/my/other/skills"]},"theme":"system"}`,
+	}
+	for file, contents := range files {
+		path := filepath.Join(root, ".config/opencode", file)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	var output bytes.Buffer
 	app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, root)
-	if err := app.Run([]string{"skl", "install"}); err != nil {
-		t.Fatal(err)
-	}
-
-	tdd := filepath.Join(root, ".codex/skills/tdd/SKILL.md")
-	wantTDD := readFile(t, tdd)
-	if err := os.WriteFile(tdd, []byte("---\nname: tdd\n---\n\n<!-- skl-owned: skl.stub/v1 -->\nstale"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	audit := filepath.Join(root, ".codex/skills/audit/SKILL.md")
-	if err := os.WriteFile(audit, []byte("---\nname: audit\n---\n\n<!-- skl-owned: skl.stub/v2 -->\nmy unrelated skill"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := app.Run([]string{"skl", "install"}); err != nil {
-		t.Fatal(err)
-	}
-
-	if got := readFile(t, tdd); got != wantTDD {
-		t.Fatalf("owned stub was not refreshed:\n%s", got)
-	}
-	if got := readFile(t, audit); got != "---\nname: audit\n---\n\n<!-- skl-owned: skl.stub/v2 -->\nmy unrelated skill" {
-		t.Fatalf("unrelated file changed: %q", got)
+	for range 2 {
+		if err := app.Run([]string{"skl", "install"}); err != nil {
+			t.Fatal(err)
+		}
+		for file, want := range files {
+			if got := readFile(t, filepath.Join(root, ".config/opencode", file)); got != want {
+				t.Fatalf("user file %s changed: %q", file, got)
+			}
+		}
+		for _, name := range skilldist.SkillNames() {
+			if name == "audit" {
+				continue
+			}
+			got := readFile(t, filepath.Join(root, ".config/opencode/skills", name, "SKILL.md"))
+			if want := readFile(t, filepath.Join(root, ".codex/skills", name, "SKILL.md")); got != want {
+				t.Fatalf("missing nonconflicting common stub for %s: %q", name, got)
+			}
+		}
 	}
 }
 

@@ -103,7 +103,9 @@ go install ./cmd/skl
 skl install
 ```
 
-`skl install` refreshes its owned Skill Stubs in Pi, Codex, and Claude Code, plus Pi-only queue prompts, runners, and their continuation check, without touching unrelated user files. This replaces the former Pi package and Claude plugin distribution. Run `skl skill <name>` for rendered instructions, `skl skill --format json <name>` for the typed packet, or `skl skill --resource <path> <name>` for one named resource. Flags precede the skill name.
+`skl install` refreshes its owned Skill Stubs in Pi, Codex, Claude Code, and OpenCode, plus Pi-only queue prompts, runners, and their continuation check, without touching unrelated user files. OpenCode receives independent common stubs at `~/.config/opencode/skills/<name>/SKILL.md`, not links to another harness or the authoring tree. This replaces the former Pi package and Claude plugin distribution. Run `skl skill <name>` for rendered instructions, `skl skill --format json <name>` for the typed packet, or `skl skill --resource <path> <name>` for one named resource. Flags precede the skill name.
+
+For a one-time OpenCode cutover, first install the new binary and run `skl install` as above, keeping any existing discovery workaround until the native stubs are available. Then manually remove only obsolete Pi skill-directory or raw-source entries from OpenCode's `skills.paths`; retain unrelated settings and intentionally configured other skills. Do not delete another harness's skills or replace the override with Claude or Codex paths. The installer does not edit discovery settings. Quit and restart OpenCode, then confirm the workflow skills load from `~/.config/opencode/skills/` as thin CLI stubs without claiming work.
 
 The `skills/` tree is authoring input. Installed `SKILL.md` files are thin discovery stubs; the running `skl` binary supplies the embedded definitions and resources, not the source checkout or files beside a stub. After updating this checkout, run `go install ./cmd/skl` here to rebuild the binary, then `skl install` to refresh its owned stubs and adapters. Editing Markdown alone does not update an already-installed binary.
 
