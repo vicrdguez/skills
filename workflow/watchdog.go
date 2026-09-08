@@ -23,10 +23,8 @@ func StartWatchdog(ctx context.Context, root, remote string, number int, backend
 	}
 	items = slices.DeleteFunc(items, func(item ImplementationItem) bool { return item.Submission == nil })
 	slices.SortFunc(items, func(a, b ImplementationItem) int {
-		if a.Submission != nil && b.Submission != nil {
-			if order := cmp.Compare(a.Submission.CreatedAt, b.Submission.CreatedAt); order != 0 {
-				return order
-			}
+		if order := cmp.Compare(a.Submission.CreatedAt, b.Submission.CreatedAt); order != 0 {
+			return order
 		}
 		return cmp.Compare(a.Number, b.Number)
 	})
@@ -34,7 +32,7 @@ func StartWatchdog(ctx context.Context, root, remote string, number int, backend
 		if number != 0 && item.Number != number {
 			continue
 		}
-		if item.State != AwaitingReview || number == 0 && item.Claimed || number != 0 && !item.Claimed || item.Problem != "" || item.Submission == nil {
+		if item.State != AwaitingReview || number == 0 && item.Claimed || number != 0 && !item.Claimed || item.Problem != "" {
 			continue
 		}
 		if item.Submission.ReviewedHead != "" && item.Submission.ReviewedHead != item.Submission.Head && item.Claimed {

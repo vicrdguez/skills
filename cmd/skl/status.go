@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 
@@ -24,6 +25,10 @@ func statusCommand(newBackend backendFactory, stdout io.Writer) *cli.Command {
 		}
 		outcome, err := workflow.ObserveStatus(c.Context, c.Path("repo"), c.String("remote"), port)
 		if err != nil {
+			var violation *workflow.InvariantError
+			if errors.As(err, &violation) {
+				return json.NewEncoder(stdout).Encode(workflow.ImplementationOutcome{Status: "fix_required", Reason: violation.Reason})
+			}
 			return err
 		}
 		return json.NewEncoder(stdout).Encode(outcome)

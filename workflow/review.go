@@ -161,6 +161,27 @@ func SubmitWatchdog(ctx context.Context, root, remote string, number int, review
 		target = NeedsHuman
 		item.ResumeState = AwaitingReview
 	}
+	if verdict == "pass" {
+		if submission.Mergeability != "mergeable" && submission.Mergeability != "conflicting" {
+			return ImplementationOutcome{}, Refuse("mergeability unavailable; wait for backend evaluation and retry")
+		}
+		target = ReadyForMerge
+		if item.State == Rework && item.Synchronization {
+			target = Rework
+		} else if submission.Mergeability == "conflicting" && (item.State == AwaitingReview || item.State == ReadyForMerge) {
+			target = Rework
+			item.Synchronization = true
+			item.TargetBranch = submission.Base
+			item.TargetSnapshot, err = backend.ImplementationHead(ctx, repository, submission.Base)
+			if err != nil {
+				return ImplementationOutcome{}, err
+			}
+			if item.TargetSnapshot == "" {
+				return ImplementationOutcome{}, Refuse("current target unavailable; restore it and retry")
+			}
+		}
+		requireMergeable = target == ReadyForMerge
+	}
 	if item.State != AwaitingReview {
 		compatible := verdict == "rework" && (item.State == Rework || item.State == NeedsHuman) || verdict == "needs-human" && item.State == NeedsHuman || verdict == "pass" && (item.State == ReadyForMerge || item.State == Rework && item.Synchronization)
 		for _, wanted := range comments {
@@ -178,18 +199,16 @@ func SubmitWatchdog(ctx context.Context, root, remote string, number int, review
 			if err != nil {
 				return ImplementationOutcome{}, err
 			}
-			wanted := string(body)
-			footer := fmt.Sprintf("\n\nCloses #%d\n", number)
-			if !strings.HasSuffix(wanted, footer) {
-				wanted += footer
-			}
-			compatible = compatible && wanted == item.Submission.Body
+			compatible = compatible && closingBody(string(body), number) == item.Submission.Body
 		}
 		if !compatible {
 			return ImplementationOutcome{}, Refuse("completed or partial review differs from supplied verdict; restore its exact Result Documents")
 		}
-		if item.Claimed {
-			if err := backend.CompleteReview(ctx, repository, item, item.State, guard); err != nil {
+		if verdict != "pass" {
+			target = item.State
+		}
+		if item.Claimed || target != item.State {
+			if err := backend.CompleteReview(ctx, repository, item, target, guard); err != nil {
 				return ImplementationOutcome{}, err
 			}
 			current, err := backend.ImplementationItems(ctx, repository)
@@ -197,7 +216,7 @@ func SubmitWatchdog(ctx context.Context, root, remote string, number int, review
 				return ImplementationOutcome{}, err
 			}
 			for _, c := range current {
-				if c.Number == item.Number && c.Problem == "" && !c.Claimed && c.State == item.State {
+				if c.Number == item.Number && c.Problem == "" && !c.Claimed && c.State == target {
 					return ImplementationOutcome{Status: string(c.State), Item: &c, Head: head}, guard()
 				}
 			}
@@ -206,33 +225,12 @@ func SubmitWatchdog(ctx context.Context, root, remote string, number int, review
 		return ImplementationOutcome{Status: string(item.State), Item: &item, Head: head}, guard()
 	}
 	if verdict == "pass" {
-		if submission.Mergeability != "mergeable" && submission.Mergeability != "conflicting" {
-			return ImplementationOutcome{}, Refuse("mergeability unavailable; wait for backend evaluation and retry")
-		}
-		target = ReadyForMerge
-		if submission.Mergeability == "conflicting" {
-			target = Rework
-			item.Synchronization = true
-			item.TargetBranch = submission.Base
-			item.TargetSnapshot, err = backend.ImplementationHead(ctx, repository, submission.Base)
-			if err != nil {
-				return ImplementationOutcome{}, err
-			}
-			if item.TargetSnapshot == "" {
-				return ImplementationOutcome{}, Refuse("current target unavailable; restore it and retry")
-			}
-		}
-		requireMergeable = target == ReadyForMerge
 		body, err := os.ReadFile(bodyPath)
 		if err != nil {
 			return ImplementationOutcome{}, err
 		}
 		wanted := *item.Submission
-		wanted.Body = string(body)
-		footer := fmt.Sprintf("\n\nCloses #%d\n", number)
-		if !strings.HasSuffix(wanted.Body, footer) {
-			wanted.Body += footer
-		}
+		wanted.Body = closingBody(string(body), number)
 		published, err := backend.PublishImplementation(ctx, repository, item, wanted)
 		if err != nil {
 			return ImplementationOutcome{}, err

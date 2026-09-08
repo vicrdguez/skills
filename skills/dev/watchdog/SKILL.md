@@ -50,6 +50,8 @@ A repeat review with no new commits is legal: a human resolved everything by dis
 
 ## Findings
 
+Before assigning dispositions for any verdict, retrieve `skl skill --resource reference/review.md watchdog` for human-directive authorization and precedence, stable finding identities, and Result Document transport.
+
 Each carries one disposition — `BLOCK`, `HUMAN` or `NOTE` — and three things:
 
 - **Source**: the frozen requirement, the project or language rule, or the concrete hazard it comes from.
@@ -101,7 +103,7 @@ Supply the current ledger and inline evidence with `--verdict needs-human` and e
 
 When verification fails **or** the review surfaces a blocking issue:
 
-1. **Write all findings before the handoff**, preserving stable agent-authored `W<n>` identities and the reviewed head in the summary. Retrieve the Result Document and structured anchor template with `skl skill --resource reference/review.md watchdog`.
+1. **Write all findings before the handoff**, preserving stable agent-authored `W<n>` identities and the reviewed head in the summary.
 2. Submit the packet's command with `--verdict rework`. It publishes the opaque summary and inline bodies before applying the convergence transition.
 3. **Modify no code.** Fixing is the implementor's job; collapsing that boundary is exactly what this stage exists to prevent. Do not archive, do not mark as `done`.
 

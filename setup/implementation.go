@@ -585,7 +585,7 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository work
 		if owners[item.Branch] != item.Number {
 			item.Problem = "multiple source issues own the conventional branch"
 		}
-		if len(matches) == 1 && (item.Problem == "contradictory lifecycle projections" || item.Claimed && (item.State == workflow.ReadyForMerge || item.State == workflow.NeedsHuman || item.State == workflow.Rework)) && (item.Transition == nil || item.Transition.Completed) {
+		if len(matches) == 1 && (item.Problem == "contradictory lifecycle projections" || item.Problem == "" && item.Claimed && (item.State == workflow.ReadyForMerge || item.State == workflow.NeedsHuman || item.State == workflow.Rework)) && (item.Transition == nil || item.Transition.Completed) {
 			observation, err := b.ReviewSubmission(ctx, repository, item.Submission.Number)
 			if err != nil {
 				return nil, err

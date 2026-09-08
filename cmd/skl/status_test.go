@@ -104,3 +104,19 @@ func TestStatusRoutesAcceptedConflictToSynchronizationRework(t *testing.T) {
 		t.Fatalf("accepted conflict: %#v", got)
 	}
 }
+
+func TestStatusReturnsStructuredRepairableRefusal(t *testing.T) {
+	b := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.ReadyForMerge, Submission: &workflow.Submission{Number: 11, Head: "fixed", Base: "main", Mergeability: "conflicting"}}}}
+	var output bytes.Buffer
+	app := newApp(func() (setup.Backend, error) { return b, nil }, bytes.NewReader(nil), &output, &output)
+	if err := app.Run([]string{"skl", "status", "--repo", proposalRepository(t)}); err != nil {
+		t.Fatalf("repairable refusal exited with an error: %v", err)
+	}
+	var result workflow.ImplementationOutcome
+	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "fix_required" || !strings.Contains(result.Reason, "current target unavailable") || b.work[0].State != workflow.ReadyForMerge {
+		t.Fatalf("repairable status: %#v", result)
+	}
+}
