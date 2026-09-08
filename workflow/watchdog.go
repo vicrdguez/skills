@@ -7,13 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 
 	skilldist "github.com/vicrdguez/skills"
 	"github.com/vicrdguez/skills/github"
 )
 
-func StartWatchdog(ctx context.Context, root, remote string, number int, backend ImplementationBackend) (ImplementationOutcome, error) {
+func StartWatchdog(ctx context.Context, root, remote string, id WorkItemID, backend ImplementationBackend) (ImplementationOutcome, error) {
 	remote, err := github.ResolveGitHubRemote(root, remote)
 	if err != nil {
 		return ImplementationOutcome{}, err
@@ -27,13 +26,13 @@ func StartWatchdog(ctx context.Context, root, remote string, number int, backend
 		if order := cmp.Compare(a.Submission.CreatedAt, b.Submission.CreatedAt); order != 0 {
 			return order
 		}
-		return cmp.Compare(a.Number, b.Number)
+		return cmp.Compare(a.Order, b.Order)
 	})
 	for _, item := range items {
-		if number != 0 && item.Number != number {
+		if id != "" && item.ID != id {
 			continue
 		}
-		if item.State != AwaitingReview || number == 0 && item.Claimed || number != 0 && !item.Claimed || item.Problem != "" {
+		if item.State != AwaitingReview || id == "" && item.Claimed || id != "" && !item.Claimed || item.Problem != "" {
 			continue
 		}
 		if item.Submission.ReviewedHead != "" && item.Submission.ReviewedHead != item.Submission.Head && item.Claimed {
@@ -57,10 +56,10 @@ func StartWatchdog(ctx context.Context, root, remote string, number int, backend
 			return ImplementationOutcome{}, err
 		}
 		for _, current := range observed {
-			if current.Number != item.Number || !current.Claimed || current.State != AwaitingReview || current.Problem != "" || current.Submission == nil || current.Submission.Head != submission.Head || current.Submission.ReviewedHead != submission.Head {
+			if current.ID != item.ID || !current.Claimed || current.State != AwaitingReview || current.Problem != "" || current.Submission == nil || current.Submission.Head != submission.Head || current.Submission.ReviewedHead != submission.Head {
 				continue
 			}
-			facts := skilldist.WatchdogFacts{WorkItem: item.Number, Submission: submission.Number, Branch: item.Branch, ReviewedHead: submission.Head, ArtifactBaseline: history.Baseline, ArtifactCompletion: history.Completion, AuditBody: submission.Body, Comments: submission.Comments}
+			facts := skilldist.WatchdogFacts{Branch: item.Branch, ReviewedHead: submission.Head, ArtifactBaseline: history.Baseline, ArtifactCompletion: history.Completion, AuditBody: submission.Body, Comments: submission.Comments}
 			facts.BaselineFiles, err = ledgerFiles(root, history.Baseline, ".changes/"+item.Branch)
 			if err != nil {
 				return ImplementationOutcome{}, err
@@ -71,7 +70,7 @@ func StartWatchdog(ctx context.Context, root, remote string, number int, backend
 			}
 			facts.Bounces = submission.Bounces
 			if port, ok := backend.(ReviewBackend); ok {
-				observed, err := port.ReviewSubmission(ctx, repository, submission.Number)
+				observed, err := port.ReviewSubmission(ctx, repository, submission.ID)
 				if err != nil {
 					return ImplementationOutcome{}, err
 				}
@@ -94,18 +93,11 @@ func StartWatchdog(ctx context.Context, root, remote string, number int, backend
 				os.RemoveAll(facts.ResultDirectory)
 				return ImplementationOutcome{}, err
 			}
-			quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'" }
-			facts.ResumeCommand = fmt.Sprintf("skl watchdog resume --repo %s --remote %s --item %d", quote(facts.Worktree), quote(remote), item.Number)
-			facts.SubmitCommand = fmt.Sprintf("skl watchdog submit --repo %s --remote %s --item %d --reviewed-head %s --summary %s", quote(facts.Worktree), quote(remote), item.Number, submission.Head, quote(filepath.Join(facts.ResultDirectory, "summary.md")))
-			packet, err := skilldist.BuildPacket("watchdog", skilldist.InvocationFacts{Watchdog: &facts})
-			if err != nil {
-				os.RemoveAll(facts.ResultDirectory)
-			}
-			return ImplementationOutcome{Status: "work_available", Item: &current, Packet: &packet}, err
+			return ImplementationOutcome{Status: "work_available", Item: &current, Facts: &skilldist.InvocationFacts{Watchdog: &facts}}, nil
 		}
 		return ImplementationOutcome{Status: "fix_required", Reason: "Watchdog Claim changed; inspect and explicitly resume"}, nil
 	}
-	if number != 0 {
+	if id != "" {
 		return ImplementationOutcome{Status: "fix_required", Reason: "explicit Work Item is not an unambiguous Awaiting Review Claim"}, nil
 	}
 	return ImplementationOutcome{Status: "no_work"}, nil

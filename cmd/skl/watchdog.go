@@ -8,6 +8,7 @@ import (
 
 	"github.com/urfave/cli/v2"
 	"github.com/vicrdguez/skills/github"
+	"github.com/vicrdguez/skills/setup"
 	"github.com/vicrdguez/skills/workflow"
 )
 
@@ -32,9 +33,9 @@ func watchdogCommands(newBackend backendFactory, stdout io.Writer) []*cli.Comman
 				if !ok {
 					return fmt.Errorf("backend does not support review publication")
 				}
-				outcome, err = workflow.SubmitWatchdog(c.Context, c.Path("repo"), c.String("remote"), c.Int("item"), c.String("reviewed-head"), c.String("head"), c.String("verdict"), c.Path("summary"), c.Path("findings"), c.Path("body"), review)
+				outcome, err = workflow.SubmitWatchdog(c.Context, c.Path("repo"), c.String("remote"), workItemID(c.Int("item")), c.String("reviewed-head"), c.String("head"), c.String("verdict"), c.Path("summary"), c.Path("findings"), c.Path("body"), review)
 			} else {
-				outcome, err = workflow.StartWatchdog(c.Context, c.Path("repo"), c.String("remote"), c.Int("item"), port)
+				outcome, err = workflow.StartWatchdog(c.Context, c.Path("repo"), c.String("remote"), workItemID(c.Int("item")), port)
 			}
 			if err != nil {
 				var violation *workflow.InvariantError
@@ -43,7 +44,11 @@ func watchdogCommands(newBackend backendFactory, stdout io.Writer) []*cli.Comman
 				}
 				return err
 			}
-			return json.NewEncoder(stdout).Encode(outcome)
+			output, err := setup.PresentImplementation(outcome)
+			if err != nil {
+				return err
+			}
+			return json.NewEncoder(stdout).Encode(output)
 		}})
 	}
 	return commands

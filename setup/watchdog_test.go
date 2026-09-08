@@ -75,7 +75,7 @@ func TestGitHubWatchdogClaimsSubmissionAndReadsReviewFacts(t *testing.T) {
 		t.Fatalf("items: %#v %v", items, err)
 	}
 	item := items[0]
-	if item.Submission.CreatedAt != "2026-01-01" || len(item.Submission.Comments) != 3 {
+	if item.ID != "7" || item.Order != 7 || item.ClosingReference != "Closes #7" || item.Submission.ID != "11" || item.Submission.CreatedAt != "2026-01-01" || len(item.Submission.Comments) != 3 {
 		t.Fatalf("review facts: %#v", item.Submission)
 	}
 	item.Submission.ReviewedHead = "fixed"
@@ -118,7 +118,7 @@ func TestGitHubWatchdogPublishesOpaqueAnchorsOnceAfterLostResponse(t *testing.T)
 	defer server.Close()
 	b := NewGitHubBackend(server.URL, "token", server.Client())
 	repo := github.RepositoryID{Owner: "acme", Name: "widgets"}
-	item := workflow.ImplementationItem{Number: 7, Submission: &workflow.Submission{Number: 11, Head: "fixed"}}
+	item := workflow.ImplementationItem{ID: "7", Submission: &workflow.Submission{ID: "11", Head: "fixed"}}
 	comments := []skilldist.ReviewComment{{Body: "opaque summary\x00", Commit: "fixed"}, {Body: "W1 [ not Markdown", Commit: "fixed", Path: "main.go", Line: 12, Side: "RIGHT"}}
 	for range 2 {
 		if err := b.PublishReview(context.Background(), repo, item, comments, func() error { return nil }); err != nil {
@@ -155,9 +155,9 @@ func TestGitHubWatchdogObservesMergeabilityAndCompletedBounceHistory(t *testing.
 			}
 		}))
 		b := NewGitHubBackend(server.URL, "token", server.Client())
-		got, err := b.ReviewSubmission(context.Background(), github.RepositoryID{Owner: "acme", Name: "widgets"}, 11)
+		got, err := b.ReviewSubmission(context.Background(), github.RepositoryID{Owner: "acme", Name: "widgets"}, "11")
 		server.Close()
-		if err != nil || got.Bounces != 1 || got.Mergeability != "conflicting" || got.Merged != merged || got.Head != "fixed" {
+		if err != nil || got.ID != "11" || got.Bounces != 1 || got.Mergeability != "conflicting" || got.Merged != merged || got.Head != "fixed" {
 			t.Fatalf("observation: %#v %v", got, err)
 		}
 	}
@@ -214,7 +214,7 @@ func TestGitHubWatchdogCompletesReviewWithoutClosingSource(t *testing.T) {
 			}))
 			defer server.Close()
 			b := NewGitHubBackend(server.URL, "token", server.Client())
-			item := workflow.ImplementationItem{Number: 7, State: workflow.AwaitingReview, ResumeState: workflow.Rework, Submission: &workflow.Submission{Number: 11, Head: "fixed", ReviewedHead: "fixed"}}
+			item := workflow.ImplementationItem{ID: "7", State: workflow.AwaitingReview, ResumeState: workflow.Rework, Submission: &workflow.Submission{ID: "11", Head: "fixed", ReviewedHead: "fixed"}}
 			for range 2 {
 				if err := b.CompleteReview(context.Background(), github.RepositoryID{Owner: "acme", Name: "widgets"}, item, target, func() error { return nil }); err != nil {
 					t.Fatal(err)
@@ -277,7 +277,7 @@ func TestGitHubWatchdogPersistsSynchronizationTarget(t *testing.T) {
 	defer server.Close()
 	b := NewGitHubBackend(server.URL, "token", server.Client())
 	repo := github.RepositoryID{Owner: "acme", Name: "widgets"}
-	item := workflow.ImplementationItem{Number: 7, State: workflow.AwaitingReview, Synchronization: true, TargetSnapshot: "new-target", TargetBranch: "main", Submission: &workflow.Submission{Number: 11, Head: "fixed"}}
+	item := workflow.ImplementationItem{ID: "7", State: workflow.AwaitingReview, Synchronization: true, TargetSnapshot: "new-target", TargetBranch: "main", Submission: &workflow.Submission{ID: "11", Head: "fixed"}}
 	if err := b.CompleteReview(context.Background(), repo, item, workflow.Rework, func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
@@ -361,11 +361,11 @@ func TestGitHubStatusReadsChildrenAndReconcilesLostClosure(t *testing.T) {
 	repo := github.RepositoryID{Owner: "acme", Name: "widgets"}
 	ctx := context.Background()
 	parents, err := b.CoordinationItems(ctx, repo)
-	if err != nil || len(parents) != 1 || len(parents[0].Children) != 101 || parents[0].Children[100] != 101 {
+	if err != nil || len(parents) != 1 || parents[0].ID != "100" || parents[0].Closed || len(parents[0].Children) != 101 || parents[0].Children[100] != "101" {
 		t.Fatalf("children: %#v %v", parents, err)
 	}
 	for range 2 {
-		if err := b.CloseCoordination(ctx, repo, 100); err != nil {
+		if err := b.CloseCoordination(ctx, repo, "100"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -567,7 +567,7 @@ func TestGitHubReviewRecoveryConflictingPartialPass(t *testing.T) {
 			ctx := context.Background()
 			repo := github.RepositoryID{Owner: "acme", Name: "widgets"}
 			guard := func() error { return nil }
-			item := workflow.ImplementationItem{Number: 7, Submission: &workflow.Submission{Number: 11, Head: "fixed"}}
+			item := workflow.ImplementationItem{ID: "7", Submission: &workflow.Submission{ID: "11", Head: "fixed"}}
 			if err := b.CompleteReview(ctx, repo, item, workflow.ReadyForMerge, guard); err == nil {
 				t.Fatal("expected interrupted pass")
 			}
@@ -595,7 +595,7 @@ func TestGitHubReviewRecoveryConflictingPartialPass(t *testing.T) {
 			if err != nil || len(items) != 1 || items[0].Problem != "" || items[0].State != workflow.Rework || items[0].Claimed || !slices.Equal(labels, []string{"sync", "rework"}) || len(metadata) != 1 {
 				t.Fatalf("retry incomplete: %#v %v labels=%v metadata=%v", items, err, labels, metadata)
 			}
-			observed, err := b.ReviewSubmission(ctx, repo, 11)
+			observed, err := b.ReviewSubmission(ctx, repo, "11")
 			if err != nil || observed.Bounces != 0 || observed.PendingReview != "" {
 				t.Fatalf("synchronization counted as bounce or left pending: %#v %v", observed, err)
 			}
@@ -655,7 +655,7 @@ func TestGitHubReviewRecoverySourceDeletionFailsUnapplied(t *testing.T) {
 	b := NewGitHubBackend(server.URL, "token", server.Client())
 	ctx := context.Background()
 	repo := github.RepositoryID{Owner: "acme", Name: "widgets"}
-	item := workflow.ImplementationItem{Number: 7, State: workflow.AwaitingReview, Submission: &workflow.Submission{Number: 11, Head: "fixed"}}
+	item := workflow.ImplementationItem{ID: "7", State: workflow.AwaitingReview, Submission: &workflow.Submission{ID: "11", Head: "fixed"}}
 	guard := func() error { return nil }
 	if err := b.CompleteReview(ctx, repo, item, workflow.ReadyForMerge, guard); err == nil || !sourcePaused || deletes != 1 {
 		t.Fatalf("expected unapplied deletion: err=%v paused=%t deletes=%d", err, sourcePaused, deletes)

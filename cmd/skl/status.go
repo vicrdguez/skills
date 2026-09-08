@@ -8,6 +8,7 @@ import (
 
 	"github.com/urfave/cli/v2"
 	"github.com/vicrdguez/skills/github"
+	"github.com/vicrdguez/skills/setup"
 	"github.com/vicrdguez/skills/workflow"
 )
 
@@ -32,6 +33,10 @@ func statusCommand(newBackend backendFactory, stdout io.Writer) *cli.Command {
 			}
 			return err
 		}
-		return json.NewEncoder(stdout).Encode(outcome)
+		output, err := setup.PresentStatus(outcome)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(stdout).Encode(output)
 	}}
 }

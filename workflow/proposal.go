@@ -13,6 +13,8 @@ import (
 
 type WorkItemID string
 
+type SubmissionID string
+
 type WorkItem struct {
 	ID               WorkItemID
 	Title            string
@@ -76,7 +78,7 @@ type CleanupOutcome struct {
 	Preserved []string
 }
 
-func Cleanup(ctx context.Context, root, remote string, backend Backend) (CleanupOutcome, error) {
+func Cleanup(ctx context.Context, root string, backend Backend) (CleanupOutcome, error) {
 	root, err := git(root, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return CleanupOutcome{}, errors.New("not a Git repository")

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -20,11 +21,11 @@ import (
 
 type implementationMemory struct {
 	memoryBackend
-	coordination     []workflow.CoordinationStatus
+	coordination     []workflow.CoordinationItem
 	work             []workflow.ImplementationItem
 	remoteHeads      map[string]string
 	afterPublish     func()
-	decisions        map[int]string
+	decisions        map[workflow.WorkItemID]string
 	failTransition   bool
 	beforeTransition func()
 	afterCompletion  func()
@@ -32,7 +33,7 @@ type implementationMemory struct {
 
 func (b *implementationMemory) RecordImplementationTransition(_ context.Context, _ github.RepositoryID, item workflow.ImplementationItem, transition workflow.ImplementationTransition) error {
 	for i := range b.work {
-		if b.work[i].Number == item.Number {
+		if b.work[i].ID == item.ID {
 			b.work[i].Transition = &transition
 		}
 	}
@@ -44,7 +45,7 @@ func (b *implementationMemory) RecordImplementationTransition(_ context.Context,
 
 func (b *implementationMemory) RetainImplementationClaim(_ context.Context, _ github.RepositoryID, item workflow.ImplementationItem) error {
 	for i := range b.work {
-		if b.work[i].Number == item.Number {
+		if b.work[i].ID == item.ID {
 			b.work[i].Claimed = true
 			b.work[i].State = item.State
 		}
@@ -64,11 +65,11 @@ func (b *implementationMemory) PauseImplementation(_ context.Context, _ github.R
 		return err
 	}
 	if b.decisions == nil {
-		b.decisions = make(map[int]string)
+		b.decisions = make(map[workflow.WorkItemID]string)
 	}
-	b.decisions[item.Number] = decision
+	b.decisions[item.ID] = decision
 	for i := range b.work {
-		if b.work[i].Number == item.Number {
+		if b.work[i].ID == item.ID {
 			b.work[i].ResumeState = item.State
 			b.work[i].State = workflow.NeedsHuman
 			if b.failTransition {
@@ -86,11 +87,11 @@ func (b *implementationMemory) ImplementationHead(_ context.Context, _ github.Re
 }
 
 func (b *implementationMemory) PublishImplementation(_ context.Context, _ github.RepositoryID, item workflow.ImplementationItem, submission workflow.Submission) (workflow.Submission, error) {
-	if submission.Number == 0 {
-		submission.Number = 11
+	if submission.ID == "" {
+		submission.ID = "11"
 	}
 	for i := range b.work {
-		if b.work[i].Number == item.Number {
+		if b.work[i].ID == item.ID {
 			b.work[i].Submission = &submission
 		}
 	}
@@ -105,7 +106,7 @@ func TestImplementRefusesInvalidHandoff(t *testing.T) {
 		t.Run(invariant, func(t *testing.T) {
 			root := proposalRepository(t)
 			prepareSlice(t, root, "widget")
-			backend := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{}}
+			backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{}}
 			start := implementCLI(t, root, backend, "next")
 			body := filepath.Join(start.Packet.Facts.Implementation.ResultDirectory, "submission.md")
 			if err := os.WriteFile(body, []byte("opaque\n"), 0600); err != nil {
@@ -146,7 +147,7 @@ func (b *implementationMemory) AwaitImplementationReview(_ context.Context, _ gi
 		return err
 	}
 	for i := range b.work {
-		if b.work[i].Number == item.Number {
+		if b.work[i].ID == item.ID {
 			b.work[i].State = workflow.AwaitingReview
 			if b.failTransition {
 				b.failTransition = false
@@ -160,12 +161,23 @@ func (b *implementationMemory) AwaitImplementationReview(_ context.Context, _ gi
 
 func (b *implementationMemory) ImplementationItems(_ context.Context, repository github.RepositoryID) ([]workflow.ImplementationItem, error) {
 	b.repository = repository
-	return append([]workflow.ImplementationItem(nil), b.work...), nil
+	items := append([]workflow.ImplementationItem(nil), b.work...)
+	for i := range items {
+		if number, err := strconv.Atoi(string(items[i].ID)); err == nil {
+			if items[i].Order == 0 {
+				items[i].Order = number
+			}
+			if items[i].ClosingReference == "" {
+				items[i].ClosingReference = fmt.Sprintf("Closes #%d", number)
+			}
+		}
+	}
+	return items, nil
 }
 
 func (b *implementationMemory) ClaimImplementation(_ context.Context, _ github.RepositoryID, item workflow.ImplementationItem) error {
 	for i := range b.work {
-		if b.work[i].Number == item.Number {
+		if b.work[i].ID == item.ID {
 			b.work[i].TargetSnapshot = item.TargetSnapshot
 			b.work[i].TargetBranch = item.TargetBranch
 			if item.Submission != nil {
@@ -177,7 +189,7 @@ func (b *implementationMemory) ClaimImplementation(_ context.Context, _ github.R
 	return nil
 }
 
-func implementCLI(t *testing.T, root string, backend *implementationMemory, args ...string) workflow.ImplementationOutcome {
+func implementCLI(t *testing.T, root string, backend *implementationMemory, args ...string) setup.ImplementationOutput {
 	t.Helper()
 	if backend.remoteHeads == nil {
 		backend.remoteHeads = make(map[string]string)
@@ -192,7 +204,7 @@ func implementCLI(t *testing.T, root string, backend *implementationMemory, args
 	if err := app.Run(command); err != nil {
 		t.Fatalf("%v: %v\n%s", command, err, &output)
 	}
-	var result workflow.ImplementationOutcome
+	var result setup.ImplementationOutput
 	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
 		t.Fatalf("%v: %s", err, &output)
 	}
@@ -205,7 +217,7 @@ func implementCLI(t *testing.T, root string, backend *implementationMemory, args
 func TestImplementSubmitsCompletedFirstImplementation(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
-	backend := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{}}
+	backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{}}
 	start := implementCLI(t, root, backend, "next")
 	body := filepath.Join(start.Packet.Facts.Implementation.ResultDirectory, "submission.md")
 	if err := os.WriteFile(body, []byte("opaque audit [not even Markdown\n"), 0600); err != nil {
@@ -219,7 +231,7 @@ func TestImplementSubmitsCompletedFirstImplementation(t *testing.T) {
 		t.Fatalf("submit: %#v %#v", got, backend.work)
 	}
 	submission := backend.work[0].Submission
-	if submission == nil || submission.Number != 11 || submission.Head != backend.remoteHeads["widget"] || submission.Body != "opaque audit [not even Markdown\n\n\nCloses #7\n" {
+	if submission == nil || submission.ID != "11" || submission.Head != backend.remoteHeads["widget"] || submission.Body != "opaque audit [not even Markdown\n\n\nCloses #7\n" {
 		t.Fatalf("submission = %#v", submission)
 	}
 }
@@ -227,24 +239,28 @@ func TestImplementSubmitsCompletedFirstImplementation(t *testing.T) {
 func TestImplementClaimsOldestEligibleWork(t *testing.T) {
 	root := proposalRepository(t)
 	backend := &implementationMemory{work: []workflow.ImplementationItem{
-		{Number: 1, State: workflow.Ready, CreatedAt: "2020", Blockers: []int{9}},
-		{Number: 2, State: workflow.Ready, CreatedAt: "2021"},
-		{Number: 3, State: workflow.Rework, CreatedAt: "2023"},
-		{Number: 5, State: workflow.Rework, CreatedAt: "2022"},
-		{Number: 4, State: workflow.Rework, CreatedAt: "2022"},
-		{Number: 6, State: workflow.Rework, CreatedAt: "2010", Claimed: true},
-		{Number: 7, State: workflow.NeedsHuman, CreatedAt: "2010"},
-		{Number: 9, State: workflow.ReadyForMerge},
+		{ID: "1", State: workflow.Ready, CreatedAt: "2020", Blockers: []workflow.WorkItemID{"9"}},
+		{ID: "2", State: workflow.Ready, CreatedAt: "2021"},
+		{ID: "3", State: workflow.Rework, CreatedAt: "2023"},
+		{ID: "5", Order: 5, State: workflow.Rework, CreatedAt: "2022"},
+		{ID: "4", Order: 4, State: workflow.Rework, CreatedAt: "2022"},
+		{ID: "6", State: workflow.Rework, CreatedAt: "2010", Claimed: true},
+		{ID: "7", State: workflow.NeedsHuman, CreatedAt: "2010"},
+		{ID: "9", State: workflow.ReadyForMerge},
 	}}
 	for i := range backend.work {
 		item := &backend.work[i]
-		item.Branch = fmt.Sprintf("slice-%d", item.Number)
+		item.Branch = fmt.Sprintf("slice-%s", item.ID)
 		prepareSlice(t, root, item.Branch)
 		if item.State == workflow.Rework {
 			runGit(t, root, "rm", "-r", ".changes/"+item.Branch)
 			runGit(t, root, "commit", "-m", "retire")
 			head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
-			item.Submission = &workflow.Submission{Number: item.Number + 100, Head: head, PreviousReviewedHead: head, Base: "main"}
+			number, err := strconv.Atoi(string(item.ID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			item.Submission = &workflow.Submission{ID: workflow.SubmissionID(strconv.Itoa(number + 100)), Head: head, PreviousReviewedHead: head, Base: "main"}
 		}
 	}
 	for _, want := range []int{4, 5, 3, 2} {
@@ -260,10 +276,10 @@ func TestImplementClaimsOldestEligibleWork(t *testing.T) {
 
 func TestImplementReportsNoEligibleWork(t *testing.T) {
 	for _, work := range [][]workflow.ImplementationItem{nil, {
-		{Number: 1, State: workflow.Ready, Blockers: []int{4}},
-		{Number: 2, State: workflow.Rework, Claimed: true},
-		{Number: 3, State: workflow.NeedsHuman},
-		{Number: 4, State: workflow.ReadyForMerge},
+		{ID: "1", State: workflow.Ready, Blockers: []workflow.WorkItemID{"4"}},
+		{ID: "2", State: workflow.Rework, Claimed: true},
+		{ID: "3", State: workflow.NeedsHuman},
+		{ID: "4", State: workflow.ReadyForMerge},
 	}} {
 		backend := &implementationMemory{work: work}
 		before := append([]workflow.ImplementationItem(nil), work...)
@@ -274,12 +290,78 @@ func TestImplementReportsNoEligibleWork(t *testing.T) {
 	}
 }
 
+func TestImplementAndWatchdogUseNumericTieBreak(t *testing.T) {
+	for _, command := range []string{"implement", "watchdog"} {
+		t.Run(command, func(t *testing.T) {
+			root := proposalRepository(t)
+			b := &implementationMemory{work: []workflow.ImplementationItem{
+				{ID: "10", Order: 10, Branch: "ten", State: workflow.Ready, CreatedAt: "2026"},
+				{ID: "2", Order: 2, Branch: "two", State: workflow.Ready, CreatedAt: "2026"},
+			}}
+			for i := range b.work {
+				item := &b.work[i]
+				prepareSlice(t, root, item.Branch)
+				if command == "watchdog" {
+					runGit(t, root, "rm", "-r", ".changes/"+item.Branch)
+					runGit(t, root, "commit", "-m", "retire")
+					item.State = workflow.AwaitingReview
+					item.Submission = &workflow.Submission{ID: workflow.SubmissionID(item.ID), Head: strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD")), CreatedAt: "2026"}
+				}
+			}
+			for _, want := range []int{2, 10} {
+				var got setup.ImplementationOutput
+				if command == "implement" {
+					got = implementCLI(t, root, b, "next")
+				} else {
+					got = watchdogCLI(t, root, b, "next")
+				}
+				if got.Status != "work_available" || got.Item == nil || got.Item.Number != want || !got.Item.Claimed {
+					t.Fatalf("numeric tie-break: %#v, want #%d", got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestImplementLifecycleOrdersOpaqueIDsByBackendFact(t *testing.T) {
+	root := proposalRepository(t)
+	b := &implementationMemory{work: []workflow.ImplementationItem{
+		{ID: "alpha", Order: 10, ClosingReference: "Resolves alpha", Branch: "ten", State: workflow.Ready, CreatedAt: "2026"},
+		{ID: "zulu", Order: 2, ClosingReference: "Resolves zulu", Branch: "two", State: workflow.Ready, CreatedAt: "2026"},
+	}, remoteHeads: map[string]string{"main": strings.TrimSpace(runGitOutput(t, root, "rev-parse", "main"))}}
+	for _, item := range b.work {
+		prepareSlice(t, root, item.Branch)
+	}
+	for _, want := range []workflow.WorkItemID{"zulu", "alpha"} {
+		got, err := workflow.StartImplementation(context.Background(), root, "origin", "", "", "", b)
+		if err != nil || got.Status != "work_available" || got.Item == nil || got.Item.ID != want || !got.Item.Claimed {
+			t.Fatalf("opaque implementation tie-break: %#v, %v; want %q", got, err, want)
+		}
+		t.Cleanup(func() { os.RemoveAll(got.Facts.Implementation.ResultDirectory) })
+	}
+	for i := range b.work {
+		item := &b.work[i]
+		runGit(t, root, "switch", item.Branch)
+		runGit(t, root, "rm", "-r", ".changes/"+item.Branch)
+		runGit(t, root, "commit", "-m", "retire")
+		item.State, item.Claimed = workflow.AwaitingReview, false
+		item.Submission = &workflow.Submission{ID: workflow.SubmissionID("review-" + item.ID), Head: strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD")), CreatedAt: "2026"}
+	}
+	for _, want := range []workflow.WorkItemID{"zulu", "alpha"} {
+		got, err := workflow.StartWatchdog(context.Background(), root, "origin", "", b)
+		if err != nil || got.Status != "work_available" || got.Item == nil || got.Item.ID != want || !got.Item.Claimed || got.Item.Submission.ID != workflow.SubmissionID("review-"+want) {
+			t.Fatalf("opaque review tie-break: %#v, %v; want %q", got, err, want)
+		}
+		t.Cleanup(func() { os.RemoveAll(got.Facts.Watchdog.ResultDirectory) })
+	}
+}
+
 func TestImplementResumesInterruptedClaim(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
 	backend := &implementationMemory{work: []workflow.ImplementationItem{
-		{Number: 1, State: workflow.Ready},
-		{Number: 7, Branch: "widget", State: workflow.Ready, Claimed: true},
+		{ID: "1", State: workflow.Ready},
+		{ID: "7", Branch: "widget", State: workflow.Ready, Claimed: true},
 	}}
 	got := implementCLI(t, root, backend, "resume", "--item", "7")
 	if got.Status != "work_available" || got.Item.Number != 7 || !got.Item.Claimed || backend.work[0].Claimed {
@@ -291,7 +373,7 @@ func TestImplementResumePreservesTargetAndRejectsAmbiguousHistory(t *testing.T) 
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
 	target := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "origin/main"))
-	b := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.Ready, Claimed: true}}}
+	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready, Claimed: true}}}
 	first := implementCLI(t, root, b, "resume", "--item", "7")
 	if first.Packet == nil || b.work[0].TargetSnapshot != target {
 		t.Fatalf("resume did not persist target: %#v", first)
@@ -310,7 +392,7 @@ func TestImplementResumePreservesTargetAndRejectsAmbiguousHistory(t *testing.T) 
 	if got := implementCLI(t, root, b, "resume", "--item", "7"); got.Status != "fix_required" {
 		t.Fatalf("guessed after history changed: %#v", got)
 	}
-	b.work[0].Submission = &workflow.Submission{Number: 11, Draft: true, Base: "main"}
+	b.work[0].Submission = &workflow.Submission{ID: "11", Draft: true, Base: "main"}
 	got := implementCLI(t, root, b, "resume", "--item", "7", "--target-snapshot", target)
 	if got.Packet == nil || got.Packet.Facts.Implementation.TargetSnapshot != target {
 		t.Fatalf("draft suppressed target: %#v", got)
@@ -323,7 +405,7 @@ func TestInstalledImplementActivationLoadsDefinitionsOnce(t *testing.T) {
 			home := t.TempDir()
 			root := proposalRepository(t)
 			prepareSlice(t, root, "widget")
-			b := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{"main": strings.TrimSpace(runGitOutput(t, root, "rev-parse", "main"))}}
+			b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{"main": strings.TrimSpace(runGitOutput(t, root, "rev-parse", "main"))}}
 			var output bytes.Buffer
 			app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return b, nil }, bytes.NewReader(nil), &output, &output, home)
 			if err := app.Run([]string{"skl", "install"}); err != nil {
@@ -353,7 +435,7 @@ func TestInstalledImplementActivationLoadsDefinitionsOnce(t *testing.T) {
 					command = "skl implement next"
 					continue
 				}
-				var outcome workflow.ImplementationOutcome
+				var outcome setup.ImplementationOutput
 				if err := json.Unmarshal(output.Bytes(), &outcome); err != nil || outcome.Packet == nil {
 					t.Fatalf("activation did not reach work: %s, %v", &output, err)
 				}
@@ -390,7 +472,7 @@ func TestImplementUsesSelectedGitHubRemoteThroughout(t *testing.T) {
 				}
 				runGit(t, root, "remote", "add", other, "https://github.com/other/widgets.git")
 			}
-			b := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.Ready}}}
+			b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}}
 			if layout == "ambiguous" {
 				var output bytes.Buffer
 				app := newApp(func(github.RepositoryID) (setup.Backend, error) { return b, nil }, bytes.NewReader(nil), &output, &output)
@@ -459,7 +541,7 @@ func TestImplementObservesLiveTargetAndKeepsPersistedSnapshot(t *testing.T) {
 			if !available {
 				target = strings.Repeat("f", 40)
 			}
-			b := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{"main": target}}
+			b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{"main": target}}
 			cached := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "origin/main"))
 			if got := implementCLI(t, root, b, "next", "--target-snapshot", cached); got.Status != "fix_required" || b.work[0].Claimed {
 				t.Fatalf("new Claim accepted caller-selected target: %#v", got)
@@ -487,7 +569,7 @@ func TestImplementPinsTargetAndBundlesInstructions(t *testing.T) {
 	root := proposalRepository(t)
 	baseline := prepareSlice(t, root, "widget")
 	target := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "origin/main"))
-	backend := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.Ready}}}
+	backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}}
 	got := implementCLI(t, root, backend, "next")
 	if got.Packet == nil || got.Packet.Facts.Implementation.TargetSnapshot != target || got.Packet.Facts.Implementation.ArtifactBaseline != baseline {
 		t.Fatalf("packet = %#v", got)
@@ -520,7 +602,7 @@ func TestImplementStartsFindingDrivenRework(t *testing.T) {
 	runGit(t, root, "commit", "-m", "retire")
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	comments := []skilldist.ReviewComment{{Body: "W1 BLOCK evidence", Author: "reviewer"}, {Body: "W1 NOTE reason", Author: "owner", Association: "OWNER"}}
-	backend := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.Rework, Submission: &workflow.Submission{Number: 11, Head: head, PreviousReviewedHead: head, Comments: comments}}}}
+	backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Rework, Submission: &workflow.Submission{ID: "11", Head: head, PreviousReviewedHead: head, Comments: comments}}}}
 	got := implementCLI(t, root, backend, "next")
 	if got.Status != "work_available" || got.Packet == nil {
 		t.Fatalf("rework = %#v", got)
@@ -538,7 +620,7 @@ func TestImplementResubmitsExistingRework(t *testing.T) {
 	for _, hasSubmission := range []bool{true, false} {
 		root := proposalRepository(t)
 		prepareSlice(t, root, "widget")
-		backend := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{}}
+		backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{}}
 		start := implementCLI(t, root, backend, "next")
 		body := filepath.Join(start.Packet.Facts.Implementation.ResultDirectory, "submission.md")
 		if err := os.WriteFile(body, []byte("current Audit and rework dispositions\n"), 0600); err != nil {
@@ -549,12 +631,12 @@ func TestImplementResubmitsExistingRework(t *testing.T) {
 		head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 		backend.work[0].State, backend.work[0].TargetSnapshot = workflow.Rework, ""
 		if hasSubmission {
-			backend.work[0].Submission = &workflow.Submission{Number: 42, Head: head, PreviousReviewedHead: head}
+			backend.work[0].Submission = &workflow.Submission{ID: "42", Head: head, PreviousReviewedHead: head}
 		}
 		backend.remoteHeads["widget"] = head
 		got := implementCLI(t, root, backend, "submit", "--item", "7", "--body", body)
 		if hasSubmission {
-			if got.Status != "awaiting_review" || backend.work[0].Submission.Number != 42 {
+			if got.Status != "awaiting_review" || backend.work[0].Submission.ID != "42" {
 				t.Fatalf("rework = %#v", got)
 			}
 		} else if got.Status != "fix_required" || backend.work[0].Submission != nil {
@@ -566,14 +648,14 @@ func TestImplementResubmitsExistingRework(t *testing.T) {
 func TestImplementPausesBeforeCodeExists(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
-	backend := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.Ready}}}
+	backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}}
 	start := implementCLI(t, root, backend, "next")
 	decision := filepath.Join(start.Packet.Facts.Implementation.ResultDirectory, "decision.md")
 	if err := os.WriteFile(decision, []byte("contradiction and recommendation\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	got := implementCLI(t, root, backend, "needs-human", "--item", "7", "--reason", "contradictory_artifacts", "--decision", decision)
-	if got.Status != "needs_human" || backend.work[0].Claimed || backend.work[0].ResumeState != workflow.Ready || backend.work[0].Submission != nil || backend.decisions[7] != "contradiction and recommendation\n" {
+	if got.Status != "needs_human" || backend.work[0].Claimed || backend.work[0].ResumeState != workflow.Ready || backend.work[0].Submission != nil || backend.decisions["7"] != "contradiction and recommendation\n" {
 		t.Fatalf("pause: %#v %#v", got, backend)
 	}
 	if _, err := os.Stat(filepath.Join(root, ".changes/widget/intent.md")); err != nil {
@@ -584,7 +666,7 @@ func TestImplementPausesBeforeCodeExists(t *testing.T) {
 func TestImplementPausesPreservingWork(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
-	backend := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{}}
+	backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{}}
 	start := implementCLI(t, root, backend, "next")
 	directory := start.Packet.Facts.Implementation.ResultDirectory
 	for _, name := range []string{"submission.md", "decision.md"} {
@@ -610,7 +692,7 @@ func TestImplementPausesPreservingWork(t *testing.T) {
 func TestImplementPublishesOpaqueResultAndCleansSuccessfulDirectory(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
-	backend := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{}}
+	backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{}}
 	start := implementCLI(t, root, backend, "next")
 	directory := start.Packet.Facts.Implementation.ResultDirectory
 	body := filepath.Join(directory, "submission.md")
@@ -636,7 +718,7 @@ func TestImplementResumesConventionalWorktreeWithoutSelectingAnotherItem(t *test
 	runGit(t, root, "switch", "main")
 	worktree := filepath.Join(root, ".worktrees", "widget")
 	runGit(t, root, "worktree", "add", worktree, "widget")
-	backend := &implementationMemory{work: []workflow.ImplementationItem{{Number: 1, Branch: "other", State: workflow.Ready}, {Number: 7, Branch: "widget", State: workflow.Ready, Claimed: true}}}
+	backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "1", Branch: "other", State: workflow.Ready}, {ID: "7", Branch: "widget", State: workflow.Ready, Claimed: true}}}
 	got := implementCLI(t, worktree, backend, "resume")
 	if got.Status != "work_available" || got.Item.Number != 7 || backend.work[0].Claimed {
 		t.Fatalf("resume = %#v", got)
@@ -650,7 +732,7 @@ func TestImplementResumesConventionalWorktreeWithoutSelectingAnotherItem(t *test
 func TestImplementInspectionSuppliesFixedLedgerEvidenceWithoutClaiming(t *testing.T) {
 	root := proposalRepository(t)
 	baseline := prepareSlice(t, root, "widget")
-	backend := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.Ready}}}
+	backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}}
 	got := implementCLI(t, root, backend, "inspect", "--item", "7")
 	if got.Status != "inspected" || got.Ledger == nil || got.Ledger.Baseline != baseline || got.Head != baseline || backend.work[0].Claimed {
 		t.Fatalf("inspection = %#v", got)
@@ -662,7 +744,7 @@ func TestImplementReconcilesInterruptedHandoffs(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			root := proposalRepository(t)
 			prepareSlice(t, root, "widget")
-			b := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{}}
+			b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{}}
 			start := implementCLI(t, root, b, "next")
 			dir := start.Packet.Facts.Implementation.ResultDirectory
 			for _, name := range []string{"submission.md", "decision.md"} {
@@ -707,7 +789,7 @@ func TestImplementChecksContradictionsAndHeadDuringProjection(t *testing.T) {
 		t.Run(fault, func(t *testing.T) {
 			root := proposalRepository(t)
 			prepareSlice(t, root, "widget")
-			b := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{}}
+			b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{}}
 			start := implementCLI(t, root, b, "next")
 			body := filepath.Join(start.Packet.Facts.Implementation.ResultDirectory, "submission.md")
 			if err := os.WriteFile(body, []byte("opaque"), 0600); err != nil {

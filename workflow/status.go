@@ -7,21 +7,15 @@ import (
 )
 
 type StatusOutcome struct {
-	CompleteProposals []int                `json:"complete_proposals,omitempty"`
+	CompleteProposals []WorkItemID         `json:"complete_proposals,omitempty"`
 	Status            string               `json:"status"`
 	Items             []ImplementationItem `json:"items"`
 }
 
 type StatusBackend interface {
 	ImplementationBackend
-	CoordinationItems(context.Context, github.RepositoryID) ([]CoordinationStatus, error)
-	CloseCoordination(context.Context, github.RepositoryID, int) error
-}
-
-type CoordinationStatus struct {
-	Number   int
-	Children []int
-	Closed   bool
+	CoordinationItems(context.Context, github.RepositoryID) ([]CoordinationItem, error)
+	CloseCoordination(context.Context, github.RepositoryID, WorkItemID) error
 }
 
 func ObserveStatus(ctx context.Context, root, remote string, backend ImplementationBackend) (StatusOutcome, error) {
@@ -41,7 +35,7 @@ func ObserveStatus(ctx context.Context, root, remote string, backend Implementat
 		}
 		if item.State == ReadyForMerge && item.Submission != nil {
 			if port, ok := backend.(ReviewBackend); ok {
-				current, err := port.ReviewSubmission(ctx, repository, item.Submission.Number)
+				current, err := port.ReviewSubmission(ctx, repository, item.Submission.ID)
 				if err != nil {
 					return StatusOutcome{}, err
 				}
@@ -72,7 +66,7 @@ func ObserveStatus(ctx context.Context, root, remote string, backend Implementat
 				return StatusOutcome{}, Refuse("backend cannot reconcile partial review")
 			}
 			guard := func() error {
-				current, err := port.ReviewSubmission(ctx, repository, item.Submission.Number)
+				current, err := port.ReviewSubmission(ctx, repository, item.Submission.ID)
 				if err != nil {
 					return err
 				}
@@ -92,7 +86,7 @@ func ObserveStatus(ctx context.Context, root, remote string, backend Implementat
 				return StatusOutcome{}, err
 			}
 			for _, c := range current {
-				if c.Number == item.Number {
+				if c.ID == item.ID {
 					outcome.Items[i] = c
 				}
 			}
@@ -105,7 +99,7 @@ func ObserveStatus(ctx context.Context, root, remote string, backend Implementat
 					return err
 				}
 				for _, c := range current {
-					if c.Number == item.Number && c.Problem == "" && c.Submission != nil && c.Submission.Head == item.Submission.Head && c.Submission.State == AwaitingReview && !c.Submission.Claimed {
+					if c.ID == item.ID && c.Problem == "" && c.Submission != nil && c.Submission.Head == item.Submission.Head && c.Submission.State == AwaitingReview && !c.Submission.Claimed {
 						return nil
 					}
 				}
@@ -119,7 +113,7 @@ func ObserveStatus(ctx context.Context, root, remote string, backend Implementat
 				return StatusOutcome{}, err
 			}
 			for _, c := range current {
-				if c.Number == item.Number {
+				if c.ID == item.ID {
 					outcome.Items[i] = c
 				}
 			}
@@ -130,9 +124,9 @@ func ObserveStatus(ctx context.Context, root, remote string, backend Implementat
 		if err != nil {
 			return StatusOutcome{}, err
 		}
-		merged := map[int]bool{}
+		merged := map[WorkItemID]bool{}
 		for _, item := range items {
-			merged[item.Number] = item.State == Merged && item.Problem == ""
+			merged[item.ID] = item.State == Merged && item.Problem == ""
 		}
 		for _, parent := range parents {
 			complete := len(parent.Children) > 0
@@ -141,11 +135,11 @@ func ObserveStatus(ctx context.Context, root, remote string, backend Implementat
 			}
 			if complete {
 				if !parent.Closed {
-					if err := port.CloseCoordination(ctx, repository, parent.Number); err != nil {
+					if err := port.CloseCoordination(ctx, repository, parent.ID); err != nil {
 						return StatusOutcome{}, err
 					}
 				}
-				outcome.CompleteProposals = append(outcome.CompleteProposals, parent.Number)
+				outcome.CompleteProposals = append(outcome.CompleteProposals, parent.ID)
 			}
 		}
 	}

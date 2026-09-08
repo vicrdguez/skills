@@ -143,7 +143,7 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 				if !ok {
 					return fmt.Errorf("workflow backend does not support proposal cleanup")
 				}
-				outcome, err := workflow.Cleanup(command.Context, repository.Root, repository.Remote, proposalBackend)
+				outcome, err := workflow.Cleanup(command.Context, repository.Root, proposalBackend)
 				if err != nil {
 					return err
 				}

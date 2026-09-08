@@ -34,7 +34,7 @@
 
 The command integration binds the publication Backend and selects the Git remote together, using a GitHub `origin`, the sole GitHub remote, or an explicit `--remote` when needed. Ambiguous selection is refused before mutation. Publication Mechanics use that explicit remote for Git evidence and opaque Work Item and Coordination Item references for Backend operations. The GitHub integration retains native issue numbers, relationship syntax, and the supplied artifact-reference Markdown without migrating existing records.
 
-The Workflow Engine owns graph validation, blocker-first publication, Git preflight, Ready timing, and interrupted-publication recovery. The Backend observes durable records and materializes the requested effects. Implementation, review, and status retain their existing decisions and external representations; their backend-independence migration is separate from the Setup and publication correction.
+The Workflow Engine owns graph validation, blocker-first publication, Git preflight, Ready timing, and interrupted-publication recovery. The Backend observes durable records and materializes the requested effects. Shared Work Item, Submission, and relationship identities are opaque; the integration preserves numeric GitHub CLI and packet representations and supplies the existing numeric ordering fact separately. Implementation, review, and status retain their existing decisions; their remaining backend-independence migration is separate from this correction.
 
 ## Planned extension after issue #3: Proposal decomposition
 
