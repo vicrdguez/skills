@@ -373,6 +373,26 @@ func TestRetrieveConcreteProposeInstructions(t *testing.T) {
 		"seam judgment":       {"Use the `design` skill", "Always prefer existing seams", "Use the highest seam possible", "Check with the user if the seams match their expectations"},
 		"artifact authorship": {"## Writing the change artifacts", "`intent.md`: Why / What / Scope / Out of scope / Definition of Done", "*Gherkin notation*", "module shapes and seams chosen for implementation", "Discoveries belong in PR findings or in a new proposal", "./reference/tasks.md"},
 		"publication":         {"skl propose publish", "skl propose cleanup"},
+		"independent delivery": {
+			"Prefer separate Work Items for behaviors that deliver safe, useful results independently",
+			"after declared Dependencies are Merged, without requiring later Work Items",
+			"Combine independently useful behaviors only for a concrete reduction in overall implementation or review burden",
+			"Shared files or a shared Workflow stage alone are insufficient",
+		},
+		"review burden": {
+			"Assess review burden from the behavior and materially different correctness, failure, and recovery concerns a reviewer must understand together",
+			"using agreed requirements and focused repository inspection rather than line counts or exhaustive implementation planning",
+			"Different error cases alone do not require separate Work Items",
+			"*Review burden*: Briefly explain those concerns and any concrete reason for combining independently useful behaviors",
+			"*Title*", "*Blocked by*", "*What it delivers*",
+			"Does the granularity feel right?", "Are the blocking edges correct", "Should any tickets be merged or split further?",
+		},
+		"bounded reconsideration": {
+			"If artifact elaboration materially changes proposed boundaries or Dependencies, return to this approval loop before publication",
+			"explain the discovery and propose the revised breakdown for approval before freezing the artifacts",
+			"Ordinary elaboration within an unchanged coherent delivery needs no renewed approval",
+			"Publishing them freezes them", "There is no later addition and no exception",
+		},
 	} {
 		t.Run(section, func(t *testing.T) {
 			for _, want := range requirements {
