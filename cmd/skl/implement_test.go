@@ -176,6 +176,12 @@ func (b *implementationMemory) ClaimImplementation(_ context.Context, _ workflow
 
 func implementCLI(t *testing.T, root string, backend *implementationMemory, args ...string) workflow.ImplementationOutcome {
 	t.Helper()
+	if backend.remoteHeads == nil {
+		backend.remoteHeads = make(map[string]string)
+	}
+	if _, ok := backend.remoteHeads["main"]; !ok {
+		backend.remoteHeads["main"] = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "refs/heads/main"))
+	}
 	var output bytes.Buffer
 	app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
 	command := append([]string{"skl", "implement"}, args...)
@@ -305,6 +311,42 @@ func TestImplementResumePreservesTargetAndRejectsAmbiguousHistory(t *testing.T) 
 	got := implementCLI(t, root, b, "resume", "--item", "7", "--target-snapshot", target)
 	if got.Packet == nil || got.Packet.Facts.Implementation.TargetSnapshot != target {
 		t.Fatalf("draft suppressed target: %#v", got)
+	}
+}
+
+func TestImplementObservesLiveTargetAndKeepsPersistedSnapshot(t *testing.T) {
+	for _, available := range []bool{true, false} {
+		t.Run(fmt.Sprint(available), func(t *testing.T) {
+			root := proposalRepository(t)
+			prepareSlice(t, root, "widget")
+			runGit(t, root, "switch", "main")
+			runGit(t, root, "commit", "--allow-empty", "-m", "new backend target")
+			target := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+			runGit(t, root, "switch", "widget")
+			if !available {
+				target = strings.Repeat("f", 40)
+			}
+			b := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{"main": target}}
+			cached := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "origin/main"))
+			if got := implementCLI(t, root, b, "next", "--target-snapshot", cached); got.Status != "fix_required" || b.work[0].Claimed {
+				t.Fatalf("new Claim accepted caller-selected target: %#v", got)
+			}
+			got := implementCLI(t, root, b, "next")
+			if !available {
+				if got.Status != "fix_required" || !strings.Contains(got.Reason, target) || !strings.Contains(got.Reason, "fetch") || b.work[0].Claimed {
+					t.Fatalf("unavailable live target: %#v", got)
+				}
+				return
+			}
+			if got.Packet == nil || got.Packet.Facts.Implementation.TargetSnapshot != target || b.work[0].TargetSnapshot != target {
+				t.Fatalf("pinned stale target: %#v", got)
+			}
+			b.remoteHeads["main"] = strings.Repeat("f", 40)
+			got = implementCLI(t, root, b, "resume", "--item", "7")
+			if got.Packet == nil || got.Packet.Facts.Implementation.TargetSnapshot != target {
+				t.Fatalf("persisted target moved: %#v", got)
+			}
+		})
 	}
 }
 

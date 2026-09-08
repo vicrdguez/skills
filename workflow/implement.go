@@ -238,6 +238,9 @@ func prepareImplementationStart(ctx context.Context, root string, repository Rep
 	}
 	if item.State == Ready {
 		if snapshot != "" {
+			if !item.Claimed && item.TargetSnapshot == "" {
+				return refuse("a new Claim observes its target on the backend; use --target-snapshot only to resume an existing obligation")
+			}
 			resolved, err := git(root, "rev-parse", "--verify", snapshot+"^{commit}")
 			if err != nil || resolved != snapshot {
 				return refuse("Target Snapshot must be an available full commit SHA; fetch the pinned commit")
@@ -257,14 +260,17 @@ func prepareImplementationStart(ctx context.Context, root string, repository Rep
 			if item.Claimed && head != history.Baseline {
 				return refuse("Target Snapshot is unknown after history changed; read the original packet and resume with --target-snapshot <sha>")
 			}
-			item.TargetSnapshot, err = git(root, "rev-parse", "--verify", "refs/remotes/origin/"+item.TargetBranch+"^{commit}")
+			item.TargetSnapshot, err = backend.ImplementationHead(ctx, repository, item.TargetBranch)
 			if err != nil {
-				return refuse("target unavailable; fetch origin/" + item.TargetBranch + " and resume")
+				return item, ImplementationOutcome{}, err
+			}
+			if item.TargetSnapshot == "" {
+				return refuse("target unavailable on the backend; restore target branch " + item.TargetBranch + " and retry")
 			}
 		}
 		resolved, err := git(root, "rev-parse", "--verify", "--end-of-options", item.TargetSnapshot+"^{commit}")
 		if err != nil || resolved != item.TargetSnapshot {
-			return refuse("recorded Target Snapshot is not an available full commit SHA; fetch the original snapshot and repair conflicting metadata")
+			return refuse("Target Snapshot " + item.TargetSnapshot + " is not an available full commit SHA; fetch the target branch and pinned commit, then retry without replacing a recorded snapshot")
 		}
 	} else {
 		if item.Submission == nil {
