@@ -162,7 +162,7 @@ func TestSetupInfersGitHubConsumerRepository(t *testing.T) {
 	if got := stdout.String(); got != "Link CLAUDE.md to AGENTS.md? [y/N] Prepared "+root+" for GitHub workflow on trunk.\n" {
 		t.Fatalf("stdout = %q", got)
 	}
-	if len(backend.labels) != 6 {
+	if len(backend.labels) != 7 {
 		t.Fatalf("prepared %d labels", len(backend.labels))
 	}
 	if got := readFile(t, filepath.Join(root, ".gitignore")); got != ".worktrees/\n" {
@@ -217,7 +217,7 @@ func TestDocumentedImplementResourceCommands(t *testing.T) {
 					t.Errorf("%s: %v", command, err)
 					continue
 				}
-				if output.String() != readRepositoryFile(t, "skills/dev/implement/"+resource) {
+				if output.String() != readRepositoryFile(t, "skills/dev/"+args[len(args)-1]+"/"+resource) {
 					t.Errorf("%s returned the wrong resource", command)
 				}
 			}

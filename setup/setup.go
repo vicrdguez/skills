@@ -28,6 +28,7 @@ type Label struct {
 }
 
 var WorkflowLabels = []Label{
+	{Name: "sync", Color: "fbca04", Description: "Synchronization Rework; does not consume the finding bounce"},
 	{Name: "ready", Color: "0e8a16", Description: "proposed change awaiting an implementor"},
 	{Name: "wip", Color: "fbca04", Description: "additive Worker Claim. An agent is working on it"},
 	{Name: "review", Color: "1d76db", Description: "built change awaiting a reviewer"},

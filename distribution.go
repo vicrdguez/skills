@@ -15,6 +15,7 @@ const StubProtocol = "skl.stub/v1"
 var ownedMarker = []byte("<!-- skl-owned: " + StubProtocol + " -->")
 
 //go:embed skills/dev/audit skills/dev/design skills/dev/domain skills/dev/explore skills/dev/implement skills/dev/propose skills/dev/tdd skills/dev/watchdog skills/misc/writing-for-agents skills/thinking/brainstorm skills/thinking/shape stubs/common.md
+//go:embed prompts/implement-loop.md prompts/watchdog-loop.md prompts/queue-next.mjs agents/implement-runner.md agents/watchdog-runner.md
 var embedded embed.FS
 
 type stubData struct {
@@ -67,6 +68,28 @@ func Install(home string) (InstallOutcome, error) {
 			}
 			outcome.Changed++
 		}
+	}
+	for _, file := range []string{"prompts/implement-loop.md", "prompts/watchdog-loop.md", "prompts/queue-next.mjs", "agents/implement-runner.md", "agents/watchdog-runner.md"} {
+		contents, err := embedded.ReadFile(file)
+		if err != nil {
+			return outcome, err
+		}
+		path := filepath.Join(home, ".pi/agent", file)
+		current, err := os.ReadFile(path)
+		if err == nil && (bytes.Equal(current, contents) || !bytes.Contains(current, []byte("skl-owned: skl.pi/v1"))) {
+			outcome.Unchanged++
+			continue
+		}
+		if err != nil && !os.IsNotExist(err) {
+			return outcome, err
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			return outcome, err
+		}
+		if err := os.WriteFile(path, contents, 0644); err != nil {
+			return outcome, err
+		}
+		outcome.Changed++
 	}
 	return outcome, nil
 }

@@ -168,7 +168,7 @@ func handoffImplementation(ctx context.Context, root, remote string, number int,
 				return ImplementationOutcome{}, err
 			}
 		}
-		submission := Submission{Head: head, Base: base, Body: string(body) + fmt.Sprintf("\n\nCloses #%d\n", number), Draft: target == NeedsHuman}
+		submission := Submission{Head: head, Base: base, Body: closingBody(string(body), number), Draft: target == NeedsHuman}
 		if item.Submission != nil {
 			submission.Number = item.Submission.Number
 		}
@@ -223,6 +223,14 @@ func handoffImplementation(ctx context.Context, root, remote string, number int,
 		return ImplementationOutcome{}, writeErr
 	}
 	return ImplementationOutcome{}, Refuse("handoff projection is incomplete; retry the same semantic command with retained Result Documents")
+}
+
+func closingBody(body string, number int) string {
+	footer := fmt.Sprintf("\n\nCloses #%d\n", number)
+	if !strings.HasSuffix(body, footer) {
+		body += footer
+	}
+	return body
 }
 
 func removeResultDirectory(bodyPath string) error {

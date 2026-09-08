@@ -8,7 +8,7 @@ Implement a single change proposal, materializing each Gherkin scenario in `beha
 
 If this packet carries Implementation facts, continue with that Work Item. Otherwise run `skl implement next` and follow its concrete packet. `no_work` ends the invocation. Resume interrupted work with `skl implement resume --item <number>` or from its conventional worktree with `skl implement resume`; ordinary selection skips Claims. Keep the packet's fixed Target Snapshot and retry commands.
 
-Work only in the packet's conventional worktree, creating it from the pushed branch with ordinary Git if needed. On first-pass implementation, merge the packet's exact Target Snapshot before coding; on finding-driven Rework sync nothing. Never rebase or force-push: rewriting history orphans the Artifact Baseline and previous _Reviewed head_, and silently widens later three-dot diffs.
+Work only in the packet's conventional worktree, creating it from the pushed branch with ordinary Git if needed. On first-pass implementation or Synchronization Rework, merge the packet's exact Target Snapshot before coding; on finding-driven Rework sync nothing. Synchronization Rework needs fresh validation and Watchdog Review without spending the finding-driven bounce. Never rebase or force-push: rewriting history orphans the Artifact Baseline and previous _Reviewed head_, and silently widens later three-dot diffs.
 
 Use the packet's selected `remote` for Git fetch/push and pass `--remote <name>` on every Implement command, including Needs Human and legacy resume. When inference is ambiguous, choose explicitly with `--remote` before claiming.
 
