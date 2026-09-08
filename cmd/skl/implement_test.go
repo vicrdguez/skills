@@ -198,7 +198,12 @@ func implementCLI(t *testing.T, root string, backend *implementationMemory, args
 		backend.remoteHeads["main"] = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "refs/heads/main"))
 	}
 	var output bytes.Buffer
-	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+	app := newApp(func(repository github.RepositoryID) (setup.Backend, error) {
+		if repository != (github.RepositoryID{Owner: "acme", Name: "widgets"}) {
+			t.Fatalf("implementation backend repository = %#v", repository)
+		}
+		return backend, nil
+	}, bytes.NewReader(nil), &output, &output)
 	command := append([]string{"skl", "implement"}, args...)
 	command = append(command, "--repo", root)
 	if err := app.Run(command); err != nil {

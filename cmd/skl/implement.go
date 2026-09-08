@@ -8,7 +8,6 @@ import (
 	"strconv"
 
 	"github.com/urfave/cli/v2"
-	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/setup"
 	"github.com/vicrdguez/skills/workflow"
 )
@@ -22,7 +21,11 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 				if command.Int("item") < 0 || command.NArg() != 0 {
 					return fmt.Errorf("invalid implementation invocation: use flags and a positive Work Item identity")
 				}
-				backend, err := newBackend(github.RepositoryID{})
+				repository, err := setup.ResolveRepository(command.Path("repo"), command.String("remote"))
+				if err != nil {
+					return err
+				}
+				backend, err := newBackend(repository.Repository)
 				if err != nil {
 					return err
 				}
@@ -35,17 +38,17 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 					if command.Int("item") <= 0 {
 						return fmt.Errorf("inspect requires --item")
 					}
-					outcome, err = workflow.InspectImplementation(command.Context, command.Path("repo"), command.String("remote"), workItemID(command.Int("item")), port)
+					outcome, err = workflow.InspectImplementation(command.Context, repository.Root, repository.Remote, workItemID(command.Int("item")), port)
 				} else if name == "needs-human" {
-					outcome, err = workflow.PauseImplementation(command.Context, command.Path("repo"), command.String("remote"), workItemID(command.Int("item")), command.String("reason"), command.Path("decision"), command.Path("body"), port)
+					outcome, err = workflow.PauseImplementation(command.Context, repository.Root, repository.Remote, workItemID(command.Int("item")), command.String("reason"), command.Path("decision"), command.Path("body"), port)
 				} else if name == "submit" {
-					outcome, err = workflow.SubmitImplementation(command.Context, command.Path("repo"), command.String("remote"), workItemID(command.Int("item")), command.Path("body"), port)
+					outcome, err = workflow.SubmitImplementation(command.Context, repository.Root, repository.Remote, workItemID(command.Int("item")), command.Path("body"), port)
 				} else {
 					id := workItemID(command.Int("item"))
 					if name == "resume" && id == "" {
 						id = workflow.CurrentWorktree
 					}
-					outcome, err = workflow.StartImplementation(command.Context, command.Path("repo"), command.String("remote"), id, command.String("target-snapshot"), command.String("reviewed-head"), port)
+					outcome, err = workflow.StartImplementation(command.Context, repository.Root, repository.Remote, id, command.String("target-snapshot"), command.String("reviewed-head"), port)
 				}
 				if err != nil {
 					var violation *workflow.InvariantError
