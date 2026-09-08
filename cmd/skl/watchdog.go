@@ -33,7 +33,7 @@ func watchdogCommands(newBackend backendFactory, stdout io.Writer) []*cli.Comman
 				}
 				outcome, err = workflow.SubmitWatchdog(c.Context, c.Path("repo"), c.String("remote"), c.Int("item"), c.String("reviewed-head"), c.String("head"), c.String("verdict"), c.Path("summary"), c.Path("findings"), c.Path("body"), review)
 			} else {
-				outcome, err = nextWork(c.Duration("wait"), c.Duration("poll"), func() (workflow.ImplementationOutcome, error) {
+				outcome, err = nextWork(c.Context, c.Duration("wait"), c.Duration("poll"), func() (workflow.ImplementationOutcome, error) {
 					return workflow.StartWatchdog(c.Context, c.Path("repo"), c.String("remote"), c.Int("item"), port)
 				})
 			}

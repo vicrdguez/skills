@@ -42,7 +42,7 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 					if name == "resume" && number == 0 {
 						number = -1
 					}
-					outcome, err = nextWork(command.Duration("wait"), command.Duration("poll"), func() (workflow.ImplementationOutcome, error) {
+					outcome, err = nextWork(command.Context, command.Duration("wait"), command.Duration("poll"), func() (workflow.ImplementationOutcome, error) {
 						return workflow.StartImplementation(command.Context, command.Path("repo"), command.String("remote"), number, command.String("target-snapshot"), command.String("reviewed-head"), port)
 					})
 				}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -65,16 +66,40 @@ func waitFlags() []cli.Flag {
 	return flags
 }
 
-func nextWork(wait, poll time.Duration, selectWork func() (workflow.ImplementationOutcome, error)) (workflow.ImplementationOutcome, error) {
+func nextWork(ctx context.Context, wait, poll time.Duration, selectWork func() (workflow.ImplementationOutcome, error)) (outcome workflow.ImplementationOutcome, err error) {
+	if wait == 0 {
+		return selectWork()
+	}
+	defer func() {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			err = fmt.Errorf("queue waiting interrupted; if a Claim may have been acquired, inspect the Work Item and explicitly resume instead of retrying next: %w", err)
+		}
+	}()
 	deadline := time.Now().Add(wait)
 	for {
-		outcome, err := selectWork()
-		if err != nil || outcome.Status != "no_work" || wait == 0 {
+		if err := ctx.Err(); err != nil {
+			return workflow.ImplementationOutcome{}, err
+		}
+		outcome, err = selectWork()
+		// The idle window stops new attempts, never an in-flight Claim.
+		if err != nil || outcome.Status != "no_work" {
 			return outcome, err
+		}
+		if err := ctx.Err(); err != nil {
+			return workflow.ImplementationOutcome{}, err
 		}
 		remaining := time.Until(deadline)
 		if remaining > 0 {
-			time.Sleep(min(poll, remaining))
+			timer := time.NewTimer(min(poll, remaining))
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return workflow.ImplementationOutcome{}, ctx.Err()
+			case <-timer.C:
+			}
+		}
+		if err := ctx.Err(); err != nil {
+			return workflow.ImplementationOutcome{}, err
 		}
 		if !time.Now().Before(deadline) {
 			return workflow.ImplementationOutcome{Status: "idle_timeout", Reason: "no claimable work in this queue during the idle window; not global completion"}, nil

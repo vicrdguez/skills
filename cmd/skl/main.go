@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/urfave/cli/v2"
 	skilldist "github.com/vicrdguez/skills"
@@ -220,7 +222,10 @@ func proposalRequest(command *cli.Context) (workflow.PublishRequest, error) {
 
 func main() {
 	app := newApp(setup.NewGitHubBackendFromEnv, os.Stdin, os.Stdout, os.Stderr)
-	if err := app.RunContext(context.Background(), os.Args); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	err := app.RunContext(ctx, os.Args)
+	stop()
+	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -200,6 +201,122 @@ func TestNextWaitAvailableImmediately(t *testing.T) {
 					got, err = waitingCLI(t, t.Context(), root, lane, b, strings.Fields(option)...)
 					if err != nil || got.Status != "no_work" || got.Packet != nil || got.Item != nil || b.reads != 3 || b.claims != 1 || time.Since(start) != 0 {
 						t.Fatalf("empty immediate = %#v err %v", got, err)
+					}
+				})
+			})
+		}
+	}
+}
+
+func TestNextWaitCancellation(t *testing.T) {
+	for _, lane := range []string{"implement", "watchdog"} {
+		for _, point := range []string{"before selection", "during sleep", "uncertain claim", "successful claim"} {
+			t.Run(lane+"/"+point, func(t *testing.T) {
+				root, b := waitFixture(t, lane)
+				synctest.Test(t, func(t *testing.T) {
+					ctx, cancel := context.WithCancel(t.Context())
+					defer cancel()
+					start := time.Now()
+					switch point {
+					case "before selection":
+						cancel()
+					case "during sleep":
+						b.work = nil
+						go func() { time.Sleep(5 * time.Second); cancel() }()
+					case "uncertain claim":
+						b.claim = func(context.Context) error { cancel(); return ctx.Err() }
+						b.observe = func(context.Context) error { return ctx.Err() }
+					case "successful claim":
+						b.claim = func(context.Context) error { cancel(); return nil }
+					}
+					got, err := waitingCLI(t, ctx, root, lane, b, "--wait")
+					if point == "successful claim" {
+						if err != nil || got.Status != "work_available" || got.Packet == nil || !got.Item.Claimed || b.claims != 1 {
+							t.Fatalf("cancellation masked successful claim: %#v %v", got, err)
+						}
+						return
+					}
+					if !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "interrupted") || got.Status != "" {
+						t.Fatalf("cancellation became outcome: %#v %v", got, err)
+					}
+					switch point {
+					case "before selection":
+						if b.reads != 0 || b.claims != 0 || time.Since(start) != 0 {
+							t.Fatalf("effects after cancellation: reads %d claims %d elapsed %s", b.reads, b.claims, time.Since(start))
+						}
+					case "during sleep":
+						if b.reads != 1 || b.claims != 0 || time.Since(start) != 5*time.Second {
+							t.Fatalf("continued after sleep cancellation: reads %d claims %d elapsed %s", b.reads, b.claims, time.Since(start))
+						}
+					case "uncertain claim":
+						wantReads := 2
+						if lane == "watchdog" {
+							wantReads = 1
+						}
+						if b.reads != wantReads || b.claims != 1 || !b.work[0].Claimed || time.Since(start) != 0 || !strings.Contains(err.Error(), "inspect") || !strings.Contains(err.Error(), "resume") {
+							t.Fatalf("uncertain claim retried or lost: %v reads %d claims %d work %#v", err, b.reads, b.claims, b.work)
+						}
+					}
+				})
+			})
+		}
+	}
+}
+
+func TestNextWaitLateObservation(t *testing.T) {
+	for _, lane := range []string{"implement", "watchdog"} {
+		for _, result := range []string{"claim", "empty", "error", "refusal"} {
+			t.Run(lane+"/"+result, func(t *testing.T) {
+				root, b := waitFixture(t, lane)
+				work := b.work
+				b.work = nil
+				failure := errors.New("forge unavailable")
+				synctest.Test(t, func(t *testing.T) {
+					start := time.Now()
+					b.observe = func(ctx context.Context) error {
+						if _, ok := ctx.Deadline(); ok {
+							t.Fatal("idle window became a request deadline")
+						}
+						if b.reads != 2 {
+							return nil
+						}
+						if time.Since(start) != 30*time.Second {
+							t.Fatalf("selection started at %s", time.Since(start))
+						}
+						time.Sleep(20 * time.Second)
+						switch result {
+						case "claim":
+							b.work = work
+						case "error":
+							return failure
+						case "refusal":
+							return workflow.Refuse("invalid evidence; inspect and repair")
+						}
+						return nil
+					}
+					got, err := waitingCLI(t, context.Background(), root, lane, b, "--wait", "45s", "--poll", "30s")
+					wantReads, wantClaims := 2, 0
+					switch result {
+					case "claim":
+						wantReads, wantClaims = 3, 1
+						if err != nil || got.Status != "work_available" || got.Packet == nil || !got.Item.Claimed {
+							t.Fatalf("late claim lost: %#v %v", got, err)
+						}
+					case "empty":
+						if err != nil || got.Status != "idle_timeout" {
+							t.Fatalf("late empty: %#v %v", got, err)
+						}
+					case "error":
+						if !errors.Is(err, failure) || got.Status != "" {
+							t.Fatalf("late failure lost: %#v %v", got, err)
+						}
+					case "refusal":
+						if err != nil || got.Status != "fix_required" || !strings.Contains(got.Reason, "invalid evidence") {
+							t.Fatalf("late refusal lost: %#v %v", got, err)
+						}
+					}
+					if b.reads != wantReads || b.claims != wantClaims || time.Since(start) != 50*time.Second {
+						t.Fatalf("late attempt retried: reads %d claims %d elapsed %s", b.reads, b.claims, time.Since(start))
 					}
 				})
 			})
