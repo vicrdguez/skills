@@ -192,6 +192,42 @@ func TestSetupDeclinesClaudeMigrationAtEndOfInput(t *testing.T) {
 	}
 }
 
+func TestDocumentedImplementResourceCommands(t *testing.T) {
+	for _, file := range []string{"skills/dev/implement/SKILL.md", "README.md"} {
+		t.Run(file, func(t *testing.T) {
+			seen := map[string]bool{}
+			for _, command := range strings.Split(readRepositoryFile(t, file), "`") {
+				if !strings.HasPrefix(command, "skl skill ") || !strings.Contains(command, "--resource") {
+					continue
+				}
+				args := strings.Fields(command)
+				resource := ""
+				for _, arg := range args {
+					if strings.HasPrefix(arg, "reference/") {
+						resource = arg
+					}
+				}
+				if resource == "" {
+					continue
+				}
+				seen[resource] = true
+				var output bytes.Buffer
+				app := newApp(nil, bytes.NewReader(nil), &output, &output)
+				if err := app.Run(args); err != nil {
+					t.Errorf("%s: %v", command, err)
+					continue
+				}
+				if output.String() != readRepositoryFile(t, "skills/dev/implement/"+resource) {
+					t.Errorf("%s returned the wrong resource", command)
+				}
+			}
+			if !seen["reference/submission.md"] || !seen["reference/decision.md"] {
+				t.Errorf("missing concrete template commands: %v", seen)
+			}
+		})
+	}
+}
+
 func TestInstallSupportedSkillStubs(t *testing.T) {
 	root := t.TempDir()
 	var output bytes.Buffer
