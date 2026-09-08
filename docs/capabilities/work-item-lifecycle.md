@@ -30,14 +30,14 @@
 - Needs Human retains its resume state and existing Submission. Explicit human relabeling chooses Rework or Awaiting Review; comments alone do not change eligibility.
 - Recovers partial backend transitions by observing current state and continuing forward rather than rolling back completed work.
 
-## Planned extension after issue #3: Proposal decomposition
+## Proposal decomposition
 
 - Prefers separate Work Items for behaviors that deliver safe, useful results independently. Independence is assessed after declared Dependencies are Merged, without requiring later Work Items; each delivery remains vertically complete.
 - Combines independently useful behaviors only for a concrete reduction in overall implementation or review burden. Shared files or a shared Workflow stage are insufficient reasons.
 - Judges slice size by the behavior and materially different correctness, failure, and recovery concerns a reviewer must understand together, using agreed requirements and focused repository inspection rather than line counts or exhaustive implementation planning. Different error cases alone do not require separate Work Items.
 - Explains those review concerns in the existing breakdown approval, including the reason for combining independently useful behaviors. This remains Agent Worker judgment, not a Workflow Engine score or gate.
 - Revisits the existing approval loop before publication when artifact elaboration materially changes proposed boundaries or Dependencies. Ordinary elaboration does not require renewed approval; frozen Work Items cannot be split during implementation under this guidance.
-- Adds no separate skill, artifact, metric, or approval stage. This extension is limited to Proposal decomposition, separate from the Consumer Repository simplicity standard.
+- Adds no separate skill, artifact, metric, or approval stage. This guidance is limited to Proposal decomposition, separate from the Consumer Repository simplicity standard.
 
 ## Out of scope
 
