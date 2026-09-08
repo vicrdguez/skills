@@ -30,6 +30,12 @@
 - Needs Human retains its resume state and existing Submission. Explicit human relabeling chooses Rework or Awaiting Review; comments alone do not change eligibility.
 - Recovers partial backend transitions by observing current state and continuing forward rather than rolling back completed work.
 
+## Publication ownership
+
+The command integration binds the publication Backend and selects the Git remote together, using a GitHub `origin`, the sole GitHub remote, or an explicit `--remote` when needed. Ambiguous selection is refused before mutation. Publication Mechanics use that explicit remote for Git evidence and opaque Work Item and Coordination Item references for Backend operations. The GitHub integration retains native issue numbers, relationship syntax, and the supplied artifact-reference Markdown without migrating existing records.
+
+The Workflow Engine owns graph validation, blocker-first publication, Git preflight, Ready timing, and interrupted-publication recovery. The Backend observes durable records and materializes the requested effects. Shared Work Item, Submission, and relationship identities are opaque; the integration preserves numeric GitHub CLI and packet representations and supplies the existing numeric ordering fact separately. Implementation, review, and status retain their existing decisions; their remaining backend-independence migration is separate from this correction.
+
 ## Proposal decomposition
 
 - Prefers separate Work Items for behaviors that deliver safe, useful results independently. Independence is assessed after declared Dependencies are Merged, without requiring later Work Items; each delivery remains vertically complete.

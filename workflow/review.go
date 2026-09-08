@@ -10,16 +10,17 @@ import (
 	"strings"
 
 	skilldist "github.com/vicrdguez/skills"
+	"github.com/vicrdguez/skills/github"
 )
 
 type ReviewBackend interface {
 	ImplementationBackend
-	ReviewSubmission(context.Context, RepositoryID, int) (Submission, error)
-	PublishReview(context.Context, RepositoryID, ImplementationItem, []skilldist.ReviewComment, func() error) error
-	CompleteReview(context.Context, RepositoryID, ImplementationItem, State, func() error) error
+	ReviewSubmission(context.Context, github.RepositoryID, SubmissionID) (Submission, error)
+	PublishReview(context.Context, github.RepositoryID, ImplementationItem, []skilldist.ReviewComment, func() error) error
+	CompleteReview(context.Context, github.RepositoryID, ImplementationItem, State, func() error) error
 }
 
-func SubmitWatchdog(ctx context.Context, root, remote string, number int, reviewed, head, verdict, summaryPath, findingsPath, bodyPath string, backend ReviewBackend) (outcome ImplementationOutcome, err error) {
+func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, reviewed, head, verdict, summaryPath, findingsPath, bodyPath string, backend ReviewBackend) (outcome ImplementationOutcome, err error) {
 	defer func() {
 		if err != nil || outcome.Item == nil || outcome.Item.Claimed {
 			return
@@ -57,10 +58,10 @@ func SubmitWatchdog(ctx context.Context, root, remote string, number int, review
 	if head == "" {
 		head = reviewed
 	}
-	if number <= 0 || reviewed == "" || verdict != "rework" && verdict != "pass" && verdict != "needs-human" || summaryPath == "" || verdict == "pass" && bodyPath == "" {
+	if id == "" || reviewed == "" || verdict != "rework" && verdict != "pass" && verdict != "needs-human" || summaryPath == "" || verdict == "pass" && bodyPath == "" {
 		return ImplementationOutcome{}, fmt.Errorf("submit requires --item, --reviewed-head, --verdict rework|pass|needs-human and --summary; pass also requires --body")
 	}
-	remote, err = ResolveGitHubRemote(root, remote)
+	remote, err = github.ResolveGitHubRemote(root, remote)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
@@ -70,8 +71,8 @@ func SubmitWatchdog(ctx context.Context, root, remote string, number int, review
 	}
 	var item ImplementationItem
 	for _, candidate := range items {
-		if candidate.Number == number {
-			if item.Number != 0 {
+		if candidate.ID == id {
+			if item.ID != "" {
 				return ImplementationOutcome{}, Refuse("ambiguous Work Item")
 			}
 			item = candidate
@@ -96,7 +97,7 @@ func SubmitWatchdog(ctx context.Context, root, remote string, number int, review
 		if remote != head {
 			return Refuse("remote reviewed head changed; push the fixed head")
 		}
-		submission, err := backend.ReviewSubmission(ctx, repository, item.Submission.Number)
+		submission, err := backend.ReviewSubmission(ctx, repository, item.Submission.ID)
 		if err != nil {
 			return err
 		}
@@ -148,7 +149,7 @@ func SubmitWatchdog(ctx context.Context, root, remote string, number int, review
 			comments = append(comments, skilldist.ReviewComment{Body: string(body), Commit: head, Path: a.Path, Line: a.Line, Side: a.Side})
 		}
 	}
-	submission, err := backend.ReviewSubmission(ctx, repository, item.Submission.Number)
+	submission, err := backend.ReviewSubmission(ctx, repository, item.Submission.ID)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
@@ -199,7 +200,7 @@ func SubmitWatchdog(ctx context.Context, root, remote string, number int, review
 			if err != nil {
 				return ImplementationOutcome{}, err
 			}
-			compatible = compatible && closingBody(string(body), number) == item.Submission.Body
+			compatible = compatible && withClosingReference(string(body), item.ClosingReference) == item.Submission.Body
 		}
 		if !compatible {
 			return ImplementationOutcome{}, Refuse("completed or partial review differs from supplied verdict; restore its exact Result Documents")
@@ -216,7 +217,7 @@ func SubmitWatchdog(ctx context.Context, root, remote string, number int, review
 				return ImplementationOutcome{}, err
 			}
 			for _, c := range current {
-				if c.Number == item.Number && c.Problem == "" && !c.Claimed && c.State == target {
+				if c.ID == item.ID && c.Problem == "" && !c.Claimed && c.State == target {
 					return ImplementationOutcome{Status: string(c.State), Item: &c, Head: head}, guard()
 				}
 			}
@@ -230,7 +231,7 @@ func SubmitWatchdog(ctx context.Context, root, remote string, number int, review
 			return ImplementationOutcome{}, err
 		}
 		wanted := *item.Submission
-		wanted.Body = closingBody(string(body), number)
+		wanted.Body = withClosingReference(string(body), item.ClosingReference)
 		published, err := backend.PublishImplementation(ctx, repository, item, wanted)
 		if err != nil {
 			return ImplementationOutcome{}, err
@@ -253,7 +254,7 @@ func SubmitWatchdog(ctx context.Context, root, remote string, number int, review
 		return ImplementationOutcome{}, err
 	}
 	for _, current := range observed {
-		if current.Number == number && current.Problem == "" && current.State == target && !current.Claimed {
+		if current.ID == id && current.Problem == "" && current.State == target && !current.Claimed {
 			return ImplementationOutcome{Status: string(target), Item: &current, Head: head}, nil
 		}
 	}

@@ -13,57 +13,23 @@ import (
 
 type recordingBackend struct {
 	validated int
-	labels    int
+	prepared  int
+	ready     bool
 }
 
-type statefulBackend struct{ labels map[string]setup.Label }
-
-func (b *statefulBackend) Validate(context.Context, setup.RepositoryID) (string, error) {
-	return "main", nil
-}
-
-func (b *statefulBackend) EnsureLabels(_ context.Context, _ setup.RepositoryID, labels []setup.Label) error {
-	for _, label := range labels {
-		b.labels[label.Name] = label
-	}
-	return nil
-}
-
-func (b *recordingBackend) Validate(context.Context, setup.RepositoryID) (string, error) {
+func (b *recordingBackend) Validate(context.Context) (string, error) {
 	b.validated++
 	return "main", nil
 }
 
-func (b *recordingBackend) EnsureLabels(context.Context, setup.RepositoryID, []setup.Label) error {
-	b.labels++
+func (b *recordingBackend) Prepare(context.Context) error {
+	b.prepared++
+	b.ready = true
 	return nil
-}
-
-func TestSetupRefusesAmbiguousGitHubRemoteBeforeMutation(t *testing.T) {
-	root := newRepository(t)
-	runGit(t, root, "remote", "add", "upstream", "https://github.com/acme/widgets.git")
-	runGit(t, root, "remote", "add", "backup", "git@github.com:acme/widgets-backup.git")
-	agentsPath := filepath.Join(root, "AGENTS.md")
-	if err := os.WriteFile(agentsPath, []byte("keep me\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	backend := &recordingBackend{}
-
-	_, err := setup.Run(context.Background(), setup.Request{Location: root}, backend)
-	if err == nil || !strings.Contains(err.Error(), "multiple GitHub remotes") {
-		t.Fatalf("error = %v", err)
-	}
-	if backend.validated != 0 || backend.labels != 0 {
-		t.Fatalf("backend mutated: %#v", backend)
-	}
-	if got := readFile(t, agentsPath); got != "keep me\n" {
-		t.Fatalf("AGENTS.md = %q", got)
-	}
 }
 
 func TestSetupMaintainsOnlyOwnedAgentsBlock(t *testing.T) {
 	root := newRepository(t)
-	runGit(t, root, "remote", "add", "origin", "https://github.com/acme/widgets.git")
 	agentsPath := filepath.Join(root, "AGENTS.md")
 	original := "user before\n<!-- dev-pipeline:start -->\nold workflow\n<!-- dev-pipeline:end -->\nuser after\n"
 	if err := os.WriteFile(agentsPath, []byte(original), 0o644); err != nil {
@@ -89,7 +55,6 @@ func TestSetupRefusesMalformedAgentsOwnershipMarkers(t *testing.T) {
 	for name, original := range cases {
 		t.Run(name, func(t *testing.T) {
 			root := newRepository(t)
-			runGit(t, root, "remote", "add", "origin", "https://github.com/acme/widgets.git")
 			path := filepath.Join(root, "AGENTS.md")
 			if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
 				t.Fatal(err)
@@ -100,7 +65,7 @@ func TestSetupRefusesMalformedAgentsOwnershipMarkers(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "malformed workflow markers") {
 				t.Fatalf("error = %v", err)
 			}
-			if backend.validated != 0 || backend.labels != 0 {
+			if backend.validated != 0 || backend.prepared != 0 {
 				t.Fatalf("backend mutated: %#v", backend)
 			}
 			if got := readFile(t, path); got != original {
@@ -114,7 +79,6 @@ func TestSetupRefusesOwnedFileSymlinksBeforeMutation(t *testing.T) {
 	for _, name := range []string{"AGENTS.md", ".gitignore"} {
 		t.Run(name, func(t *testing.T) {
 			root := newRepository(t)
-			runGit(t, root, "remote", "add", "origin", "https://github.com/acme/widgets.git")
 			outside := filepath.Join(t.TempDir(), "outside")
 			if err := os.WriteFile(outside, []byte("keep me\n"), 0o644); err != nil {
 				t.Fatal(err)
@@ -128,7 +92,7 @@ func TestSetupRefusesOwnedFileSymlinksBeforeMutation(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "must not be a symlink") {
 				t.Fatalf("error = %v", err)
 			}
-			if backend.validated != 0 || backend.labels != 0 {
+			if backend.validated != 0 || backend.prepared != 0 {
 				t.Fatalf("backend mutated: %#v", backend)
 			}
 			if got := readFile(t, outside); got != "keep me\n" {
@@ -152,7 +116,6 @@ func TestSetupOffersSafeClaudeSymlinkMigration(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			root := newRepository(t)
-			runGit(t, root, "remote", "add", "origin", "https://github.com/acme/widgets.git")
 			claudePath := filepath.Join(root, "CLAUDE.md")
 			if test.existing != nil {
 				if err := os.WriteFile(claudePath, []byte(*test.existing), 0o644); err != nil {
@@ -187,7 +150,6 @@ func TestSetupOffersSafeClaudeSymlinkMigration(t *testing.T) {
 
 func TestSetupRetiresLegacySetupArtifacts(t *testing.T) {
 	root := newRepository(t)
-	runGit(t, root, "remote", "add", "origin", "https://github.com/acme/widgets.git")
 	gitignore := filepath.Join(root, ".gitignore")
 	if err := os.WriteFile(gitignore, []byte("dist/\n.worktrees/\n*.log\n.worktrees/\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -212,37 +174,44 @@ func TestSetupRetiresLegacySetupArtifacts(t *testing.T) {
 	}
 }
 
-func TestSetupRepeatsWithoutDrift(t *testing.T) {
+func TestSetupBoundPreparationRepeatsWithoutDrift(t *testing.T) {
 	root := newRepository(t)
-	runGit(t, root, "remote", "add", "origin", "https://github.com/acme/widgets.git")
-	backend := &statefulBackend{labels: map[string]setup.Label{
-		"ready":  {Name: "ready", Color: "ffffff", Description: "stale"},
-		"custom": {Name: "custom", Color: "123456", Description: "unrelated"},
-	}}
-	confirm := func(string) (bool, error) { return true, nil }
-	request := setup.Request{Location: root, Confirm: confirm}
-
-	if _, err := setup.Run(context.Background(), request, backend); err != nil {
-		t.Fatal(err)
-	}
-	agents := readFile(t, filepath.Join(root, "AGENTS.md"))
-	gitignore := readFile(t, filepath.Join(root, ".gitignore"))
-	if _, err := setup.Run(context.Background(), request, backend); err != nil {
-		t.Fatal(err)
-	}
-	if got := readFile(t, filepath.Join(root, "AGENTS.md")); got != agents {
-		t.Fatalf("AGENTS.md drifted: %q", got)
-	}
-	if got := readFile(t, filepath.Join(root, ".gitignore")); got != gitignore {
-		t.Fatalf(".gitignore drifted: %q", got)
-	}
-	for _, want := range setup.WorkflowLabels {
-		if got := backend.labels[want.Name]; got != want {
-			t.Fatalf("label %q = %#v", want.Name, got)
+	for name, contents := range map[string]string{
+		"AGENTS.md":  "Keep repository guidance.\n<!-- dev-pipeline:start -->\nold workflow\n<!-- dev-pipeline:end -->\nKeep local conventions.\n",
+		"CLAUDE.md":  "Keep substantive harness guidance.\n",
+		".gitignore": "dist/\n.worktrees/\n*.log\n.worktrees/\n",
+		"README.md":  "Unrelated project documentation.\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
 		}
 	}
-	if got := backend.labels["custom"]; got.Description != "unrelated" {
-		t.Fatalf("unrelated label changed: %#v", got)
+	backend := &recordingBackend{}
+	request := setup.Request{Location: root, Confirm: func(string) (bool, error) {
+		t.Fatal("must not offer to replace substantive CLAUDE.md")
+		return false, nil
+	}}
+	for run := 1; run <= 2; run++ {
+		outcome, err := setup.Run(context.Background(), request, backend)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := (setup.Outcome{Root: root, TargetBranch: "main"}); outcome != want {
+			t.Fatalf("outcome = %#v, want %#v", outcome, want)
+		}
+		if !backend.ready || backend.validated != run || backend.prepared != run {
+			t.Fatalf("backend not prepared on run %d: %#v", run, backend)
+		}
+		for name, want := range map[string]string{
+			"AGENTS.md":  "Keep repository guidance.\n" + setup.AgentsBlock + "Keep local conventions.\n",
+			"CLAUDE.md":  "Keep substantive harness guidance.\n",
+			".gitignore": "dist/\n*.log\n.worktrees/\n",
+			"README.md":  "Unrelated project documentation.\n",
+		} {
+			if got := readFile(t, filepath.Join(root, name)); got != want {
+				t.Fatalf("%s on run %d = %q, want %q", name, run, got, want)
+			}
+		}
 	}
 }
 

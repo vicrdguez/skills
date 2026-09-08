@@ -6,13 +6,14 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/setup"
 )
 
 func TestInstallPiQueueAdaptersWithoutDuplicatingSkills(t *testing.T) {
 	home := t.TempDir()
 	var output bytes.Buffer
-	app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, home)
+	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, home)
 	for range 2 {
 		if err := app.Run([]string{"skl", "install"}); err != nil {
 			t.Fatal(err)
