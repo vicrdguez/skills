@@ -150,6 +150,9 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 		Name:        "implement",
 		Subcommands: implementationCommands(newBackend, stdout),
 	}, {
+		Name:        "watchdog",
+		Subcommands: watchdogCommands(newBackend, stdout),
+	}, {
 		Name: "setup",
 		Flags: []cli.Flag{
 			&cli.PathFlag{Name: "repo"},
