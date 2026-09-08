@@ -16,12 +16,17 @@ Run it from any directory inside the Consumer Repository, or pass `--repo <path>
 - Removes the superseded `docs/github.md` protocol document.
 - Produces the same owned guidance and backend preparation when repeated with the same choices.
 
-## Planned extension after issue #3
+## Ownership
+
+The command integration resolves the Consumer Repository and selected Git remote before entering Setup, and supplies a repository-bound Backend. Setup owns local-file safety and calls semantic validation and preparation; the GitHub integration owns repository coordinates, authentication, target-branch discovery, and the fixed Workflow Projection labels. No provider discovery or label vocabulary is required by Setup Mechanics.
+
+## Simplicity standard
 
 - Installs and maintains a repository-owned simplicity standard in the managed `AGENTS.md` block as part of normal Setup, without an opt-in. It applies to coding and review inside and outside the Workflow.
 - The standard preserves accepted behavior and required verification, favors adequate existing mechanisms and justified structure, and directs simplification toward maintenance burden rather than line counts. Test guidance preserves distinct regression protection while simplifying repeated setup and incidental implementation coupling.
-- The installed standard is the agent-facing source of truth; Instruction Packets do not repeat it, and it requires no separate Skill Definition. PR size and reviewability remain outside this extension.
-- Existing Skill Definitions and resources remain unchanged except for removal of Audit's optional `ponytail-review` integration. Overlapping guidance is retained; consolidation is outside this extension.
+- Setup refreshes the standard inside the existing workflow markers while preserving Workflow entrypoint instructions and all surrounding user-authored guidance byte-for-byte. Repeating Setup with the same choices leaves `AGENTS.md` unchanged and the section present once.
+- The installed standard is the agent-facing source of truth; Instruction Packets do not repeat it, and it requires no separate Skill Definition. PR size and reviewability remain out of scope.
+- Existing Skill Definitions and resources remain unchanged except for removal of Audit's optional `ponytail-review` integration. Overlapping guidance is retained; consolidation is out of scope.
 
 ## Out of scope
 

@@ -50,13 +50,7 @@ Look for the originating artifacts, in this order:
 
 Anything in the repo that documents how code should be written, such as `CODING_STANDARDS.md` or `CONTRIBUTING.md`.
 
-On top of whatever the repo documents, the Standards axis always carries the **smell baseline** in [smells.md](./reference/smells.md) — a fixed set of Fowler code smells (_Refactoring_, ch.3) that applies even when a repo documents nothing, plus the two rules that bind it.
-
-#### Optional Ponytail review
-
-Check the available skills for `ponytail-review`. When present, include it only in the Standards axis as an additional over-engineering lens. For pi, pass `skill: "ponytail-review"` on the Standards task; do not pass it to the Artifacts task. If the skill is absent, omit the override and continue normally.
-
-Ponytail findings are judgement calls, not documented-standard violations. Keep them separate from the ordinary Standards findings, and do not let them replace the documented standards or smell baseline.
+On top of whatever the repo documents, the Standards axis always carries the **smell baseline** from `skl skill --resource reference/smells.md audit` — a fixed set of Fowler code smells (_Refactoring_, ch.3) that applies even when a repo documents nothing, plus the two rules that bind it.
 
 ### 4. Run the deterministic checks once
 
@@ -70,17 +64,16 @@ These two produce facts, not judgements — a diff read or an exit code. Run the
 Dispatch both axes as parallel sub-agents, each in a fresh context carrying its brief:
 
 - **Claude Code**: a single message with two `Agent` tool calls, using the `general-purpose` subagent for both.
-- **pi** ([pi-subagents](https://github.com/nicobailon/pi-subagents)): a single asynchronous `subagent` call with a `workflowScript` using `runs.all` to launch both reviewers in fresh contexts. Set `timeoutMs: 3600000` on the workflow call and both reviewer items. When `ponytail-review` is available, pass it to the Standards task only.
+- **pi** ([pi-subagents](https://github.com/nicobailon/pi-subagents)): a single asynchronous `subagent` call with a `workflowScript` using `runs.all` to launch both reviewers in fresh contexts. Set `timeoutMs: 3600000` on the workflow call and both reviewer items.
 - **No sub-agent mechanism available**: run the two axes sequentially, Standards first.
 
 **Standards sub-agent prompt** — include:
 
 - The full diff command and commit list.
-- The list of standards-source files you found in step 3, plus the absolute path to [smells.md](./reference/smells.md). Instruct the sub-agent to read them.
+- The list of standards-source files you found in step 3, plus `skl skill --resource reference/smells.md audit`. Instruct the sub-agent to read those files and the command's output.
 - The gate results from step 4.
 - The precedence between sources, so the sub-agent knows what outranks what: frozen artifacts, then required tooling and CI, then the project's `AGENTS.md`, standards docs and quality skills, then language and framework correctness, security and accessibility rules, then the generic smell baseline. An explicit project or language `MUST`, `ALWAYS`, `NEVER` or equivalent can be a hard violation; a generic smell stays a judgement call unless a local rule or a concrete behavior or maintenance impact elevates it.
-- When `ponytail-review` was provided, instruct the sub-agent to load and apply it as an additional lens. Put its output under `### Ponytail review`, preserve its concise finding format and final net-lines estimate, and treat every Ponytail finding as a judgement call. It must still complete the documented-standards and smell-baseline review.
-- The brief: "Report — per file/hunk where relevant — (a) every place the diff violates a documented standard: cite the standard (file + the rule); and (b) any baseline smell you spot: name it and quote the hunk. Tag each finding as `HARD` or `JUDGEMENT` as its first token; documented-standard breaches can be `HARD`, but baseline smells (and ponytail findings if available) are always `JUDGEMENT`, and a documented repo standard overrides the baseline. Skip anything tooling enforces. Report each finding as its own bullet, anchored to `file:line`. Under 500 words, or 750 when `ponytail-review` is included. Compress findings rather than omit any; Ponytail findings must retain their one-line format."
+- The brief: "Report — per file/hunk where relevant — (a) every place the diff violates a documented standard: cite the standard (file + the rule); and (b) any baseline smell you spot: name it and quote the hunk. Tag each finding as `HARD` or `JUDGEMENT` as its first token; documented-standard breaches can be `HARD`, but baseline smells are always `JUDGEMENT`, and a documented repo standard overrides the baseline. Skip anything tooling enforces. Report each finding as its own bullet, anchored to `file:line`. Under 500 words. Compress findings rather than omit any."
 
 **Artifacts sub-agent prompt** — include:
 
@@ -95,9 +88,9 @@ If the Artifacts is missing, skip the Artifacts sub-agent and note this in the f
 
 ### 6. Aggregate
 
-Present the two reports under `## Standards` and `## Artifacts` headings, verbatim or lightly cleaned. Keep any `### Ponytail review` subsection inside `## Standards`. Carry each finding's `HARD`/`JUDGEMENT` tag through verbatim: you did not see the evidence, the axis that found it did. Do **not** merge or rerank findings — the two axes are deliberately separate (see _Why two axes_).
+Present the two reports under `## Standards` and `## Artifacts` headings, verbatim or lightly cleaned. Carry each finding's `HARD`/`JUDGEMENT` tag through verbatim: you did not see the evidence, the axis that found it did. Do **not** merge or rerank findings — the two axes are deliberately separate (see _Why two axes_).
 
-End with a one-line summary: the `HARD` and `JUDGEMENT` counts per axis, counting Ponytail findings in Standards, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes — that's the reranking the separation exists to prevent. State both step-4 results verbatim alongside it; they are the only part of the report that is not a judgement.
+End with a one-line summary: the `HARD` and `JUDGEMENT` counts per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes — that's the reranking the separation exists to prevent. State both step-4 results verbatim alongside it; they are the only part of the report that is not a judgement.
 
 ## Why two axes
 

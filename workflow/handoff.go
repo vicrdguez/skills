@@ -9,24 +9,26 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/vicrdguez/skills/github"
 )
 
-func SubmitImplementation(ctx context.Context, root, remote string, number int, bodyPath string, backend ImplementationBackend) (ImplementationOutcome, error) {
-	if number <= 0 || bodyPath == "" {
+func SubmitImplementation(ctx context.Context, root, remote string, id WorkItemID, bodyPath string, backend ImplementationBackend) (ImplementationOutcome, error) {
+	if id == "" || bodyPath == "" {
 		return ImplementationOutcome{}, errors.New("submit requires --item and --body")
 	}
-	return handoffImplementation(ctx, root, remote, number, AwaitingReview, "", bodyPath, backend)
+	return handoffImplementation(ctx, root, remote, id, AwaitingReview, "", bodyPath, backend)
 }
 
-func PauseImplementation(ctx context.Context, root, remote string, number int, reason, decisionPath, bodyPath string, backend ImplementationBackend) (ImplementationOutcome, error) {
-	if number <= 0 || decisionPath == "" || !slices.Contains([]string{"contradictory_artifacts", "mandatory_rule", "frozen_interface", "disputed_blocker", "bounce_cap"}, reason) {
+func PauseImplementation(ctx context.Context, root, remote string, id WorkItemID, reason, decisionPath, bodyPath string, backend ImplementationBackend) (ImplementationOutcome, error) {
+	if id == "" || decisionPath == "" || !slices.Contains([]string{"contradictory_artifacts", "mandatory_rule", "frozen_interface", "disputed_blocker", "bounce_cap"}, reason) {
 		return ImplementationOutcome{}, errors.New("Needs Human requires --item, --decision and a permitted --reason")
 	}
-	return handoffImplementation(ctx, root, remote, number, NeedsHuman, decisionPath, bodyPath, backend)
+	return handoffImplementation(ctx, root, remote, id, NeedsHuman, decisionPath, bodyPath, backend)
 }
 
-func handoffImplementation(ctx context.Context, root, remote string, number int, target State, decisionPath, bodyPath string, backend ImplementationBackend) (outcome ImplementationOutcome, err error) {
-	remote, err = ResolveGitHubRemote(root, remote)
+func handoffImplementation(ctx context.Context, root, remote string, id WorkItemID, target State, decisionPath, bodyPath string, backend ImplementationBackend) (outcome ImplementationOutcome, err error) {
+	remote, err = github.ResolveGitHubRemote(root, remote)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
@@ -36,14 +38,14 @@ func handoffImplementation(ctx context.Context, root, remote string, number int,
 	}
 	var item ImplementationItem
 	for _, candidate := range items {
-		if candidate.Number == number {
-			if item.Number != 0 {
+		if candidate.ID == id {
+			if item.ID != "" {
 				return ImplementationOutcome{}, Refuse("ambiguous Work Item identity; repair duplicate attachments")
 			}
 			item = candidate
 		}
 	}
-	if item.Number == 0 || item.Problem != "" {
+	if item.ID == "" || item.Problem != "" {
 		return ImplementationOutcome{}, Refuse("Workflow State contradicts handoff: " + item.Problem + "; repair projections before retrying")
 	}
 	resultPath := bodyPath
@@ -168,9 +170,9 @@ func handoffImplementation(ctx context.Context, root, remote string, number int,
 				return ImplementationOutcome{}, err
 			}
 		}
-		submission := Submission{Head: head, Base: base, Body: string(body) + fmt.Sprintf("\n\nCloses #%d\n", number), Draft: target == NeedsHuman}
+		submission := Submission{Head: head, Base: base, Body: withClosingReference(string(body), item.ClosingReference), Draft: target == NeedsHuman}
 		if item.Submission != nil {
-			submission.Number = item.Submission.Number
+			submission.ID = item.Submission.ID
 		}
 		submission, err = backend.PublishImplementation(ctx, repository, item, submission)
 		if err != nil {
@@ -201,7 +203,7 @@ func handoffImplementation(ctx context.Context, root, remote string, number int,
 		return ImplementationOutcome{}, err
 	}
 	for _, current := range observed {
-		if current.Number != number {
+		if current.ID != id {
 			continue
 		}
 		if current.Problem == "" && current.State == target && !current.Claimed && (bodyPath == "" || current.Submission != nil && current.Submission.Head == head && current.Submission.Draft == (target == NeedsHuman)) {
@@ -223,6 +225,17 @@ func handoffImplementation(ctx context.Context, root, remote string, number int,
 		return ImplementationOutcome{}, writeErr
 	}
 	return ImplementationOutcome{}, Refuse("handoff projection is incomplete; retry the same semantic command with retained Result Documents")
+}
+
+func withClosingReference(body, reference string) string {
+	if reference == "" {
+		return body
+	}
+	footer := "\n\n" + reference + "\n"
+	if !strings.HasSuffix(body, footer) {
+		body += footer
+	}
+	return body
 }
 
 func removeResultDirectory(bodyPath string) error {

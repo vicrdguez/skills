@@ -10,9 +10,13 @@ import (
 	"strings"
 
 	skilldist "github.com/vicrdguez/skills"
+	"github.com/vicrdguez/skills/github"
 )
 
 type State string
+
+// CurrentWorktree selects an invocation's worktree; it is never a backend identity.
+const CurrentWorktree WorkItemID = "<current-worktree>"
 
 const (
 	Ready          State = "ready_for_implementation"
@@ -25,24 +29,33 @@ const (
 )
 
 type ImplementationItem struct {
-	Problem        string
-	ResumeState    State
-	Submission     *Submission
-	Branch         string
-	TargetSnapshot string
-	TargetBranch   string
-	Number         int
-	State          State
-	CreatedAt      string
-	Claimed        bool
-	Blockers       []int
-	Transition     *ImplementationTransition
+	Synchronization  bool
+	Problem          string
+	ResumeState      State
+	Submission       *Submission
+	Branch           string
+	TargetSnapshot   string
+	TargetBranch     string
+	ID               WorkItemID
+	Order            int
+	ClosingReference string
+	State            State
+	CreatedAt        string
+	Claimed          bool
+	Blockers         []WorkItemID
+	Transition       *ImplementationTransition
 }
 
 type Submission struct {
+	PendingReview        State
+	Merged               bool
+	Mergeability         string
+	Bounces              int
+	CreatedAt            string
+	ReviewedHead         string
 	State                State
 	Claimed              bool
-	Number               int
+	ID                   SubmissionID
 	Head                 string
 	Base                 string
 	Body                 string
@@ -52,15 +65,15 @@ type Submission struct {
 }
 
 type ImplementationBackend interface {
-	ImplementationTarget(context.Context, RepositoryID) (string, error)
-	ImplementationItems(context.Context, RepositoryID) ([]ImplementationItem, error)
-	ClaimImplementation(context.Context, RepositoryID, ImplementationItem) error
-	ImplementationHead(context.Context, RepositoryID, string) (string, error)
-	PublishImplementation(context.Context, RepositoryID, ImplementationItem, Submission) (Submission, error)
-	RecordImplementationTransition(context.Context, RepositoryID, ImplementationItem, ImplementationTransition) error
-	RetainImplementationClaim(context.Context, RepositoryID, ImplementationItem) error
-	AwaitImplementationReview(context.Context, RepositoryID, ImplementationItem, func() error) error
-	PauseImplementation(context.Context, RepositoryID, ImplementationItem, string, func() error) error
+	ImplementationTarget(context.Context, github.RepositoryID) (string, error)
+	ImplementationItems(context.Context, github.RepositoryID) ([]ImplementationItem, error)
+	ClaimImplementation(context.Context, github.RepositoryID, ImplementationItem) error
+	ImplementationHead(context.Context, github.RepositoryID, string) (string, error)
+	PublishImplementation(context.Context, github.RepositoryID, ImplementationItem, Submission) (Submission, error)
+	RecordImplementationTransition(context.Context, github.RepositoryID, ImplementationItem, ImplementationTransition) error
+	RetainImplementationClaim(context.Context, github.RepositoryID, ImplementationItem) error
+	AwaitImplementationReview(context.Context, github.RepositoryID, ImplementationItem, func() error) error
+	PauseImplementation(context.Context, github.RepositoryID, ImplementationItem, string, func() error) error
 }
 
 type ImplementationTransition struct {
@@ -79,29 +92,35 @@ func (e *InvariantError) Error() string { return e.Reason }
 func Refuse(reason string) error        { return &InvariantError{Reason: reason} }
 
 type ImplementationOutcome struct {
-	Ledger *LedgerHistory      `json:"ledger,omitempty"`
-	Head   string              `json:"head,omitempty"`
-	Packet *skilldist.Packet   `json:"packet,omitempty"`
-	Status string              `json:"status"`
-	Reason string              `json:"reason,omitempty"`
-	Item   *ImplementationItem `json:"item,omitempty"`
+	Ledger *LedgerHistory             `json:"ledger,omitempty"`
+	Head   string                     `json:"head,omitempty"`
+	Facts  *skilldist.InvocationFacts `json:"-"`
+	Status string                     `json:"status"`
+	Reason string                     `json:"reason,omitempty"`
+	Item   *ImplementationItem        `json:"item,omitempty"`
 }
 
-func loadImplementation(ctx context.Context, root, remote string, backend ImplementationBackend) (RepositoryID, []ImplementationItem, error) {
+func loadImplementation(ctx context.Context, root, remote string, backend ImplementationBackend) (github.RepositoryID, []ImplementationItem, error) {
 	remote, err := git(root, "remote", "get-url", remote)
 	if err != nil {
-		return RepositoryID{}, nil, err
+		return github.RepositoryID{}, nil, err
 	}
-	repository, err := ParseGitHubRemote(remote)
+	repository, err := github.ParseGitHubRemote(remote)
 	if err != nil {
-		return RepositoryID{}, nil, err
+		return github.RepositoryID{}, nil, err
 	}
 	items, err := backend.ImplementationItems(ctx, repository)
+	for i := range items {
+		if items[i].Submission != nil && items[i].Submission.Merged {
+			items[i].State = Merged
+			items[i].Claimed = false
+		}
+	}
 	return repository, items, err
 }
 
-func InspectImplementation(ctx context.Context, root, remote string, number int, backend ImplementationBackend) (ImplementationOutcome, error) {
-	remote, err := ResolveGitHubRemote(root, remote)
+func InspectImplementation(ctx context.Context, root, remote string, id WorkItemID, backend ImplementationBackend) (ImplementationOutcome, error) {
+	remote, err := github.ResolveGitHubRemote(root, remote)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
@@ -110,7 +129,7 @@ func InspectImplementation(ctx context.Context, root, remote string, number int,
 		return ImplementationOutcome{}, err
 	}
 	for _, item := range items {
-		if item.Number != number {
+		if item.ID != id {
 			continue
 		}
 		head, err := git(root, "rev-parse", "refs/heads/"+item.Branch)
@@ -123,8 +142,8 @@ func InspectImplementation(ctx context.Context, root, remote string, number int,
 	return ImplementationOutcome{Status: "fix_required", Reason: "Work Item unavailable; supply its explicit stable --item identity"}, nil
 }
 
-func StartImplementation(ctx context.Context, root, remote string, number int, snapshot, reviewedHead string, backend ImplementationBackend) (ImplementationOutcome, error) {
-	remote, err := ResolveGitHubRemote(root, remote)
+func StartImplementation(ctx context.Context, root, remote string, id WorkItemID, snapshot, reviewedHead string, backend ImplementationBackend) (ImplementationOutcome, error) {
+	remote, err := github.ResolveGitHubRemote(root, remote)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
@@ -132,8 +151,8 @@ func StartImplementation(ctx context.Context, root, remote string, number int, s
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
-	if number != 0 {
-		if number == -1 {
+	if id != "" {
+		if id == CurrentWorktree {
 			main, err := primaryWorktree(root)
 			if err != nil {
 				return ImplementationOutcome{}, err
@@ -144,15 +163,15 @@ func StartImplementation(ctx context.Context, root, remote string, number int, s
 			}
 			for _, item := range items {
 				if item.Claimed && filepath.Clean(location) == filepath.Join(main, ".worktrees", item.Branch) {
-					if number != -1 {
+					if id != CurrentWorktree {
 						return ImplementationOutcome{Status: "fix_required", Reason: "worktree identity is ambiguous; resume with --item after repairing attachments"}, nil
 					}
-					number = item.Number
+					id = item.ID
 				}
 			}
 		}
 		for _, item := range items {
-			if item.Number == number && item.Claimed && (item.State == Ready || item.State == Rework) {
+			if item.ID == id && item.Claimed && (item.State == Ready || item.State == Rework) {
 				prepared, outcome, err := prepareImplementationStart(ctx, root, remote, repository, item, snapshot, reviewedHead, backend)
 				if err != nil || outcome.Status != "" {
 					return outcome, err
@@ -166,9 +185,9 @@ func StartImplementation(ctx context.Context, root, remote string, number int, s
 		}
 		return ImplementationOutcome{Status: "fix_required", Reason: "explicit Work Item is not an unambiguous implementation Claim; repair its projections before resuming"}, nil
 	}
-	merged := make(map[int]bool)
+	merged := make(map[WorkItemID]bool)
 	for _, item := range items {
-		merged[item.Number] = item.State == Merged
+		merged[item.ID] = item.State == Merged
 	}
 	slices.SortFunc(items, func(a, b ImplementationItem) int {
 		if a.State != b.State {
@@ -182,10 +201,10 @@ func StartImplementation(ctx context.Context, root, remote string, number int, s
 		if age := cmp.Compare(a.CreatedAt, b.CreatedAt); age != 0 {
 			return age
 		}
-		return cmp.Compare(a.Number, b.Number)
+		return cmp.Compare(a.Order, b.Order)
 	})
 	for _, item := range items {
-		if item.Claimed || item.Transition != nil && !item.Transition.Completed || item.State != Ready && item.State != Rework {
+		if item.Claimed || item.Submission != nil && item.Submission.PendingReview != "" || item.Transition != nil && !item.Transition.Completed || item.State != Ready && item.State != Rework {
 			continue
 		}
 		blocked := false
@@ -208,7 +227,7 @@ func StartImplementation(ctx context.Context, root, remote string, number int, s
 			return ImplementationOutcome{}, err
 		}
 		for _, current := range observed {
-			if current.Number == item.Number && current.Claimed && current.State == item.State && current.Problem == "" && current.Branch == item.Branch && current.TargetSnapshot == item.TargetSnapshot {
+			if current.ID == item.ID && current.Claimed && current.State == item.State && current.Problem == "" && current.Branch == item.Branch && current.TargetSnapshot == item.TargetSnapshot {
 				return implementationPacket(root, remote, current)
 			}
 		}
@@ -220,7 +239,7 @@ func StartImplementation(ctx context.Context, root, remote string, number int, s
 	return ImplementationOutcome{Status: "no_work"}, nil
 }
 
-func prepareImplementationStart(ctx context.Context, root, remote string, repository RepositoryID, item ImplementationItem, snapshot, reviewedHead string, backend ImplementationBackend) (ImplementationItem, ImplementationOutcome, error) {
+func prepareImplementationStart(ctx context.Context, root, remote string, repository github.RepositoryID, item ImplementationItem, snapshot, reviewedHead string, backend ImplementationBackend) (ImplementationItem, ImplementationOutcome, error) {
 	refuse := func(reason string) (ImplementationItem, ImplementationOutcome, error) {
 		return item, ImplementationOutcome{Status: "fix_required", Reason: reason, Item: &item}, nil
 	}
@@ -307,7 +326,7 @@ func prepareImplementationStart(ctx context.Context, root, remote string, reposi
 }
 
 func implementationPacket(root, remote string, item ImplementationItem) (ImplementationOutcome, error) {
-	if item.State == Rework && (item.Submission == nil || item.Submission.PreviousReviewedHead == "") {
+	if item.State == Rework && !item.Synchronization && (item.Submission == nil || item.Submission.PreviousReviewedHead == "") {
 		return ImplementationOutcome{Status: "fix_required", Item: &item, Reason: "previous reviewed head needs agent extraction from the supplied watchdog summary; resume --reviewed-head <full-sha> without rewriting history"}, nil
 	}
 	main, err := primaryWorktree(root)
@@ -332,32 +351,24 @@ func implementationPacket(root, remote string, item ImplementationItem) (Impleme
 			return ImplementationOutcome{Status: "fix_required", Reason: fmt.Sprint(history.Violations) + "; repair ledger history and resume"}, nil
 		}
 	}
-	facts := skilldist.ImplementationFacts{WorkItem: item.Number, Branch: item.Branch, Worktree: filepath.Join(main, ".worktrees", item.Branch), TargetSnapshot: target, ArtifactBaseline: history.Baseline, ArtifactCompletion: history.Completion,
-		ResumeCommand: fmt.Sprintf("skl implement resume --item %d --target-snapshot %s", item.Number, target)}
+	facts := skilldist.ImplementationFacts{Branch: item.Branch, Worktree: filepath.Join(main, ".worktrees", item.Branch), TargetSnapshot: target, ArtifactBaseline: history.Baseline, ArtifactCompletion: history.Completion}
 	if item.Submission != nil {
-		facts.Submission, facts.PreviousReviewedHead, facts.Comments = item.Submission.Number, item.Submission.PreviousReviewedHead, item.Submission.Comments
+		facts.PreviousReviewedHead, facts.Comments = item.Submission.PreviousReviewedHead, item.Submission.Comments
 	}
-	if item.State == Rework {
+	if item.State == Rework && !item.Synchronization {
 		facts.TargetSnapshot = ""
-		facts.ResumeCommand = fmt.Sprintf("skl implement resume --item %d", item.Number)
+	}
+	if item.Synchronization {
+		facts.PreviousReviewedHead = ""
 	}
 	facts.ResultDirectory, err = os.MkdirTemp("", "skl-implement-")
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
-	quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'" }
-	facts.ResumeCommand += " --remote " + quote(remote)
 	facts.Remote = remote
-	facts.InspectCommand = fmt.Sprintf("skl implement inspect --repo %s --remote %s --item %d", quote(facts.Worktree), quote(remote), item.Number)
-	facts.SubmitCommand = fmt.Sprintf("skl implement submit --repo %s --remote %s --item %d --body %s", quote(facts.Worktree), quote(remote), item.Number, quote(filepath.Join(facts.ResultDirectory, "submission.md")))
-	packet, err := skilldist.BuildPacket("implement", skilldist.InvocationFacts{Implementation: &facts})
-	if err != nil {
-		os.RemoveAll(facts.ResultDirectory)
-		return ImplementationOutcome{}, err
-	}
 	if err := os.WriteFile(filepath.Join(facts.ResultDirectory, ".skl-result"), []byte("skl.implement/v1\n"), 0600); err != nil {
 		os.RemoveAll(facts.ResultDirectory)
 		return ImplementationOutcome{}, err
 	}
-	return ImplementationOutcome{Status: "work_available", Item: &item, Packet: &packet}, err
+	return ImplementationOutcome{Status: "work_available", Item: &item, Facts: &skilldist.InvocationFacts{Implementation: &facts}}, nil
 }

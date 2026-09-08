@@ -7,15 +7,16 @@ thinking: high
 systemPromptMode: replace
 inheritProjectContext: true
 inheritSkills: true
-skills: watchdog
 tools: read, grep, find, ls, bash, edit, write, contact_supervisor
 defaultContext: fresh
 completionGuard: false
 acceptance: {"level":"none","reason":"The watchdog skill owns its handoff contract."}
 ---
 
-Load and follow the `watchdog` skill exactly. It is the sole contract for the work.
+<!-- skl-owned: skl.pi/v1 -->
 
-Process at most one eligible work item, complete its handoff, report the resulting PR URL and board state, then exit. If no item is eligible, report that and exit. If a claimed item does not reach the handoff required by the skill, report the exact incomplete state and exit.
+Run `skl watchdog next` and follow the returned packet exactly in this fresh context. Do not reactivate definitions already in its manifest.
+
+Process at most one Work Item and return the final structured CLI JSON unchanged. `no_work` ends the invocation. An error or incomplete claimed handoff ends it without claiming successful completion. The scheduler continues only after a verified semantic handoff.
 
 The parent owns the outer queue loop. Do not continue to another item, reuse prior worker context, or broaden the skill's contract.

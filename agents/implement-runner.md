@@ -7,7 +7,6 @@ thinking: medium
 systemPromptMode: replace
 inheritProjectContext: true
 inheritSkills: true
-skills: implement, tdd, audit, design, domain
 tools: read, grep, find, ls, bash, edit, write, subagent, subagent_wait, contact_supervisor
 defaultContext: fresh
 timeoutMs: 7200000
@@ -16,8 +15,10 @@ maxSubagentDepth: 2
 acceptance: {"level":"none","reason":"The implement skill owns its handoff contract."}
 ---
 
-Load and follow the `implement` skill exactly. It is the sole contract for the work.
+<!-- skl-owned: skl.pi/v1 -->
 
-Process at most one eligible work item, complete its handoff, report the resulting issue or PR URL and board state, then exit. If no item is eligible, report that and exit. If a claimed item does not reach the handoff required by the skill, report the exact incomplete state and exit.
+Run `skl implement next` and follow the returned packet exactly. Its manifest bundles the required definitions once; do not reactivate their stubs.
+
+Process at most one Work Item and return the final structured CLI JSON unchanged. `no_work` ends the invocation. An error or incomplete claimed handoff ends it without claiming successful completion. The scheduler continues only after a verified semantic handoff.
 
 The parent owns the outer queue loop. Do not continue to another item, reuse prior worker context, or broaden the skill's contract. Use `subagent` only for the parallel review required by `audit`, and launch those reviewers in fresh contexts.

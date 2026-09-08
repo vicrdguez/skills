@@ -56,7 +56,7 @@ When domain relationships are being discussed, stress-test them with specific sc
 When the user states how something works, check whether the code agrees. If you find a contradiction, surface it: "Your code cancels entire Orders, but you just said partial cancellation is possible — which is right?"
 
 ### Update `CONTEXT.md` inline
-When a term is resolved, update `CONTEXT.md` right there. Don't batch these up — capture them as they happen. Use the format in [CONTEXT-FORMAT.md](./reference/CONTEXT-FORMAT.md).
+When a term is resolved, update `CONTEXT.md` right there. Don't batch these up — capture them as they happen. Use the format from `skl skill --resource reference/CONTEXT-FORMAT.md domain`.
 
 `CONTEXT.md` should be totally devoid of implementation details. Do not treat `CONTEXT.md` as a spec, a scratch pad, or a repository for implementation decisions. It is a glossary and nothing else.
 
@@ -67,7 +67,7 @@ Only offer to create an ADR when all three are true:
 2. Surprising without context — a future reader will wonder "why did they do it this way?"
 3. The result of a real trade-off — there were genuine alternatives and you picked one for specific reasons
 
-If any of the three is missing, skip the ADR. Use the format in [ADR-FORMAT.md](./reference/ADR-FORMAT.md).
+If any of the three is missing, skip the ADR. Use the format from `skl skill --resource reference/ADR-FORMAT.md domain`.
 
 ### Maintain capability docs
-When a change adds, alters, or retires an observable capability, create or update its doc in `docs/capabilities/` — one capability per file, created lazily like ADRs. Use the format in [CAPABILITIES-FORMAT.md](./reference/CAPABILITIES-FORMAT.md).
+When a change adds, alters, or retires an observable capability, create or update its doc in `docs/capabilities/` — one capability per file, created lazily like ADRs. Use the format from `skl skill --resource reference/CAPABILITIES-FORMAT.md domain`.
