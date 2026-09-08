@@ -348,31 +348,47 @@ func TestInstallFailsWithoutUserHome(t *testing.T) {
 }
 
 func TestInstallRefreshesOnlyOwnedStubs(t *testing.T) {
-	root := t.TempDir()
-	var output bytes.Buffer
-	app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, root)
-	if err := app.Run([]string{"skl", "install"}); err != nil {
-		t.Fatal(err)
-	}
+	for _, harness := range []string{".codex/skills", ".config/opencode/skills"} {
+		t.Run(harness, func(t *testing.T) {
+			root := t.TempDir()
+			var output bytes.Buffer
+			app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, root)
+			if err := app.Run([]string{"skl", "install"}); err != nil {
+				t.Fatal(err)
+			}
 
-	tdd := filepath.Join(root, ".codex/skills/tdd/SKILL.md")
-	wantTDD := readFile(t, tdd)
-	if err := os.WriteFile(tdd, []byte("---\nname: tdd\n---\n\n<!-- skl-owned: skl.stub/v1 -->\nstale"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	audit := filepath.Join(root, ".codex/skills/audit/SKILL.md")
-	if err := os.WriteFile(audit, []byte("---\nname: audit\n---\n\n<!-- skl-owned: skl.stub/v2 -->\nmy unrelated skill"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := app.Run([]string{"skl", "install"}); err != nil {
-		t.Fatal(err)
-	}
+			tdd := filepath.Join(root, harness, "tdd/SKILL.md")
+			wantTDD := readFile(t, tdd)
+			if err := os.WriteFile(tdd, []byte("---\nname: tdd\n---\n\n<!-- skl-owned: skl.stub/v1 -->\nstale"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			audit := filepath.Join(root, harness, "audit/SKILL.md")
+			if err := os.WriteFile(audit, []byte("---\nname: audit\n---\n\n<!-- skl-owned: skl.stub/v2 -->\nmy unrelated skill"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := app.Run([]string{"skl", "install"}); err != nil {
+				t.Fatal(err)
+			}
 
-	if got := readFile(t, tdd); got != wantTDD {
-		t.Fatalf("owned stub was not refreshed:\n%s", got)
-	}
-	if got := readFile(t, audit); got != "---\nname: audit\n---\n\n<!-- skl-owned: skl.stub/v2 -->\nmy unrelated skill" {
-		t.Fatalf("unrelated file changed: %q", got)
+			if got := readFile(t, tdd); got != wantTDD {
+				t.Fatalf("owned stub was not refreshed:\n%s", got)
+			}
+			if got := readFile(t, audit); got != "---\nname: audit\n---\n\n<!-- skl-owned: skl.stub/v2 -->\nmy unrelated skill" {
+				t.Fatalf("unrelated file changed: %q", got)
+			}
+			if err := app.Run([]string{"skl", "install"}); err != nil {
+				t.Fatal(err)
+			}
+			if got := readFile(t, tdd); got != wantTDD {
+				t.Fatalf("repeat installation changed current stub:\n%s", got)
+			}
+			if harness == ".config/opencode/skills" {
+				entries, err := os.ReadDir(filepath.Join(root, ".config/opencode"))
+				if err != nil || len(entries) != 1 || entries[0].Name() != "skills" {
+					t.Fatalf("reinstallation wrote OpenCode configuration: %v: %v", entries, err)
+				}
+			}
+		})
 	}
 }
 
