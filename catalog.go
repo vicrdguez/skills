@@ -14,7 +14,35 @@ import (
 
 const InstructionProtocol = "skl.instructions/v1"
 
-type InvocationFacts struct{}
+type InvocationFacts struct {
+	Implementation *ImplementationFacts `json:"implementation,omitempty"`
+}
+
+type ImplementationFacts struct {
+	Remote               string          `json:"remote"`
+	InspectCommand       string          `json:"inspect_command"`
+	ResultDirectory      string          `json:"result_directory"`
+	SubmitCommand        string          `json:"submit_command"`
+	Submission           int             `json:"submission,omitempty"`
+	PreviousReviewedHead string          `json:"previous_reviewed_head,omitempty"`
+	Comments             []ReviewComment `json:"comments,omitempty"`
+	WorkItem             int             `json:"work_item"`
+	Branch               string          `json:"branch"`
+	Worktree             string          `json:"worktree"`
+	TargetSnapshot       string          `json:"target_snapshot,omitempty"`
+	ArtifactBaseline     string          `json:"artifact_baseline,omitempty"`
+	ArtifactCompletion   string          `json:"artifact_completion,omitempty"`
+	ResumeCommand        string          `json:"resume_command"`
+}
+
+type ReviewComment struct {
+	Body        string `json:"body"`
+	Author      string `json:"author"`
+	Association string `json:"association"`
+	Commit      string `json:"commit,omitempty"`
+	Path        string `json:"path,omitempty"`
+	CreatedAt   string `json:"created_at,omitempty"`
+}
 
 type Packet struct {
 	Protocol       string          `json:"protocol"`
@@ -69,6 +97,17 @@ func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
 			return Packet{}, err
 		}
 		instructions += "\n\n## Included Skill: " + included + "\n\n" + rendered
+	}
+	if facts.Implementation != nil {
+		f := facts.Implementation
+		instructions += fmt.Sprintf("\n\n## Work Start\n\nWork Item: #%d\nBranch: %s\nWorktree: %s\nArtifact Baseline: %s\nResume: `%s`\n", f.WorkItem, f.Branch, f.Worktree, f.ArtifactBaseline, f.ResumeCommand)
+		if f.TargetSnapshot != "" {
+			instructions += "\nBefore coding, use ordinary Git in the worktree: `git merge " + f.TargetSnapshot + "`. The engine has not merged or run project checks.\n"
+		}
+		if f.PreviousReviewedHead != "" {
+			instructions += "\nFinding-driven Rework: sync nothing; review only `" + f.PreviousReviewedHead + "...HEAD`. Read the supplied summary, inline evidence, and human comments. Keep the ledger retired.\n"
+		}
+		instructions += "\nWrite the opaque Result Document using the named template, then run `" + f.SubmitCommand + "`. Refresh ledger integrity for Audit with `" + f.InspectCommand + "`.\n"
 	}
 	resources, err := resourceNames(definition)
 	if err != nil {
@@ -139,7 +178,8 @@ func (packet Packet) Markdown() string {
 	if included == "" {
 		included = "none"
 	}
-	return fmt.Sprintf("Protocol: %s\nSkill: %s\nIncluded skills: %s\nFacts: {}\nResources: %s\n\n%s", packet.Protocol, packet.Skill, included, resources, packet.Instructions)
+	facts, _ := json.Marshal(packet.Facts)
+	return fmt.Sprintf("Protocol: %s\nSkill: %s\nIncluded skills: %s\nFacts: %s\nResources: %s\n\n%s", packet.Protocol, packet.Skill, included, facts, resources, packet.Instructions)
 }
 
 func (packet Packet) JSON() ([]byte, error) {

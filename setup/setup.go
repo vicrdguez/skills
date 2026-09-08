@@ -58,7 +58,7 @@ func Run(ctx context.Context, request Request, backend Backend) (Outcome, error)
 	if err != nil {
 		return Outcome{}, errors.New("not a Git repository")
 	}
-	remote, err := resolveRemote(root, request.Remote)
+	remote, err := workflow.ResolveGitHubRemote(root, request.Remote)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -219,38 +219,6 @@ func readOwnedFile(path string) ([]byte, error) {
 		return nil, fmt.Errorf("owned file %s must not be a symlink", path)
 	}
 	return os.ReadFile(path)
-}
-
-func resolveRemote(root, explicit string) (string, error) {
-	if explicit != "" {
-		return explicit, nil
-	}
-	if origin, err := git(root, "remote", "get-url", "origin"); err == nil {
-		if _, err := parseGitHubRemote(origin); err == nil {
-			return "origin", nil
-		}
-	}
-	names, err := git(root, "remote")
-	if err != nil {
-		return "", err
-	}
-	var githubRemotes []string
-	for _, name := range strings.Fields(names) {
-		remoteURL, err := git(root, "remote", "get-url", name)
-		if err == nil {
-			if _, err := parseGitHubRemote(remoteURL); err == nil {
-				githubRemotes = append(githubRemotes, name)
-			}
-		}
-	}
-	switch len(githubRemotes) {
-	case 1:
-		return githubRemotes[0], nil
-	case 0:
-		return "", errors.New("no GitHub remote found")
-	default:
-		return "", fmt.Errorf("multiple GitHub remotes (%s); choose one with --remote", strings.Join(githubRemotes, ", "))
-	}
 }
 
 func git(directory string, args ...string) (string, error) {
