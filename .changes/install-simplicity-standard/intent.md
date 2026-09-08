@@ -31,13 +31,13 @@ This is one Work Item, `install-simplicity-standard`, blocked by #8 (`review-and
 
 ## Definition of Done
 
-- [ ] Fresh Setup installs the exact approved Simplicity section once without requiring a simplicity-specific choice.
-- [ ] Setup refreshes an existing owned block with that section while preserving surrounding user-authored guidance and existing Workflow entrypoint instructions.
-- [ ] Repeating Setup with the same choices leaves the resulting guidance unchanged and does not duplicate the section.
-- [ ] Direct Audit instruction retrieval in Markdown and JSON omits the complete Ponytail integration and does not inject the Simplicity section; the ordinary Audit instructions remain intact.
-- [ ] Implementation instruction retrieval in Markdown and JSON includes the same Ponytail-free Audit definition, without injecting the Simplicity section or introducing a new supporting skill or resource.
-- [ ] The implementation diff changes no other Skill Definition or resource and changes Audit only as enumerated in `plan.md`, compared with the post-#8 Target Snapshot at Work Start.
-- [ ] Existing relevant regression checks and the Consumer Repository Full Gate pass; the capability documentation describes the delivered behavior rather than a planned extension.
+- [x] Fresh Setup installs the exact approved Simplicity section once without requiring a simplicity-specific choice.
+- [x] Setup refreshes an existing owned block with that section while preserving surrounding user-authored guidance and existing Workflow entrypoint instructions.
+- [x] Repeating Setup with the same choices leaves the resulting guidance unchanged and does not duplicate the section.
+- [x] Direct Audit instruction retrieval in Markdown and JSON omits the complete Ponytail integration and does not inject the Simplicity section; the ordinary Audit instructions remain intact.
+- [x] Implementation instruction retrieval in Markdown and JSON includes the same Ponytail-free Audit definition, without injecting the Simplicity section or introducing a new supporting skill or resource.
+- [x] The implementation diff changes no other Skill Definition or resource and changes Audit only as enumerated in `plan.md`, compared with the post-#8 Target Snapshot at Work Start.
+- [x] Existing relevant regression checks and the Consumer Repository Full Gate pass; the capability documentation describes the delivered behavior rather than a planned extension.
 
 ## Manual verification
 
