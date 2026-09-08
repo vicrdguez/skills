@@ -172,41 +172,33 @@ func TestSetupInfersGitHubConsumerRepository(t *testing.T) {
 	workflow := "<!-- dev-pipeline:start -->\n## Workflow\n\nUse `skl` as the Workflow entrypoint. Do not manually mutate Workflow Projections. Only a human merges.\n"
 	wantBlock := workflow + "\n" + section + "<!-- dev-pipeline:end -->\n"
 	agentsPath := filepath.Join(root, "AGENTS.md")
-	want := wantBlock
-	var installed string
-	for _, scenario := range []string{"B1 fresh", "B2 refresh", "B3 repeat"} {
-		t.Run(scenario, func(t *testing.T) {
-			if scenario == "B2 refresh" {
-				before, after := "# User guidance\r\nKeep this spacing.  \n\n", "\nUser footer\twithout final newline"
-				original := before + workflow + "<!-- dev-pipeline:end -->\n" + after
-				if err := os.WriteFile(agentsPath, []byte(original), 0o644); err != nil {
-					t.Fatal(err)
-				}
-				want = before + wantBlock + after
+	installed := readFile(t, agentsPath)
+	if installed != wantBlock || strings.Count(installed, "## Simplicity\n") != 1 {
+		t.Fatalf("fresh AGENTS.md = %q, want %q", installed, wantBlock)
+	}
+	t.Run("refresh and repeat", func(t *testing.T) {
+		before, after := "# User guidance\r\nKeep this spacing.  \n\n", "\nUser footer\twithout final newline"
+		original := before + workflow + "<!-- dev-pipeline:end -->\n" + after
+		if err := os.WriteFile(agentsPath, []byte(original), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		want := before + wantBlock + after
+		for range 2 {
+			stdout.Reset()
+			app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewBufferString("n\n"), &stdout, &stderr)
+			if err := app.Run([]string{"skl", "setup", "--repo", root}); err != nil {
+				t.Fatal(err)
 			}
-			if scenario != "B1 fresh" {
-				stdout.Reset()
-				app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewBufferString("n\n"), &stdout, &stderr)
-				if err := app.Run([]string{"skl", "setup", "--repo", root}); err != nil {
-					t.Fatal(err)
-				}
-				if got := stdout.String(); got != "Link CLAUDE.md to AGENTS.md? [y/N] Prepared "+root+" for GitHub workflow on trunk.\n" {
-					t.Errorf("stdout = %q", got)
-				}
+			if got := stdout.String(); got != "Link CLAUDE.md to AGENTS.md? [y/N] Prepared "+root+" for GitHub workflow on trunk.\n" {
+				t.Errorf("stdout = %q", got)
 			}
 			got := readFile(t, agentsPath)
-			if got != want {
-				t.Errorf("AGENTS.md = %q, want %q", got, want)
+			if got != want || strings.Count(got, "## Simplicity\n") != 1 {
+				t.Fatalf("AGENTS.md = %q, want %q", got, want)
 			}
-			if strings.Count(got, "## Simplicity\n") != 1 || strings.Count(got, section) != 1 {
-				t.Error("AGENTS.md must contain the exact approved Simplicity section once")
-			}
-			if scenario == "B3 repeat" && got != installed {
-				t.Error("AGENTS.md changed on repeat Setup")
-			}
-			installed = got
-		})
-	}
+			want = got
+		}
+	})
 	if _, err := os.Stat(filepath.Join(root, ".skl.yml")); !os.IsNotExist(err) {
 		t.Fatalf("workflow configuration was written: %v", err)
 	}
