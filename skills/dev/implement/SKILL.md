@@ -10,6 +10,8 @@ If this packet carries Implementation facts, continue with that Work Item. Other
 
 Work only in the packet's conventional worktree, creating it from the pushed branch with ordinary Git if needed. On first-pass implementation, merge the packet's exact Target Snapshot before coding; on finding-driven Rework sync nothing. Never rebase or force-push: rewriting history orphans the Artifact Baseline and previous _Reviewed head_, and silently widens later three-dot diffs.
 
+Use the packet's selected `remote` for Git fetch/push and pass `--remote <name>` on every Implement command, including Needs Human and legacy resume. When inference is ambiguous, choose explicitly with `--remote` before claiming.
+
 Run typechecking and single test files regularly. `audit` runs the full suite as its gate at the end of this stage, so don't run it separately first.
 
 Once the whole implementation is done and every scenario is green, run `audit` against the PR base merge-base — not the first commit of the claim, which `...HEAD` would leave out of the diff. On a rework round the fixed point moves; **Rework** below pins it. Refactoring happens here, deliberately kept out of the red -> green cycles. Apply its findings yourself, fix the `HARD` and on each `JUDGEMENT`, either fix it, decline it with a stated reason, or carry it as debt. Declining `HARD` is not yours to do. Keep the suite green while doing so. This is the pass where ordinary cleanup and refactoring belongs — smells, readability, maintainability, making the code navigable for the next agent. Whatever survives it, the watchdog sees.

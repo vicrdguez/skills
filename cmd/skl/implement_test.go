@@ -156,7 +156,8 @@ func (b *implementationMemory) AwaitImplementationReview(_ context.Context, _ wo
 	return nil
 }
 
-func (b *implementationMemory) ImplementationItems(context.Context, workflow.RepositoryID) ([]workflow.ImplementationItem, error) {
+func (b *implementationMemory) ImplementationItems(_ context.Context, repository workflow.RepositoryID) ([]workflow.ImplementationItem, error) {
+	b.repository = repository
 	return append([]workflow.ImplementationItem(nil), b.work...), nil
 }
 
@@ -311,6 +312,79 @@ func TestImplementResumePreservesTargetAndRejectsAmbiguousHistory(t *testing.T) 
 	got := implementCLI(t, root, b, "resume", "--item", "7", "--target-snapshot", target)
 	if got.Packet == nil || got.Packet.Facts.Implementation.TargetSnapshot != target {
 		t.Fatalf("draft suppressed target: %#v", got)
+	}
+}
+
+func TestImplementUsesSelectedGitHubRemoteThroughout(t *testing.T) {
+	for _, layout := range []string{"upstream only", "non-GitHub origin", "ambiguous", "explicit over origin"} {
+		t.Run(layout, func(t *testing.T) {
+			root := proposalRepository(t)
+			baseline := prepareSlice(t, root, "widget")
+			runGit(t, root, "remote", "rename", "origin", "upstream")
+			if layout == "non-GitHub origin" {
+				runGit(t, root, "remote", "add", "origin", "https://example.com/acme/widgets.git")
+			}
+			if layout == "ambiguous" || layout == "explicit over origin" {
+				other := "fork"
+				if layout == "explicit over origin" {
+					other = "origin"
+				}
+				runGit(t, root, "remote", "add", other, "https://github.com/other/widgets.git")
+			}
+			b := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.Ready}}}
+			if layout == "ambiguous" {
+				var output bytes.Buffer
+				app := newApp(func() (setup.Backend, error) { return b, nil }, bytes.NewReader(nil), &output, &output)
+				err := app.Run([]string{"skl", "implement", "next", "--repo", root})
+				if err == nil || !strings.Contains(err.Error(), "--remote") || b.work[0].Claimed {
+					t.Fatalf("ambiguous inference = %v, %s", err, &output)
+				}
+			}
+			// Only the selected remote has the published branch available locally.
+			runGit(t, root, "switch", "main")
+			runGit(t, root, "branch", "-D", "widget")
+			runGit(t, root, "update-ref", "refs/remotes/upstream/widget", baseline)
+			args := []string{"next"}
+			if layout == "ambiguous" || layout == "explicit over origin" {
+				args = append(args, "--remote", "upstream")
+			}
+			start := implementCLI(t, root, b, args...)
+			if start.Packet == nil || b.repository != (workflow.RepositoryID{Owner: "acme", Name: "widgets"}) {
+				t.Fatalf("wrong remote: %#v, %#v", start, b.repository)
+			}
+			facts := start.Packet.Facts.Implementation
+			if !strings.Contains(facts.ResumeCommand, "--remote 'upstream'") || !strings.Contains(facts.SubmitCommand, "--remote 'upstream'") {
+				t.Fatalf("retry lost remote: %#v", facts)
+			}
+			runGit(t, root, "switch", "-c", "widget", "refs/remotes/upstream/widget")
+			for _, operation := range []string{"resume", "inspect"} {
+				got := implementCLI(t, root, b, operation, "--remote", "upstream", "--item", "7")
+				if got.Item == nil || b.repository.Owner != "acme" {
+					t.Fatalf("%s lost remote: %#v", operation, got)
+				}
+			}
+			decision := filepath.Join(facts.ResultDirectory, "decision.md")
+			if err := os.WriteFile(decision, []byte("human decision"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			got := implementCLI(t, root, b, "needs-human", "--remote", "upstream", "--item", "7", "--reason", "mandatory_rule", "--decision", decision)
+			if got.Status != "needs_human" || b.repository.Owner != "acme" {
+				t.Fatalf("pause lost remote: %#v", got)
+			}
+			b.work[0].State, b.work[0].Claimed = workflow.Ready, true
+			start = implementCLI(t, root, b, "resume", "--remote", "upstream", "--item", "7")
+			body := filepath.Join(start.Packet.Facts.Implementation.ResultDirectory, "submission.md")
+			if err := os.WriteFile(body, []byte("audit"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			runGit(t, root, "rm", "-r", ".changes/widget")
+			runGit(t, root, "commit", "-m", "retire")
+			b.remoteHeads["widget"] = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+			got = implementCLI(t, root, b, "submit", "--remote", "upstream", "--item", "7", "--body", body)
+			if got.Status != "awaiting_review" || b.repository.Owner != "acme" {
+				t.Fatalf("submit lost remote: %#v", got)
+			}
+		})
 	}
 }
 

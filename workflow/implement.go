@@ -87,8 +87,8 @@ type ImplementationOutcome struct {
 	Item   *ImplementationItem `json:"item,omitempty"`
 }
 
-func loadImplementation(ctx context.Context, root string, backend ImplementationBackend) (RepositoryID, []ImplementationItem, error) {
-	remote, err := git(root, "remote", "get-url", "origin")
+func loadImplementation(ctx context.Context, root, remote string, backend ImplementationBackend) (RepositoryID, []ImplementationItem, error) {
+	remote, err := git(root, "remote", "get-url", remote)
 	if err != nil {
 		return RepositoryID{}, nil, err
 	}
@@ -100,8 +100,12 @@ func loadImplementation(ctx context.Context, root string, backend Implementation
 	return repository, items, err
 }
 
-func InspectImplementation(ctx context.Context, root string, number int, backend ImplementationBackend) (ImplementationOutcome, error) {
-	_, items, err := loadImplementation(ctx, root, backend)
+func InspectImplementation(ctx context.Context, root, remote string, number int, backend ImplementationBackend) (ImplementationOutcome, error) {
+	remote, err := ResolveGitHubRemote(root, remote)
+	if err != nil {
+		return ImplementationOutcome{}, err
+	}
+	_, items, err := loadImplementation(ctx, root, remote, backend)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
@@ -119,8 +123,12 @@ func InspectImplementation(ctx context.Context, root string, number int, backend
 	return ImplementationOutcome{Status: "fix_required", Reason: "Work Item unavailable; supply its explicit stable --item identity"}, nil
 }
 
-func StartImplementation(ctx context.Context, root string, number int, snapshot, reviewedHead string, backend ImplementationBackend) (ImplementationOutcome, error) {
-	repository, items, err := loadImplementation(ctx, root, backend)
+func StartImplementation(ctx context.Context, root, remote string, number int, snapshot, reviewedHead string, backend ImplementationBackend) (ImplementationOutcome, error) {
+	remote, err := ResolveGitHubRemote(root, remote)
+	if err != nil {
+		return ImplementationOutcome{}, err
+	}
+	repository, items, err := loadImplementation(ctx, root, remote, backend)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
@@ -145,7 +153,7 @@ func StartImplementation(ctx context.Context, root string, number int, snapshot,
 		}
 		for _, item := range items {
 			if item.Number == number && item.Claimed && (item.State == Ready || item.State == Rework) {
-				prepared, outcome, err := prepareImplementationStart(ctx, root, repository, item, snapshot, reviewedHead, backend)
+				prepared, outcome, err := prepareImplementationStart(ctx, root, remote, repository, item, snapshot, reviewedHead, backend)
 				if err != nil || outcome.Status != "" {
 					return outcome, err
 				}
@@ -153,7 +161,7 @@ func StartImplementation(ctx context.Context, root string, number int, snapshot,
 					return ImplementationOutcome{}, err
 				}
 				item = prepared
-				return implementationPacket(root, item)
+				return implementationPacket(root, remote, item)
 			}
 		}
 		return ImplementationOutcome{Status: "fix_required", Reason: "explicit Work Item is not an unambiguous implementation Claim; repair its projections before resuming"}, nil
@@ -189,7 +197,7 @@ func StartImplementation(ctx context.Context, root string, number int, snapshot,
 		if blocked {
 			continue
 		}
-		prepared, outcome, err := prepareImplementationStart(ctx, root, repository, item, snapshot, reviewedHead, backend)
+		prepared, outcome, err := prepareImplementationStart(ctx, root, remote, repository, item, snapshot, reviewedHead, backend)
 		if err != nil || outcome.Status != "" {
 			return outcome, err
 		}
@@ -201,7 +209,7 @@ func StartImplementation(ctx context.Context, root string, number int, snapshot,
 		}
 		for _, current := range observed {
 			if current.Number == item.Number && current.Claimed && current.State == item.State && current.Problem == "" && current.Branch == item.Branch && current.TargetSnapshot == item.TargetSnapshot {
-				return implementationPacket(root, current)
+				return implementationPacket(root, remote, current)
 			}
 		}
 		if claimErr != nil {
@@ -212,7 +220,7 @@ func StartImplementation(ctx context.Context, root string, number int, snapshot,
 	return ImplementationOutcome{Status: "no_work"}, nil
 }
 
-func prepareImplementationStart(ctx context.Context, root string, repository RepositoryID, item ImplementationItem, snapshot, reviewedHead string, backend ImplementationBackend) (ImplementationItem, ImplementationOutcome, error) {
+func prepareImplementationStart(ctx context.Context, root, remote string, repository RepositoryID, item ImplementationItem, snapshot, reviewedHead string, backend ImplementationBackend) (ImplementationItem, ImplementationOutcome, error) {
 	refuse := func(reason string) (ImplementationItem, ImplementationOutcome, error) {
 		return item, ImplementationOutcome{Status: "fix_required", Reason: reason, Item: &item}, nil
 	}
@@ -224,7 +232,7 @@ func prepareImplementationStart(ctx context.Context, root string, repository Rep
 	}
 	head, err := git(root, "rev-parse", "--verify", "refs/heads/"+item.Branch+"^{commit}")
 	if err != nil {
-		head, err = git(root, "rev-parse", "--verify", "refs/remotes/origin/"+item.Branch+"^{commit}")
+		head, err = git(root, "rev-parse", "--verify", "refs/remotes/"+remote+"/"+item.Branch+"^{commit}")
 	}
 	if err != nil {
 		return refuse("branch unavailable; fetch the published branch and resume")
@@ -298,7 +306,7 @@ func prepareImplementationStart(ctx context.Context, root string, repository Rep
 	return item, ImplementationOutcome{}, nil
 }
 
-func implementationPacket(root string, item ImplementationItem) (ImplementationOutcome, error) {
+func implementationPacket(root, remote string, item ImplementationItem) (ImplementationOutcome, error) {
 	if item.State == Rework && (item.Submission == nil || item.Submission.PreviousReviewedHead == "") {
 		return ImplementationOutcome{Status: "fix_required", Item: &item, Reason: "previous reviewed head needs agent extraction from the supplied watchdog summary; resume --reviewed-head <full-sha> without rewriting history"}, nil
 	}
@@ -311,7 +319,7 @@ func implementationPacket(root string, item ImplementationItem) (ImplementationO
 	if item.Branch != "" {
 		head, headErr := git(root, "rev-parse", "refs/heads/"+item.Branch)
 		if headErr != nil {
-			head, headErr = git(root, "rev-parse", "refs/remotes/origin/"+item.Branch)
+			head, headErr = git(root, "rev-parse", "refs/remotes/"+remote+"/"+item.Branch)
 		}
 		if headErr != nil {
 			return ImplementationOutcome{Status: "fix_required", Reason: "branch unavailable; fetch and create the conventional worktree before resuming"}, nil
@@ -338,7 +346,10 @@ func implementationPacket(root string, item ImplementationItem) (ImplementationO
 		return ImplementationOutcome{}, err
 	}
 	quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'" }
-	facts.SubmitCommand = fmt.Sprintf("skl implement submit --repo %s --item %d --body %s", quote(facts.Worktree), item.Number, quote(filepath.Join(facts.ResultDirectory, "submission.md")))
+	facts.ResumeCommand += " --remote " + quote(remote)
+	facts.Remote = remote
+	facts.InspectCommand = fmt.Sprintf("skl implement inspect --repo %s --remote %s --item %d", quote(facts.Worktree), quote(remote), item.Number)
+	facts.SubmitCommand = fmt.Sprintf("skl implement submit --repo %s --remote %s --item %d --body %s", quote(facts.Worktree), quote(remote), item.Number, quote(filepath.Join(facts.ResultDirectory, "submission.md")))
 	packet, err := skilldist.BuildPacket("implement", skilldist.InvocationFacts{Implementation: &facts})
 	if err != nil {
 		os.RemoveAll(facts.ResultDirectory)

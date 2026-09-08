@@ -88,6 +88,8 @@ Omit the parent flags and repeated slice/dependency flags for a single-slice Pro
 
 Run `skl implement next` for one claimed Work Item and its bundled Instruction Packet, or `skl implement resume --item <number>` for interrupted work. Inside its conventional worktree, `skl implement resume` resolves the Claim by location. Selection prefers eligible Rework and skips blocked, claimed, and paused items.
 
+Implement uses Setup's remote inference: GitHub `origin`, otherwise the sole GitHub remote. Select explicitly with `--remote <name>` when ambiguous or overriding `origin`; all Implement operations accept it, and packet retry commands retain it. Use that same remote for ordinary Git fetch/push.
+
 The worker merges the pinned Target Snapshot, writes code and scenario tests in red-green commits, and runs focused checks. At the Audit gate the worker runs the Full Gate and both independent review axes, dispositions every finding, then commits final ticks and ledger retirement and pushes. `skl` runs none of those project checks or Git mutations.
 
 Write the Audit-bearing `submission.md` in the packet's private temporary directory, then run `skl implement submit --item <number> --body <absolute-file>`. A repairable refusal retains the Claim and prose. Successful publication reports `awaiting_review`, removes the temporary directory, and leaves the issue open until human merge. `skl implement inspect --item <number>` supplies current fixed Git and historical ledger evidence for Audit.

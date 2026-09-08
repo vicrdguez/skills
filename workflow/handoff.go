@@ -11,22 +11,26 @@ import (
 	"strings"
 )
 
-func SubmitImplementation(ctx context.Context, root string, number int, bodyPath string, backend ImplementationBackend) (ImplementationOutcome, error) {
+func SubmitImplementation(ctx context.Context, root, remote string, number int, bodyPath string, backend ImplementationBackend) (ImplementationOutcome, error) {
 	if number <= 0 || bodyPath == "" {
 		return ImplementationOutcome{}, errors.New("submit requires --item and --body")
 	}
-	return handoffImplementation(ctx, root, number, AwaitingReview, "", bodyPath, backend)
+	return handoffImplementation(ctx, root, remote, number, AwaitingReview, "", bodyPath, backend)
 }
 
-func PauseImplementation(ctx context.Context, root string, number int, reason, decisionPath, bodyPath string, backend ImplementationBackend) (ImplementationOutcome, error) {
+func PauseImplementation(ctx context.Context, root, remote string, number int, reason, decisionPath, bodyPath string, backend ImplementationBackend) (ImplementationOutcome, error) {
 	if number <= 0 || decisionPath == "" || !slices.Contains([]string{"contradictory_artifacts", "mandatory_rule", "frozen_interface", "disputed_blocker", "bounce_cap"}, reason) {
 		return ImplementationOutcome{}, errors.New("Needs Human requires --item, --decision and a permitted --reason")
 	}
-	return handoffImplementation(ctx, root, number, NeedsHuman, decisionPath, bodyPath, backend)
+	return handoffImplementation(ctx, root, remote, number, NeedsHuman, decisionPath, bodyPath, backend)
 }
 
-func handoffImplementation(ctx context.Context, root string, number int, target State, decisionPath, bodyPath string, backend ImplementationBackend) (outcome ImplementationOutcome, err error) {
-	repository, items, err := loadImplementation(ctx, root, backend)
+func handoffImplementation(ctx context.Context, root, remote string, number int, target State, decisionPath, bodyPath string, backend ImplementationBackend) (outcome ImplementationOutcome, err error) {
+	remote, err = ResolveGitHubRemote(root, remote)
+	if err != nil {
+		return ImplementationOutcome{}, err
+	}
+	repository, items, err := loadImplementation(ctx, root, remote, backend)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
@@ -189,7 +193,7 @@ func handoffImplementation(ctx context.Context, root string, number int, target 
 	if err := guard(); err != nil {
 		return ImplementationOutcome{}, err
 	}
-	_, observed, err := loadImplementation(ctx, root, backend)
+	_, observed, err := loadImplementation(ctx, root, remote, backend)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
