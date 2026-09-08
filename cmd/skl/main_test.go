@@ -361,6 +361,14 @@ func TestEmbeddedResourceDelegationSmoke(t *testing.T) {
 		{"tdd", "", "`skl skill --resource reference/mocking.md tdd` for mocking guidelines.", "skl skill --resource reference/mocking.md tdd", "Mock at **system boundaries** only:"},
 		{"audit", "", "the Standards axis always carries the **smell baseline** from `skl skill --resource reference/smells.md audit`", "skl skill --resource reference/smells.md audit", "# Smell Baseline"},
 		{"audit", "", "The list of standards-source files you found in step 3, plus `skl skill --resource reference/smells.md audit`. Instruct the sub-agent to read those files and the command's output.", "skl skill --resource reference/smells.md audit", "**The repo overrides.** A documented repo standard always wins"},
+		{"design", "", "see `skl skill --resource reference/DEEPENING.md design`: dependency categories", "skl skill --resource reference/DEEPENING.md design", "### 2. Local-substitutable"},
+		{"design", "", "see `skl skill --resource reference/DESIGN-IT-TWICE.md design`: spin up parallel sub-agents", "skl skill --resource reference/DESIGN-IT-TWICE.md design", "Each must produce a **radically different** interface"},
+		{"design", "reference/DEEPENING.md", "the Design definition (retrieve with `skl skill design` if not already supplied)", "skl skill design", "# Codebase Design"},
+		{"design", "reference/DESIGN-IT-TWICE.md", "Uses the vocabulary in the Design definition (retrieve with `skl skill design` if not already supplied)", "skl skill design", "**The interface is the test surface.**"},
+		{"design", "reference/DESIGN-IT-TWICE.md", "which category they fall into (see `skl skill --resource reference/DEEPENING.md design`)", "skl skill --resource reference/DEEPENING.md design", "## Dependency categories"},
+		{"design", "reference/DESIGN-IT-TWICE.md", "dependency category from `skl skill --resource reference/DEEPENING.md design`, what sits behind the seam", "skl skill --resource reference/DEEPENING.md design", "### 4. True external (Mock)"},
+		{"design", "reference/DESIGN-IT-TWICE.md", "Include both the Design definition's vocabulary (retrieve with `skl skill design` if not already supplied) and `CONTEXT.md` vocabulary in the brief", "skl skill design", "**Locality**"},
+		{"design", "reference/DESIGN-IT-TWICE.md", "Dependency strategy and adapters (see `skl skill --resource reference/DEEPENING.md design`)", "skl skill --resource reference/DEEPENING.md design", "## Testing strategy: replace, don't layer"},
 	} {
 		t.Run(tc.skill+"/"+tc.pointer, func(t *testing.T) {
 			if tc.resource != "" {
