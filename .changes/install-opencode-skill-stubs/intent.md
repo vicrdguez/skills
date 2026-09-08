@@ -25,12 +25,12 @@ Extend the existing common-stub installation to OpenCode's default global skill 
 - Editing personal OpenCode configuration during this proposal or as a tracked implementation change.
 
 ## Definition of Done
-- [ ] A fresh `skl install` creates native OpenCode stubs for every catalog skill with the existing frontmatter, ownership marker, and CLI delegation, without depending on another harness's files.
-- [ ] Reinstallation refreshes outdated owned OpenCode stubs and leaves current stubs unchanged in content.
-- [ ] Unowned OpenCode skills and unrelated configuration files are preserved, while installation still creates missing nonconflicting stubs.
-- [ ] Existing Pi, Codex, and Claude Code installation behavior and Pi-only queue assets remain intact; no OpenCode queue assets are introduced.
-- [ ] Existing CLI-level tests prove native installation, refresh, idempotence, and preservation using temporary homes, and the full documented gate passes.
-- [ ] Documentation lists OpenCode's native installation path and explains removal of the temporary cross-harness override without prescribing deletion of unrelated skills or configuration.
+- [x] A fresh `skl install` creates native OpenCode stubs for every catalog skill with the existing frontmatter, ownership marker, and CLI delegation, without depending on another harness's files.
+- [x] Reinstallation refreshes outdated owned OpenCode stubs and leaves current stubs unchanged in content.
+- [x] Unowned OpenCode skills and unrelated configuration files are preserved, while installation still creates missing nonconflicting stubs.
+- [x] Existing Pi, Codex, and Claude Code installation behavior and Pi-only queue assets remain intact; no OpenCode queue assets are introduced.
+- [x] Existing CLI-level tests prove native installation, refresh, idempotence, and preservation using temporary homes, and the full documented gate passes.
+- [x] Documentation lists OpenCode's native installation path and explains removal of the temporary cross-harness override without prescribing deletion of unrelated skills or configuration.
 
 ## Manual verification
 - [ ] After installing the reviewed binary, remove only obsolete raw-source and Pi skill-directory entries from OpenCode's `skills.paths`, restart OpenCode, and confirm the workflow skills load from `~/.config/opencode/skills/` as thin CLI stubs without claiming work.
