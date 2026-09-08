@@ -7,7 +7,6 @@ import (
 	"io"
 
 	"github.com/urfave/cli/v2"
-	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/setup"
 	"github.com/vicrdguez/skills/workflow"
 )
@@ -17,7 +16,11 @@ func statusCommand(newBackend backendFactory, stdout io.Writer) *cli.Command {
 		if c.NArg() != 0 {
 			return fmt.Errorf("status takes no positional arguments")
 		}
-		backend, err := newBackend(github.RepositoryID{})
+		repository, err := setup.ResolveRepository(c.Path("repo"), c.String("remote"))
+		if err != nil {
+			return err
+		}
+		backend, err := newBackend(repository.Repository)
 		if err != nil {
 			return err
 		}
@@ -25,7 +28,7 @@ func statusCommand(newBackend backendFactory, stdout io.Writer) *cli.Command {
 		if !ok {
 			return fmt.Errorf("backend does not support status")
 		}
-		outcome, err := workflow.ObserveStatus(c.Context, c.Path("repo"), c.String("remote"), port)
+		outcome, err := workflow.ObserveStatus(c.Context, repository.Root, repository.Remote, port)
 		if err != nil {
 			var violation *workflow.InvariantError
 			if errors.As(err, &violation) {

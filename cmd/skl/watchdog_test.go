@@ -275,7 +275,7 @@ func TestWatchdogPassRetryChecksMergeability(t *testing.T) {
 	}
 }
 
-func (b *implementationMemory) ReviewSubmission(_ context.Context, _ github.RepositoryID, id workflow.SubmissionID) (workflow.Submission, error) {
+func (b *implementationMemory) ReviewSubmission(_ context.Context, id workflow.SubmissionID) (workflow.Submission, error) {
 	for _, item := range b.work {
 		if item.Submission != nil && item.Submission.ID == id {
 			return *item.Submission, nil
@@ -284,7 +284,7 @@ func (b *implementationMemory) ReviewSubmission(_ context.Context, _ github.Repo
 	return workflow.Submission{}, fmt.Errorf("missing Submission")
 }
 
-func (b *implementationMemory) PublishReview(_ context.Context, _ github.RepositoryID, item workflow.ImplementationItem, comments []skilldist.ReviewComment, guard func() error) error {
+func (b *implementationMemory) PublishReview(_ context.Context, item workflow.ImplementationItem, comments []skilldist.ReviewComment, guard func() error) error {
 	if err := guard(); err != nil {
 		return err
 	}
@@ -300,7 +300,7 @@ func (b *implementationMemory) PublishReview(_ context.Context, _ github.Reposit
 	return nil
 }
 
-func (b *implementationMemory) CompleteReview(_ context.Context, _ github.RepositoryID, item workflow.ImplementationItem, target workflow.State, guard func() error) error {
+func (b *implementationMemory) CompleteReview(_ context.Context, item workflow.ImplementationItem, target workflow.State, guard func() error) error {
 	if b.beforeTransition != nil {
 		b.beforeTransition()
 	}

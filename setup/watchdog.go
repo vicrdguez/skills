@@ -7,11 +7,14 @@ import (
 	"strconv"
 
 	skilldist "github.com/vicrdguez/skills"
-	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/workflow"
 )
 
-func (b *GitHubBackend) CompleteReview(ctx context.Context, repository github.RepositoryID, item workflow.ImplementationItem, target workflow.State, guard func() error) error {
+func (b *GitHubBackend) CompleteReview(ctx context.Context, item workflow.ImplementationItem, target workflow.State, guard func() error) error {
+	if err := b.requireRepository(); err != nil {
+		return err
+	}
+	repository := b.repository
 	label := map[workflow.State]string{workflow.Rework: "rework", workflow.NeedsHuman: "needs-human", workflow.ReadyForMerge: "done"}[target]
 	if label == "" || item.Submission == nil {
 		return fmt.Errorf("invalid review target or missing Submission")
@@ -55,7 +58,11 @@ func (b *GitHubBackend) CompleteReview(ctx context.Context, repository github.Re
 	return b.implementationLabelMutation(ctx, repository, submissionNumber, nil, append(remove, "wip"), guard)
 }
 
-func (b *GitHubBackend) ReviewSubmission(ctx context.Context, repository github.RepositoryID, id workflow.SubmissionID) (workflow.Submission, error) {
+func (b *GitHubBackend) ReviewSubmission(ctx context.Context, id workflow.SubmissionID) (workflow.Submission, error) {
+	if err := b.requireRepository(); err != nil {
+		return workflow.Submission{}, err
+	}
+	repository := b.repository
 	number, err := githubIssueNumber(workflow.WorkItemID(id))
 	if err != nil {
 		return workflow.Submission{}, err
@@ -146,7 +153,11 @@ func (b *GitHubBackend) ReviewSubmission(ctx context.Context, repository github.
 	return result, nil
 }
 
-func (b *GitHubBackend) PublishReview(ctx context.Context, repository github.RepositoryID, item workflow.ImplementationItem, comments []skilldist.ReviewComment, guard func() error) error {
+func (b *GitHubBackend) PublishReview(ctx context.Context, item workflow.ImplementationItem, comments []skilldist.ReviewComment, guard func() error) error {
+	if err := b.requireRepository(); err != nil {
+		return err
+	}
+	repository := b.repository
 	if item.Submission == nil {
 		return fmt.Errorf("review requires a Submission")
 	}

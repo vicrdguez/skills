@@ -9,8 +9,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-
-	"github.com/vicrdguez/skills/github"
 )
 
 func SubmitImplementation(ctx context.Context, root, remote string, id WorkItemID, bodyPath string, backend ImplementationBackend) (ImplementationOutcome, error) {
@@ -28,11 +26,7 @@ func PauseImplementation(ctx context.Context, root, remote string, id WorkItemID
 }
 
 func handoffImplementation(ctx context.Context, root, remote string, id WorkItemID, target State, decisionPath, bodyPath string, backend ImplementationBackend) (outcome ImplementationOutcome, err error) {
-	remote, err = github.ResolveGitHubRemote(root, remote)
-	if err != nil {
-		return ImplementationOutcome{}, err
-	}
-	repository, items, err := loadImplementation(ctx, root, remote, backend)
+	items, err := loadImplementation(ctx, backend)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
@@ -63,7 +57,7 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 			return Refuse("local head changed during handoff; commit and push a fixed head, then retry")
 		}
 		if bodyPath != "" {
-			remote, err := backend.ImplementationHead(ctx, repository, item.Branch)
+			remote, err := backend.ImplementationHead(ctx, item.Branch)
 			if err != nil {
 				return err
 			}
@@ -149,14 +143,14 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 		return ImplementationOutcome{}, Refuse("pending handoff differs from supplied intent or head; restore its fixed Result Documents and resume")
 	}
 	item.State = from
-	if err := backend.RecordImplementationTransition(ctx, repository, item, transition); err != nil {
+	if err := backend.RecordImplementationTransition(ctx, item, transition); err != nil {
 		return ImplementationOutcome{}, err
 	}
 	item.Transition = &transition
 	defer func() {
 		if err != nil {
 			transition.Completed = false
-			err = errors.Join(err, backend.RecordImplementationTransition(ctx, repository, item, transition), backend.RetainImplementationClaim(ctx, repository, item))
+			err = errors.Join(err, backend.RecordImplementationTransition(ctx, item, transition), backend.RetainImplementationClaim(ctx, item))
 		}
 	}()
 	if bodyPath != "" {
@@ -165,16 +159,16 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 			base = item.Submission.Base
 		}
 		if base == "" {
-			base, err = backend.ImplementationTarget(ctx, repository)
+			base, err = backend.ImplementationTarget(ctx)
 			if err != nil {
 				return ImplementationOutcome{}, err
 			}
 		}
-		submission := Submission{Head: head, Base: base, Body: withClosingReference(string(body), item.ClosingReference), Draft: target == NeedsHuman}
+		submission := Submission{Head: head, Base: base, Body: string(body), Draft: target == NeedsHuman}
 		if item.Submission != nil {
 			submission.ID = item.Submission.ID
 		}
-		submission, err = backend.PublishImplementation(ctx, repository, item, submission)
+		submission, err = backend.PublishImplementation(ctx, item, submission)
 		if err != nil {
 			return ImplementationOutcome{}, err
 		}
@@ -188,14 +182,14 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 	}
 	var writeErr error
 	if target == AwaitingReview {
-		writeErr = backend.AwaitImplementationReview(ctx, repository, item, guard)
+		writeErr = backend.AwaitImplementationReview(ctx, item, guard)
 	} else {
-		writeErr = backend.PauseImplementation(ctx, repository, item, string(decision), guard)
+		writeErr = backend.PauseImplementation(ctx, item, string(decision), guard)
 	}
 	if err := guard(); err != nil {
 		return ImplementationOutcome{}, err
 	}
-	_, observed, err := loadImplementation(ctx, root, remote, backend)
+	observed, err := loadImplementation(ctx, backend)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
@@ -208,7 +202,7 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 		}
 		if current.Problem == "" && current.State == target && !current.Claimed && (bodyPath == "" || current.Submission != nil && current.Submission.Head == head && current.Submission.Draft == (target == NeedsHuman)) {
 			transition.Completed = true
-			if err := backend.RecordImplementationTransition(ctx, repository, current, transition); err != nil {
+			if err := backend.RecordImplementationTransition(ctx, current, transition); err != nil {
 				return ImplementationOutcome{}, err
 			}
 			if err := guard(); err != nil {
@@ -225,17 +219,6 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 		return ImplementationOutcome{}, writeErr
 	}
 	return ImplementationOutcome{}, Refuse("handoff projection is incomplete; retry the same semantic command with retained Result Documents")
-}
-
-func withClosingReference(body, reference string) string {
-	if reference == "" {
-		return body
-	}
-	footer := "\n\n" + reference + "\n"
-	if !strings.HasSuffix(body, footer) {
-		body += footer
-	}
-	return body
 }
 
 func removeResultDirectory(bodyPath string) error {

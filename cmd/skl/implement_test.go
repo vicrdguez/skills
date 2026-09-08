@@ -31,7 +31,7 @@ type implementationMemory struct {
 	afterCompletion  func()
 }
 
-func (b *implementationMemory) RecordImplementationTransition(_ context.Context, _ github.RepositoryID, item workflow.ImplementationItem, transition workflow.ImplementationTransition) error {
+func (b *implementationMemory) RecordImplementationTransition(_ context.Context, item workflow.ImplementationItem, transition workflow.ImplementationTransition) error {
 	for i := range b.work {
 		if b.work[i].ID == item.ID {
 			b.work[i].Transition = &transition
@@ -43,7 +43,7 @@ func (b *implementationMemory) RecordImplementationTransition(_ context.Context,
 	return nil
 }
 
-func (b *implementationMemory) RetainImplementationClaim(_ context.Context, _ github.RepositoryID, item workflow.ImplementationItem) error {
+func (b *implementationMemory) RetainImplementationClaim(_ context.Context, item workflow.ImplementationItem) error {
 	for i := range b.work {
 		if b.work[i].ID == item.ID {
 			b.work[i].Claimed = true
@@ -53,11 +53,11 @@ func (b *implementationMemory) RetainImplementationClaim(_ context.Context, _ gi
 	return nil
 }
 
-func (b *implementationMemory) ImplementationTarget(context.Context, github.RepositoryID) (string, error) {
+func (b *implementationMemory) ImplementationTarget(context.Context) (string, error) {
 	return "main", nil
 }
 
-func (b *implementationMemory) PauseImplementation(_ context.Context, _ github.RepositoryID, item workflow.ImplementationItem, decision string, guard func() error) error {
+func (b *implementationMemory) PauseImplementation(_ context.Context, item workflow.ImplementationItem, decision string, guard func() error) error {
 	if b.beforeTransition != nil {
 		b.beforeTransition()
 	}
@@ -82,11 +82,17 @@ func (b *implementationMemory) PauseImplementation(_ context.Context, _ github.R
 	return nil
 }
 
-func (b *implementationMemory) ImplementationHead(_ context.Context, _ github.RepositoryID, branch string) (string, error) {
+func (b *implementationMemory) ImplementationHead(_ context.Context, branch string) (string, error) {
 	return b.remoteHeads[branch], nil
 }
 
-func (b *implementationMemory) PublishImplementation(_ context.Context, _ github.RepositoryID, item workflow.ImplementationItem, submission workflow.Submission) (workflow.Submission, error) {
+func (b *implementationMemory) PublishImplementation(_ context.Context, item workflow.ImplementationItem, submission workflow.Submission) (workflow.Submission, error) {
+	if number, err := strconv.Atoi(string(item.ID)); err == nil {
+		footer := fmt.Sprintf("\n\nCloses #%d\n", number)
+		if !strings.HasSuffix(submission.Body, footer) {
+			submission.Body += footer
+		}
+	}
 	if submission.ID == "" {
 		submission.ID = "11"
 	}
@@ -139,7 +145,7 @@ func TestImplementRefusesInvalidHandoff(t *testing.T) {
 	}
 }
 
-func (b *implementationMemory) AwaitImplementationReview(_ context.Context, _ github.RepositoryID, item workflow.ImplementationItem, guard func() error) error {
+func (b *implementationMemory) AwaitImplementationReview(_ context.Context, item workflow.ImplementationItem, guard func() error) error {
 	if b.beforeTransition != nil {
 		b.beforeTransition()
 	}
@@ -159,23 +165,19 @@ func (b *implementationMemory) AwaitImplementationReview(_ context.Context, _ gi
 	return nil
 }
 
-func (b *implementationMemory) ImplementationItems(_ context.Context, repository github.RepositoryID) ([]workflow.ImplementationItem, error) {
-	b.repository = repository
+func (b *implementationMemory) ImplementationItems(context.Context) ([]workflow.ImplementationItem, error) {
 	items := append([]workflow.ImplementationItem(nil), b.work...)
 	for i := range items {
 		if number, err := strconv.Atoi(string(items[i].ID)); err == nil {
 			if items[i].Order == 0 {
 				items[i].Order = number
 			}
-			if items[i].ClosingReference == "" {
-				items[i].ClosingReference = fmt.Sprintf("Closes #%d", number)
-			}
 		}
 	}
 	return items, nil
 }
 
-func (b *implementationMemory) ClaimImplementation(_ context.Context, _ github.RepositoryID, item workflow.ImplementationItem) error {
+func (b *implementationMemory) ClaimImplementation(_ context.Context, item workflow.ImplementationItem) error {
 	for i := range b.work {
 		if b.work[i].ID == item.ID {
 			b.work[i].TargetSnapshot = item.TargetSnapshot
@@ -202,6 +204,7 @@ func implementCLI(t *testing.T, root string, backend *implementationMemory, args
 		if repository != (github.RepositoryID{Owner: "acme", Name: "widgets"}) {
 			t.Fatalf("implementation backend repository = %#v", repository)
 		}
+		backend.repository = repository
 		return backend, nil
 	}, bytes.NewReader(nil), &output, &output)
 	command := append([]string{"skl", "implement"}, args...)
@@ -331,8 +334,8 @@ func TestImplementAndWatchdogUseNumericTieBreak(t *testing.T) {
 func TestImplementLifecycleOrdersOpaqueIDsByBackendFact(t *testing.T) {
 	root := proposalRepository(t)
 	b := &implementationMemory{work: []workflow.ImplementationItem{
-		{ID: "alpha", Order: 10, ClosingReference: "Resolves alpha", Branch: "ten", State: workflow.Ready, CreatedAt: "2026"},
-		{ID: "zulu", Order: 2, ClosingReference: "Resolves zulu", Branch: "two", State: workflow.Ready, CreatedAt: "2026"},
+		{ID: "alpha", Order: 10, Branch: "ten", State: workflow.Ready, CreatedAt: "2026"},
+		{ID: "zulu", Order: 2, Branch: "two", State: workflow.Ready, CreatedAt: "2026"},
 	}, remoteHeads: map[string]string{"main": strings.TrimSpace(runGitOutput(t, root, "rev-parse", "main"))}}
 	for _, item := range b.work {
 		prepareSlice(t, root, item.Branch)

@@ -16,6 +16,11 @@ import (
 	"github.com/vicrdguez/skills/workflow"
 )
 
+func boundGitHubBackend(backend *GitHubBackend) *GitHubBackend {
+	backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
+	return backend
+}
+
 func TestGitHubImplementationRejectsDuplicateSourceOwnership(t *testing.T) {
 	for _, attached := range []bool{false, true} {
 		t.Run(fmt.Sprint(attached), func(t *testing.T) {
@@ -40,10 +45,11 @@ func TestGitHubImplementationRejectsDuplicateSourceOwnership(t *testing.T) {
 				}
 			}))
 			defer server.Close()
-			b := NewGitHubBackend(server.URL, "token", server.Client())
+			b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
 			ctx := context.Background()
 			repo := github.RepositoryID{Owner: "acme", Name: "widgets"}
-			items, err := b.ImplementationItems(ctx, repo)
+			b.BindRepository(repo)
+			items, err := b.ImplementationItems(ctx)
 			if err != nil || len(items) != 2 {
 				t.Fatalf("items = %#v, %v", items, err)
 			}
@@ -51,10 +57,10 @@ func TestGitHubImplementationRejectsDuplicateSourceOwnership(t *testing.T) {
 				if !strings.Contains(item.Problem, "multiple source") {
 					t.Errorf("ambiguous ownership accepted: %#v", item)
 				}
-				if err := b.ClaimImplementation(ctx, repo, item); err == nil {
+				if err := b.ClaimImplementation(ctx, item); err == nil {
 					t.Error("ambiguous Claim accepted")
 				}
-				if _, err := b.PublishImplementation(ctx, repo, item, workflow.Submission{Head: "fixed", Base: "main", Body: "replacement"}); err == nil {
+				if _, err := b.PublishImplementation(ctx, item, workflow.Submission{Head: "fixed", Base: "main", Body: "replacement"}); err == nil {
 					t.Error("ambiguous publication accepted")
 				}
 			}
@@ -83,8 +89,9 @@ func TestGitHubImplementationRejectsReassignedSourceBeforePublication(t *testing
 		}
 	}))
 	defer server.Close()
-	b := NewGitHubBackend(server.URL, "token", server.Client())
-	_, err := b.PublishImplementation(context.Background(), github.RepositoryID{Owner: "acme", Name: "widgets"}, workflow.ImplementationItem{ID: "7", Branch: "widget"}, workflow.Submission{ID: "11", Head: "fixed", Base: "main", Body: "replacement"})
+	b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
+	b.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
+	_, err := b.PublishImplementation(context.Background(), workflow.ImplementationItem{ID: "7", Branch: "widget"}, workflow.Submission{ID: "11", Head: "fixed", Base: "main", Body: "replacement"})
 	if err == nil || writes != 0 {
 		t.Fatalf("reassigned source allowed publication: %v, writes=%d", err, writes)
 	}
@@ -118,9 +125,10 @@ func TestGitHubImplementationNormalizesPaginatedWork(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	backend := NewGitHubBackend(server.URL, "token", server.Client())
-	items, err := backend.ImplementationItems(context.Background(), github.RepositoryID{Owner: "acme", Name: "widgets"})
-	if err != nil || len(items) != 1 || items[0].ID != "7" || items[0].Order != 7 || items[0].ClosingReference != "Closes #7" || !slices.Equal(items[0].Blockers, []workflow.WorkItemID{"2", "3"}) || items[0].State != workflow.Ready || items[0].Branch != "widget" || items[0].CreatedAt != "2020-01-01T00:00:00Z" {
+	backend := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
+	backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
+	items, err := backend.ImplementationItems(context.Background())
+	if err != nil || len(items) != 1 || items[0].ID != "7" || items[0].Order != 7 || !slices.Equal(items[0].Blockers, []workflow.WorkItemID{"2", "3"}) || items[0].State != workflow.Ready || items[0].Branch != "widget" || items[0].CreatedAt != "2020-01-01T00:00:00Z" {
 		t.Fatalf("items = %#v, %v", items, err)
 	}
 }
@@ -132,42 +140,43 @@ func TestGitHubLifecycleRejectsInvalidIdentitiesBeforeTransport(t *testing.T) {
 		http.Error(w, "unexpected transport", http.StatusBadRequest)
 	}))
 	defer server.Close()
-	b := NewGitHubBackend(server.URL, "token", server.Client())
+	b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
 	ctx := context.Background()
 	repo := github.RepositoryID{Owner: "acme", Name: "widgets"}
+	b.BindRepository(repo)
 	guard := func() error { return nil }
 	operations := map[string]func(workflow.ImplementationItem) error{
 		"claim": func(item workflow.ImplementationItem) error {
-			return b.ClaimImplementation(ctx, repo, item)
+			return b.ClaimImplementation(ctx, item)
 		},
 		"publish": func(item workflow.ImplementationItem) error {
-			_, err := b.PublishImplementation(ctx, repo, item, *item.Submission)
+			_, err := b.PublishImplementation(ctx, item, *item.Submission)
 			return err
 		},
 		"await": func(item workflow.ImplementationItem) error {
-			return b.AwaitImplementationReview(ctx, repo, item, guard)
+			return b.AwaitImplementationReview(ctx, item, guard)
 		},
 		"pause": func(item workflow.ImplementationItem) error {
-			return b.PauseImplementation(ctx, repo, item, "opaque decision", guard)
+			return b.PauseImplementation(ctx, item, "opaque decision", guard)
 		},
 		"retain": func(item workflow.ImplementationItem) error {
-			return b.RetainImplementationClaim(ctx, repo, item)
+			return b.RetainImplementationClaim(ctx, item)
 		},
 		"complete-review": func(item workflow.ImplementationItem) error {
-			return b.CompleteReview(ctx, repo, item, workflow.Rework, guard)
+			return b.CompleteReview(ctx, item, workflow.Rework, guard)
 		},
 		"transition": func(item workflow.ImplementationItem) error {
-			return b.RecordImplementationTransition(ctx, repo, item, workflow.ImplementationTransition{})
+			return b.RecordImplementationTransition(ctx, item, workflow.ImplementationTransition{})
 		},
 		"close-coordination": func(item workflow.ImplementationItem) error {
-			return b.CloseCoordination(ctx, repo, item.ID)
+			return b.CloseCoordination(ctx, item.ID)
 		},
 		"review-submission": func(item workflow.ImplementationItem) error {
-			_, err := b.ReviewSubmission(ctx, repo, item.Submission.ID)
+			_, err := b.ReviewSubmission(ctx, item.Submission.ID)
 			return err
 		},
 		"publish-review": func(item workflow.ImplementationItem) error {
-			return b.PublishReview(ctx, repo, item, nil, guard)
+			return b.PublishReview(ctx, item, nil, guard)
 		},
 	}
 	for _, id := range []string{"", "0", "-1", "07", "7/labels", "issue:7", "999999999999999999999999"} {
@@ -294,47 +303,48 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 		json.NewEncoder(w).Encode(result)
 	}))
 	defer server.Close()
-	b := NewGitHubBackend(server.URL, "token", server.Client())
+	b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
 	ctx := context.Background()
 	repo := github.RepositoryID{Owner: "acme", Name: "widgets"}
+	b.BindRepository(repo)
 	item := workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Ready, TargetSnapshot: "snapshot"}
-	if err := b.ClaimImplementation(ctx, repo, item); err != nil {
+	if err := b.ClaimImplementation(ctx, item); err != nil {
 		t.Fatal(err)
 	}
-	items, err := b.ImplementationItems(ctx, repo)
+	items, err := b.ImplementationItems(ctx)
 	if err != nil || len(items) != 1 || !items[0].Claimed || items[0].TargetSnapshot != "snapshot" {
 		t.Fatalf("Claim: %#v %v", items, err)
 	}
 	item = items[0]
 	decision := "<!-- skl.implement/v1\n{\"target_snapshot\":\"agent-prose-not-metadata\"}\n-->"
 	pause := workflow.ImplementationTransition{From: workflow.Ready, Target: workflow.NeedsHuman, Head: "fixed", DecisionDigest: fmt.Sprintf("%x", sha256.Sum256([]byte(decision)))}
-	if err := b.RecordImplementationTransition(ctx, repo, item, pause); err != nil {
+	if err := b.RecordImplementationTransition(ctx, item, pause); err != nil {
 		t.Fatal(err)
 	}
-	if err := b.PauseImplementation(ctx, repo, item, decision, func() error { return nil }); err != nil {
+	if err := b.PauseImplementation(ctx, item, decision, func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
-	items, err = b.ImplementationItems(ctx, repo)
+	items, err = b.ImplementationItems(ctx)
 	if err != nil || len(items) != 1 || items[0].Problem != "" || items[0].TargetSnapshot != "snapshot" || items[0].State != workflow.NeedsHuman {
 		t.Fatalf("opaque decision parsed as metadata: %#v %v", items, err)
 	}
 	pause.Completed = true
-	if err := b.RecordImplementationTransition(ctx, repo, item, pause); err != nil {
+	if err := b.RecordImplementationTransition(ctx, item, pause); err != nil {
 		t.Fatal(err)
 	}
 	labels[7] = []string{"ready", "external", "wip"}
-	submission, err := b.PublishImplementation(ctx, repo, item, workflow.Submission{Head: "fixed", Base: "main", Body: "opaque\n\nCloses #7\n"})
+	submission, err := b.PublishImplementation(ctx, item, workflow.Submission{Head: "fixed", Base: "main", Body: "opaque"})
 	if err != nil || submission.ID != "11" {
 		t.Fatalf("publication = %#v, %v", submission, err)
 	}
 	item.Submission = &submission
 	submission.Body = "updated opaque\n\nCloses #7\n"
-	updated, err := b.PublishImplementation(ctx, repo, item, submission)
+	updated, err := b.PublishImplementation(ctx, item, submission)
 	if err != nil || updated.Body != submission.Body || creations != 1 {
 		t.Fatalf("update = %#v, %v, creations=%d", updated, err, creations)
 	}
 	item.Submission = &updated
-	if err := b.AwaitImplementationReview(ctx, repo, item, func() error { return nil }); err != nil {
+	if err := b.AwaitImplementationReview(ctx, item, func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if fmt.Sprint(labels[7]) != "[external]" || fmt.Sprint(labels[11]) != "[review]" {
@@ -344,17 +354,17 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 	item.State = workflow.Rework
 	item.Claimed = true
 	transition := workflow.ImplementationTransition{From: workflow.Rework, Target: workflow.NeedsHuman, Head: "fixed"}
-	if err := b.RecordImplementationTransition(ctx, repo, item, transition); err != nil {
+	if err := b.RecordImplementationTransition(ctx, item, transition); err != nil {
 		t.Fatal(err)
 	}
 	labels[7] = []string{"done"}
-	items, err = b.ImplementationItems(ctx, repo)
+	items, err = b.ImplementationItems(ctx)
 	if err != nil || len(items) != 1 || items[0].Problem == "" {
 		t.Fatalf("pending drift accepted: %#v %v", items, err)
 	}
 	labels[7] = []string{"external"}
 	updated.Draft = true
-	draft, err := b.PublishImplementation(ctx, repo, item, updated)
+	draft, err := b.PublishImplementation(ctx, item, updated)
 	if err != nil || !draft.Draft {
 		t.Fatalf("draft = %#v %v", draft, err)
 	}
@@ -367,17 +377,17 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 		}
 		return nil
 	}
-	if err := b.PauseImplementation(ctx, repo, item, "opaque decision", guard); err == nil {
+	if err := b.PauseImplementation(ctx, item, "opaque decision", guard); err == nil {
 		t.Fatal("fixture did not interrupt pause")
 	}
-	items, err = b.ImplementationItems(ctx, repo)
+	items, err = b.ImplementationItems(ctx)
 	if err != nil || len(items) != 1 || items[0].Problem != "" || items[0].State != workflow.Rework || !items[0].Claimed {
 		t.Fatalf("interrupted pause = %#v %v", items, err)
 	}
-	if err := b.PauseImplementation(ctx, repo, item, "opaque decision", guard); err != nil {
+	if err := b.PauseImplementation(ctx, item, "opaque decision", guard); err != nil {
 		t.Fatal(err)
 	}
-	items, err = b.ImplementationItems(ctx, repo)
+	items, err = b.ImplementationItems(ctx)
 	if err != nil || items[0].State != workflow.NeedsHuman || items[0].Claimed || items[0].ResumeState != workflow.Rework || !items[0].Submission.Draft {
 		t.Fatalf("completed pause = %#v %v", items, err)
 	}
@@ -415,8 +425,9 @@ func TestGitHubImplementationRejectsForeignAttachmentsAndConflictingMetadata(t *
 				}
 			}))
 			defer server.Close()
-			b := NewGitHubBackend(server.URL, "token", server.Client())
-			items, err := b.ImplementationItems(context.Background(), github.RepositoryID{Owner: "acme", Name: "widgets"})
+			b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
+			b.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
+			items, err := b.ImplementationItems(context.Background())
 			if err != nil || len(items) != 1 {
 				t.Fatalf("items = %#v %v", items, err)
 			}

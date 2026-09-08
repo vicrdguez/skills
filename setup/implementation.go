@@ -51,12 +51,16 @@ func githubImplementationNumbers(item workflow.ImplementationItem) (int, int, er
 	return number, submissionNumber, nil
 }
 
-func (b *GitHubBackend) ClaimImplementation(ctx context.Context, repository github.RepositoryID, item workflow.ImplementationItem) error {
+func (b *GitHubBackend) ClaimImplementation(ctx context.Context, item workflow.ImplementationItem) error {
+	if err := b.requireRepository(); err != nil {
+		return err
+	}
+	repository := b.repository
 	itemNumber, submissionNumber, err := githubImplementationNumbers(item)
 	if err != nil {
 		return err
 	}
-	items, err := b.ImplementationItems(ctx, repository)
+	items, err := b.ImplementationItems(ctx)
 	if err != nil {
 		return err
 	}
@@ -200,7 +204,11 @@ func (b *GitHubBackend) implementationLabelMutation(ctx context.Context, reposit
 	return nil
 }
 
-func (b *GitHubBackend) PublishImplementation(ctx context.Context, repository github.RepositoryID, item workflow.ImplementationItem, wanted workflow.Submission) (workflow.Submission, error) {
+func (b *GitHubBackend) PublishImplementation(ctx context.Context, item workflow.ImplementationItem, wanted workflow.Submission) (workflow.Submission, error) {
+	if err := b.requireRepository(); err != nil {
+		return workflow.Submission{}, err
+	}
+	repository := b.repository
 	itemNumber, err := githubIssueNumber(item.ID)
 	if err != nil {
 		return workflow.Submission{}, err
@@ -212,6 +220,7 @@ func (b *GitHubBackend) PublishImplementation(ctx context.Context, repository gi
 			return workflow.Submission{}, err
 		}
 	}
+	wanted.Body = withClosingReference(wanted.Body, itemNumber)
 	issues, err := b.listIssues(ctx, repository)
 	if err != nil {
 		return workflow.Submission{}, err
@@ -295,7 +304,11 @@ func (b *GitHubBackend) PublishImplementation(ctx context.Context, repository gi
 	return wanted, nil
 }
 
-func (b *GitHubBackend) AwaitImplementationReview(ctx context.Context, repository github.RepositoryID, item workflow.ImplementationItem, guard func() error) (err error) {
+func (b *GitHubBackend) AwaitImplementationReview(ctx context.Context, item workflow.ImplementationItem, guard func() error) (err error) {
+	if err := b.requireRepository(); err != nil {
+		return err
+	}
+	repository := b.repository
 	itemNumber, submissionNumber, err := githubImplementationNumbers(item)
 	if err != nil {
 		return err
@@ -327,7 +340,11 @@ func (b *GitHubBackend) AwaitImplementationReview(ctx context.Context, repositor
 	return b.implementationLabelMutation(ctx, repository, itemNumber, nil, []string{"ready", "wip"}, guard)
 }
 
-func (b *GitHubBackend) PauseImplementation(ctx context.Context, repository github.RepositoryID, item workflow.ImplementationItem, decision string, guard func() error) (err error) {
+func (b *GitHubBackend) PauseImplementation(ctx context.Context, item workflow.ImplementationItem, decision string, guard func() error) (err error) {
+	if err := b.requireRepository(); err != nil {
+		return err
+	}
+	repository := b.repository
 	itemNumber, submissionNumber, err := githubImplementationNumbers(item)
 	if err != nil {
 		return err
@@ -362,7 +379,11 @@ func (b *GitHubBackend) PauseImplementation(ctx context.Context, repository gith
 	return b.implementationLabelMutation(ctx, repository, itemNumber, []string{"needs-human"}, []string{"ready", "wip"}, guard)
 }
 
-func (b *GitHubBackend) RecordImplementationTransition(ctx context.Context, repository github.RepositoryID, item workflow.ImplementationItem, transition workflow.ImplementationTransition) error {
+func (b *GitHubBackend) RecordImplementationTransition(ctx context.Context, item workflow.ImplementationItem, transition workflow.ImplementationTransition) error {
+	if err := b.requireRepository(); err != nil {
+		return err
+	}
+	repository := b.repository
 	number, err := githubIssueNumber(item.ID)
 	if err != nil {
 		return err
@@ -370,7 +391,11 @@ func (b *GitHubBackend) RecordImplementationTransition(ctx context.Context, repo
 	return b.publishImplementationMetadata(ctx, repository, number, implementationMetadata{Transition: &transition})
 }
 
-func (b *GitHubBackend) RetainImplementationClaim(ctx context.Context, repository github.RepositoryID, item workflow.ImplementationItem) error {
+func (b *GitHubBackend) RetainImplementationClaim(ctx context.Context, item workflow.ImplementationItem) error {
+	if err := b.requireRepository(); err != nil {
+		return err
+	}
+	repository := b.repository
 	number, submissionNumber, err := githubImplementationNumbers(item)
 	if err != nil {
 		return err
@@ -410,7 +435,11 @@ func implementationBranchOwners(issues []githubIssue) map[string]int {
 	return owners
 }
 
-func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository github.RepositoryID) ([]workflow.ImplementationItem, error) {
+func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.ImplementationItem, error) {
+	if err := b.requireRepository(); err != nil {
+		return nil, err
+	}
+	repository := b.repository
 	issues, err := b.listIssues(ctx, repository)
 	if err != nil {
 		return nil, err
@@ -442,7 +471,7 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository gith
 			continue
 		}
 		state, claimed, problem := implementationLabels(issue)
-		item := workflow.ImplementationItem{ID: workflow.WorkItemID(strconv.Itoa(issue.Number)), Order: issue.Number, ClosingReference: fmt.Sprintf("Closes #%d", issue.Number), Branch: issue.Title, CreatedAt: issue.CreatedAt, State: state, Claimed: claimed, Problem: problem}
+		item := workflow.ImplementationItem{ID: workflow.WorkItemID(strconv.Itoa(issue.Number)), Order: issue.Number, Branch: issue.Title, CreatedAt: issue.CreatedAt, State: state, Claimed: claimed, Problem: problem}
 		if len(matches) > 1 {
 			item.Problem = "multiple Submissions share the conventional branch"
 		}
@@ -632,7 +661,7 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository gith
 			item.Problem = "multiple source issues own the conventional branch"
 		}
 		if len(matches) == 1 && (item.Problem == "contradictory lifecycle projections" || item.Problem == "" && item.Claimed && (item.State == workflow.ReadyForMerge || item.State == workflow.NeedsHuman || item.State == workflow.Rework)) && (item.Transition == nil || item.Transition.Completed) {
-			observation, err := b.ReviewSubmission(ctx, repository, item.Submission.ID)
+			observation, err := b.ReviewSubmission(ctx, item.Submission.ID)
 			if err != nil {
 				return nil, err
 			}
@@ -647,8 +676,11 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository gith
 	return items, nil
 }
 
-func (b *GitHubBackend) ImplementationTarget(ctx context.Context, repository github.RepositoryID) (string, error) {
-	return b.validate(ctx, repository)
+func (b *GitHubBackend) ImplementationTarget(ctx context.Context) (string, error) {
+	if err := b.requireRepository(); err != nil {
+		return "", err
+	}
+	return b.validate(ctx, b.repository)
 }
 
 func implementationLabels(issue githubIssue) (workflow.State, bool, string) {
@@ -715,7 +747,11 @@ func (b *GitHubBackend) implementationComments(ctx context.Context, repository g
 	}
 }
 
-func (b *GitHubBackend) ImplementationHead(ctx context.Context, repository github.RepositoryID, branch string) (string, error) {
+func (b *GitHubBackend) ImplementationHead(ctx context.Context, branch string) (string, error) {
+	if err := b.requireRepository(); err != nil {
+		return "", err
+	}
+	repository := b.repository
 	var ref struct {
 		Object struct {
 			SHA string `json:"sha"`
@@ -726,4 +762,12 @@ func (b *GitHubBackend) ImplementationHead(ctx context.Context, repository githu
 		return "", err
 	}
 	return ref.Object.SHA, nil
+}
+
+func withClosingReference(body string, number int) string {
+	footer := fmt.Sprintf("\n\nCloses #%d\n", number)
+	if !strings.HasSuffix(body, footer) {
+		body += footer
+	}
+	return body
 }

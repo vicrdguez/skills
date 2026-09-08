@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	skilldist "github.com/vicrdguez/skills"
-	"github.com/vicrdguez/skills/github"
 )
 
 type State string
@@ -29,21 +28,20 @@ const (
 )
 
 type ImplementationItem struct {
-	Synchronization  bool
-	Problem          string
-	ResumeState      State
-	Submission       *Submission
-	Branch           string
-	TargetSnapshot   string
-	TargetBranch     string
-	ID               WorkItemID
-	Order            int
-	ClosingReference string
-	State            State
-	CreatedAt        string
-	Claimed          bool
-	Blockers         []WorkItemID
-	Transition       *ImplementationTransition
+	Synchronization bool
+	Problem         string
+	ResumeState     State
+	Submission      *Submission
+	Branch          string
+	TargetSnapshot  string
+	TargetBranch    string
+	ID              WorkItemID
+	Order           int
+	State           State
+	CreatedAt       string
+	Claimed         bool
+	Blockers        []WorkItemID
+	Transition      *ImplementationTransition
 }
 
 type Submission struct {
@@ -65,15 +63,15 @@ type Submission struct {
 }
 
 type ImplementationBackend interface {
-	ImplementationTarget(context.Context, github.RepositoryID) (string, error)
-	ImplementationItems(context.Context, github.RepositoryID) ([]ImplementationItem, error)
-	ClaimImplementation(context.Context, github.RepositoryID, ImplementationItem) error
-	ImplementationHead(context.Context, github.RepositoryID, string) (string, error)
-	PublishImplementation(context.Context, github.RepositoryID, ImplementationItem, Submission) (Submission, error)
-	RecordImplementationTransition(context.Context, github.RepositoryID, ImplementationItem, ImplementationTransition) error
-	RetainImplementationClaim(context.Context, github.RepositoryID, ImplementationItem) error
-	AwaitImplementationReview(context.Context, github.RepositoryID, ImplementationItem, func() error) error
-	PauseImplementation(context.Context, github.RepositoryID, ImplementationItem, string, func() error) error
+	ImplementationTarget(context.Context) (string, error)
+	ImplementationItems(context.Context) ([]ImplementationItem, error)
+	ClaimImplementation(context.Context, ImplementationItem) error
+	ImplementationHead(context.Context, string) (string, error)
+	PublishImplementation(context.Context, ImplementationItem, Submission) (Submission, error)
+	RecordImplementationTransition(context.Context, ImplementationItem, ImplementationTransition) error
+	RetainImplementationClaim(context.Context, ImplementationItem) error
+	AwaitImplementationReview(context.Context, ImplementationItem, func() error) error
+	PauseImplementation(context.Context, ImplementationItem, string, func() error) error
 }
 
 type ImplementationTransition struct {
@@ -100,31 +98,19 @@ type ImplementationOutcome struct {
 	Item   *ImplementationItem        `json:"item,omitempty"`
 }
 
-func loadImplementation(ctx context.Context, root, remote string, backend ImplementationBackend) (github.RepositoryID, []ImplementationItem, error) {
-	remote, err := git(root, "remote", "get-url", remote)
-	if err != nil {
-		return github.RepositoryID{}, nil, err
-	}
-	repository, err := github.ParseGitHubRemote(remote)
-	if err != nil {
-		return github.RepositoryID{}, nil, err
-	}
-	items, err := backend.ImplementationItems(ctx, repository)
+func loadImplementation(ctx context.Context, backend ImplementationBackend) ([]ImplementationItem, error) {
+	items, err := backend.ImplementationItems(ctx)
 	for i := range items {
 		if items[i].Submission != nil && items[i].Submission.Merged {
 			items[i].State = Merged
 			items[i].Claimed = false
 		}
 	}
-	return repository, items, err
+	return items, err
 }
 
 func InspectImplementation(ctx context.Context, root, remote string, id WorkItemID, backend ImplementationBackend) (ImplementationOutcome, error) {
-	remote, err := github.ResolveGitHubRemote(root, remote)
-	if err != nil {
-		return ImplementationOutcome{}, err
-	}
-	_, items, err := loadImplementation(ctx, root, remote, backend)
+	items, err := loadImplementation(ctx, backend)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
@@ -143,11 +129,7 @@ func InspectImplementation(ctx context.Context, root, remote string, id WorkItem
 }
 
 func StartImplementation(ctx context.Context, root, remote string, id WorkItemID, snapshot, reviewedHead string, backend ImplementationBackend) (ImplementationOutcome, error) {
-	remote, err := github.ResolveGitHubRemote(root, remote)
-	if err != nil {
-		return ImplementationOutcome{}, err
-	}
-	repository, items, err := loadImplementation(ctx, root, remote, backend)
+	items, err := loadImplementation(ctx, backend)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
@@ -172,11 +154,11 @@ func StartImplementation(ctx context.Context, root, remote string, id WorkItemID
 		}
 		for _, item := range items {
 			if item.ID == id && item.Claimed && (item.State == Ready || item.State == Rework) {
-				prepared, outcome, err := prepareImplementationStart(ctx, root, remote, repository, item, snapshot, reviewedHead, backend)
+				prepared, outcome, err := prepareImplementationStart(ctx, root, remote, item, snapshot, reviewedHead, backend)
 				if err != nil || outcome.Status != "" {
 					return outcome, err
 				}
-				if err := backend.ClaimImplementation(ctx, repository, prepared); err != nil {
+				if err := backend.ClaimImplementation(ctx, prepared); err != nil {
 					return ImplementationOutcome{}, err
 				}
 				item = prepared
@@ -216,13 +198,13 @@ func StartImplementation(ctx context.Context, root, remote string, id WorkItemID
 		if blocked {
 			continue
 		}
-		prepared, outcome, err := prepareImplementationStart(ctx, root, remote, repository, item, snapshot, reviewedHead, backend)
+		prepared, outcome, err := prepareImplementationStart(ctx, root, remote, item, snapshot, reviewedHead, backend)
 		if err != nil || outcome.Status != "" {
 			return outcome, err
 		}
 		item = prepared
-		claimErr := backend.ClaimImplementation(ctx, repository, item)
-		observed, err := backend.ImplementationItems(ctx, repository)
+		claimErr := backend.ClaimImplementation(ctx, item)
+		observed, err := backend.ImplementationItems(ctx)
 		if err != nil {
 			return ImplementationOutcome{}, err
 		}
@@ -239,7 +221,7 @@ func StartImplementation(ctx context.Context, root, remote string, id WorkItemID
 	return ImplementationOutcome{Status: "no_work"}, nil
 }
 
-func prepareImplementationStart(ctx context.Context, root, remote string, repository github.RepositoryID, item ImplementationItem, snapshot, reviewedHead string, backend ImplementationBackend) (ImplementationItem, ImplementationOutcome, error) {
+func prepareImplementationStart(ctx context.Context, root, remote string, item ImplementationItem, snapshot, reviewedHead string, backend ImplementationBackend) (ImplementationItem, ImplementationOutcome, error) {
 	refuse := func(reason string) (ImplementationItem, ImplementationOutcome, error) {
 		return item, ImplementationOutcome{Status: "fix_required", Reason: reason, Item: &item}, nil
 	}
@@ -278,7 +260,7 @@ func prepareImplementationStart(ctx context.Context, root, remote string, reposi
 			item.TargetSnapshot = snapshot
 		}
 		if item.TargetBranch == "" {
-			item.TargetBranch, err = backend.ImplementationTarget(ctx, repository)
+			item.TargetBranch, err = backend.ImplementationTarget(ctx)
 			if err != nil {
 				return item, ImplementationOutcome{}, err
 			}
@@ -287,7 +269,7 @@ func prepareImplementationStart(ctx context.Context, root, remote string, reposi
 			if item.Claimed && head != history.Baseline {
 				return refuse("Target Snapshot is unknown after history changed; read the original packet and resume with --target-snapshot <sha>")
 			}
-			item.TargetSnapshot, err = backend.ImplementationHead(ctx, repository, item.TargetBranch)
+			item.TargetSnapshot, err = backend.ImplementationHead(ctx, item.TargetBranch)
 			if err != nil {
 				return item, ImplementationOutcome{}, err
 			}

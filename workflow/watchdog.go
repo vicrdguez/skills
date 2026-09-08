@@ -9,15 +9,10 @@ import (
 	"slices"
 
 	skilldist "github.com/vicrdguez/skills"
-	"github.com/vicrdguez/skills/github"
 )
 
 func StartWatchdog(ctx context.Context, root, remote string, id WorkItemID, backend ImplementationBackend) (ImplementationOutcome, error) {
-	remote, err := github.ResolveGitHubRemote(root, remote)
-	if err != nil {
-		return ImplementationOutcome{}, err
-	}
-	repository, items, err := loadImplementation(ctx, root, remote, backend)
+	items, err := loadImplementation(ctx, backend)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
@@ -48,10 +43,10 @@ func StartWatchdog(ctx context.Context, root, remote string, id WorkItemID, back
 		submission := *item.Submission
 		submission.ReviewedHead = submission.Head
 		item.Submission = &submission
-		if err := backend.ClaimImplementation(ctx, repository, item); err != nil {
+		if err := backend.ClaimImplementation(ctx, item); err != nil {
 			return ImplementationOutcome{}, err
 		}
-		observed, err := backend.ImplementationItems(ctx, repository)
+		observed, err := backend.ImplementationItems(ctx)
 		if err != nil {
 			return ImplementationOutcome{}, err
 		}
@@ -70,7 +65,7 @@ func StartWatchdog(ctx context.Context, root, remote string, id WorkItemID, back
 			}
 			facts.Bounces = submission.Bounces
 			if port, ok := backend.(ReviewBackend); ok {
-				observed, err := port.ReviewSubmission(ctx, repository, submission.ID)
+				observed, err := port.ReviewSubmission(ctx, submission.ID)
 				if err != nil {
 					return ImplementationOutcome{}, err
 				}
