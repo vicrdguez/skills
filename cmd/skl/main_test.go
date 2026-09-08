@@ -392,6 +392,45 @@ func TestInstallRefreshesOnlyOwnedStubs(t *testing.T) {
 	}
 }
 
+func TestInstallPreservesOpenCodeSkillsAndConfiguration(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"skills/audit/SKILL.md":    "---\nname: audit\n---\nMy own audit skill\n",
+		"skills/personal/SKILL.md": "My unrelated skill\n",
+		"opencode.json":           `{"skills":{"paths":["~/.pi/agent/skills","/my/other/skills"]},"theme":"system"}`,
+	}
+	for file, contents := range files {
+		path := filepath.Join(root, ".config/opencode", file)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var output bytes.Buffer
+	app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, root)
+	for range 2 {
+		if err := app.Run([]string{"skl", "install"}); err != nil {
+			t.Fatal(err)
+		}
+		for file, want := range files {
+			if got := readFile(t, filepath.Join(root, ".config/opencode", file)); got != want {
+				t.Fatalf("user file %s changed: %q", file, got)
+			}
+		}
+		for _, name := range skilldist.SkillNames() {
+			if name == "audit" {
+				continue
+			}
+			got := readFile(t, filepath.Join(root, ".config/opencode/skills", name, "SKILL.md"))
+			if want := readFile(t, filepath.Join(root, ".codex/skills", name, "SKILL.md")); got != want {
+				t.Fatalf("missing nonconflicting common stub for %s: %q", name, got)
+			}
+		}
+	}
+}
+
 func TestRetrieveRenderedSkillInstructions(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, t.TempDir())
