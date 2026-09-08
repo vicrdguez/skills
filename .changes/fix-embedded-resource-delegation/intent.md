@@ -26,12 +26,12 @@ Surgically replace incorrect source-file pointers with the existing CLI retrieva
 - Editing personal harness settings or performing the user's installation cutover as part of this tracked Work Item. That separately authorized local operation follows proposal publication and installs existing merged V1.
 
 ## Definition of Done
-- [ ] Every identified incorrect embedded-resource pointer uses an exact existing CLI command with its owning skill; parent definitions use definition retrieval rather than resource retrieval.
-- [ ] Nested, cross-skill, and bundled-definition instructions retain correct resource ownership without depending on source-tree paths or rereading already-supplied parent definitions.
-- [ ] Audit's Standards brief can obtain the smell baseline through `skl` while retaining ordinary filesystem paths for Consumer Repository standards files.
-- [ ] A runnable source-independent smoke check verifies installed stubs, corrected delegation instructions, and retrieved contents at the CLI seam. Restoring a covered broken pointer makes the check fail.
-- [ ] README explains the authoring/runtime distinction, exact resource retrieval, and the rebuild/install lifecycle without introducing a second distribution mechanism.
-- [ ] The diff is limited to pointer-sized instruction edits, README guidance, and necessary tests; the complete documented Go/Node gate remains green.
+- [x] Every identified incorrect embedded-resource pointer uses an exact existing CLI command with its owning skill; parent definitions use definition retrieval rather than resource retrieval.
+- [x] Nested, cross-skill, and bundled-definition instructions retain correct resource ownership without depending on source-tree paths or rereading already-supplied parent definitions.
+- [x] Audit's Standards brief can obtain the smell baseline through `skl` while retaining ordinary filesystem paths for Consumer Repository standards files.
+- [x] A runnable source-independent smoke check verifies installed stubs, corrected delegation instructions, and retrieved contents at the CLI seam. Restoring a covered broken pointer makes the check fail.
+- [x] README explains the authoring/runtime distinction, exact resource retrieval, and the rebuild/install lifecycle without introducing a second distribution mechanism.
+- [x] The diff is limited to pointer-sized instruction edits, README guidance, and necessary tests; the complete documented Go/Node gate remains green.
 
 ## Manual verification
 None. This slice changes instruction transport pointers and documentation, not live harness session behavior.
