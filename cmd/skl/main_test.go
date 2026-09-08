@@ -306,6 +306,120 @@ func TestInstallSupportedSkillStubs(t *testing.T) {
 	}
 }
 
+func TestEmbeddedResourceDelegationSmoke(t *testing.T) {
+	home := t.TempDir()
+	previous, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(previous) })
+	run := func(t *testing.T, command string) string {
+		t.Helper()
+		var stdout, stderr bytes.Buffer
+		app := newAppWithSkillHome(func() (setup.Backend, error) {
+			t.Fatal("read-only retrieval and installation must not open a backend")
+			return nil, nil
+		}, bytes.NewReader(nil), &stdout, &stderr, home)
+		if err := app.Run(strings.Fields(command)); err != nil {
+			t.Fatalf("%s: %v\n%s", command, err, stderr.String())
+		}
+		if stderr.Len() != 0 {
+			t.Fatalf("%s stderr: %s", command, stderr.String())
+		}
+		return stdout.String()
+	}
+	run(t, "skl install")
+	for _, harness := range []string{".pi/agent/skills", ".codex/skills", ".claude/skills"} {
+		for _, skill := range []string{"audit", "brainstorm", "design", "domain", "explore", "implement", "propose", "shape", "tdd", "watchdog", "writing-for-agents"} {
+			directory := filepath.Join(home, harness, skill)
+			entries, err := os.ReadDir(directory)
+			if err != nil || len(entries) != 1 || entries[0].Name() != "SKILL.md" {
+				t.Fatalf("%s must contain only a stub: %v (%v)", directory, entries, err)
+			}
+			stub := readFile(t, filepath.Join(directory, "SKILL.md"))
+			_, body, found := strings.Cut(strings.TrimPrefix(stub, "---\n"), "\n---\n")
+			command := "skl skill " + skill
+			if skill == "implement" {
+				command = "skl implement next"
+			}
+			want := "\n<!-- skl-owned: skl.stub/v1 -->\n\nRun `" + command + "`. Skip activation for every skill named in `included_skills`; its definition is already in the packet.\n"
+			if !found || body != want {
+				t.Fatalf("%s is not a thin CLI-delegating stub: %s", directory, stub)
+			}
+		}
+	}
+	for _, tc := range []struct {
+		skill, resource, pointer, command, content string
+	}{
+		{"domain", "", "Use the format from `skl skill --resource reference/CONTEXT-FORMAT.md domain`.", "skl skill --resource reference/CONTEXT-FORMAT.md domain", "# CONTEXT.md Format"},
+		{"domain", "", "If any of the three is missing, skip the ADR. Use the format from `skl skill --resource reference/ADR-FORMAT.md domain`.", "skl skill --resource reference/ADR-FORMAT.md domain", "# ADR Format"},
+		{"domain", "", "Use the format from `skl skill --resource reference/CAPABILITIES-FORMAT.md domain`.", "skl skill --resource reference/CAPABILITIES-FORMAT.md domain", "# Capability Doc Format"},
+		{"tdd", "", "See `skl skill --resource reference/tests.md tdd` for examples", "skl skill --resource reference/tests.md tdd", "# Good and Bad Tests"},
+		{"tdd", "", "`skl skill --resource reference/mocking.md tdd` for mocking guidelines.", "skl skill --resource reference/mocking.md tdd", "Mock at **system boundaries** only:"},
+		{"audit", "", "the Standards axis always carries the **smell baseline** from `skl skill --resource reference/smells.md audit`", "skl skill --resource reference/smells.md audit", "# Smell Baseline"},
+		{"audit", "", "The list of standards-source files you found in step 3, plus `skl skill --resource reference/smells.md audit`. Instruct the sub-agent to read those files and the command's output.", "skl skill --resource reference/smells.md audit", "**The repo overrides.** A documented repo standard always wins"},
+		{"design", "", "see `skl skill --resource reference/DEEPENING.md design`: dependency categories", "skl skill --resource reference/DEEPENING.md design", "### 2. Local-substitutable"},
+		{"design", "", "see `skl skill --resource reference/DESIGN-IT-TWICE.md design`: spin up parallel sub-agents", "skl skill --resource reference/DESIGN-IT-TWICE.md design", "Each must produce a **radically different** interface"},
+		{"design", "reference/DEEPENING.md", "the Design definition (retrieve with `skl skill design` if not already supplied)", "skl skill design", "# Codebase Design"},
+		{"design", "reference/DESIGN-IT-TWICE.md", "Uses the vocabulary in the Design definition (retrieve with `skl skill design` if not already supplied)", "skl skill design", "**The interface is the test surface.**"},
+		{"design", "reference/DESIGN-IT-TWICE.md", "which category they fall into (see `skl skill --resource reference/DEEPENING.md design`)", "skl skill --resource reference/DEEPENING.md design", "## Dependency categories"},
+		{"design", "reference/DESIGN-IT-TWICE.md", "dependency category from `skl skill --resource reference/DEEPENING.md design`, what sits behind the seam", "skl skill --resource reference/DEEPENING.md design", "### 4. True external (Mock)"},
+		{"design", "reference/DESIGN-IT-TWICE.md", "Include both the Design definition's vocabulary (retrieve with `skl skill design` if not already supplied) and `CONTEXT.md` vocabulary in the brief", "skl skill design", "**Locality**"},
+		{"design", "reference/DESIGN-IT-TWICE.md", "Dependency strategy and adapters (see `skl skill --resource reference/DEEPENING.md design`)", "skl skill --resource reference/DEEPENING.md design", "## Testing strategy: replace, don't layer"},
+		{"propose", "", "Follow the template from `skl skill --resource reference/intent.md propose`", "skl skill --resource reference/intent.md propose", "## Definition of Done"},
+		{"propose", "", "Follow the template from `skl skill --resource reference/behavior.md propose`", "skl skill --resource reference/behavior.md propose", "## Feature: Order cancellation"},
+		{"propose", "", "Follow the template from `skl skill --resource reference/plan.md propose`", "skl skill --resource reference/plan.md propose", "### Module shapes & seams"},
+		{"propose", "", "`tasks.md`: Follow the template from `skl skill --resource reference/tasks.md propose`", "skl skill --resource reference/tasks.md propose", "Write it when there's more than a couple of scenarios or any non-behavioral chores."},
+		{"propose", "reference/tasks.md", "When relevant include the capability-doc update as the final doc task (format: `skl skill --resource reference/CAPABILITIES-FORMAT.md domain`).", "skl skill --resource reference/CAPABILITIES-FORMAT.md domain", "# Capability Doc Format"},
+		{"writing-for-agents", "", "When the document you're writing is a skill, read `skl skill --resource SKILL-MECHANICS.md writing-for-agents` for frontmatter, invocation choice, and router skills.", "skl skill --resource SKILL-MECHANICS.md writing-for-agents", "## Invocation"},
+		{"writing-for-agents", "", "**By invocation**, skill-specific: see `skl skill --resource SKILL-MECHANICS.md writing-for-agents`.", "skl skill --resource SKILL-MECHANICS.md writing-for-agents", "## Router skills"},
+		{"writing-for-agents", "SKILL-MECHANICS.md", "the Writing for Agents definition (retrieve with `skl skill writing-for-agents` if not already supplied)", "skl skill writing-for-agents", "## Context pointers"},
+		{"writing-for-agents", "SKILL-MECHANICS.md", "the pointer-writing rules in the Writing for Agents definition apply in full", "skl skill writing-for-agents", "**One trigger per branch.**"},
+		{"writing-for-agents", "SKILL-MECHANICS.md", "the sequence cut lives in the Writing for Agents definition", "skl skill writing-for-agents", "**By sequence**: split a run of steps"},
+	} {
+		t.Run(tc.skill+"/"+tc.pointer, func(t *testing.T) {
+			if tc.resource != "" {
+				if got := run(t, "skl skill --resource "+tc.resource+" "+tc.skill); !strings.Contains(got, tc.pointer) {
+					t.Errorf("resource lacks %q", tc.pointer)
+				}
+			} else {
+				skills := []string{tc.skill}
+				if slices.Contains([]string{"tdd", "audit", "design", "domain"}, tc.skill) {
+					skills = append(skills, "implement")
+				}
+				for _, skill := range skills {
+					for _, format := range []string{"markdown", "json"} {
+						got := run(t, "skl skill --format "+format+" "+skill)
+						if format == "json" {
+							var packet skilldist.Packet
+							if err := json.Unmarshal([]byte(got), &packet); err != nil {
+								t.Fatal(err)
+							}
+							if skill == "implement" && !slices.Equal(packet.IncludedSkills, []string{"tdd", "audit", "design", "domain"}) {
+								t.Fatalf("included skills = %v", packet.IncludedSkills)
+							}
+							got = packet.Instructions
+						}
+						if skill == "implement" {
+							_, got, _ = strings.Cut(got, "\n\n## Included Skill: "+tc.skill+"\n\n")
+						}
+						got, _, _ = strings.Cut(got, "\n\n## Included Skill:")
+						if !strings.Contains(got, tc.pointer) {
+							t.Errorf("%s %s lacks %q", skill, format, tc.pointer)
+						}
+					}
+				}
+			}
+			if got := run(t, tc.command); !strings.Contains(got, tc.content) {
+				t.Errorf("%s lacks meaningful content %q", tc.command, tc.content)
+			}
+		})
+	}
+}
+
 func TestInstallFailsWithoutUserHome(t *testing.T) {
 	t.Setenv("HOME", "")
 	var output bytes.Buffer
@@ -371,7 +485,7 @@ func TestRetrieveConcreteProposeInstructions(t *testing.T) {
 	for section, requirements := range map[string][]string{
 		"slice judgment":      {"COMPLETE path through every layer", "demoable and verifiable on its own", "single fresh context window", "Iterate until the user approves the breakdown"},
 		"seam judgment":       {"Use the `design` skill", "Always prefer existing seams", "Use the highest seam possible", "Check with the user if the seams match their expectations"},
-		"artifact authorship": {"## Writing the change artifacts", "`intent.md`: Why / What / Scope / Out of scope / Definition of Done", "*Gherkin notation*", "module shapes and seams chosen for implementation", "Discoveries belong in PR findings or in a new proposal", "./reference/tasks.md"},
+		"artifact authorship": {"## Writing the change artifacts", "`intent.md`: Why / What / Scope / Out of scope / Definition of Done", "*Gherkin notation*", "module shapes and seams chosen for implementation", "Discoveries belong in PR findings or in a new proposal", "skl skill --resource reference/tasks.md propose"},
 		"publication":         {"skl propose publish", "skl propose cleanup"},
 		"independent delivery": {
 			"Prefer separate Work Items for behaviors that deliver safe, useful results independently",

@@ -87,9 +87,9 @@ Publishing them freezes them. From that commit on, the only edit anyone may make
 So resolve the contradictions now, while you still can — between the artifacts themselves, and between them and the project's own rules. Afterwards nobody downstream can fix them; they can only stop and ask you.
 
 **Always**:
-- `intent.md`: Why / What / Scope / Out of scope / Definition of Done. Follow the [intent.md](./reference/intent.md) template
-- `behavior.md`: The exact required behavior(s) to implement, in *Gherkin notation* that map to `intent.md` *Definition of Done* section. Since seams are where we test at, use `tdd` to define good tests and avoid anti-patterns. The final list of behaviours will translate directly to what should be implemented and tested. Follow the [behavior.md](./reference/behavior.md) template
+- `intent.md`: Why / What / Scope / Out of scope / Definition of Done. Follow the template from `skl skill --resource reference/intent.md propose`
+- `behavior.md`: The exact required behavior(s) to implement, in *Gherkin notation* that map to `intent.md` *Definition of Done* section. Since seams are where we test at, use `tdd` to define good tests and avoid anti-patterns. The final list of behaviours will translate directly to what should be implemented and tested. Follow the template from `skl skill --resource reference/behavior.md propose`
 
 **When warranted**:
-- `plan.md`: The approach, the module shapes and seams chosen for implementation and any pinned decision the implementer MUST NOT make on its own. Follow the [plan.md](./reference/plan.md) template
-- `tasks.md`: Follow the [tasks.md](./reference/tasks.md) template — it states when it is warranted
+- `plan.md`: The approach, the module shapes and seams chosen for implementation and any pinned decision the implementer MUST NOT make on its own. Follow the template from `skl skill --resource reference/plan.md propose`
+- `tasks.md`: Follow the template from `skl skill --resource reference/tasks.md propose` — it states when it is warranted
