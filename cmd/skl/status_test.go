@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/vicrdguez/skills/setup"
@@ -83,5 +84,23 @@ func TestStatusNormalizesPartialAndContradictoryRecords(t *testing.T) {
 	}
 	if got.Items[8].State != workflow.AwaitingReview || got.Items[8].Claimed || got.Items[9].State != workflow.NeedsHuman || got.Items[7].Branch != "retained-reference" {
 		t.Fatalf("normalized status: %#v", got)
+	}
+}
+
+func TestStatusCompletesPartiallyProjectedReview(t *testing.T) {
+	b := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.Rework, Claimed: true, Submission: &workflow.Submission{Number: 11, Head: "fixed", PendingReview: workflow.Rework}}}}
+	got := statusCLI(t, proposalRepository(t), b)
+	if got.Items[0].Claimed || got.Items[0].Submission.PendingReview != "" || got.Items[0].State != workflow.Rework {
+		t.Fatalf("partial review: %#v", got)
+	}
+}
+
+func TestStatusRoutesAcceptedConflictToSynchronizationRework(t *testing.T) {
+	root := proposalRepository(t)
+	target := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "main"))
+	b := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.ReadyForMerge, Submission: &workflow.Submission{Number: 11, Head: "fixed", Base: "main", Mergeability: "conflicting", Bounces: 1}}}, remoteHeads: map[string]string{"main": target}}
+	got := statusCLI(t, root, b)
+	if got.Items[0].State != workflow.Rework || !got.Items[0].Synchronization || got.Items[0].TargetSnapshot != target || got.Items[0].Submission.Bounces != 1 {
+		t.Fatalf("accepted conflict: %#v", got)
 	}
 }

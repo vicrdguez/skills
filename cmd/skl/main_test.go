@@ -217,7 +217,7 @@ func TestDocumentedImplementResourceCommands(t *testing.T) {
 					t.Errorf("%s: %v", command, err)
 					continue
 				}
-				if output.String() != readRepositoryFile(t, "skills/dev/implement/"+resource) {
+				if output.String() != readRepositoryFile(t, "skills/dev/"+args[len(args)-1]+"/"+resource) {
 					t.Errorf("%s returned the wrong resource", command)
 				}
 			}

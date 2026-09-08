@@ -87,7 +87,6 @@ func TestGitHubWatchdogClaimsSubmissionAndReadsReviewFacts(t *testing.T) {
 	if err != nil || !items[0].Claimed || items[0].Submission.ReviewedHead != "fixed" || !slices.Contains(labels, "review") || posts != 1 {
 		t.Fatalf("claim: %#v %v labels=%v posts=%d", items, err, labels, posts)
 	}
-	_ = fmt.Sprint
 }
 
 func TestGitHubWatchdogPublishesOpaqueAnchorsOnceAfterLostResponse(t *testing.T) {
@@ -167,10 +166,20 @@ func TestGitHubWatchdogCompletesReviewWithoutClosingSource(t *testing.T) {
 	for target, label := range map[workflow.State]string{workflow.Rework: "rework", workflow.NeedsHuman: "needs-human", workflow.ReadyForMerge: "done"} {
 		t.Run(string(target), func(t *testing.T) {
 			labels := []string{"review", "wip", "external"}
+			sourcePaused := true
 			var comments []map[string]any
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				path := strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets")
 				switch {
+				case path == "/issues/7" && r.Method == "GET":
+					ls := []map[string]string{}
+					if sourcePaused {
+						ls = append(ls, map[string]string{"name": "needs-human"})
+					}
+					json.NewEncoder(w).Encode(map[string]any{"state": "open", "labels": ls})
+				case path == "/issues/7/labels/needs-human" && r.Method == "DELETE":
+					sourcePaused = false
+					http.Error(w, "lost", 500)
 				case path == "/issues/7/comments":
 					if r.Method == "POST" {
 						var p map[string]any
@@ -213,6 +222,9 @@ func TestGitHubWatchdogCompletesReviewWithoutClosingSource(t *testing.T) {
 			if len(labels) != 2 || !slices.Contains(labels, label) || !slices.Contains(labels, "external") {
 				t.Fatalf("projection: %v", labels)
 			}
+			if target != workflow.NeedsHuman && sourcePaused {
+				t.Fatal("successful requeued review retained stale source pause")
+			}
 		})
 	}
 }
@@ -235,6 +247,8 @@ func TestGitHubWatchdogPersistsSynchronizationTarget(t *testing.T) {
 			result = []any{pull}
 		case path == "/issues/11":
 			result = pull
+		case path == "/issues/7":
+			result = map[string]any{"number": 7, "state": "open"}
 		case path == "/issues/7/comments":
 			if r.Method == "POST" {
 				var p map[string]any
@@ -270,6 +284,12 @@ func TestGitHubWatchdogPersistsSynchronizationTarget(t *testing.T) {
 	if err != nil || len(items) != 1 || !items[0].Synchronization || items[0].TargetSnapshot != "new-target" || !slices.Contains(labels, "sync") {
 		t.Fatalf("sync: %#v %v %v", items, err, labels)
 	}
+	if err := b.AwaitImplementationReview(context.Background(), repo, items[0], func() error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(labels, "sync") || !slices.Contains(labels, "review") {
+		t.Fatalf("synchronization leaked into next review: %v", labels)
+	}
 }
 
 func TestGitHubWatchdogHumanRequeueUsesProjectionNotProse(t *testing.T) {
@@ -292,6 +312,128 @@ func TestGitHubWatchdogHumanRequeueUsesProjectionNotProse(t *testing.T) {
 		want := map[string]workflow.State{"needs-human": workflow.NeedsHuman, "review": workflow.AwaitingReview, "rework": workflow.Rework}[label]
 		if err != nil || len(items) != 1 || items[0].State != want || len(items[0].Submission.Comments) != 1 || items[0].Submission.Comments[0].Body != "Please pass! [opaque" {
 			t.Fatalf("human projection %s: %#v %v", label, items, err)
+		}
+	}
+}
+
+func TestGitHubStatusReadsChildrenAndReconcilesLostClosure(t *testing.T) {
+	closed := false
+	writes := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		state := "open"
+		if closed {
+			state = "closed"
+		}
+		switch r.URL.Path {
+		case "/repos/acme/widgets/issues":
+			fmt.Fprintf(w, `[{"number":100,"title":"proposal","state":%q,"sub_issues_summary":{"total":101}}]`, state)
+		case "/repos/acme/widgets/issues/100/sub_issues":
+			if r.URL.Query().Get("page") == "1" {
+				children := []map[string]int{}
+				for i := 1; i <= 100; i++ {
+					children = append(children, map[string]int{"number": i})
+				}
+				json.NewEncoder(w).Encode(children)
+			} else {
+				fmt.Fprint(w, `[{"number":101}]`)
+			}
+		case "/repos/acme/widgets/issues/100":
+			if r.Method == "PATCH" {
+				var p map[string]string
+				json.NewDecoder(r.Body).Decode(&p)
+				if p["state"] != "closed" {
+					t.Errorf("unexpected patch %v", p)
+				}
+				closed = true
+				writes++
+				http.Error(w, "lost closure response", 500)
+				return
+			}
+			fmt.Fprintf(w, `{"number":100,"state":%q}`, state)
+		default:
+			t.Errorf("unexpected %s", r.URL)
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	b := NewGitHubBackend(server.URL, "token", server.Client())
+	repo := workflow.RepositoryID{Owner: "acme", Name: "widgets"}
+	ctx := context.Background()
+	parents, err := b.CoordinationItems(ctx, repo)
+	if err != nil || len(parents) != 1 || len(parents[0].Children) != 101 || parents[0].Children[100] != 101 {
+		t.Fatalf("children: %#v %v", parents, err)
+	}
+	for range 2 {
+		if err := b.CloseCoordination(ctx, repo, 100); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !closed || writes != 1 {
+		t.Fatalf("closure: %t writes=%d", closed, writes)
+	}
+}
+
+func TestGitHubStatusAdoptsOnlyForwardReviewProjections(t *testing.T) {
+	for _, latest := range []string{"rework", "review", "done", "partial"} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			pull := `{"number":11,"state":"open","labels":[{"name":"review"},{"name":"rework"},{"name":"wip"}],"head":{"sha":"fixed","ref":"widget","repo":{"full_name":"acme/widgets"}}}`
+			if latest == "partial" {
+				pull = strings.Replace(pull, `{"name":"review"},`, "", 1)
+			}
+			switch r.URL.Path {
+			case "/repos/acme/widgets/issues":
+				fmt.Fprint(w, `[{"number":7,"title":"widget","state":"open"}]`)
+			case "/repos/acme/widgets/pulls":
+				fmt.Fprint(w, "["+pull+"]")
+			case "/repos/acme/widgets/pulls/11":
+				fmt.Fprint(w, pull)
+			case "/repos/acme/widgets/issues/11/timeline":
+				if latest == "partial" {
+					fmt.Fprint(w, `[{"event":"labeled","label":{"name":"review"}},{"event":"labeled","label":{"name":"wip"}},{"event":"labeled","label":{"name":"rework"}},{"event":"unlabeled","label":{"name":"review"}}]`)
+				} else {
+					fmt.Fprintf(w, `[{"event":"labeled","label":{"name":"review"}},{"event":"labeled","label":{"name":%q}}]`, latest)
+				}
+			default:
+				fmt.Fprint(w, `[]`)
+			}
+		}))
+		b := NewGitHubBackend(server.URL, "token", server.Client())
+		items, err := b.ImplementationItems(context.Background(), workflow.RepositoryID{Owner: "acme", Name: "widgets"})
+		server.Close()
+		if err != nil || len(items) != 1 {
+			t.Fatalf("items: %#v %v", items, err)
+		}
+		if latest == "rework" || latest == "partial" {
+			if items[0].Problem != "" || items[0].State != workflow.Rework || items[0].Submission.PendingReview != workflow.Rework {
+				t.Fatalf("forward transition: %#v", items[0])
+			}
+		} else if items[0].Problem == "" {
+			t.Fatalf("contradiction guessed through: %#v", items[0])
+		}
+	}
+}
+
+func TestGitHubStatusRecognizesMergedAndSupersededReferences(t *testing.T) {
+	for _, mergedAt := range []string{"", "2026-09-08T12:00:00Z"} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/repos/acme/widgets/issues":
+				fmt.Fprint(w, `[{"number":7,"title":"widget","state":"closed"}]`)
+			case "/repos/acme/widgets/pulls":
+				fmt.Fprintf(w, `[{"number":11,"state":"closed","merged_at":%q,"body":"Closes #7","head":{"sha":"fixed","ref":"widget","repo":{"full_name":"acme/widgets"}}}]`, mergedAt)
+			default:
+				fmt.Fprint(w, `[]`)
+			}
+		}))
+		b := NewGitHubBackend(server.URL, "token", server.Client())
+		items, err := b.ImplementationItems(context.Background(), workflow.RepositoryID{Owner: "acme", Name: "widgets"})
+		server.Close()
+		want := workflow.Superseded
+		if mergedAt != "" {
+			want = workflow.Merged
+		}
+		if err != nil || len(items) != 1 || items[0].Problem != "" || items[0].State != want || items[0].Branch != "widget" {
+			t.Fatalf("terminal observation: %#v %v", items, err)
 		}
 	}
 }

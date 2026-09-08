@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 
 	skilldist "github.com/vicrdguez/skills"
@@ -18,14 +19,48 @@ type ReviewBackend interface {
 	CompleteReview(context.Context, RepositoryID, ImplementationItem, State, func() error) error
 }
 
-func SubmitWatchdog(ctx context.Context, root, remote string, number int, reviewed, head, verdict, summaryPath, findingsPath, bodyPath string, backend ReviewBackend) (ImplementationOutcome, error) {
+func SubmitWatchdog(ctx context.Context, root, remote string, number int, reviewed, head, verdict, summaryPath, findingsPath, bodyPath string, backend ReviewBackend) (outcome ImplementationOutcome, err error) {
+	defer func() {
+		if err != nil || outcome.Item == nil || outcome.Item.Claimed {
+			return
+		}
+		dir := filepath.Dir(summaryPath)
+		if !filepath.IsAbs(summaryPath) || !strings.HasPrefix(filepath.Base(dir), "skl-watchdog-") {
+			return
+		}
+		parent, e := filepath.EvalSymlinks(filepath.Dir(dir))
+		temp, te := filepath.EvalSymlinks(os.TempDir())
+		if e != nil || te != nil || parent != temp {
+			return
+		}
+		info, e := os.Lstat(dir)
+		if e != nil || !info.IsDir() || info.Mode().Perm()&0077 != 0 {
+			return
+		}
+		marker, e := os.ReadFile(filepath.Join(dir, ".skl-result"))
+		if e != nil || string(marker) != "skl.watchdog/v1\n" {
+			return
+		}
+		entries, e := os.ReadDir(dir)
+		if e != nil {
+			err = e
+			return
+		}
+		for _, entry := range entries {
+			if !entry.Type().IsRegular() || entry.Name() != ".skl-result" && filepath.Ext(entry.Name()) != ".md" && filepath.Ext(entry.Name()) != ".json" {
+				err = fmt.Errorf("handoff completed but private directory has unexpected files; preserve it for explicit cleanup")
+				return
+			}
+		}
+		err = os.RemoveAll(dir)
+	}()
 	if head == "" {
 		head = reviewed
 	}
 	if number <= 0 || reviewed == "" || verdict != "rework" && verdict != "pass" && verdict != "needs-human" || summaryPath == "" || verdict == "pass" && bodyPath == "" {
 		return ImplementationOutcome{}, fmt.Errorf("submit requires --item, --reviewed-head, --verdict rework|pass|needs-human and --summary; pass also requires --body")
 	}
-	remote, err := ResolveGitHubRemote(root, remote)
+	remote, err = ResolveGitHubRemote(root, remote)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
@@ -42,12 +77,13 @@ func SubmitWatchdog(ctx context.Context, root, remote string, number int, review
 			item = candidate
 		}
 	}
-	if item.Problem != "" || item.Submission == nil || item.State != AwaitingReview || !item.Claimed || item.Submission.ReviewedHead != reviewed {
+	if item.Problem != "" || item.Submission == nil || item.State == AwaitingReview && !item.Claimed || item.Submission.ReviewedHead != reviewed {
 		return ImplementationOutcome{}, Refuse("verdict requires the fixed Awaiting Review Claim")
 	}
 	if head != reviewed && (verdict != "pass" || gitOK(root, "merge-base", "--is-ancestor", reviewed, head) != nil) {
 		return ImplementationOutcome{}, Refuse("post-marker head must descend from the fixed reviewed head on pass")
 	}
+	requireMergeable := false
 	guard := func() error {
 		local, err := git(root, "rev-parse", "--verify", "refs/heads/"+item.Branch+"^{commit}")
 		if err != nil || local != head {
@@ -64,8 +100,11 @@ func SubmitWatchdog(ctx context.Context, root, remote string, number int, review
 		if err != nil {
 			return err
 		}
-		if submission.Head != head {
+		if submission.Head != head || submission.Merged || submission.Draft {
 			return Refuse("Submission head changed during verdict")
+		}
+		if requireMergeable && submission.Mergeability != "mergeable" {
+			return Refuse("mergeability changed during verdict; retry to observe the current target")
 		}
 		return nil
 	}
@@ -122,6 +161,50 @@ func SubmitWatchdog(ctx context.Context, root, remote string, number int, review
 		target = NeedsHuman
 		item.ResumeState = AwaitingReview
 	}
+	if item.State != AwaitingReview {
+		compatible := verdict == "rework" && (item.State == Rework || item.State == NeedsHuman) || verdict == "needs-human" && item.State == NeedsHuman || verdict == "pass" && (item.State == ReadyForMerge || item.State == Rework && item.Synchronization)
+		for _, wanted := range comments {
+			found := false
+			for _, existing := range item.Submission.Comments {
+				if wanted.Body == existing.Body && wanted.Path == existing.Path && (wanted.Path == "" || wanted.Commit == existing.Commit && wanted.Line == existing.Line && wanted.Side == existing.Side) {
+					found = true
+					break
+				}
+			}
+			compatible = compatible && found
+		}
+		if verdict == "pass" {
+			body, err := os.ReadFile(bodyPath)
+			if err != nil {
+				return ImplementationOutcome{}, err
+			}
+			wanted := string(body)
+			footer := fmt.Sprintf("\n\nCloses #%d\n", number)
+			if !strings.HasSuffix(wanted, footer) {
+				wanted += footer
+			}
+			compatible = compatible && wanted == item.Submission.Body
+		}
+		if !compatible {
+			return ImplementationOutcome{}, Refuse("completed or partial review differs from supplied verdict; restore its exact Result Documents")
+		}
+		if item.Claimed {
+			if err := backend.CompleteReview(ctx, repository, item, item.State, guard); err != nil {
+				return ImplementationOutcome{}, err
+			}
+			current, err := backend.ImplementationItems(ctx, repository)
+			if err != nil {
+				return ImplementationOutcome{}, err
+			}
+			for _, c := range current {
+				if c.Number == item.Number && c.Problem == "" && !c.Claimed && c.State == item.State {
+					return ImplementationOutcome{Status: string(c.State), Item: &c, Head: head}, guard()
+				}
+			}
+			return ImplementationOutcome{}, Refuse("review handoff still incomplete; retain Claim and retry")
+		}
+		return ImplementationOutcome{Status: string(item.State), Item: &item, Head: head}, guard()
+	}
 	if verdict == "pass" {
 		if submission.Mergeability != "mergeable" && submission.Mergeability != "conflicting" {
 			return ImplementationOutcome{}, Refuse("mergeability unavailable; wait for backend evaluation and retry")
@@ -139,6 +222,7 @@ func SubmitWatchdog(ctx context.Context, root, remote string, number int, review
 				return ImplementationOutcome{}, Refuse("current target unavailable; restore it and retry")
 			}
 		}
+		requireMergeable = target == ReadyForMerge
 		body, err := os.ReadFile(bodyPath)
 		if err != nil {
 			return ImplementationOutcome{}, err

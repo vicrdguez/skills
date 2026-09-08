@@ -41,6 +41,7 @@ type ImplementationItem struct {
 }
 
 type Submission struct {
+	PendingReview        State
 	Merged               bool
 	Mergeability         string
 	Bounces              int
@@ -197,7 +198,7 @@ func StartImplementation(ctx context.Context, root, remote string, number int, s
 		return cmp.Compare(a.Number, b.Number)
 	})
 	for _, item := range items {
-		if item.Claimed || item.Transition != nil && !item.Transition.Completed || item.State != Ready && item.State != Rework {
+		if item.Claimed || item.Submission != nil && item.Submission.PendingReview != "" || item.Transition != nil && !item.Transition.Completed || item.State != Ready && item.State != Rework {
 			continue
 		}
 		blocked := false

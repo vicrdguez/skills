@@ -29,6 +29,62 @@ func ObserveStatus(ctx context.Context, root, remote string, backend Implementat
 			outcome.Items[i].State = NeedsHuman
 			continue
 		}
+		if item.State == ReadyForMerge && item.Submission != nil {
+			if port, ok := backend.(ReviewBackend); ok {
+				current, err := port.ReviewSubmission(ctx, repository, item.Submission.Number)
+				if err != nil {
+					return StatusOutcome{}, err
+				}
+				if current.Merged {
+					outcome.Items[i].State = Merged
+					outcome.Items[i].Claimed = false
+					continue
+				}
+				if current.Head == item.Submission.Head && current.Mergeability == "conflicting" {
+					item.Synchronization = true
+					item.TargetBranch = current.Base
+					item.TargetSnapshot, err = backend.ImplementationHead(ctx, repository, current.Base)
+					if err != nil {
+						return StatusOutcome{}, err
+					}
+					if item.TargetSnapshot == "" {
+						return StatusOutcome{}, Refuse("current target unavailable; retry status after restoring the target")
+					}
+					submission := *item.Submission
+					submission.PendingReview = Rework
+					item.Submission = &submission
+				}
+			}
+		}
+		if item.Submission != nil && item.Submission.PendingReview != "" {
+			port, ok := backend.(ReviewBackend)
+			if !ok {
+				return StatusOutcome{}, Refuse("backend cannot reconcile partial review")
+			}
+			guard := func() error {
+				current, err := port.ReviewSubmission(ctx, repository, item.Submission.Number)
+				if err != nil {
+					return err
+				}
+				if current.Head != item.Submission.Head || current.Merged {
+					return Refuse("Submission changed during status reconciliation")
+				}
+				return nil
+			}
+			if err := port.CompleteReview(ctx, repository, item, item.Submission.PendingReview, guard); err != nil {
+				return StatusOutcome{}, err
+			}
+			current, err := backend.ImplementationItems(ctx, repository)
+			if err != nil {
+				return StatusOutcome{}, err
+			}
+			for _, c := range current {
+				if c.Number == item.Number {
+					outcome.Items[i] = c
+				}
+			}
+			continue
+		}
 		if item.State == Ready && item.Submission != nil && item.Submission.State == AwaitingReview && !item.Submission.Claimed {
 			guard := func() error {
 				current, err := backend.ImplementationItems(ctx, repository)

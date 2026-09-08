@@ -286,7 +286,7 @@ func (b *GitHubBackend) AwaitImplementationReview(ctx context.Context, repositor
 	if state == workflow.NeedsHuman || state == workflow.ReadyForMerge || state == workflow.Ready || problem != "" && state != workflow.Rework && state != workflow.AwaitingReview {
 		return workflow.Refuse("Submission lifecycle contradicts review handoff; repair its projections")
 	}
-	if err := b.implementationLabelMutation(ctx, repository, item.Submission.Number, []string{"review"}, []string{"rework", "wip"}, guard); err != nil {
+	if err := b.implementationLabelMutation(ctx, repository, item.Submission.Number, []string{"review"}, []string{"rework", "wip", "sync"}, guard); err != nil {
 		return err
 	}
 	return b.implementationLabelMutation(ctx, repository, item.Number, nil, []string{"ready", "wip"}, guard)
@@ -427,7 +427,7 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository work
 			} else if pull.State == "closed" {
 				item.State = workflow.Superseded
 			}
-			if item.State == workflow.Rework || item.State == workflow.AwaitingReview || item.State == workflow.NeedsHuman {
+			if item.State == workflow.Rework || item.State == workflow.AwaitingReview || item.State == workflow.NeedsHuman || item.State == workflow.ReadyForMerge {
 				for _, stream := range []string{fmt.Sprintf("/issues/%d/comments", pull.Number), fmt.Sprintf("/pulls/%d/comments", pull.Number)} {
 					comments, err := b.implementationComments(ctx, repository, stream)
 					if err != nil {
@@ -458,7 +458,7 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository work
 				}
 			}
 		}
-		if issue.State == "closed" && item.State != workflow.Merged && item.State != workflow.ReadyForMerge {
+		if issue.State == "closed" && item.State != workflow.Merged && item.State != workflow.ReadyForMerge && item.State != workflow.Superseded {
 			item.Problem = "source issue is closed without a merged Submission"
 		}
 		if item.State == workflow.Ready {
@@ -584,6 +584,17 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository work
 		}
 		if owners[item.Branch] != item.Number {
 			item.Problem = "multiple source issues own the conventional branch"
+		}
+		if len(matches) == 1 && (item.Problem == "contradictory lifecycle projections" || item.Claimed && (item.State == workflow.ReadyForMerge || item.State == workflow.NeedsHuman || item.State == workflow.Rework)) && (item.Transition == nil || item.Transition.Completed) {
+			observation, err := b.ReviewSubmission(ctx, repository, item.Submission.Number)
+			if err != nil {
+				return nil, err
+			}
+			if observation.PendingReview != "" && observation.Head == item.Submission.Head && problem == "" {
+				item.Problem = ""
+				item.State = observation.PendingReview
+				item.Submission.PendingReview = observation.PendingReview
+			}
 		}
 		items = append(items, item)
 	}

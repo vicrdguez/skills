@@ -38,7 +38,7 @@ flowchart LR
 | Explore | `explore` | Shared understanding through frontier rounds; durable docs written inline via `domain` |
 | Propose | `propose` | Agent-authored tracer-bullet slices prepared in Git, then deterministically published by `skl propose` |
 | Implement | `implement` | One claimed slice, TDD'd at pinned seams, refactored via `audit`, PR labeled `review` |
-| Watchdog | `watchdog` | A verdict reached in a fresh context — lands it (`done`) or bounces it (`rework`). Edits no code |
+| Watchdog | `watchdog` | A fresh-context verdict published through `skl watchdog`: Ready for Merge, Rework, or Needs Human. Only non-functional Debt Marker comments may change |
 | Merge | human | The acceptance gate |
 
 The rest are reference skills the stages pull in rather than stages of their own: `design` (deep modules and seams), `domain` (glossary, ADRs, capabilities), `tdd` (the red → green loop), `audit` (the two-axis review engine). `writing-for-agents` is a standalone reference for authoring skills and agent-facing docs.
@@ -103,14 +103,24 @@ go install ./cmd/skl
 skl install
 ```
 
-`skl install` refreshes its owned Skill Stubs in Pi, Codex, and Claude Code without touching unrelated user files. Run `skl skill <name>` for rendered instructions, `skl skill --format json <name>` for the typed packet, or `skl skill --resource <path> <name>` for one named resource. Flags precede the skill name.
+`skl install` refreshes its owned Skill Stubs in Pi, Codex, and Claude Code, plus Pi-only queue prompts, runners, and their continuation check, without touching unrelated user files. This replaces the former Pi package and Claude plugin distribution. Run `skl skill <name>` for rendered instructions, `skl skill --format json <name>` for the typed packet, or `skl skill --resource <path> <name>` for one named resource. Flags precede the skill name.
+
+### Review and human completion
+
+In a fresh session, run `skl watchdog next`, or resume the fixed Claim with `skl watchdog resume --item <number>`. The packet carries the reviewed head, historical Artifact Baseline and Completion files, the opaque Audit-bearing PR body, prior findings, and raw human comments. Watchdog runs the Full Gate and independent artifact checks but never reruns Audit.
+
+Write the summary and optional anchored findings in the packet's private temporary directory. Submit its concrete command with `--verdict pass`, `--verdict rework`, or `--verdict needs-human`. A pass also takes `--body <absolute-submission.md>` containing the complete final PR body and unchecked Manual Verification checklist. Retrieve the transport template with `skl skill --resource reference/review.md watchdog`. If passing Notes need Debt Marker comments, the worker commits and pushes them, runs the formatter/parser and `git diff --check`, and supplies `--head <final-sha>` without replacing `--reviewed-head`.
+
+`ready_for_merge` projects `done` without closing the source issue. Only a human merges; GitHub then closes the issue through the PR's `Closes #N` footer. `skl status` observes Merged, releases Dependencies, closes Coordination Items whose children are all Merged, and safely reconciles partial projections. Contradictions are reported as Needs Human without overwriting them. An unmerged closed Submission is Superseded, preserving its branch reference for later Explore.
+
+A merge conflict routes a passing review to Synchronization Rework with a fresh Target Snapshot, without spending the finding-driven bounce. No review outcome restores or archives the retired ledger. Human comments are supplied verbatim; only explicit relabeling to Rework or Awaiting Review requeues paused work.
 
 ## Pi subagent loops
 
-The Pi package uses [pi-subagents](https://github.com/nicobailon/pi-subagents) to drain each board queue sequentially. Install that extension separately with `pi install npm:pi-subagents`.
+The installed Pi adapters use [pi-subagents](https://github.com/nicobailon/pi-subagents) to drain each queue sequentially. Install that extension separately with `pi install npm:pi-subagents`; Node runs the installed structured-outcome continuation check.
 
-- `/implement-loop [max-items]` launches one fresh `implement-runner` per `ready` or `rework` item. A verified `review` handoff starts the next worker.
-- `/watchdog-loop [max-items]` launches one fresh `watchdog-runner` per `review` item. A verified `done` or `rework` handoff starts the next worker.
+- `/implement-loop [max-items]` launches one fresh `implement-runner` using `skl implement next`. A verified `awaiting_review` handoff starts the next worker.
+- `/watchdog-loop [max-items]` launches one fresh `watchdog-runner` using `skl watchdog next`. A verified `ready_for_merge` or `rework` handoff starts the next worker.
 
 Review findings carry stable per-PR IDs (`W1`, `W2`, …) so a round can be compared with the last one. The first watchdog review is complete; later rounds verify the open findings and read only what changed since the previous `Reviewed head`, and a second failing review pauses at `needs-human` rather than bouncing again. A verified `needs-human` is a complete handoff — the loop moves on, and nothing reclaims that item until a person does.
 
@@ -142,4 +152,4 @@ The loop passes this as the `model` override on every fresh `watchdog-runner` la
 
 Use `xhigh` for security, authorization, billing, destructive migrations, irreversible data operations, public API compatibility, or the watchdog's opt-in independent test reimplementation. Keep `high` for normal reviews: extra reasoning can otherwise increase latency and speculative edge-case findings.
 
-Both loops stop when the queue is empty, their item limit is reached, or a claimed item has an incomplete or unverified handoff. A normal watchdog rejection that reaches verified `rework` is complete, so the loop continues.
+Both loops consume unchanged CLI JSON and stop on `no_work`, their item limit, incomplete Claims, ambiguous results, or adapter errors. A normal watchdog rejection that reaches verified `rework` is complete, so the loop continues. Queue draining remains Pi-only; Codex and Claude Code use the same one-item semantic commands.

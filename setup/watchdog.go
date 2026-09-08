@@ -34,7 +34,16 @@ func (b *GitHubBackend) CompleteReview(ctx context.Context, repository workflow.
 	if target != workflow.Rework {
 		remove = append(remove, "rework")
 	}
-	return b.implementationLabelMutation(ctx, repository, item.Submission.Number, []string{label}, remove, guard)
+	if target != workflow.ReadyForMerge {
+		remove = append(remove, "done")
+	}
+	if err := b.implementationLabelMutation(ctx, repository, item.Submission.Number, []string{label}, remove, guard); err != nil {
+		return err
+	}
+	if target != workflow.NeedsHuman {
+		return b.implementationLabelMutation(ctx, repository, item.Number, nil, []string{"needs-human"}, guard)
+	}
+	return nil
 }
 
 func (b *GitHubBackend) ReviewSubmission(ctx context.Context, repository workflow.RepositoryID, number int) (workflow.Submission, error) {
@@ -52,6 +61,8 @@ func (b *GitHubBackend) ReviewSubmission(ctx context.Context, repository workflo
 	}
 	labels := map[string]bool{}
 	reviewing := false
+	latest := ""
+	reviewExited := false
 	for page := 1; ; page++ {
 		var events []struct {
 			Event string `json:"event"`
@@ -67,6 +78,15 @@ func (b *GitHubBackend) ReviewSubmission(ctx context.Context, repository workflo
 				continue
 			}
 			labels[event.Label.Name] = event.Event == "labeled"
+			if event.Event == "unlabeled" && event.Label.Name == "review" && labels["rework"] {
+				reviewExited = true
+			}
+			if event.Event == "labeled" && event.Label.Name == "wip" {
+				reviewExited = false
+			}
+			if event.Event == "labeled" && (event.Label.Name == "review" || event.Label.Name == "rework" || event.Label.Name == "done" || event.Label.Name == "needs-human") {
+				latest = event.Label.Name
+			}
 			if event.Event == "labeled" && event.Label.Name == "review" {
 				reviewing = true
 			}
@@ -80,6 +100,24 @@ func (b *GitHubBackend) ReviewSubmission(ctx context.Context, repository workflo
 		if len(events) < 100 {
 			break
 		}
+	}
+	current := map[string]bool{}
+	states := 0
+	for _, label := range pull.Labels {
+		current[label.Name] = true
+		if label.Name == "review" || label.Name == "rework" || label.Name == "done" || label.Name == "needs-human" || label.Name == "ready" {
+			states++
+		}
+	}
+	if current["review"] && states == 2 && current[latest] && latest != "review" && latest != "ready" {
+		result.PendingReview = map[string]workflow.State{"rework": workflow.Rework, "done": workflow.ReadyForMerge, "needs-human": workflow.NeedsHuman}[latest]
+		result.State = result.PendingReview
+	}
+	if states == 1 && claimed && (state == workflow.ReadyForMerge || state == workflow.NeedsHuman) {
+		result.PendingReview = state
+	}
+	if states == 1 && claimed && state == workflow.Rework && reviewExited {
+		result.PendingReview = state
 	}
 	return result, nil
 }

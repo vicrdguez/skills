@@ -4,8 +4,12 @@ import (
 	"cmp"
 	"context"
 	"fmt"
-	skilldist "github.com/vicrdguez/skills"
+	"os"
+	"path/filepath"
 	"slices"
+	"strings"
+
+	skilldist "github.com/vicrdguez/skills"
 )
 
 func StartWatchdog(ctx context.Context, root, remote string, number int, backend ImplementationBackend) (ImplementationOutcome, error) {
@@ -17,6 +21,7 @@ func StartWatchdog(ctx context.Context, root, remote string, number int, backend
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
+	items = slices.DeleteFunc(items, func(item ImplementationItem) bool { return item.Submission == nil })
 	slices.SortFunc(items, func(a, b ImplementationItem) int {
 		if a.Submission != nil && b.Submission != nil {
 			if order := cmp.Compare(a.Submission.CreatedAt, b.Submission.CreatedAt); order != 0 {
@@ -57,7 +62,46 @@ func StartWatchdog(ctx context.Context, root, remote string, number int, backend
 				continue
 			}
 			facts := skilldist.WatchdogFacts{WorkItem: item.Number, Submission: submission.Number, Branch: item.Branch, ReviewedHead: submission.Head, ArtifactBaseline: history.Baseline, ArtifactCompletion: history.Completion, AuditBody: submission.Body, Comments: submission.Comments}
+			facts.BaselineFiles, err = ledgerFiles(root, history.Baseline, ".changes/"+item.Branch)
+			if err != nil {
+				return ImplementationOutcome{}, err
+			}
+			facts.CompletionFiles, err = ledgerFiles(root, history.Completion, ".changes/"+item.Branch)
+			if err != nil {
+				return ImplementationOutcome{}, err
+			}
+			facts.Bounces = submission.Bounces
+			if port, ok := backend.(ReviewBackend); ok {
+				observed, err := port.ReviewSubmission(ctx, repository, submission.Number)
+				if err != nil {
+					return ImplementationOutcome{}, err
+				}
+				if observed.Head != submission.Head {
+					return ImplementationOutcome{}, Refuse("Submission changed during packet construction")
+				}
+				facts.Bounces = observed.Bounces
+			}
+			main, err := primaryWorktree(root)
+			if err != nil {
+				return ImplementationOutcome{}, err
+			}
+			facts.Worktree = filepath.Join(main, ".worktrees", item.Branch)
+			facts.Remote = remote
+			facts.ResultDirectory, err = os.MkdirTemp("", "skl-watchdog-")
+			if err != nil {
+				return ImplementationOutcome{}, err
+			}
+			if err := os.WriteFile(filepath.Join(facts.ResultDirectory, ".skl-result"), []byte("skl.watchdog/v1\n"), 0600); err != nil {
+				os.RemoveAll(facts.ResultDirectory)
+				return ImplementationOutcome{}, err
+			}
+			quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'" }
+			facts.ResumeCommand = fmt.Sprintf("skl watchdog resume --repo %s --remote %s --item %d", quote(facts.Worktree), quote(remote), item.Number)
+			facts.SubmitCommand = fmt.Sprintf("skl watchdog submit --repo %s --remote %s --item %d --reviewed-head %s --summary %s", quote(facts.Worktree), quote(remote), item.Number, submission.Head, quote(filepath.Join(facts.ResultDirectory, "summary.md")))
 			packet, err := skilldist.BuildPacket("watchdog", skilldist.InvocationFacts{Watchdog: &facts})
+			if err != nil {
+				os.RemoveAll(facts.ResultDirectory)
+			}
 			return ImplementationOutcome{Status: "work_available", Item: &current, Packet: &packet}, err
 		}
 		return ImplementationOutcome{Status: "fix_required", Reason: "Watchdog Claim changed; inspect and explicitly resume"}, nil
