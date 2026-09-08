@@ -28,6 +28,8 @@ Break the work into **tracer-bullets** tickets.
 - Each slice cuts a narrow but COMPLETE path through every layer (schema, API, UI, tests) - vertical, NOT a horizontal slice of one layer
 - A completed slice is demoable and verifiable on its own
 - Each slice is sized to fit in a single fresh context window
+- Prefer separate Work Items for behaviors that deliver safe, useful results independently. Assess independence after declared Dependencies are Merged, without requiring later Work Items.
+- Combine independently useful behaviors only for a concrete reduction in overall implementation or review burden. Shared files or a shared Workflow stage alone are insufficient.
 - Write the artifacts, then publish them to the project's issue tracker as explained below. 
 
 Use the `design` skill to sketch the seams at which this change will be tested.

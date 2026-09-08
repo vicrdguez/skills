@@ -373,6 +373,12 @@ func TestRetrieveConcreteProposeInstructions(t *testing.T) {
 		"seam judgment":       {"Use the `design` skill", "Always prefer existing seams", "Use the highest seam possible", "Check with the user if the seams match their expectations"},
 		"artifact authorship": {"## Writing the change artifacts", "`intent.md`: Why / What / Scope / Out of scope / Definition of Done", "*Gherkin notation*", "module shapes and seams chosen for implementation", "Discoveries belong in PR findings or in a new proposal", "./reference/tasks.md"},
 		"publication":         {"skl propose publish", "skl propose cleanup"},
+		"independent delivery": {
+			"Prefer separate Work Items for behaviors that deliver safe, useful results independently",
+			"after declared Dependencies are Merged, without requiring later Work Items",
+			"Combine independently useful behaviors only for a concrete reduction in overall implementation or review burden",
+			"Shared files or a shared Workflow stage alone are insufficient",
+		},
 	} {
 		t.Run(section, func(t *testing.T) {
 			for _, want := range requirements {
