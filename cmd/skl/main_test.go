@@ -369,6 +369,16 @@ func TestEmbeddedResourceDelegationSmoke(t *testing.T) {
 		{"design", "reference/DESIGN-IT-TWICE.md", "dependency category from `skl skill --resource reference/DEEPENING.md design`, what sits behind the seam", "skl skill --resource reference/DEEPENING.md design", "### 4. True external (Mock)"},
 		{"design", "reference/DESIGN-IT-TWICE.md", "Include both the Design definition's vocabulary (retrieve with `skl skill design` if not already supplied) and `CONTEXT.md` vocabulary in the brief", "skl skill design", "**Locality**"},
 		{"design", "reference/DESIGN-IT-TWICE.md", "Dependency strategy and adapters (see `skl skill --resource reference/DEEPENING.md design`)", "skl skill --resource reference/DEEPENING.md design", "## Testing strategy: replace, don't layer"},
+		{"propose", "", "Follow the template from `skl skill --resource reference/intent.md propose`", "skl skill --resource reference/intent.md propose", "## Definition of Done"},
+		{"propose", "", "Follow the template from `skl skill --resource reference/behavior.md propose`", "skl skill --resource reference/behavior.md propose", "## Feature: Order cancellation"},
+		{"propose", "", "Follow the template from `skl skill --resource reference/plan.md propose`", "skl skill --resource reference/plan.md propose", "### Module shapes & seams"},
+		{"propose", "", "`tasks.md`: Follow the template from `skl skill --resource reference/tasks.md propose`", "skl skill --resource reference/tasks.md propose", "Write it when there's more than a couple of scenarios or any non-behavioral chores."},
+		{"propose", "reference/tasks.md", "When relevant include the capability-doc update as the final doc task (format: `skl skill --resource reference/CAPABILITIES-FORMAT.md domain`).", "skl skill --resource reference/CAPABILITIES-FORMAT.md domain", "# Capability Doc Format"},
+		{"writing-for-agents", "", "When the document you're writing is a skill, read `skl skill --resource SKILL-MECHANICS.md writing-for-agents` for frontmatter, invocation choice, and router skills.", "skl skill --resource SKILL-MECHANICS.md writing-for-agents", "## Invocation"},
+		{"writing-for-agents", "", "**By invocation**, skill-specific: see `skl skill --resource SKILL-MECHANICS.md writing-for-agents`.", "skl skill --resource SKILL-MECHANICS.md writing-for-agents", "## Router skills"},
+		{"writing-for-agents", "SKILL-MECHANICS.md", "the Writing for Agents definition (retrieve with `skl skill writing-for-agents` if not already supplied)", "skl skill writing-for-agents", "## Context pointers"},
+		{"writing-for-agents", "SKILL-MECHANICS.md", "the pointer-writing rules in the Writing for Agents definition apply in full", "skl skill writing-for-agents", "**One trigger per branch.**"},
+		{"writing-for-agents", "SKILL-MECHANICS.md", "the sequence cut lives in the Writing for Agents definition", "skl skill writing-for-agents", "**By sequence**: split a run of steps"},
 	} {
 		t.Run(tc.skill+"/"+tc.pointer, func(t *testing.T) {
 			if tc.resource != "" {
@@ -475,7 +485,7 @@ func TestRetrieveConcreteProposeInstructions(t *testing.T) {
 	for section, requirements := range map[string][]string{
 		"slice judgment":      {"COMPLETE path through every layer", "demoable and verifiable on its own", "single fresh context window", "Iterate until the user approves the breakdown"},
 		"seam judgment":       {"Use the `design` skill", "Always prefer existing seams", "Use the highest seam possible", "Check with the user if the seams match their expectations"},
-		"artifact authorship": {"## Writing the change artifacts", "`intent.md`: Why / What / Scope / Out of scope / Definition of Done", "*Gherkin notation*", "module shapes and seams chosen for implementation", "Discoveries belong in PR findings or in a new proposal", "./reference/tasks.md"},
+		"artifact authorship": {"## Writing the change artifacts", "`intent.md`: Why / What / Scope / Out of scope / Definition of Done", "*Gherkin notation*", "module shapes and seams chosen for implementation", "Discoveries belong in PR findings or in a new proposal", "skl skill --resource reference/tasks.md propose"},
 		"publication":         {"skl propose publish", "skl propose cleanup"},
 	} {
 		t.Run(section, func(t *testing.T) {
