@@ -176,8 +176,8 @@ func (b *GitHubBackend) PublishImplementation(ctx context.Context, repository wo
 		return workflow.Submission{}, err
 	}
 	owners := implementationBranchOwners(issues)
-	if owners[item.Branch] != 1 {
-		return workflow.Submission{}, workflow.Refuse("missing or multiple source issues own the conventional branch; repair attachments before publication")
+	if owners[item.Branch] != item.Number || item.Number <= 0 {
+		return workflow.Submission{}, workflow.Refuse("missing, changed or multiple source issues own the conventional branch; repair attachments before publication")
 	}
 	var matches []githubPull
 	for page := 1; ; page++ {
@@ -342,7 +342,11 @@ func implementationBranchOwners(issues []githubIssue) map[string]int {
 	owners := make(map[string]int)
 	for _, issue := range issues {
 		if len(issue.PullRequest) == 0 && issue.SubIssuesSummary.Total == 0 {
-			owners[issue.Title]++
+			if _, exists := owners[issue.Title]; exists {
+				owners[issue.Title] = 0 // Duplicate ownership has no unambiguous Work Item identity.
+			} else {
+				owners[issue.Title] = issue.Number
+			}
 		}
 	}
 	return owners
@@ -552,7 +556,7 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository work
 				}
 			}
 		}
-		if owners[item.Branch] > 1 {
+		if owners[item.Branch] != item.Number {
 			item.Problem = "multiple source issues own the conventional branch"
 		}
 		items = append(items, item)

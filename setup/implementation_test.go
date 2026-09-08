@@ -64,6 +64,31 @@ func TestGitHubImplementationRejectsDuplicateSourceOwnership(t *testing.T) {
 	}
 }
 
+func TestGitHubImplementationRejectsReassignedSourceBeforePublication(t *testing.T) {
+	writes := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writes++
+			http.Error(w, "unexpected mutation", 500)
+			return
+		}
+		switch r.URL.Path {
+		case "/repos/acme/widgets/issues":
+			fmt.Fprint(w, `[{"number":7,"title":"renamed","state":"open"},{"number":8,"title":"widget","state":"open","labels":[{"name":"ready"}]}]`)
+		case "/repos/acme/widgets/pulls":
+			fmt.Fprint(w, `[{"number":11,"state":"open","body":"original","head":{"ref":"widget","sha":"fixed","repo":{"full_name":"acme/widgets"}},"base":{"ref":"main"}}]`)
+		default:
+			fmt.Fprint(w, `{}`)
+		}
+	}))
+	defer server.Close()
+	b := NewGitHubBackend(server.URL, "token", server.Client())
+	_, err := b.PublishImplementation(context.Background(), workflow.RepositoryID{Owner: "acme", Name: "widgets"}, workflow.ImplementationItem{Number: 7, Branch: "widget"}, workflow.Submission{Number: 11, Head: "fixed", Base: "main", Body: "replacement"})
+	if err == nil || writes != 0 {
+		t.Fatalf("reassigned source allowed publication: %v, writes=%d", err, writes)
+	}
+}
+
 func TestGitHubImplementationNormalizesPaginatedWork(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
