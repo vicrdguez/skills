@@ -1141,6 +1141,48 @@ func TestRetrieveEquivalentTypedInstructions(t *testing.T) {
 	}
 }
 
+func TestRetrieveAuditWithoutPonytail(t *testing.T) {
+	for _, format := range []string{"markdown", "json"} {
+		t.Run(format, func(t *testing.T) {
+			var output bytes.Buffer
+			app := newApp(nil, bytes.NewReader(nil), &output, &output)
+			if err := app.Run([]string{"skl", "skill", "--format", format, "audit"}); err != nil {
+				t.Fatal(err)
+			}
+			instructions := output.String()
+			if format == "json" {
+				var packet skilldist.Packet
+				if err := json.Unmarshal(output.Bytes(), &packet); err != nil {
+					t.Fatal(err)
+				}
+				if len(packet.IncludedSkills) != 0 || !slices.Equal(packet.Resources, []string{"reference/smells.md"}) {
+					t.Fatalf("unexpected Audit dependencies: %#v", packet)
+				}
+				instructions = packet.Instructions
+			} else {
+				header := "Protocol: skl.instructions/v1\nSkill: audit\nIncluded skills: none\nFacts: {}\nResources: reference/smells.md\n\n"
+				if !strings.HasPrefix(instructions, header) {
+					t.Fatalf("unexpected Audit manifest: %s", instructions)
+				}
+				instructions = strings.TrimPrefix(instructions, header)
+			}
+			if instructions != readRepositoryFile(t, "skills/dev/audit/SKILL.md") {
+				t.Error("retrieved Audit differs from its authoritative definition")
+			}
+			for _, forbidden := range []string{"ponytail", "750", "net-lines", "## Simplicity"} {
+				if strings.Contains(strings.ToLower(instructions), strings.ToLower(forbidden)) {
+					t.Errorf("Audit retains or injects %q", forbidden)
+				}
+			}
+			for _, required := range []string{"**Standards**", "**Artifacts**", "**smell baseline**", "**The documented gate**", "**Artifact integrity**", "`HARD` or `JUDGEMENT`", "Under 500 words.", "### 6. Aggregate", "Do **not** merge or rerank findings"} {
+				if !strings.Contains(instructions, required) {
+					t.Errorf("Audit lost ordinary review instruction %q", required)
+				}
+			}
+		})
+	}
+}
+
 func TestRetrieveOneNamedResource(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, t.TempDir())
@@ -1180,6 +1222,50 @@ func TestBundleGuaranteedSupportingSkills(t *testing.T) {
 	}
 	if packet.Instructions != wantInstructions {
 		t.Fatalf("bundled instructions differ from canonical definitions:\n%s", packet.Instructions)
+	}
+	if !slices.Equal(packet.Resources, []string{"reference/decision.md", "reference/submission.md"}) {
+		t.Fatalf("implementation resources changed: %v", packet.Resources)
+	}
+	for _, format := range []string{"markdown", "json"} {
+		t.Run(format, func(t *testing.T) {
+			var direct, bundled bytes.Buffer
+			for _, request := range []struct {
+				name string
+				out  *bytes.Buffer
+			}{{"audit", &direct}, {"implement", &bundled}} {
+				app := newApp(nil, bytes.NewReader(nil), request.out, request.out)
+				if err := app.Run([]string{"skl", "skill", "--format", format, request.name}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			audit, implementation := direct.String(), bundled.String()
+			if format == "json" {
+				var directPacket, bundledPacket skilldist.Packet
+				if err := json.Unmarshal(direct.Bytes(), &directPacket); err != nil {
+					t.Fatal(err)
+				}
+				if err := json.Unmarshal(bundled.Bytes(), &bundledPacket); err != nil {
+					t.Fatal(err)
+				}
+				audit, implementation = directPacket.Instructions, bundledPacket.Instructions
+			} else {
+				_, audit, _ = strings.Cut(audit, "\n\n")
+				wantHeader := "Protocol: skl.instructions/v1\nSkill: implement\nIncluded skills: tdd, audit, design, domain\nFacts: {}\nResources: reference/decision.md, reference/submission.md\n\n"
+				if bundled.String() != wantHeader+wantInstructions {
+					t.Fatal("rendered implementation manifest or supporting definitions changed")
+				}
+			}
+			_, includedAudit, found := strings.Cut(implementation, "\n\n## Included Skill: audit\n\n")
+			includedAudit, _, _ = strings.Cut(includedAudit, "\n\n## Included Skill:")
+			if !found || includedAudit != audit {
+				t.Error("bundled Audit differs from direct retrieval")
+			}
+			for _, forbidden := range []string{"ponytail", "## simplicity"} {
+				if strings.Contains(strings.ToLower(implementation), forbidden) {
+					t.Errorf("implementation packet retains or injects %q", forbidden)
+				}
+			}
+		})
 	}
 
 	if err := app.Run([]string{"skl", "install"}); err != nil {
