@@ -105,6 +105,17 @@ skl install
 
 `skl install` refreshes its owned Skill Stubs in Pi, Codex, and Claude Code, plus Pi-only queue prompts, runners, and their continuation check, without touching unrelated user files. This replaces the former Pi package and Claude plugin distribution. Run `skl skill <name>` for rendered instructions, `skl skill --format json <name>` for the typed packet, or `skl skill --resource <path> <name>` for one named resource. Flags precede the skill name.
 
+The `skills/` tree is authoring input. Installed `SKILL.md` files are thin discovery stubs; the running `skl` binary supplies the embedded definitions and resources, not the source checkout or files beside a stub. After updating this checkout, run `go install ./cmd/skl` here to rebuild the binary, then `skl install` to refresh its owned stubs and adapters. Editing Markdown alone does not update an already-installed binary.
+
+Resource names are exact and relative to their owning skill, even inside a nested resource or bundled definition:
+
+```sh
+skl skill --resource reference/DEEPENING.md design
+skl skill --resource SKILL-MECHANICS.md writing-for-agents
+```
+
+Retrieve a parent definition with `skl skill <name>` only when it is not already supplied; `SKILL.md` is not a resource name. Raw source-tree registrations bypass this distribution arrangement. OpenCode can consume the installed Claude-compatible stubs rather than registering the authoring tree.
+
 ### Review and human completion
 
 In a fresh session, run `skl watchdog next`, or resume the fixed Claim with `skl watchdog resume --item <number>`. The packet carries the reviewed head, historical Artifact Baseline and Completion files, the opaque Audit-bearing PR body, prior findings, and raw human comments. Watchdog runs the Full Gate and independent artifact checks but never reruns Audit.
