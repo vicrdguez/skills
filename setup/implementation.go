@@ -18,10 +18,12 @@ import (
 
 type githubPull struct {
 	githubIssue
-	NodeID   string `json:"node_id"`
-	Draft    bool   `json:"draft"`
-	MergedAt string `json:"merged_at"`
-	Head     struct {
+	Merged    bool   `json:"merged"`
+	Mergeable *bool  `json:"mergeable"`
+	NodeID    string `json:"node_id"`
+	Draft     bool   `json:"draft"`
+	MergedAt  string `json:"merged_at"`
+	Head      struct {
 		Ref  string `json:"ref"`
 		SHA  string `json:"sha"`
 		Repo struct {
@@ -58,11 +60,19 @@ func (b *GitHubBackend) ClaimImplementation(ctx context.Context, repository work
 				return err
 			}
 		}
+		if item.State == workflow.AwaitingReview {
+			if item.Submission == nil || current.Submission == nil || current.Submission.Head != item.Submission.ReviewedHead || current.Submission.Number != item.Submission.Number || current.Claimed && current.Submission.ReviewedHead != "" && current.Submission.ReviewedHead != item.Submission.ReviewedHead {
+				return workflow.Refuse("Submission changed before Watchdog Claim; restore the fixed head")
+			}
+			if err := b.publishImplementationMetadata(ctx, repository, item.Number, implementationMetadata{WatchdogHead: item.Submission.ReviewedHead}); err != nil {
+				return err
+			}
+		}
 		if current.Claimed {
 			return nil
 		}
 		number := item.Number
-		if item.State == workflow.Rework {
+		if item.State == workflow.Rework || item.State == workflow.AwaitingReview {
 			if item.Submission == nil {
 				return workflow.Refuse("Rework has no Submission; repair its attachment")
 			}
@@ -276,7 +286,7 @@ func (b *GitHubBackend) AwaitImplementationReview(ctx context.Context, repositor
 	if state == workflow.NeedsHuman || state == workflow.ReadyForMerge || state == workflow.Ready || problem != "" && state != workflow.Rework && state != workflow.AwaitingReview {
 		return workflow.Refuse("Submission lifecycle contradicts review handoff; repair its projections")
 	}
-	if err := b.implementationLabelMutation(ctx, repository, item.Submission.Number, []string{"review"}, []string{"rework", "wip"}, guard); err != nil {
+	if err := b.implementationLabelMutation(ctx, repository, item.Submission.Number, []string{"review"}, []string{"rework", "wip", "sync"}, guard); err != nil {
 		return err
 	}
 	return b.implementationLabelMutation(ctx, repository, item.Number, nil, []string{"ready", "wip"}, guard)
@@ -330,12 +340,14 @@ func trustedMetadata(comment skilldist.ReviewComment) bool {
 }
 
 type implementationMetadata struct {
-	Transition      *workflow.ImplementationTransition `json:"transition,omitempty"`
-	TargetSnapshot  string                             `json:"target_snapshot,omitempty"`
-	TargetBranch    string                             `json:"target_branch,omitempty"`
-	ReviewedHead    string                             `json:"reviewed_head,omitempty"`
-	ReviewRoundHead string                             `json:"review_round_head,omitempty"`
-	ResumeState     workflow.State                     `json:"resume_state,omitempty"`
+	SynchronizationTarget string                             `json:"synchronization_target,omitempty"`
+	WatchdogHead          string                             `json:"watchdog_head,omitempty"`
+	Transition            *workflow.ImplementationTransition `json:"transition,omitempty"`
+	TargetSnapshot        string                             `json:"target_snapshot,omitempty"`
+	TargetBranch          string                             `json:"target_branch,omitempty"`
+	ReviewedHead          string                             `json:"reviewed_head,omitempty"`
+	ReviewRoundHead       string                             `json:"review_round_head,omitempty"`
+	ResumeState           workflow.State                     `json:"resume_state,omitempty"`
 }
 
 func implementationBranchOwners(issues []githubIssue) map[string]int {
@@ -391,12 +403,17 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository work
 		if len(matches) == 1 {
 			pull := matches[0]
 			prState, prClaimed, prProblem := implementationLabels(pull.githubIssue)
-			item.Submission = &workflow.Submission{Number: pull.Number, Head: pull.Head.SHA, Base: pull.Base.Ref, Draft: pull.Draft, Body: pull.Body, State: prState, Claimed: prClaimed}
+			item.Submission = &workflow.Submission{Number: pull.Number, Head: pull.Head.SHA, Base: pull.Base.Ref, Draft: pull.Draft, Body: pull.Body, State: prState, Claimed: prClaimed, CreatedAt: pull.CreatedAt}
+			for _, label := range pull.Labels {
+				item.Synchronization = item.Synchronization || label.Name == "sync"
+			}
 			item.Claimed = item.Claimed || prClaimed
 			if prProblem != "" {
 				item.Problem = prProblem
 			}
-			if state == workflow.NeedsHuman || prState == workflow.NeedsHuman {
+			if state == workflow.NeedsHuman && (prState == workflow.Rework || prState == workflow.AwaitingReview) && prProblem == "" {
+				item.State = prState
+			} else if state == workflow.NeedsHuman || prState == workflow.NeedsHuman {
 				item.State = workflow.NeedsHuman
 			} else if prState != "" {
 				if state == workflow.Ready && prState != workflow.AwaitingReview {
@@ -410,7 +427,7 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository work
 			} else if pull.State == "closed" {
 				item.State = workflow.Superseded
 			}
-			if item.State == workflow.Rework {
+			if item.State == workflow.Rework || item.State == workflow.AwaitingReview || item.State == workflow.NeedsHuman || item.State == workflow.ReadyForMerge {
 				for _, stream := range []string{fmt.Sprintf("/issues/%d/comments", pull.Number), fmt.Sprintf("/pulls/%d/comments", pull.Number)} {
 					comments, err := b.implementationComments(ctx, repository, stream)
 					if err != nil {
@@ -441,7 +458,7 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository work
 				}
 			}
 		}
-		if issue.State == "closed" && item.State != workflow.Merged && item.State != workflow.ReadyForMerge {
+		if issue.State == "closed" && item.State != workflow.Merged && item.State != workflow.ReadyForMerge && item.State != workflow.Superseded {
 			item.Problem = "source issue is closed without a merged Submission"
 		}
 		if item.State == workflow.Ready {
@@ -477,6 +494,9 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository work
 			return nil, err
 		}
 		for _, comment := range comments {
+			if item.Submission != nil && !strings.HasPrefix(comment.Body, "<!-- skl.implement/v1\n") {
+				item.Submission.Comments = append(item.Submission.Comments, comment)
+			}
 			// The operation identifies opaque prose before that prose is published.
 			if item.Transition != nil && fmt.Sprintf("%x", sha256.Sum256([]byte(comment.Body))) == item.Transition.DecisionDigest {
 				continue
@@ -500,11 +520,17 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository work
 				if metadata.TargetBranch != "" {
 					item.TargetBranch = metadata.TargetBranch
 				}
+				if metadata.SynchronizationTarget != "" {
+					item.TargetSnapshot = metadata.SynchronizationTarget
+				}
 				if metadata.ReviewedHead != "" && item.Submission != nil && metadata.ReviewRoundHead == item.Submission.Head {
 					item.Submission.PreviousReviewedHead = metadata.ReviewedHead
 				}
 				if metadata.ResumeState != "" {
 					item.ResumeState = metadata.ResumeState
+				}
+				if metadata.WatchdogHead != "" && item.Submission != nil {
+					item.Submission.ReviewedHead = metadata.WatchdogHead
 				}
 				if metadata.Transition != nil {
 					item.Transition = metadata.Transition
@@ -559,6 +585,17 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository work
 		if owners[item.Branch] != item.Number {
 			item.Problem = "multiple source issues own the conventional branch"
 		}
+		if len(matches) == 1 && (item.Problem == "contradictory lifecycle projections" || item.Problem == "" && item.Claimed && (item.State == workflow.ReadyForMerge || item.State == workflow.NeedsHuman || item.State == workflow.Rework)) && (item.Transition == nil || item.Transition.Completed) {
+			observation, err := b.ReviewSubmission(ctx, repository, item.Submission.Number)
+			if err != nil {
+				return nil, err
+			}
+			if observation.PendingReview != "" && observation.Head == item.Submission.Head && problem == "" {
+				item.Problem = ""
+				item.State = observation.PendingReview
+				item.Submission.PendingReview = observation.PendingReview
+			}
+		}
 		items = append(items, item)
 	}
 	return items, nil
@@ -609,6 +646,8 @@ func (b *GitHubBackend) implementationComments(ctx context.Context, repository w
 	var comments []skilldist.ReviewComment
 	for page := 1; ; page++ {
 		var batch []struct {
+			Line        int    `json:"line"`
+			Side        string `json:"side"`
 			Body        string `json:"body"`
 			Association string `json:"author_association"`
 			Commit      string `json:"commit_id"`
@@ -622,7 +661,7 @@ func (b *GitHubBackend) implementationComments(ctx context.Context, repository w
 			return nil, err
 		}
 		for _, comment := range batch {
-			comments = append(comments, skilldist.ReviewComment{Body: comment.Body, Author: comment.User.Login, Association: comment.Association, Commit: comment.Commit, Path: comment.Path, CreatedAt: comment.CreatedAt})
+			comments = append(comments, skilldist.ReviewComment{Body: comment.Body, Author: comment.User.Login, Association: comment.Association, Commit: comment.Commit, Path: comment.Path, CreatedAt: comment.CreatedAt, Line: comment.Line, Side: comment.Side})
 		}
 		if len(batch) < 100 {
 			return comments, nil
