@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	skilldist "github.com/vicrdguez/skills"
+	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/workflow"
 )
 
@@ -35,7 +36,7 @@ type githubPull struct {
 	} `json:"base"`
 }
 
-func (b *GitHubBackend) ClaimImplementation(ctx context.Context, repository workflow.RepositoryID, item workflow.ImplementationItem) error {
+func (b *GitHubBackend) ClaimImplementation(ctx context.Context, repository github.RepositoryID, item workflow.ImplementationItem) error {
 	items, err := b.ImplementationItems(ctx, repository)
 	if err != nil {
 		return err
@@ -83,7 +84,7 @@ func (b *GitHubBackend) ClaimImplementation(ctx context.Context, repository work
 	return workflow.Refuse("Work Item disappeared before Claim; inspect its stable identity")
 }
 
-func (b *GitHubBackend) publishImplementationMetadata(ctx context.Context, repository workflow.RepositoryID, number int, metadata implementationMetadata) error {
+func (b *GitHubBackend) publishImplementationMetadata(ctx context.Context, repository github.RepositoryID, number int, metadata implementationMetadata) error {
 	payload, err := json.Marshal(metadata)
 	if err != nil {
 		return err
@@ -91,7 +92,7 @@ func (b *GitHubBackend) publishImplementationMetadata(ctx context.Context, repos
 	return b.implementationComment(ctx, repository, number, "<!-- skl.implement/v1\n"+string(payload)+"\n-->", true)
 }
 
-func (b *GitHubBackend) implementationComment(ctx context.Context, repository workflow.RepositoryID, number int, body string, metadata bool) error {
+func (b *GitHubBackend) implementationComment(ctx context.Context, repository github.RepositoryID, number int, body string, metadata bool) error {
 	published := func(comments []skilldist.ReviewComment) bool {
 		latest := ""
 		for _, comment := range comments {
@@ -127,7 +128,7 @@ func (b *GitHubBackend) implementationComment(ctx context.Context, repository wo
 	return errors.New("comment publication not observed; retry the same operation")
 }
 
-func (b *GitHubBackend) implementationLabelMutation(ctx context.Context, repository workflow.RepositoryID, number int, add, remove []string, guard func() error) error {
+func (b *GitHubBackend) implementationLabelMutation(ctx context.Context, repository github.RepositoryID, number int, add, remove []string, guard func() error) error {
 	if guard == nil {
 		guard = func() error { return nil }
 	}
@@ -180,7 +181,7 @@ func (b *GitHubBackend) implementationLabelMutation(ctx context.Context, reposit
 	return nil
 }
 
-func (b *GitHubBackend) PublishImplementation(ctx context.Context, repository workflow.RepositoryID, item workflow.ImplementationItem, wanted workflow.Submission) (workflow.Submission, error) {
+func (b *GitHubBackend) PublishImplementation(ctx context.Context, repository github.RepositoryID, item workflow.ImplementationItem, wanted workflow.Submission) (workflow.Submission, error) {
 	issues, err := b.listIssues(ctx, repository)
 	if err != nil {
 		return workflow.Submission{}, err
@@ -264,7 +265,7 @@ func (b *GitHubBackend) PublishImplementation(ctx context.Context, repository wo
 	return wanted, nil
 }
 
-func (b *GitHubBackend) AwaitImplementationReview(ctx context.Context, repository workflow.RepositoryID, item workflow.ImplementationItem, guard func() error) (err error) {
+func (b *GitHubBackend) AwaitImplementationReview(ctx context.Context, repository github.RepositoryID, item workflow.ImplementationItem, guard func() error) (err error) {
 	defer func() {
 		if err != nil {
 			number := item.Number
@@ -292,7 +293,7 @@ func (b *GitHubBackend) AwaitImplementationReview(ctx context.Context, repositor
 	return b.implementationLabelMutation(ctx, repository, item.Number, nil, []string{"ready", "wip"}, guard)
 }
 
-func (b *GitHubBackend) PauseImplementation(ctx context.Context, repository workflow.RepositoryID, item workflow.ImplementationItem, decision string, guard func() error) (err error) {
+func (b *GitHubBackend) PauseImplementation(ctx context.Context, repository github.RepositoryID, item workflow.ImplementationItem, decision string, guard func() error) (err error) {
 	defer func() {
 		if err != nil {
 			number := item.Number
@@ -323,11 +324,11 @@ func (b *GitHubBackend) PauseImplementation(ctx context.Context, repository work
 	return b.implementationLabelMutation(ctx, repository, item.Number, []string{"needs-human"}, []string{"ready", "wip"}, guard)
 }
 
-func (b *GitHubBackend) RecordImplementationTransition(ctx context.Context, repository workflow.RepositoryID, item workflow.ImplementationItem, transition workflow.ImplementationTransition) error {
+func (b *GitHubBackend) RecordImplementationTransition(ctx context.Context, repository github.RepositoryID, item workflow.ImplementationItem, transition workflow.ImplementationTransition) error {
 	return b.publishImplementationMetadata(ctx, repository, item.Number, implementationMetadata{Transition: &transition})
 }
 
-func (b *GitHubBackend) RetainImplementationClaim(ctx context.Context, repository workflow.RepositoryID, item workflow.ImplementationItem) error {
+func (b *GitHubBackend) RetainImplementationClaim(ctx context.Context, repository github.RepositoryID, item workflow.ImplementationItem) error {
 	number := item.Number
 	if item.State == workflow.Rework && item.Submission != nil {
 		number = item.Submission.Number
@@ -364,7 +365,7 @@ func implementationBranchOwners(issues []githubIssue) map[string]int {
 	return owners
 }
 
-func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository workflow.RepositoryID) ([]workflow.ImplementationItem, error) {
+func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository github.RepositoryID) ([]workflow.ImplementationItem, error) {
 	issues, err := b.listIssues(ctx, repository)
 	if err != nil {
 		return nil, err
@@ -601,8 +602,8 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository work
 	return items, nil
 }
 
-func (b *GitHubBackend) ImplementationTarget(ctx context.Context, repository workflow.RepositoryID) (string, error) {
-	return b.Validate(ctx, repository)
+func (b *GitHubBackend) ImplementationTarget(ctx context.Context, repository github.RepositoryID) (string, error) {
+	return b.validate(ctx, repository)
 }
 
 func implementationLabels(issue githubIssue) (workflow.State, bool, string) {
@@ -642,7 +643,7 @@ func implementationLabels(issue githubIssue) (workflow.State, bool, string) {
 	return state, claimed, problem
 }
 
-func (b *GitHubBackend) implementationComments(ctx context.Context, repository workflow.RepositoryID, stream string) ([]skilldist.ReviewComment, error) {
+func (b *GitHubBackend) implementationComments(ctx context.Context, repository github.RepositoryID, stream string) ([]skilldist.ReviewComment, error) {
 	var comments []skilldist.ReviewComment
 	for page := 1; ; page++ {
 		var batch []struct {
@@ -669,7 +670,7 @@ func (b *GitHubBackend) implementationComments(ctx context.Context, repository w
 	}
 }
 
-func (b *GitHubBackend) ImplementationHead(ctx context.Context, repository workflow.RepositoryID, branch string) (string, error) {
+func (b *GitHubBackend) ImplementationHead(ctx context.Context, repository github.RepositoryID, branch string) (string, error) {
 	var ref struct {
 		Object struct {
 			SHA string `json:"sha"`

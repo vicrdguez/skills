@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/vicrdguez/skills/github"
 )
 
 func SubmitImplementation(ctx context.Context, root, remote string, number int, bodyPath string, backend ImplementationBackend) (ImplementationOutcome, error) {
@@ -26,7 +28,7 @@ func PauseImplementation(ctx context.Context, root, remote string, number int, r
 }
 
 func handoffImplementation(ctx context.Context, root, remote string, number int, target State, decisionPath, bodyPath string, backend ImplementationBackend) (outcome ImplementationOutcome, err error) {
-	remote, err = ResolveGitHubRemote(root, remote)
+	remote, err = github.ResolveGitHubRemote(root, remote)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}

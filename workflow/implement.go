@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	skilldist "github.com/vicrdguez/skills"
+	"github.com/vicrdguez/skills/github"
 )
 
 type State string
@@ -59,15 +60,15 @@ type Submission struct {
 }
 
 type ImplementationBackend interface {
-	ImplementationTarget(context.Context, RepositoryID) (string, error)
-	ImplementationItems(context.Context, RepositoryID) ([]ImplementationItem, error)
-	ClaimImplementation(context.Context, RepositoryID, ImplementationItem) error
-	ImplementationHead(context.Context, RepositoryID, string) (string, error)
-	PublishImplementation(context.Context, RepositoryID, ImplementationItem, Submission) (Submission, error)
-	RecordImplementationTransition(context.Context, RepositoryID, ImplementationItem, ImplementationTransition) error
-	RetainImplementationClaim(context.Context, RepositoryID, ImplementationItem) error
-	AwaitImplementationReview(context.Context, RepositoryID, ImplementationItem, func() error) error
-	PauseImplementation(context.Context, RepositoryID, ImplementationItem, string, func() error) error
+	ImplementationTarget(context.Context, github.RepositoryID) (string, error)
+	ImplementationItems(context.Context, github.RepositoryID) ([]ImplementationItem, error)
+	ClaimImplementation(context.Context, github.RepositoryID, ImplementationItem) error
+	ImplementationHead(context.Context, github.RepositoryID, string) (string, error)
+	PublishImplementation(context.Context, github.RepositoryID, ImplementationItem, Submission) (Submission, error)
+	RecordImplementationTransition(context.Context, github.RepositoryID, ImplementationItem, ImplementationTransition) error
+	RetainImplementationClaim(context.Context, github.RepositoryID, ImplementationItem) error
+	AwaitImplementationReview(context.Context, github.RepositoryID, ImplementationItem, func() error) error
+	PauseImplementation(context.Context, github.RepositoryID, ImplementationItem, string, func() error) error
 }
 
 type ImplementationTransition struct {
@@ -94,14 +95,14 @@ type ImplementationOutcome struct {
 	Item   *ImplementationItem `json:"item,omitempty"`
 }
 
-func loadImplementation(ctx context.Context, root, remote string, backend ImplementationBackend) (RepositoryID, []ImplementationItem, error) {
+func loadImplementation(ctx context.Context, root, remote string, backend ImplementationBackend) (github.RepositoryID, []ImplementationItem, error) {
 	remote, err := git(root, "remote", "get-url", remote)
 	if err != nil {
-		return RepositoryID{}, nil, err
+		return github.RepositoryID{}, nil, err
 	}
-	repository, err := ParseGitHubRemote(remote)
+	repository, err := github.ParseGitHubRemote(remote)
 	if err != nil {
-		return RepositoryID{}, nil, err
+		return github.RepositoryID{}, nil, err
 	}
 	items, err := backend.ImplementationItems(ctx, repository)
 	for i := range items {
@@ -114,7 +115,7 @@ func loadImplementation(ctx context.Context, root, remote string, backend Implem
 }
 
 func InspectImplementation(ctx context.Context, root, remote string, number int, backend ImplementationBackend) (ImplementationOutcome, error) {
-	remote, err := ResolveGitHubRemote(root, remote)
+	remote, err := github.ResolveGitHubRemote(root, remote)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
@@ -137,7 +138,7 @@ func InspectImplementation(ctx context.Context, root, remote string, number int,
 }
 
 func StartImplementation(ctx context.Context, root, remote string, number int, snapshot, reviewedHead string, backend ImplementationBackend) (ImplementationOutcome, error) {
-	remote, err := ResolveGitHubRemote(root, remote)
+	remote, err := github.ResolveGitHubRemote(root, remote)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
@@ -233,7 +234,7 @@ func StartImplementation(ctx context.Context, root, remote string, number int, s
 	return ImplementationOutcome{Status: "no_work"}, nil
 }
 
-func prepareImplementationStart(ctx context.Context, root, remote string, repository RepositoryID, item ImplementationItem, snapshot, reviewedHead string, backend ImplementationBackend) (ImplementationItem, ImplementationOutcome, error) {
+func prepareImplementationStart(ctx context.Context, root, remote string, repository github.RepositoryID, item ImplementationItem, snapshot, reviewedHead string, backend ImplementationBackend) (ImplementationItem, ImplementationOutcome, error) {
 	refuse := func(reason string) (ImplementationItem, ImplementationOutcome, error) {
 		return item, ImplementationOutcome{Status: "fix_required", Reason: reason, Item: &item}, nil
 	}

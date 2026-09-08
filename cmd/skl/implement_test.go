@@ -13,12 +13,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/setup"
 	"github.com/vicrdguez/skills/workflow"
 )
 
 type implementationMemory struct {
 	memoryBackend
+	coordination     []workflow.CoordinationStatus
 	work             []workflow.ImplementationItem
 	remoteHeads      map[string]string
 	afterPublish     func()
@@ -28,7 +30,7 @@ type implementationMemory struct {
 	afterCompletion  func()
 }
 
-func (b *implementationMemory) RecordImplementationTransition(_ context.Context, _ workflow.RepositoryID, item workflow.ImplementationItem, transition workflow.ImplementationTransition) error {
+func (b *implementationMemory) RecordImplementationTransition(_ context.Context, _ github.RepositoryID, item workflow.ImplementationItem, transition workflow.ImplementationTransition) error {
 	for i := range b.work {
 		if b.work[i].Number == item.Number {
 			b.work[i].Transition = &transition
@@ -40,7 +42,7 @@ func (b *implementationMemory) RecordImplementationTransition(_ context.Context,
 	return nil
 }
 
-func (b *implementationMemory) RetainImplementationClaim(_ context.Context, _ workflow.RepositoryID, item workflow.ImplementationItem) error {
+func (b *implementationMemory) RetainImplementationClaim(_ context.Context, _ github.RepositoryID, item workflow.ImplementationItem) error {
 	for i := range b.work {
 		if b.work[i].Number == item.Number {
 			b.work[i].Claimed = true
@@ -50,11 +52,11 @@ func (b *implementationMemory) RetainImplementationClaim(_ context.Context, _ wo
 	return nil
 }
 
-func (b *implementationMemory) ImplementationTarget(context.Context, workflow.RepositoryID) (string, error) {
+func (b *implementationMemory) ImplementationTarget(context.Context, github.RepositoryID) (string, error) {
 	return "main", nil
 }
 
-func (b *implementationMemory) PauseImplementation(_ context.Context, _ workflow.RepositoryID, item workflow.ImplementationItem, decision string, guard func() error) error {
+func (b *implementationMemory) PauseImplementation(_ context.Context, _ github.RepositoryID, item workflow.ImplementationItem, decision string, guard func() error) error {
 	if b.beforeTransition != nil {
 		b.beforeTransition()
 	}
@@ -79,11 +81,11 @@ func (b *implementationMemory) PauseImplementation(_ context.Context, _ workflow
 	return nil
 }
 
-func (b *implementationMemory) ImplementationHead(_ context.Context, _ workflow.RepositoryID, branch string) (string, error) {
+func (b *implementationMemory) ImplementationHead(_ context.Context, _ github.RepositoryID, branch string) (string, error) {
 	return b.remoteHeads[branch], nil
 }
 
-func (b *implementationMemory) PublishImplementation(_ context.Context, _ workflow.RepositoryID, item workflow.ImplementationItem, submission workflow.Submission) (workflow.Submission, error) {
+func (b *implementationMemory) PublishImplementation(_ context.Context, _ github.RepositoryID, item workflow.ImplementationItem, submission workflow.Submission) (workflow.Submission, error) {
 	if submission.Number == 0 {
 		submission.Number = 11
 	}
@@ -136,7 +138,7 @@ func TestImplementRefusesInvalidHandoff(t *testing.T) {
 	}
 }
 
-func (b *implementationMemory) AwaitImplementationReview(_ context.Context, _ workflow.RepositoryID, item workflow.ImplementationItem, guard func() error) error {
+func (b *implementationMemory) AwaitImplementationReview(_ context.Context, _ github.RepositoryID, item workflow.ImplementationItem, guard func() error) error {
 	if b.beforeTransition != nil {
 		b.beforeTransition()
 	}
@@ -156,12 +158,12 @@ func (b *implementationMemory) AwaitImplementationReview(_ context.Context, _ wo
 	return nil
 }
 
-func (b *implementationMemory) ImplementationItems(_ context.Context, repository workflow.RepositoryID) ([]workflow.ImplementationItem, error) {
+func (b *implementationMemory) ImplementationItems(_ context.Context, repository github.RepositoryID) ([]workflow.ImplementationItem, error) {
 	b.repository = repository
 	return append([]workflow.ImplementationItem(nil), b.work...), nil
 }
 
-func (b *implementationMemory) ClaimImplementation(_ context.Context, _ workflow.RepositoryID, item workflow.ImplementationItem) error {
+func (b *implementationMemory) ClaimImplementation(_ context.Context, _ github.RepositoryID, item workflow.ImplementationItem) error {
 	for i := range b.work {
 		if b.work[i].Number == item.Number {
 			b.work[i].TargetSnapshot = item.TargetSnapshot
@@ -184,7 +186,7 @@ func implementCLI(t *testing.T, root string, backend *implementationMemory, args
 		backend.remoteHeads["main"] = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "refs/heads/main"))
 	}
 	var output bytes.Buffer
-	app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
 	command := append([]string{"skl", "implement"}, args...)
 	command = append(command, "--repo", root)
 	if err := app.Run(command); err != nil {
@@ -323,7 +325,7 @@ func TestInstalledImplementActivationLoadsDefinitionsOnce(t *testing.T) {
 			prepareSlice(t, root, "widget")
 			b := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{"main": strings.TrimSpace(runGitOutput(t, root, "rev-parse", "main"))}}
 			var output bytes.Buffer
-			app := newAppWithSkillHome(func() (setup.Backend, error) { return b, nil }, bytes.NewReader(nil), &output, &output, home)
+			app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return b, nil }, bytes.NewReader(nil), &output, &output, home)
 			if err := app.Run([]string{"skl", "install"}); err != nil {
 				t.Fatal(err)
 			}
@@ -391,7 +393,7 @@ func TestImplementUsesSelectedGitHubRemoteThroughout(t *testing.T) {
 			b := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.Ready}}}
 			if layout == "ambiguous" {
 				var output bytes.Buffer
-				app := newApp(func() (setup.Backend, error) { return b, nil }, bytes.NewReader(nil), &output, &output)
+				app := newApp(func(github.RepositoryID) (setup.Backend, error) { return b, nil }, bytes.NewReader(nil), &output, &output)
 				err := app.Run([]string{"skl", "implement", "next", "--repo", root})
 				if err == nil || !strings.Contains(err.Error(), "--remote") || b.work[0].Claimed {
 					t.Fatalf("ambiguous inference = %v, %s", err, &output)
@@ -406,7 +408,7 @@ func TestImplementUsesSelectedGitHubRemoteThroughout(t *testing.T) {
 				args = append(args, "--remote", "upstream")
 			}
 			start := implementCLI(t, root, b, args...)
-			if start.Packet == nil || b.repository != (workflow.RepositoryID{Owner: "acme", Name: "widgets"}) {
+			if start.Packet == nil || b.repository != (github.RepositoryID{Owner: "acme", Name: "widgets"}) {
 				t.Fatalf("wrong remote: %#v, %#v", start, b.repository)
 			}
 			facts := start.Packet.Facts.Implementation
@@ -679,7 +681,7 @@ func TestImplementReconcilesInterruptedHandoffs(t *testing.T) {
 			b.remoteHeads["widget"] = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 			b.failTransition = true
 			var output bytes.Buffer
-			app := newApp(func() (setup.Backend, error) { return b, nil }, bytes.NewReader(nil), &output, &output)
+			app := newApp(func(github.RepositoryID) (setup.Backend, error) { return b, nil }, bytes.NewReader(nil), &output, &output)
 			command := append([]string{"skl", "implement"}, args...)
 			command = append(command, "--repo", root)
 			if err := app.Run(command); err == nil {

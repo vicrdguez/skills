@@ -11,42 +11,39 @@ import (
 	"strings"
 )
 
-type RepositoryID struct {
-	Owner string
-	Name  string
-}
+type WorkItemID string
 
 type WorkItem struct {
-	Number           int
+	ID               WorkItemID
 	Title            string
 	Body             string
 	Branch           string
 	ArtifactBaseline string
 	AcceptedHead     string
 	Ready            bool
-	Parent           int
-	Blockers         []int
+	Parent           WorkItemID
+	Blockers         []WorkItemID
 	Merged           bool
 	Closed           bool
 }
 
 type CoordinationItem struct {
-	Children []int
-	Number   int
+	Children []WorkItemID
+	ID       WorkItemID
 	Title    string
 	Body     string
 	Closed   bool
 }
 
 type Backend interface {
-	FindWorkItems(context.Context, RepositoryID, []WorkItem, []Dependency) ([]WorkItem, error)
-	ListMergedWorkItems(context.Context, RepositoryID) ([]WorkItem, error)
-	CreateWorkItem(context.Context, RepositoryID, WorkItem) (WorkItem, error)
-	FindCoordinationItems(context.Context, RepositoryID, string) ([]CoordinationItem, error)
-	CreateCoordinationItem(context.Context, RepositoryID, CoordinationItem) (CoordinationItem, error)
-	AddChild(context.Context, RepositoryID, int, int) error
-	AddDependency(context.Context, RepositoryID, int, int) error
-	SetReady(context.Context, RepositoryID, int) error
+	FindWorkItems(context.Context, []WorkItem, []Dependency) ([]WorkItem, error)
+	ListMergedWorkItems(context.Context) ([]WorkItem, error)
+	CreateWorkItem(context.Context, WorkItem) (WorkItem, error)
+	FindCoordinationItems(context.Context, string) ([]CoordinationItem, error)
+	CreateCoordinationItem(context.Context, CoordinationItem) (CoordinationItem, error)
+	AddChild(context.Context, WorkItemID, WorkItemID) error
+	AddDependency(context.Context, WorkItemID, WorkItemID) error
+	SetReady(context.Context, WorkItemID) error
 }
 
 type Slice struct {
@@ -84,18 +81,7 @@ func Cleanup(ctx context.Context, root, remote string, backend Backend) (Cleanup
 	if err != nil {
 		return CleanupOutcome{}, errors.New("not a Git repository")
 	}
-	if remote == "" {
-		remote = "origin"
-	}
-	remoteURL, err := git(root, "remote", "get-url", remote)
-	if err != nil {
-		return CleanupOutcome{}, err
-	}
-	repository, err := ParseGitHubRemote(remoteURL)
-	if err != nil {
-		return CleanupOutcome{}, err
-	}
-	items, err := backend.ListMergedWorkItems(ctx, repository)
+	items, err := backend.ListMergedWorkItems(ctx)
 	if err != nil {
 		return CleanupOutcome{}, err
 	}
@@ -159,7 +145,7 @@ func registeredWorktrees(root string) (map[string]string, error) {
 }
 
 func Publish(ctx context.Context, request PublishRequest, backend Backend) (Outcome, error) {
-	prepared, repository, outcome, err := preflight(request)
+	prepared, outcome, err := preflight(request)
 	if err != nil || outcome.Status != "" {
 		return outcome, err
 	}
@@ -177,7 +163,7 @@ func Publish(ctx context.Context, request PublishRequest, backend Backend) (Outc
 		if err != nil {
 			return Outcome{}, err
 		}
-		parents, err := backend.FindCoordinationItems(ctx, repository, request.ParentTitle)
+		parents, err := backend.FindCoordinationItems(ctx, request.ParentTitle)
 		if err != nil {
 			return Outcome{}, err
 		}
@@ -200,7 +186,7 @@ func Publish(ctx context.Context, request PublishRequest, backend Backend) (Outc
 			parent = matches[0]
 		}
 	}
-	existing, err := backend.FindWorkItems(ctx, repository, ordered, request.Dependencies)
+	existing, err := backend.FindWorkItems(ctx, ordered, request.Dependencies)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -221,8 +207,8 @@ func Publish(ctx context.Context, request PublishRequest, backend Backend) (Outc
 			return Outcome{Status: "needs_human", Reason: "ambiguous existing Work Item " + slice.Title}, nil
 		}
 		if len(matches) == 1 {
-			wantedParent := parent.Number
-			if matches[0].Parent != 0 && matches[0].Parent != wantedParent {
+			wantedParent := parent.ID
+			if matches[0].Parent != "" && matches[0].Parent != wantedParent {
 				return Outcome{Status: "needs_human", Reason: "existing Work Item has a conflicting parent: " + slice.Title}, nil
 			}
 		}
@@ -232,19 +218,19 @@ func Publish(ctx context.Context, request PublishRequest, backend Backend) (Outc
 		if len(matches) != 1 {
 			continue
 		}
-		var wanted []int
+		var wanted []WorkItemID
 		for _, dependency := range request.Dependencies {
 			blockers := matchesByTitle[dependency.Blocker]
 			if dependency.Dependent == slice.Title && len(blockers) == 1 {
-				wanted = append(wanted, blockers[0].Number)
+				wanted = append(wanted, blockers[0].ID)
 			}
 		}
 		if !containsOnly(matches[0].Blockers, wanted) {
 			return Outcome{Status: "needs_human", Reason: "existing Work Item has conflicting Dependencies: " + slice.Title}, nil
 		}
 	}
-	if len(prepared) > 1 && parent.Number == 0 {
-		parent, err = backend.CreateCoordinationItem(ctx, repository, CoordinationItem{Title: request.ParentTitle, Body: string(parentBody)})
+	if len(prepared) > 1 && parent.ID == "" {
+		parent, err = backend.CreateCoordinationItem(ctx, CoordinationItem{Title: request.ParentTitle, Body: string(parentBody)})
 		if err != nil {
 			return Outcome{}, err
 		}
@@ -254,19 +240,19 @@ func Publish(ctx context.Context, request PublishRequest, backend Backend) (Outc
 		matches := matchesByTitle[slice.Title]
 		item := slice
 		if len(matches) == 0 {
-			item, err = backend.CreateWorkItem(ctx, repository, slice)
+			item, err = backend.CreateWorkItem(ctx, slice)
 			if err != nil {
 				return Outcome{}, err
 			}
 		} else {
 			item = matches[0]
 		}
-		if parent.Number != 0 {
-			if item.Parent != 0 && item.Parent != parent.Number {
+		if parent.ID != "" {
+			if item.Parent != "" && item.Parent != parent.ID {
 				return Outcome{Status: "needs_human", Reason: "existing Work Item has a conflicting parent: " + slice.Title}, nil
 			}
-			if item.Parent == 0 {
-				if err := backend.AddChild(ctx, repository, parent.Number, item.Number); err != nil {
+			if item.Parent == "" {
+				if err := backend.AddChild(ctx, parent.ID, item.ID); err != nil {
 					return Outcome{}, err
 				}
 			}
@@ -275,7 +261,7 @@ func Publish(ctx context.Context, request PublishRequest, backend Backend) (Outc
 			if dependency.Dependent != slice.Title {
 				continue
 			}
-			blocker := published[dependency.Blocker].Number
+			blocker := published[dependency.Blocker].ID
 			alreadyLinked := false
 			for _, existingBlocker := range item.Blockers {
 				if existingBlocker == blocker {
@@ -283,13 +269,13 @@ func Publish(ctx context.Context, request PublishRequest, backend Backend) (Outc
 				}
 			}
 			if !alreadyLinked {
-				if err := backend.AddDependency(ctx, repository, item.Number, blocker); err != nil {
+				if err := backend.AddDependency(ctx, item.ID, blocker); err != nil {
 					return Outcome{}, err
 				}
 			}
 		}
 		if !item.Ready {
-			if err := backend.SetReady(ctx, repository, item.Number); err != nil {
+			if err := backend.SetReady(ctx, item.ID); err != nil {
 				return Outcome{}, err
 			}
 		}
@@ -298,9 +284,9 @@ func Publish(ctx context.Context, request PublishRequest, backend Backend) (Outc
 	return Outcome{Status: "completed"}, nil
 }
 
-func containsOnly(existing, wanted []int) bool {
-	for _, number := range existing {
-		if !slices.Contains(wanted, number) {
+func containsOnly(existing, wanted []WorkItemID) bool {
+	for _, id := range existing {
+		if !slices.Contains(wanted, id) {
 			return false
 		}
 	}
@@ -343,70 +329,62 @@ func orderSlices(items []WorkItem, dependencies []Dependency) ([]WorkItem, Outco
 	return ordered, Outcome{}
 }
 
-func preflight(request PublishRequest) ([]WorkItem, RepositoryID, Outcome, error) {
+func preflight(request PublishRequest) ([]WorkItem, Outcome, error) {
 	if len(request.Slices) == 0 {
-		return nil, RepositoryID{}, Outcome{}, errors.New("at least one --slice is required")
+		return nil, Outcome{}, errors.New("at least one --slice is required")
 	}
 	root, err := git(request.Root, "rev-parse", "--show-toplevel")
 	if err != nil {
-		return nil, RepositoryID{}, Outcome{}, errors.New("not a Git repository")
+		return nil, Outcome{}, errors.New("not a Git repository")
 	}
 	remote := request.Remote
 	if remote == "" {
-		remote = "origin"
-	}
-	remoteURL, err := git(root, "remote", "get-url", remote)
-	if err != nil {
-		return nil, RepositoryID{}, Outcome{}, fmt.Errorf("resolve remote %q: %w", remote, err)
-	}
-	repository, err := ParseGitHubRemote(remoteURL)
-	if err != nil {
-		return nil, RepositoryID{}, Outcome{}, err
+		return nil, Outcome{}, errors.New("publication requires an explicit Git remote")
 	}
 	target, err := git(root, "rev-parse", "refs/remotes/"+remote+"/"+request.Target)
 	if err != nil {
-		return nil, RepositoryID{}, fix("target branch is unavailable", "fetch the target branch"), nil
+		return nil, fix("target branch is unavailable", "fetch the target branch"), nil
 	}
 	mainWorktree, err := primaryWorktree(root)
 	if err != nil {
-		return nil, RepositoryID{}, Outcome{}, err
+		return nil, Outcome{}, err
 	}
 	dirty, err := git(mainWorktree, "status", "--porcelain", "--untracked-files=all", "--", "CONTEXT.md", "docs/adr", "docs/capabilities")
 	if err != nil {
-		return nil, RepositoryID{}, Outcome{}, err
+		return nil, Outcome{}, err
 	}
 	if dirty != "" {
-		return nil, RepositoryID{}, fix("durable documents have uncommitted changes", "commit or restore the reported durable-document paths"), nil
+		return nil, fix("durable documents have uncommitted changes", "commit or restore the reported durable-document paths"), nil
 	}
 	seen := make(map[string]bool)
 	prepared := make([]WorkItem, 0, len(request.Slices))
 	for _, slice := range request.Slices {
 		if slice.Slug == "" || slice.BodyPath == "" || seen[slice.Slug] {
-			return nil, RepositoryID{}, Outcome{}, fmt.Errorf("invalid --slice %q", slice.Slug)
+			return nil, Outcome{}, fmt.Errorf("invalid --slice %q", slice.Slug)
 		}
 		seen[slice.Slug] = true
 		head, err := git(root, "rev-parse", "refs/heads/"+slice.Slug)
 		if err != nil {
-			return nil, RepositoryID{}, fix("slice branch "+slice.Slug+" is unavailable", "create the local slice branch"), nil
+			return nil, fix("slice branch "+slice.Slug+" is unavailable", "create the local slice branch"), nil
 		}
 		remoteHead, err := git(root, "rev-parse", "refs/remotes/"+remote+"/"+slice.Slug)
 		if err != nil || remoteHead != head {
-			return nil, RepositoryID{}, fix("slice branch "+slice.Slug+" is not pushed at its local head", "push the slice branch"), nil
+			return nil, fix("slice branch "+slice.Slug+" is not pushed at its local head", "push the slice branch"), nil
 		}
 		if err := gitOK(root, "merge-base", "--is-ancestor", target, head); err != nil {
-			return nil, RepositoryID{}, fix("slice branch "+slice.Slug+" misses the observed target", "merge the target branch into the slice"), nil
+			return nil, fix("slice branch "+slice.Slug+" misses the observed target", "merge the target branch into the slice"), nil
 		}
 		baseline, err := artifactBaseline(root, slice.Slug, head)
 		if err != nil {
-			return nil, RepositoryID{}, fix(err.Error(), "commit the complete ledger once at the published branch head"), nil
+			return nil, fix(err.Error(), "commit the complete ledger once at the published branch head"), nil
 		}
 		body, err := os.ReadFile(slice.BodyPath)
 		if err != nil {
-			return nil, RepositoryID{}, Outcome{}, err
+			return nil, Outcome{}, err
 		}
 		prepared = append(prepared, WorkItem{Title: slice.Slug, Body: string(body), Branch: slice.Slug, ArtifactBaseline: baseline})
 	}
-	return prepared, repository, Outcome{}, nil
+	return prepared, Outcome{}, nil
 }
 
 func primaryWorktree(root string) (string, error) {
@@ -441,19 +419,6 @@ func artifactBaseline(root, slug, head string) (string, error) {
 
 func fix(invariant, repair string) Outcome {
 	return Outcome{Status: "fix_required", Reason: invariant + "; " + repair}
-}
-
-func ParseGitHubRemote(remote string) (RepositoryID, error) {
-	remote = strings.TrimSuffix(remote, ".git")
-	for _, prefix := range []string{"git@github.com:", "https://github.com/", "ssh://git@github.com/"} {
-		if strings.HasPrefix(remote, prefix) {
-			parts := strings.Split(strings.TrimPrefix(remote, prefix), "/")
-			if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
-				return RepositoryID{Owner: parts[0], Name: parts[1]}, nil
-			}
-		}
-	}
-	return RepositoryID{}, fmt.Errorf("remote %q is not a GitHub repository", remote)
 }
 
 func git(directory string, args ...string) (string, error) {

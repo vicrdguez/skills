@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/setup"
 	"github.com/vicrdguez/skills/workflow"
 )
@@ -57,7 +58,7 @@ func TestWatchdogHumanRequeuePreservesFirstFailureBounce(t *testing.T) {
 			}))
 			defer server.Close()
 			adapter := setup.NewGitHubBackend(server.URL, "token", server.Client())
-			submission, err := adapter.ReviewSubmission(context.Background(), workflow.RepositoryID{Owner: "acme", Name: "widgets"}, 11)
+			submission, err := adapter.ReviewSubmission(context.Background(), github.RepositoryID{Owner: "acme", Name: "widgets"}, 11)
 			if err != nil {
 				t.Fatal(err)
 			}

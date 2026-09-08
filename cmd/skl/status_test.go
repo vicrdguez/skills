@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/setup"
 	"github.com/vicrdguez/skills/workflow"
 )
@@ -15,7 +16,7 @@ import (
 func statusCLI(t *testing.T, root string, b *implementationMemory) workflow.StatusOutcome {
 	t.Helper()
 	var output bytes.Buffer
-	app := newApp(func() (setup.Backend, error) { return b, nil }, bytes.NewReader(nil), &output, &output)
+	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return b, nil }, bytes.NewReader(nil), &output, &output)
 	if err := app.Run([]string{"skl", "status", "--repo", root}); err != nil {
 		t.Fatalf("status: %v %s", err, &output)
 	}
@@ -27,25 +28,25 @@ func statusCLI(t *testing.T, root string, b *implementationMemory) workflow.Stat
 }
 
 func TestStatusCompletesCoordinationOnlyWhenEveryChildMerged(t *testing.T) {
-	b := &implementationMemory{memoryBackend: memoryBackend{parents: []workflow.CoordinationItem{{Number: 100, Children: []int{7, 8}}}}, work: []workflow.ImplementationItem{{Number: 7, State: workflow.Merged}, {Number: 8, State: workflow.ReadyForMerge}}}
+	b := &implementationMemory{coordination: []workflow.CoordinationStatus{{Number: 100, Children: []int{7, 8}}}, work: []workflow.ImplementationItem{{Number: 7, State: workflow.Merged}, {Number: 8, State: workflow.ReadyForMerge}}}
 	root := proposalRepository(t)
-	if got := statusCLI(t, root, b); b.parents[0].Closed || len(got.CompleteProposals) != 0 {
+	if got := statusCLI(t, root, b); b.coordination[0].Closed || len(got.CompleteProposals) != 0 {
 		t.Fatalf("premature completion: %#v", got)
 	}
 	b.work[1].State = workflow.Merged
 	got := statusCLI(t, root, b)
-	if !b.parents[0].Closed || len(got.CompleteProposals) != 1 || got.CompleteProposals[0] != 100 {
+	if !b.coordination[0].Closed || len(got.CompleteProposals) != 1 || got.CompleteProposals[0] != 100 {
 		t.Fatalf("parent completion: %#v", got)
 	}
 }
 
-func (b *implementationMemory) CoordinationItems(context.Context, workflow.RepositoryID) ([]workflow.CoordinationItem, error) {
-	return b.parents, nil
+func (b *implementationMemory) CoordinationItems(context.Context, github.RepositoryID) ([]workflow.CoordinationStatus, error) {
+	return b.coordination, nil
 }
-func (b *implementationMemory) CloseCoordination(_ context.Context, _ workflow.RepositoryID, number int) error {
-	for i := range b.parents {
-		if b.parents[i].Number == number {
-			b.parents[i].Closed = true
+func (b *implementationMemory) CloseCoordination(_ context.Context, _ github.RepositoryID, number int) error {
+	for i := range b.coordination {
+		if b.coordination[i].Number == number {
+			b.coordination[i].Closed = true
 		}
 	}
 	return nil
@@ -101,7 +102,7 @@ type statusGuardMemory struct {
 	beforeLaterGuard func()
 }
 
-func (b *statusGuardMemory) CompleteReview(ctx context.Context, repository workflow.RepositoryID, item workflow.ImplementationItem, target workflow.State, guard func() error) error {
+func (b *statusGuardMemory) CompleteReview(ctx context.Context, repository github.RepositoryID, item workflow.ImplementationItem, target workflow.State, guard func() error) error {
 	if err := guard(); err != nil {
 		return err
 	}
@@ -131,7 +132,7 @@ func TestStatusPendingPassRequiresMergeabilityAndRetainsRecovery(t *testing.T) {
 					b.beforeLaterGuard = change
 				}
 				var output bytes.Buffer
-				app := newApp(func() (setup.Backend, error) { return b, nil }, bytes.NewReader(nil), &output, &output)
+				app := newApp(func(github.RepositoryID) (setup.Backend, error) { return b, nil }, bytes.NewReader(nil), &output, &output)
 				if err := app.Run([]string{"skl", "status", "--repo", root}); err != nil {
 					t.Fatal(err)
 				}
@@ -173,7 +174,7 @@ func TestStatusRoutesAcceptedConflictToSynchronizationRework(t *testing.T) {
 func TestStatusReturnsStructuredRepairableRefusal(t *testing.T) {
 	b := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.ReadyForMerge, Submission: &workflow.Submission{Number: 11, Head: "fixed", Base: "main", Mergeability: "conflicting"}}}}
 	var output bytes.Buffer
-	app := newApp(func() (setup.Backend, error) { return b, nil }, bytes.NewReader(nil), &output, &output)
+	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return b, nil }, bytes.NewReader(nil), &output, &output)
 	if err := app.Run([]string{"skl", "status", "--repo", proposalRepository(t)}); err != nil {
 		t.Fatalf("repairable refusal exited with an error: %v", err)
 	}

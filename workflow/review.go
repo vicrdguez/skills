@@ -10,13 +10,14 @@ import (
 	"strings"
 
 	skilldist "github.com/vicrdguez/skills"
+	"github.com/vicrdguez/skills/github"
 )
 
 type ReviewBackend interface {
 	ImplementationBackend
-	ReviewSubmission(context.Context, RepositoryID, int) (Submission, error)
-	PublishReview(context.Context, RepositoryID, ImplementationItem, []skilldist.ReviewComment, func() error) error
-	CompleteReview(context.Context, RepositoryID, ImplementationItem, State, func() error) error
+	ReviewSubmission(context.Context, github.RepositoryID, int) (Submission, error)
+	PublishReview(context.Context, github.RepositoryID, ImplementationItem, []skilldist.ReviewComment, func() error) error
+	CompleteReview(context.Context, github.RepositoryID, ImplementationItem, State, func() error) error
 }
 
 func SubmitWatchdog(ctx context.Context, root, remote string, number int, reviewed, head, verdict, summaryPath, findingsPath, bodyPath string, backend ReviewBackend) (outcome ImplementationOutcome, err error) {
@@ -60,7 +61,7 @@ func SubmitWatchdog(ctx context.Context, root, remote string, number int, review
 	if number <= 0 || reviewed == "" || verdict != "rework" && verdict != "pass" && verdict != "needs-human" || summaryPath == "" || verdict == "pass" && bodyPath == "" {
 		return ImplementationOutcome{}, fmt.Errorf("submit requires --item, --reviewed-head, --verdict rework|pass|needs-human and --summary; pass also requires --body")
 	}
-	remote, err = ResolveGitHubRemote(root, remote)
+	remote, err = github.ResolveGitHubRemote(root, remote)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}

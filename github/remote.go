@@ -1,10 +1,29 @@
-package workflow
+package github
 
 import (
 	"errors"
 	"fmt"
+	"os/exec"
 	"strings"
 )
+
+type RepositoryID struct {
+	Owner string
+	Name  string
+}
+
+func ParseGitHubRemote(remote string) (RepositoryID, error) {
+	remote = strings.TrimSuffix(remote, ".git")
+	for _, prefix := range []string{"git@github.com:", "https://github.com/", "ssh://git@github.com/"} {
+		if strings.HasPrefix(remote, prefix) {
+			parts := strings.Split(strings.TrimPrefix(remote, prefix), "/")
+			if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
+				return RepositoryID{Owner: parts[0], Name: parts[1]}, nil
+			}
+		}
+	}
+	return RepositoryID{}, fmt.Errorf("remote %q is not a GitHub repository", remote)
+}
 
 func ResolveGitHubRemote(root, explicit string) (string, error) {
 	if explicit != "" {
@@ -36,4 +55,9 @@ func ResolveGitHubRemote(root, explicit string) (string, error) {
 	default:
 		return "", fmt.Errorf("multiple GitHub remotes (%s); choose one with --remote", strings.Join(githubRemotes, ", "))
 	}
+}
+
+func git(directory string, args ...string) (string, error) {
+	output, err := exec.Command("git", append([]string{"-C", directory}, args...)...).Output()
+	return strings.TrimSpace(string(output)), err
 }

@@ -10,10 +10,11 @@ import (
 	"strings"
 
 	skilldist "github.com/vicrdguez/skills"
+	"github.com/vicrdguez/skills/github"
 )
 
 func StartWatchdog(ctx context.Context, root, remote string, number int, backend ImplementationBackend) (ImplementationOutcome, error) {
-	remote, err := ResolveGitHubRemote(root, remote)
+	remote, err := github.ResolveGitHubRemote(root, remote)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}

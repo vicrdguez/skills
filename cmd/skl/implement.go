@@ -7,6 +7,7 @@ import (
 	"io"
 
 	"github.com/urfave/cli/v2"
+	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/workflow"
 )
 
@@ -19,7 +20,7 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 				if command.Int("item") < 0 || command.NArg() != 0 {
 					return fmt.Errorf("invalid implementation invocation: use flags and a positive Work Item identity")
 				}
-				backend, err := newBackend()
+				backend, err := newBackend(github.RepositoryID{})
 				if err != nil {
 					return err
 				}

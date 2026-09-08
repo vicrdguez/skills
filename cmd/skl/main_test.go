@@ -17,33 +17,33 @@ import (
 	"testing"
 
 	skilldist "github.com/vicrdguez/skills"
+	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/setup"
 	"github.com/vicrdguez/skills/workflow"
 )
 
 type memoryBackend struct {
-	repository     setup.RepositoryID
-	labels         []setup.Label
+	repository     github.RepositoryID
+	prepared       bool
 	items          []workflow.WorkItem
 	parents        []workflow.CoordinationItem
-	children       [][2]int
-	blocks         [][2]int
-	failReady      int
-	failChild      int
-	failDependency int
+	children       [][2]workflow.WorkItemID
+	blocks         [][2]workflow.WorkItemID
+	failReady      workflow.WorkItemID
+	failChild      workflow.WorkItemID
+	failDependency workflow.WorkItemID
 }
 
-func (b *memoryBackend) Validate(_ context.Context, repository setup.RepositoryID) (string, error) {
-	b.repository = repository
+func (b *memoryBackend) Validate(context.Context) (string, error) {
 	return "trunk", nil
 }
 
-func (b *memoryBackend) EnsureLabels(_ context.Context, _ setup.RepositoryID, labels []setup.Label) error {
-	b.labels = append([]setup.Label(nil), labels...)
+func (b *memoryBackend) Prepare(context.Context) error {
+	b.prepared = true
 	return nil
 }
 
-func (b *memoryBackend) FindWorkItems(_ context.Context, _ workflow.RepositoryID, prepared []workflow.WorkItem, _ []workflow.Dependency) ([]workflow.WorkItem, error) {
+func (b *memoryBackend) FindWorkItems(_ context.Context, prepared []workflow.WorkItem, _ []workflow.Dependency) ([]workflow.WorkItem, error) {
 	var found []workflow.WorkItem
 	for _, item := range b.items {
 		for _, wanted := range prepared {
@@ -55,7 +55,7 @@ func (b *memoryBackend) FindWorkItems(_ context.Context, _ workflow.RepositoryID
 	return found, nil
 }
 
-func (b *memoryBackend) ListMergedWorkItems(context.Context, workflow.RepositoryID) ([]workflow.WorkItem, error) {
+func (b *memoryBackend) ListMergedWorkItems(context.Context) ([]workflow.WorkItem, error) {
 	var merged []workflow.WorkItem
 	for _, item := range b.items {
 		if item.Merged {
@@ -65,13 +65,13 @@ func (b *memoryBackend) ListMergedWorkItems(context.Context, workflow.Repository
 	return merged, nil
 }
 
-func (b *memoryBackend) CreateWorkItem(_ context.Context, _ workflow.RepositoryID, item workflow.WorkItem) (workflow.WorkItem, error) {
-	item.Number = len(b.items) + 1
+func (b *memoryBackend) CreateWorkItem(_ context.Context, item workflow.WorkItem) (workflow.WorkItem, error) {
+	item.ID = workflow.WorkItemID(fmt.Sprintf("work-%d", len(b.items)+1))
 	b.items = append(b.items, item)
 	return item, nil
 }
 
-func (b *memoryBackend) FindCoordinationItems(_ context.Context, _ workflow.RepositoryID, title string) ([]workflow.CoordinationItem, error) {
+func (b *memoryBackend) FindCoordinationItems(_ context.Context, title string) ([]workflow.CoordinationItem, error) {
 	var found []workflow.CoordinationItem
 	for _, item := range b.parents {
 		if item.Title == title {
@@ -81,47 +81,47 @@ func (b *memoryBackend) FindCoordinationItems(_ context.Context, _ workflow.Repo
 	return found, nil
 }
 
-func (b *memoryBackend) CreateCoordinationItem(_ context.Context, _ workflow.RepositoryID, item workflow.CoordinationItem) (workflow.CoordinationItem, error) {
-	item.Number = 100 + len(b.parents)
+func (b *memoryBackend) CreateCoordinationItem(_ context.Context, item workflow.CoordinationItem) (workflow.CoordinationItem, error) {
+	item.ID = workflow.WorkItemID(fmt.Sprintf("coordination-%d", len(b.parents)+1))
 	b.parents = append(b.parents, item)
 	return item, nil
 }
 
-func (b *memoryBackend) AddChild(_ context.Context, _ workflow.RepositoryID, parent, child int) error {
+func (b *memoryBackend) AddChild(_ context.Context, parent, child workflow.WorkItemID) error {
 	if b.failChild == child {
-		b.failChild = 0
+		b.failChild = ""
 		return errors.New("temporary parent relationship failure")
 	}
-	b.children = append(b.children, [2]int{parent, child})
+	b.children = append(b.children, [2]workflow.WorkItemID{parent, child})
 	for index := range b.items {
-		if b.items[index].Number == child {
+		if b.items[index].ID == child {
 			b.items[index].Parent = parent
 		}
 	}
 	return nil
 }
 
-func (b *memoryBackend) AddDependency(_ context.Context, _ workflow.RepositoryID, dependent, blocker int) error {
+func (b *memoryBackend) AddDependency(_ context.Context, dependent, blocker workflow.WorkItemID) error {
 	if b.failDependency == dependent {
-		b.failDependency = 0
+		b.failDependency = ""
 		return errors.New("temporary dependency relationship failure")
 	}
-	b.blocks = append(b.blocks, [2]int{dependent, blocker})
+	b.blocks = append(b.blocks, [2]workflow.WorkItemID{dependent, blocker})
 	for index := range b.items {
-		if b.items[index].Number == dependent {
+		if b.items[index].ID == dependent {
 			b.items[index].Blockers = append(b.items[index].Blockers, blocker)
 		}
 	}
 	return nil
 }
 
-func (b *memoryBackend) SetReady(_ context.Context, _ workflow.RepositoryID, number int) error {
-	if b.failReady == number {
-		b.failReady = 0
+func (b *memoryBackend) SetReady(_ context.Context, id workflow.WorkItemID) error {
+	if b.failReady == id {
+		b.failReady = ""
 		return errors.New("temporary backend failure")
 	}
 	for index := range b.items {
-		if b.items[index].Number == number {
+		if b.items[index].ID == id {
 			b.items[index].Ready = true
 		}
 	}
@@ -151,19 +151,22 @@ func TestSetupInfersGitHubConsumerRepository(t *testing.T) {
 
 	backend := &memoryBackend{}
 	var stdout, stderr bytes.Buffer
-	app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewBufferString("n\n"), &stdout, &stderr)
+	app := newApp(func(repository github.RepositoryID) (setup.Backend, error) {
+		backend.repository = repository
+		return backend, nil
+	}, bytes.NewBufferString("n\n"), &stdout, &stderr)
 	if err := app.Run([]string{"skl", "setup"}); err != nil {
 		t.Fatalf("setup failed: %v\nstderr: %s", err, stderr.String())
 	}
 
-	if backend.repository != (setup.RepositoryID{Owner: "acme", Name: "widgets"}) {
+	if backend.repository != (github.RepositoryID{Owner: "acme", Name: "widgets"}) {
 		t.Fatalf("repository = %#v", backend.repository)
 	}
 	if got := stdout.String(); got != "Link CLAUDE.md to AGENTS.md? [y/N] Prepared "+root+" for GitHub workflow on trunk.\n" {
 		t.Fatalf("stdout = %q", got)
 	}
-	if len(backend.labels) != 7 {
-		t.Fatalf("prepared %d labels", len(backend.labels))
+	if !backend.prepared {
+		t.Fatal("workflow backend was not prepared")
 	}
 	if got := readFile(t, filepath.Join(root, ".gitignore")); got != ".worktrees/\n" {
 		t.Fatalf(".gitignore = %q", got)
@@ -185,7 +188,7 @@ func TestSetupInfersGitHubConsumerRepository(t *testing.T) {
 		want := before + wantBlock + after
 		for range 2 {
 			stdout.Reset()
-			app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewBufferString("n\n"), &stdout, &stderr)
+			app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewBufferString("n\n"), &stdout, &stderr)
 			if err := app.Run([]string{"skl", "setup", "--repo", root}); err != nil {
 				t.Fatal(err)
 			}
@@ -210,13 +213,132 @@ func TestSetupDeclinesClaudeMigrationAtEndOfInput(t *testing.T) {
 	runGit(t, root, "remote", "add", "origin", "https://github.com/acme/widgets.git")
 	backend := &memoryBackend{}
 	var output bytes.Buffer
-	app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
 
 	if err := app.Run([]string{"skl", "setup", "--repo", root}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(filepath.Join(root, "CLAUDE.md")); !os.IsNotExist(err) {
 		t.Fatalf("CLAUDE.md created without confirmation: %v", err)
+	}
+}
+
+func TestSetupAndProposalResolveRepository(t *testing.T) {
+	for _, operation := range []string{"setup", "publish"} {
+		for _, layout := range []string{"origin", "sole upstream", "non-GitHub origin", "ambiguous", "explicit upstream"} {
+			t.Run(operation+"/"+layout, func(t *testing.T) {
+				root := proposalRepository(t)
+				baseline := prepareSlice(t, root, "widget")
+				if layout == "origin" {
+					runGit(t, root, "remote", "add", "upstream", "https://github.com/other/widgets.git")
+				} else {
+					runGit(t, root, "remote", "rename", "origin", "upstream")
+				}
+				switch layout {
+				case "non-GitHub origin":
+					runGit(t, root, "remote", "add", "origin", "https://example.com/other/widgets.git")
+				case "ambiguous":
+					runGit(t, root, "remote", "add", "fork", "https://github.com/other/widgets.git")
+				case "explicit upstream":
+					runGit(t, root, "remote", "add", "origin", "https://github.com/other/widgets.git")
+				}
+				args := []string{"skl", "setup", "--repo", root}
+				if operation == "publish" {
+					args = []string{"skl", "propose", "publish", "--repo", root, "--target", "main", "--slice", proposalSliceFlag(t, "widget")}
+				}
+				if layout == "explicit upstream" {
+					args = append(args, "--remote", "upstream")
+				}
+				backend := &memoryBackend{}
+				var output bytes.Buffer
+				app := newApp(func(repository github.RepositoryID) (setup.Backend, error) {
+					backend.repository = repository
+					return backend, nil
+				}, bytes.NewReader(nil), &output, &output)
+				err := app.Run(args)
+				if layout == "ambiguous" {
+					if err == nil || !strings.Contains(err.Error(), "--remote") || output.Len() != 0 {
+						t.Fatalf("ambiguous selection = %v, output=%q", err, &output)
+					}
+					if backend.prepared || len(backend.items)+len(backend.parents)+len(backend.children)+len(backend.blocks) != 0 {
+						t.Fatalf("ambiguous selection mutated backend: %#v", backend)
+					}
+					if got := runGitOutput(t, root, "status", "--porcelain", "--untracked-files=all"); got != "" {
+						t.Fatalf("ambiguous selection changed repository files: %s", got)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if backend.repository != (github.RepositoryID{Owner: "acme", Name: "widgets"}) {
+					t.Fatalf("bound repository = %#v", backend.repository)
+				}
+				if operation == "setup" {
+					if !backend.prepared || !strings.Contains(output.String(), "for GitHub workflow on trunk.") || !strings.Contains(readFile(t, filepath.Join(root, "AGENTS.md")), "## Workflow") {
+						t.Fatalf("setup = %q, backend=%#v", &output, backend)
+					}
+				} else if output.String() != "completed\n" || len(backend.items) != 1 || backend.items[0].ID != "work-1" || backend.items[0].ArtifactBaseline != baseline || !backend.items[0].Ready {
+					t.Fatalf("publication = %q, backend=%#v", &output, backend)
+				}
+			})
+		}
+	}
+}
+
+func TestPublishExplicitRemoteChecksItsOwnGitEvidence(t *testing.T) {
+	for _, evidence := range []string{"missing target", "target ancestry", "pushed head", "artifact baseline"} {
+		t.Run(evidence, func(t *testing.T) {
+			root := proposalRepository(t)
+			baseline := prepareSlice(t, root, "widget")
+			runGit(t, root, "remote", "add", "upstream", "https://github.com/other/widgets.git")
+			runGit(t, root, "update-ref", "refs/remotes/upstream/main", "main")
+			runGit(t, root, "update-ref", "refs/remotes/upstream/widget", baseline)
+			var invariant, repair string
+			switch evidence {
+			case "missing target":
+				runGit(t, root, "update-ref", "-d", "refs/remotes/upstream/main")
+				invariant, repair = "target branch is unavailable", "fetch the target branch"
+			case "target ancestry":
+				tree := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD^{tree}"))
+				target := strings.TrimSpace(runGitOutput(t, root, "commit-tree", tree, "-p", baseline, "-m", "target moved"))
+				runGit(t, root, "update-ref", "refs/remotes/upstream/main", target)
+				invariant, repair = "slice branch widget misses the observed target", "merge the target branch into the slice"
+			case "pushed head":
+				runGit(t, root, "update-ref", "refs/remotes/upstream/widget", "main")
+				invariant, repair = "slice branch widget is not pushed at its local head", "push the slice branch"
+			case "artifact baseline":
+				runGit(t, root, "update-ref", "refs/heads/widget", "main")
+				runGit(t, root, "update-ref", "refs/remotes/upstream/widget", "main")
+				invariant, repair = "ledger is missing at .changes/widget", "commit the complete ledger once at the published branch head"
+			}
+			backend := &memoryBackend{}
+			var output bytes.Buffer
+			app := newApp(func(repository github.RepositoryID) (setup.Backend, error) {
+				backend.repository = repository
+				return backend, nil
+			}, bytes.NewReader(nil), &output, &output)
+			args := []string{"skl", "propose", "publish", "--repo", root, "--remote", "upstream", "--target", "main", "--slice", proposalSliceFlag(t, "widget")}
+			if err := app.Run(args); err != nil {
+				t.Fatal(err)
+			}
+			if output.String() != "fix_required\n"+invariant+"; "+repair+"\n" || len(backend.items)+len(backend.parents)+len(backend.children)+len(backend.blocks) != 0 {
+				t.Fatalf("used origin evidence instead of refusing: output=%q, backend=%#v", &output, backend)
+			}
+			if backend.repository != (github.RepositoryID{Owner: "other", Name: "widgets"}) {
+				t.Fatalf("bound repository = %#v", backend.repository)
+			}
+			runGit(t, root, "update-ref", "refs/heads/widget", baseline)
+			runGit(t, root, "update-ref", "refs/remotes/upstream/main", "main")
+			runGit(t, root, "update-ref", "refs/remotes/upstream/widget", baseline)
+			output.Reset()
+			if err := app.Run(args); err != nil {
+				t.Fatal(err)
+			}
+			if output.String() != "completed\n" || len(backend.items) != 1 || backend.items[0].ID != "work-1" || backend.items[0].ArtifactBaseline != baseline || !backend.items[0].Ready {
+				t.Fatalf("corrected evidence did not publish: output=%q, backend=%#v", &output, backend)
+			}
+		})
 	}
 }
 
@@ -259,7 +381,7 @@ func TestDocumentedImplementResourceCommands(t *testing.T) {
 func TestInstallSupportedSkillStubs(t *testing.T) {
 	root := t.TempDir()
 	var output bytes.Buffer
-	app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, root)
+	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, root)
 
 	if err := app.Run([]string{"skl", "install"}); err != nil {
 		t.Fatal(err)
@@ -309,7 +431,7 @@ func TestInstallSupportedSkillStubs(t *testing.T) {
 func TestInstallFailsWithoutUserHome(t *testing.T) {
 	t.Setenv("HOME", "")
 	var output bytes.Buffer
-	app := newApp(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output)
+	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output)
 
 	if err := app.Run([]string{"skl", "install"}); err == nil {
 		t.Fatal("install succeeded without a user home")
@@ -319,7 +441,7 @@ func TestInstallFailsWithoutUserHome(t *testing.T) {
 func TestInstallRefreshesOnlyOwnedStubs(t *testing.T) {
 	root := t.TempDir()
 	var output bytes.Buffer
-	app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, root)
+	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, root)
 	if err := app.Run([]string{"skl", "install"}); err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +469,7 @@ func TestInstallRefreshesOnlyOwnedStubs(t *testing.T) {
 
 func TestRetrieveRenderedSkillInstructions(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, t.TempDir())
+	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, t.TempDir())
 
 	if err := app.Run([]string{"skl", "skill", "tdd"}); err != nil {
 		t.Fatal(err)
@@ -361,7 +483,7 @@ func TestRetrieveRenderedSkillInstructions(t *testing.T) {
 
 func TestRetrieveConcreteProposeInstructions(t *testing.T) {
 	var output bytes.Buffer
-	app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, t.TempDir())
+	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, t.TempDir())
 
 	if err := app.Run([]string{"skl", "skill", "propose"}); err != nil {
 		t.Fatal(err)
@@ -404,7 +526,7 @@ func TestRetrieveRetiredLedgerInstructions(t *testing.T) {
 	} {
 		t.Run(skill, func(t *testing.T) {
 			var output bytes.Buffer
-			app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, t.TempDir())
+			app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, t.TempDir())
 			if err := app.Run([]string{"skl", "skill", skill}); err != nil {
 				t.Fatal(err)
 			}
@@ -430,7 +552,7 @@ func TestRetrieveRetiredLedgerInstructions(t *testing.T) {
 
 func TestProposePacketPublishesDurableThinPointer(t *testing.T) {
 	var output bytes.Buffer
-	app := newApp(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output)
+	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output)
 	if err := app.Run([]string{"skl", "skill", "propose"}); err != nil {
 		t.Fatal(err)
 	}
@@ -481,8 +603,12 @@ func TestProposePacketPublishesDurableThinPointer(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
 	})}
 	output.Reset()
-	app = newApp(func() (setup.Backend, error) {
-		return setup.NewGitHubBackend("https://api.github.test", "secret", client), nil
+	app = newApp(func(repository github.RepositoryID) (setup.Backend, error) {
+		backend := setup.NewGitHubBackend("https://api.github.test", "secret", client)
+		if repository != (github.RepositoryID{}) {
+			backend.BindRepository(repository)
+		}
+		return backend, nil
 	}, bytes.NewReader(nil), &output, &output)
 	if err := app.Run([]string{"skl", "propose", "publish", "--repo", root, "--target", "main", "--slice", "ship-widget=" + bodyPath}); err != nil {
 		t.Fatal(err)
@@ -501,7 +627,7 @@ func TestPublishOnePreparedSlice(t *testing.T) {
 	}
 	backend := &memoryBackend{}
 	var output bytes.Buffer
-	app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
 
 	err := app.Run([]string{"skl", "propose", "publish", "--repo", root, "--target", "main", "--slice", "ship-widget=" + body})
 	if err != nil {
@@ -515,7 +641,7 @@ func TestPublishOnePreparedSlice(t *testing.T) {
 		t.Fatalf("items = %#v", backend.items)
 	}
 	item := backend.items[0]
-	if item.Title != "ship-widget" || item.Body != "agent-authored body\n" || item.Branch != "ship-widget" || item.ArtifactBaseline != baseline || !item.Ready {
+	if item.ID != "work-1" || item.Title != "ship-widget" || item.Body != "agent-authored body\n" || item.Branch != "ship-widget" || item.ArtifactBaseline != baseline || !item.Ready {
 		t.Fatalf("item = %#v", item)
 	}
 	if len(backend.parents) != 0 {
@@ -535,7 +661,7 @@ func TestPublishDependencyOrderedMultiSliceProposal(t *testing.T) {
 	}
 	backend := &memoryBackend{}
 	var output bytes.Buffer
-	app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
 
 	err := app.Run([]string{"skl", "propose", "publish", "--repo", root, "--target", "main",
 		"--slice", "feature=" + filepath.Join(directory, "feature.md"),
@@ -545,16 +671,16 @@ func TestPublishDependencyOrderedMultiSliceProposal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(backend.parents) != 1 || backend.parents[0].Title != "widgets" || backend.parents[0].Body != "parent prose\n" {
+	if len(backend.parents) != 1 || backend.parents[0].ID != "coordination-1" || backend.parents[0].Title != "widgets" || backend.parents[0].Body != "parent prose\n" {
 		t.Fatalf("parents = %#v", backend.parents)
 	}
 	if got := []string{backend.items[0].Title, backend.items[1].Title}; !slices.Equal(got, []string{"foundation", "feature"}) {
 		t.Fatalf("publication order = %v", got)
 	}
-	if !slices.Equal(backend.children, [][2]int{{100, 1}, {100, 2}}) {
+	if !slices.Equal(backend.children, [][2]workflow.WorkItemID{{"coordination-1", "work-1"}, {"coordination-1", "work-2"}}) {
 		t.Fatalf("children = %v", backend.children)
 	}
-	if !slices.Equal(backend.blocks, [][2]int{{2, 1}}) {
+	if !slices.Equal(backend.blocks, [][2]workflow.WorkItemID{{"work-2", "work-1"}}) {
 		t.Fatalf("dependencies = %v", backend.blocks)
 	}
 	if !backend.items[0].Ready || !backend.items[1].Ready {
@@ -576,12 +702,12 @@ func TestPublicationRelationshipFailureLeavesChildNotReady(t *testing.T) {
 			}
 			backend := &memoryBackend{}
 			if relationship == "parent" {
-				backend.failChild = 2
+				backend.failChild = "work-2"
 			} else {
-				backend.failDependency = 2
+				backend.failDependency = "work-2"
 			}
 			var output bytes.Buffer
-			app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+			app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
 			arguments := []string{"skl", "propose", "publish", "--repo", root, "--target", "main",
 				"--slice", "dependent=" + filepath.Join(directory, "dependent.md"), "--slice", "base=" + filepath.Join(directory, "base.md"),
 				"--depends", "dependent:base", "--parent-title", "parent", "--parent-body", filepath.Join(directory, "parent.md")}
@@ -594,7 +720,7 @@ func TestPublicationRelationshipFailureLeavesChildNotReady(t *testing.T) {
 			if err := app.Run(arguments); err != nil {
 				t.Fatal(err)
 			}
-			if output.String() != "completed\n" || len(backend.items) != 2 || !backend.items[0].Ready || !backend.items[1].Ready || len(backend.parents) != 1 || !slices.Equal(backend.children, [][2]int{{100, 1}, {100, 2}}) || !slices.Equal(backend.blocks, [][2]int{{2, 1}}) {
+			if output.String() != "completed\n" || len(backend.items) != 2 || !backend.items[0].Ready || !backend.items[1].Ready || len(backend.parents) != 1 || !slices.Equal(backend.children, [][2]workflow.WorkItemID{{"coordination-1", "work-1"}, {"coordination-1", "work-2"}}) || !slices.Equal(backend.blocks, [][2]workflow.WorkItemID{{"work-2", "work-1"}}) {
 				t.Fatalf("forward retry = %q backend=%#v", output.String(), backend)
 			}
 		})
@@ -711,7 +837,7 @@ func TestRefuseInvalidProposalPreflight(t *testing.T) {
 			root, flags := arrange(t)
 			backend := &memoryBackend{}
 			var output bytes.Buffer
-			app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+			app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
 			arguments := append([]string{"skl", "propose", "publish", "--repo", root, "--target", "main"}, flags...)
 
 			if err := app.Run(arguments); err != nil {
@@ -750,9 +876,9 @@ func TestResumePartialProposalPublication(t *testing.T) {
 	arguments := []string{"skl", "propose", "publish", "--repo", root, "--target", "main",
 		"--slice", "base=" + filepath.Join(directory, "base.md"), "--slice", "dependent=" + filepath.Join(directory, "dependent.md"),
 		"--depends", "dependent:base", "--parent-title", "proposal", "--parent-body", filepath.Join(directory, "parent.md")}
-	backend := &memoryBackend{failReady: 2}
+	backend := &memoryBackend{failReady: "work-2"}
 	var output bytes.Buffer
-	app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
 
 	if err := app.Run(arguments); err == nil || !strings.Contains(err.Error(), "temporary backend failure") {
 		t.Fatalf("first publication error = %v", err)
@@ -764,7 +890,7 @@ func TestResumePartialProposalPublication(t *testing.T) {
 	if len(backend.parents) != 1 || len(backend.items) != 2 {
 		t.Fatalf("records duplicated: parents=%#v items=%#v", backend.parents, backend.items)
 	}
-	if !slices.Equal(backend.children, [][2]int{{100, 1}, {100, 2}}) || !slices.Equal(backend.blocks, [][2]int{{2, 1}}) {
+	if !slices.Equal(backend.children, [][2]workflow.WorkItemID{{"coordination-1", "work-1"}, {"coordination-1", "work-2"}}) || !slices.Equal(backend.blocks, [][2]workflow.WorkItemID{{"work-2", "work-1"}}) {
 		t.Fatalf("relationships duplicated: children=%v dependencies=%v", backend.children, backend.blocks)
 	}
 	if !backend.items[0].Ready || !backend.items[1].Ready {
@@ -808,7 +934,12 @@ func TestReconcileCompletedProposalThroughGitHubAdapter(t *testing.T) {
 	})}
 	backend := setup.NewGitHubBackend("https://api.github.test", "secret", client)
 	var output bytes.Buffer
-	app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+	app := newApp(func(repository github.RepositoryID) (setup.Backend, error) {
+		if repository != (github.RepositoryID{}) {
+			backend.BindRepository(repository)
+		}
+		return backend, nil
+	}, bytes.NewReader(nil), &output, &output)
 
 	err := app.Run([]string{"skl", "propose", "publish", "--repo", root, "--target", "main",
 		"--slice", "base=" + filepath.Join(directory, "base.md"), "--slice", "dependent=" + filepath.Join(directory, "dependent.md"),
@@ -857,8 +988,12 @@ func TestReconcileFallbackProposalWithoutMutations(t *testing.T) {
 				return &http.Response{StatusCode: code, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
 			})}
 			var output bytes.Buffer
-			app := newApp(func() (setup.Backend, error) {
-				return setup.NewGitHubBackend("https://api.github.test", "secret", client), nil
+			app := newApp(func(repository github.RepositoryID) (setup.Backend, error) {
+				backend := setup.NewGitHubBackend("https://api.github.test", "secret", client)
+				if repository != (github.RepositoryID{}) {
+					backend.BindRepository(repository)
+				}
+				return backend, nil
 			}, bytes.NewReader(nil), &output, &output)
 			for range 2 {
 				output.Reset()
@@ -917,8 +1052,12 @@ func TestClosedProposalRecordsStopBeforeMutation(t *testing.T) {
 				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
 			})}
 			var output bytes.Buffer
-			app := newApp(func() (setup.Backend, error) {
-				return setup.NewGitHubBackend("https://api.github.test", "secret", client), nil
+			app := newApp(func(repository github.RepositoryID) (setup.Backend, error) {
+				backend := setup.NewGitHubBackend("https://api.github.test", "secret", client)
+				if repository != (github.RepositoryID{}) {
+					backend.BindRepository(repository)
+				}
+				return backend, nil
 			}, bytes.NewReader(nil), &output, &output)
 			err := app.Run([]string{"skl", "propose", "publish", "--repo", root, "--target", "main",
 				"--slice", "base=" + filepath.Join(directory, "base.md"), "--slice", "dependent=" + filepath.Join(directory, "dependent.md"),
@@ -943,9 +1082,9 @@ func TestAmbiguousProposalRetryStopsBeforeMutation(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	backend := &memoryBackend{items: []workflow.WorkItem{{Number: 1, Title: "one"}, {Number: 2, Title: "one"}}}
+	backend := &memoryBackend{items: []workflow.WorkItem{{ID: "work-1", Title: "one"}, {ID: "work-2", Title: "one"}}}
 	var output bytes.Buffer
-	app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
 
 	err := app.Run([]string{"skl", "propose", "publish", "--repo", root, "--target", "main",
 		"--slice", "one=" + filepath.Join(directory, "one.md"), "--slice", "two=" + filepath.Join(directory, "two.md"),
@@ -973,14 +1112,14 @@ func TestContradictoryDependenciesStopBeforeMutation(t *testing.T) {
 		}
 	}
 	backend := &memoryBackend{
-		parents: []workflow.CoordinationItem{{Number: 100, Title: "parent", Body: "parent\n"}},
+		parents: []workflow.CoordinationItem{{ID: "coordination-1", Title: "parent", Body: "parent\n"}},
 		items: []workflow.WorkItem{
-			{Number: 1, Title: "base", Body: "base\n", Parent: 100, Ready: true},
-			{Number: 2, Title: "dependent", Body: "dependent\n", Parent: 100, Blockers: []int{99}, Ready: true},
+			{ID: "work-1", Title: "base", Body: "base\n", Parent: "coordination-1", Ready: true},
+			{ID: "work-2", Title: "dependent", Body: "dependent\n", Parent: "coordination-1", Blockers: []workflow.WorkItemID{"work-99"}, Ready: true},
 		},
 	}
 	var output bytes.Buffer
-	app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
 
 	err := app.Run([]string{"skl", "propose", "publish", "--repo", root, "--target", "main",
 		"--slice", "base=" + filepath.Join(directory, "base.md"), "--slice", "dependent=" + filepath.Join(directory, "dependent.md"),
@@ -1009,12 +1148,12 @@ func TestCleanOnlySafeMergedWorktrees(t *testing.T) {
 	}
 	accepted := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "main"))
 	backend := &memoryBackend{items: []workflow.WorkItem{
-		{Number: 1, Title: "merged-clean", Branch: "merged-clean", Merged: true, AcceptedHead: accepted},
-		{Number: 2, Title: "merged-dirty", Branch: "merged-dirty", Merged: true, AcceptedHead: accepted},
-		{Number: 3, Title: "merged-unexpected", Branch: "merged-unexpected", Merged: true, AcceptedHead: accepted},
+		{ID: "work-1", Title: "merged-clean", Branch: "merged-clean", Merged: true, AcceptedHead: accepted},
+		{ID: "work-2", Title: "merged-dirty", Branch: "merged-dirty", Merged: true, AcceptedHead: accepted},
+		{ID: "work-3", Title: "merged-unexpected", Branch: "merged-unexpected", Merged: true, AcceptedHead: accepted},
 	}}
 	var output bytes.Buffer
-	app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
 
 	if err := app.Run([]string{"skl", "propose", "cleanup", "--repo", root}); err != nil {
 		t.Fatal(err)
@@ -1059,7 +1198,7 @@ func TestCleanMergedBranchWithPrunedUpstream(t *testing.T) {
 	runGit(t, root, "commit", "-am", "accepted squash")
 	backend := &memoryBackend{items: []workflow.WorkItem{{Title: "squashed", Branch: "squashed", Merged: true, AcceptedHead: strings.TrimSpace(runGitOutput(t, path, "rev-parse", "HEAD"))}}}
 	var output bytes.Buffer
-	app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
 	for range 2 {
 		if err := app.Run([]string{"skl", "propose", "cleanup", "--repo", root}); err != nil {
 			t.Fatal(err)
@@ -1092,7 +1231,7 @@ func TestCleanupPreservesUnacceptedLocalHead(t *testing.T) {
 			head := runGitOutput(t, path, "rev-parse", "HEAD")
 			backend := &memoryBackend{items: []workflow.WorkItem{{Title: "merged", Branch: "merged", Merged: true, AcceptedHead: accepted}}}
 			var output bytes.Buffer
-			app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+			app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
 			if err := app.Run([]string{"skl", "propose", "cleanup", "--repo", root}); err != nil {
 				t.Fatal(err)
 			}
@@ -1111,13 +1250,13 @@ func TestRetrieveEquivalentTypedInstructions(t *testing.T) {
 	wantResources := []string{"reference/mocking.md", "reference/tests.md"}
 	wantMarkdown := "Protocol: skl.instructions/v1\nSkill: tdd\nIncluded skills: none\nFacts: {}\nResources: reference/mocking.md, reference/tests.md\n\n" + wantInstructions
 	var markdown bytes.Buffer
-	app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &markdown, &markdown, t.TempDir())
+	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &markdown, &markdown, t.TempDir())
 	if err := app.Run([]string{"skl", "skill", "tdd"}); err != nil {
 		t.Fatal(err)
 	}
 
 	var stdout, stderr bytes.Buffer
-	app = newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, t.TempDir())
+	app = newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, t.TempDir())
 	if err := app.Run([]string{"skl", "skill", "--format", "json", "tdd"}); err != nil {
 		t.Fatal(err)
 	}
@@ -1177,7 +1316,7 @@ func TestRetrieveAuditWithoutPonytail(t *testing.T) {
 
 func TestRetrieveOneNamedResource(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, t.TempDir())
+	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, t.TempDir())
 
 	if err := app.Run([]string{"skl", "skill", "--resource", "reference/tests.md", "tdd"}); err != nil {
 		t.Fatal(err)
@@ -1191,7 +1330,7 @@ func TestRetrieveOneNamedResource(t *testing.T) {
 func TestBundleGuaranteedSupportingSkills(t *testing.T) {
 	root := t.TempDir()
 	var stdout, stderr bytes.Buffer
-	app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, root)
+	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, root)
 	if err := app.Run([]string{"skl", "skill", "--format", "json", "implement"}); err != nil {
 		t.Fatal(err)
 	}
@@ -1288,7 +1427,7 @@ func TestIgnoreConsumerRepositoryOverrides(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chdir(previous) })
 
 	var stdout, stderr bytes.Buffer
-	app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, t.TempDir())
+	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, t.TempDir())
 	if err := app.Run([]string{"skl", "skill", "tdd"}); err != nil {
 		t.Fatal(err)
 	}

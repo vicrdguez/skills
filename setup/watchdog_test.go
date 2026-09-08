@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	skilldist "github.com/vicrdguez/skills"
+	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/workflow"
 )
 
@@ -68,7 +69,7 @@ func TestGitHubWatchdogClaimsSubmissionAndReadsReviewFacts(t *testing.T) {
 	defer server.Close()
 	b := NewGitHubBackend(server.URL, "token", server.Client())
 	ctx := context.Background()
-	repo := workflow.RepositoryID{Owner: "acme", Name: "widgets"}
+	repo := github.RepositoryID{Owner: "acme", Name: "widgets"}
 	items, err := b.ImplementationItems(ctx, repo)
 	if err != nil || len(items) != 1 {
 		t.Fatalf("items: %#v %v", items, err)
@@ -116,7 +117,7 @@ func TestGitHubWatchdogPublishesOpaqueAnchorsOnceAfterLostResponse(t *testing.T)
 	}))
 	defer server.Close()
 	b := NewGitHubBackend(server.URL, "token", server.Client())
-	repo := workflow.RepositoryID{Owner: "acme", Name: "widgets"}
+	repo := github.RepositoryID{Owner: "acme", Name: "widgets"}
 	item := workflow.ImplementationItem{Number: 7, Submission: &workflow.Submission{Number: 11, Head: "fixed"}}
 	comments := []skilldist.ReviewComment{{Body: "opaque summary\x00", Commit: "fixed"}, {Body: "W1 [ not Markdown", Commit: "fixed", Path: "main.go", Line: 12, Side: "RIGHT"}}
 	for range 2 {
@@ -154,7 +155,7 @@ func TestGitHubWatchdogObservesMergeabilityAndCompletedBounceHistory(t *testing.
 			}
 		}))
 		b := NewGitHubBackend(server.URL, "token", server.Client())
-		got, err := b.ReviewSubmission(context.Background(), workflow.RepositoryID{Owner: "acme", Name: "widgets"}, 11)
+		got, err := b.ReviewSubmission(context.Background(), github.RepositoryID{Owner: "acme", Name: "widgets"}, 11)
 		server.Close()
 		if err != nil || got.Bounces != 1 || got.Mergeability != "conflicting" || got.Merged != merged || got.Head != "fixed" {
 			t.Fatalf("observation: %#v %v", got, err)
@@ -215,7 +216,7 @@ func TestGitHubWatchdogCompletesReviewWithoutClosingSource(t *testing.T) {
 			b := NewGitHubBackend(server.URL, "token", server.Client())
 			item := workflow.ImplementationItem{Number: 7, State: workflow.AwaitingReview, ResumeState: workflow.Rework, Submission: &workflow.Submission{Number: 11, Head: "fixed", ReviewedHead: "fixed"}}
 			for range 2 {
-				if err := b.CompleteReview(context.Background(), workflow.RepositoryID{Owner: "acme", Name: "widgets"}, item, target, func() error { return nil }); err != nil {
+				if err := b.CompleteReview(context.Background(), github.RepositoryID{Owner: "acme", Name: "widgets"}, item, target, func() error { return nil }); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -275,7 +276,7 @@ func TestGitHubWatchdogPersistsSynchronizationTarget(t *testing.T) {
 	}))
 	defer server.Close()
 	b := NewGitHubBackend(server.URL, "token", server.Client())
-	repo := workflow.RepositoryID{Owner: "acme", Name: "widgets"}
+	repo := github.RepositoryID{Owner: "acme", Name: "widgets"}
 	item := workflow.ImplementationItem{Number: 7, State: workflow.AwaitingReview, Synchronization: true, TargetSnapshot: "new-target", TargetBranch: "main", Submission: &workflow.Submission{Number: 11, Head: "fixed"}}
 	if err := b.CompleteReview(context.Background(), repo, item, workflow.Rework, func() error { return nil }); err != nil {
 		t.Fatal(err)
@@ -307,7 +308,7 @@ func TestGitHubWatchdogHumanRequeueUsesProjectionNotProse(t *testing.T) {
 			}
 		}))
 		b := NewGitHubBackend(server.URL, "token", server.Client())
-		items, err := b.ImplementationItems(context.Background(), workflow.RepositoryID{Owner: "acme", Name: "widgets"})
+		items, err := b.ImplementationItems(context.Background(), github.RepositoryID{Owner: "acme", Name: "widgets"})
 		server.Close()
 		want := map[string]workflow.State{"needs-human": workflow.NeedsHuman, "review": workflow.AwaitingReview, "rework": workflow.Rework, "done": workflow.NeedsHuman}[label]
 		if err != nil || len(items) != 1 || items[0].State != want || len(items[0].Submission.Comments) != 1 || items[0].Submission.Comments[0].Body != "Please pass! [opaque" {
@@ -357,7 +358,7 @@ func TestGitHubStatusReadsChildrenAndReconcilesLostClosure(t *testing.T) {
 	}))
 	defer server.Close()
 	b := NewGitHubBackend(server.URL, "token", server.Client())
-	repo := workflow.RepositoryID{Owner: "acme", Name: "widgets"}
+	repo := github.RepositoryID{Owner: "acme", Name: "widgets"}
 	ctx := context.Background()
 	parents, err := b.CoordinationItems(ctx, repo)
 	if err != nil || len(parents) != 1 || len(parents[0].Children) != 101 || parents[0].Children[100] != 101 {
@@ -398,7 +399,7 @@ func TestGitHubStatusAdoptsOnlyForwardReviewProjections(t *testing.T) {
 			}
 		}))
 		b := NewGitHubBackend(server.URL, "token", server.Client())
-		items, err := b.ImplementationItems(context.Background(), workflow.RepositoryID{Owner: "acme", Name: "widgets"})
+		items, err := b.ImplementationItems(context.Background(), github.RepositoryID{Owner: "acme", Name: "widgets"})
 		server.Close()
 		if err != nil || len(items) != 1 {
 			t.Fatalf("items: %#v %v", items, err)
@@ -443,7 +444,7 @@ func TestGitHubReviewRecoveryPreservesProblems(t *testing.T) {
 			}))
 			defer server.Close()
 			b := NewGitHubBackend(server.URL, "token", server.Client())
-			items, err := b.ImplementationItems(context.Background(), workflow.RepositoryID{Owner: "acme", Name: "widgets"})
+			items, err := b.ImplementationItems(context.Background(), github.RepositoryID{Owner: "acme", Name: "widgets"})
 			if err != nil || len(items) == 0 {
 				t.Fatalf("items: %#v %v", items, err)
 			}
@@ -485,7 +486,7 @@ func TestGitHubReviewRecoveryLateSynchronization(t *testing.T) {
 			}))
 			defer server.Close()
 			b := NewGitHubBackend(server.URL, "token", server.Client())
-			items, err := b.ImplementationItems(context.Background(), workflow.RepositoryID{Owner: "acme", Name: "widgets"})
+			items, err := b.ImplementationItems(context.Background(), github.RepositoryID{Owner: "acme", Name: "widgets"})
 			if err != nil || len(items) != 1 {
 				t.Fatalf("items: %#v %v", items, err)
 			}
@@ -564,7 +565,7 @@ func TestGitHubReviewRecoveryConflictingPartialPass(t *testing.T) {
 			defer server.Close()
 			b := NewGitHubBackend(server.URL, "token", server.Client())
 			ctx := context.Background()
-			repo := workflow.RepositoryID{Owner: "acme", Name: "widgets"}
+			repo := github.RepositoryID{Owner: "acme", Name: "widgets"}
 			guard := func() error { return nil }
 			item := workflow.ImplementationItem{Number: 7, Submission: &workflow.Submission{Number: 11, Head: "fixed"}}
 			if err := b.CompleteReview(ctx, repo, item, workflow.ReadyForMerge, guard); err == nil {
@@ -653,7 +654,7 @@ func TestGitHubReviewRecoverySourceDeletionFailsUnapplied(t *testing.T) {
 	defer server.Close()
 	b := NewGitHubBackend(server.URL, "token", server.Client())
 	ctx := context.Background()
-	repo := workflow.RepositoryID{Owner: "acme", Name: "widgets"}
+	repo := github.RepositoryID{Owner: "acme", Name: "widgets"}
 	item := workflow.ImplementationItem{Number: 7, State: workflow.AwaitingReview, Submission: &workflow.Submission{Number: 11, Head: "fixed"}}
 	guard := func() error { return nil }
 	if err := b.CompleteReview(ctx, repo, item, workflow.ReadyForMerge, guard); err == nil || !sourcePaused || deletes != 1 {
@@ -686,7 +687,7 @@ func TestGitHubStatusRecognizesMergedAndSupersededReferences(t *testing.T) {
 			}
 		}))
 		b := NewGitHubBackend(server.URL, "token", server.Client())
-		items, err := b.ImplementationItems(context.Background(), workflow.RepositoryID{Owner: "acme", Name: "widgets"})
+		items, err := b.ImplementationItems(context.Background(), github.RepositoryID{Owner: "acme", Name: "widgets"})
 		server.Close()
 		want := workflow.Superseded
 		if mergedAt != "" {

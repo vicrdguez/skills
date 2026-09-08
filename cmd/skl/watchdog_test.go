@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	skilldist "github.com/vicrdguez/skills"
+	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/setup"
 	"github.com/vicrdguez/skills/workflow"
 )
@@ -20,7 +21,7 @@ import (
 func watchdogCLI(t *testing.T, root string, backend *implementationMemory, args ...string) workflow.ImplementationOutcome {
 	t.Helper()
 	var output bytes.Buffer
-	app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
 	command := append([]string{"skl", "watchdog"}, args...)
 	command = append(command, "--repo", root)
 	if err := app.Run(command); err != nil {
@@ -273,7 +274,7 @@ func TestWatchdogPassRetryChecksMergeability(t *testing.T) {
 	}
 }
 
-func (b *implementationMemory) ReviewSubmission(_ context.Context, _ workflow.RepositoryID, number int) (workflow.Submission, error) {
+func (b *implementationMemory) ReviewSubmission(_ context.Context, _ github.RepositoryID, number int) (workflow.Submission, error) {
 	for _, item := range b.work {
 		if item.Submission != nil && item.Submission.Number == number {
 			return *item.Submission, nil
@@ -282,7 +283,7 @@ func (b *implementationMemory) ReviewSubmission(_ context.Context, _ workflow.Re
 	return workflow.Submission{}, fmt.Errorf("missing Submission")
 }
 
-func (b *implementationMemory) PublishReview(_ context.Context, _ workflow.RepositoryID, item workflow.ImplementationItem, comments []skilldist.ReviewComment, guard func() error) error {
+func (b *implementationMemory) PublishReview(_ context.Context, _ github.RepositoryID, item workflow.ImplementationItem, comments []skilldist.ReviewComment, guard func() error) error {
 	if err := guard(); err != nil {
 		return err
 	}
@@ -298,7 +299,7 @@ func (b *implementationMemory) PublishReview(_ context.Context, _ workflow.Repos
 	return nil
 }
 
-func (b *implementationMemory) CompleteReview(_ context.Context, _ workflow.RepositoryID, item workflow.ImplementationItem, target workflow.State, guard func() error) error {
+func (b *implementationMemory) CompleteReview(_ context.Context, _ github.RepositoryID, item workflow.ImplementationItem, target workflow.State, guard func() error) error {
 	if b.beforeTransition != nil {
 		b.beforeTransition()
 	}

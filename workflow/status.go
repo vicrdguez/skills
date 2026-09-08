@@ -1,6 +1,10 @@
 package workflow
 
-import "context"
+import (
+	"context"
+
+	"github.com/vicrdguez/skills/github"
+)
 
 type StatusOutcome struct {
 	CompleteProposals []int                `json:"complete_proposals,omitempty"`
@@ -10,12 +14,18 @@ type StatusOutcome struct {
 
 type StatusBackend interface {
 	ImplementationBackend
-	CoordinationItems(context.Context, RepositoryID) ([]CoordinationItem, error)
-	CloseCoordination(context.Context, RepositoryID, int) error
+	CoordinationItems(context.Context, github.RepositoryID) ([]CoordinationStatus, error)
+	CloseCoordination(context.Context, github.RepositoryID, int) error
+}
+
+type CoordinationStatus struct {
+	Number   int
+	Children []int
+	Closed   bool
 }
 
 func ObserveStatus(ctx context.Context, root, remote string, backend ImplementationBackend) (StatusOutcome, error) {
-	remote, err := ResolveGitHubRemote(root, remote)
+	remote, err := github.ResolveGitHubRemote(root, remote)
 	if err != nil {
 		return StatusOutcome{}, err
 	}
