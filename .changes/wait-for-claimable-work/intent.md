@@ -18,12 +18,12 @@ Add optional bounded waiting to both stage-oriented `next` commands. The Workflo
 - Changes to ordering, dependencies, review-bounce limits, or human merge authority.
 
 ## Definition of Done
-- [ ] D1 Both lanes retain immediate selection and no-work behavior without waiting, including explicit repository/remote handling. (B1)
-- [ ] D2 Waiting checks immediately and returns as soon as existing selection claims work, with the requested idle window and poll interval. (B2-B3)
-- [ ] D3 Empty waiting expires as a queue-local idle timeout without claiming global completion or creating workflow state. (B4)
-- [ ] D4 Invalid options fail before backend effects; cancellation and idle deadlines prevent further polling without abandoning a possibly acquired Claim. (B5-B7)
-- [ ] D5 Operational failures and deterministic refusals stop waiting rather than masquerading as empty observations. (B8)
-- [ ] D6 Every poll reuses canonical ordering and eligibility, including human-merge Dependencies and held Claims. (B9)
+- [x] D1 Both lanes retain immediate selection and no-work behavior without waiting, including explicit repository/remote handling. (B1)
+- [x] D2 Waiting checks immediately and returns as soon as existing selection claims work, with the requested idle window and poll interval. (B2-B3)
+- [x] D3 Empty waiting expires as a queue-local idle timeout without claiming global completion or creating workflow state. (B4)
+- [x] D4 Invalid options fail before backend effects; cancellation and idle deadlines prevent further polling without abandoning a possibly acquired Claim. (B5-B7)
+- [x] D5 Operational failures and deterministic refusals stop waiting rather than masquerading as empty observations. (B8)
+- [x] D6 Every poll reuses canonical ordering and eligibility, including human-merge Dependencies and held Claims. (B9)
 
 ## Manual verification
 None. Deterministic CLI checks use controlled time; no live harness smoke test is required.
