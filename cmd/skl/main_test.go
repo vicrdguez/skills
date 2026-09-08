@@ -278,7 +278,7 @@ func TestInstallSupportedSkillStubs(t *testing.T) {
 		"watchdog":           "skills/dev/watchdog/SKILL.md",
 		"writing-for-agents": "skills/misc/writing-for-agents/SKILL.md",
 	}
-	for _, harness := range []string{".pi/agent/skills", ".codex/skills", ".claude/skills"} {
+	for _, harness := range []string{".pi/agent/skills", ".codex/skills", ".claude/skills", ".config/opencode/skills"} {
 		for name, source := range wantSkills {
 			stub := readFile(t, filepath.Join(root, harness, name, "SKILL.md"))
 			if !strings.HasPrefix(stub, "---\n") {
@@ -294,10 +294,41 @@ func TestInstallSupportedSkillStubs(t *testing.T) {
 			if !strings.Contains(stub, command) || !strings.Contains(stub, "skl.stub/v1") {
 				t.Fatalf("%s %s stub does not delegate to skl:\n%s", harness, name, stub)
 			}
+			if harness == ".config/opencode/skills" {
+				path := filepath.Join(root, harness, name, "SKILL.md")
+				info, err := os.Lstat(path)
+				if err != nil || !info.Mode().IsRegular() {
+					t.Fatalf("OpenCode stub is not a regular file: %s: %v", path, err)
+				}
+				for _, other := range []string{".pi/agent/skills", ".codex/skills", ".claude/skills"} {
+					otherPath := filepath.Join(root, other, name, "SKILL.md")
+					otherInfo, err := os.Stat(otherPath)
+					if err != nil || os.SameFile(info, otherInfo) || stub != readFile(t, otherPath) {
+						t.Fatalf("OpenCode stub is not an independent common stub: %s: %v", path, err)
+					}
+				}
+				for _, reference := range []string{".pi/", ".codex/", ".claude/", "skills/dev/", "skills/misc/", "skills/thinking/"} {
+					if strings.Contains(stub, reference) {
+						t.Fatalf("OpenCode stub references %s: %s", reference, path)
+					}
+				}
+				entries, err := os.ReadDir(filepath.Dir(path))
+				if err != nil || len(entries) != 1 || entries[0].Name() != "SKILL.md" {
+					t.Fatalf("unexpected OpenCode skill assets: %v: %v", entries, err)
+				}
+			}
 		}
 		if _, err := os.Stat(filepath.Join(root, harness, "dev-setup", "SKILL.md")); !os.IsNotExist(err) {
 			t.Fatalf("%s contains retired dev-setup stub: %v", harness, err)
 		}
+	}
+	entries, err := os.ReadDir(filepath.Join(root, ".config/opencode"))
+	if err != nil || len(entries) != 1 || entries[0].Name() != "skills" || !entries[0].IsDir() {
+		t.Fatalf("unexpected OpenCode configuration or adapters: %v: %v", entries, err)
+	}
+	entries, err = os.ReadDir(filepath.Join(root, ".config/opencode/skills"))
+	if err != nil || len(entries) != len(wantSkills) {
+		t.Fatalf("unexpected OpenCode catalog: %v: %v", entries, err)
 	}
 	for _, manifest := range []string{".claude-plugin/plugin.json", ".codex-plugin/plugin.json", "package.json"} {
 		if _, err := os.Stat(filepath.Join(root, manifest)); !os.IsNotExist(err) {
