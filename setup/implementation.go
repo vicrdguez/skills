@@ -478,7 +478,7 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 		if len(matches) == 1 {
 			pull := matches[0]
 			prState, prClaimed, prProblem := implementationLabels(pull.githubIssue)
-			item.Submission = &workflow.Submission{ID: workflow.SubmissionID(strconv.Itoa(pull.Number)), Head: pull.Head.SHA, Base: pull.Base.Ref, Draft: pull.Draft, Body: pull.Body, State: prState, Claimed: prClaimed, CreatedAt: pull.CreatedAt}
+			item.Submission = &workflow.Submission{ID: workflow.SubmissionID(strconv.Itoa(pull.Number)), Head: pull.Head.SHA, Base: pull.Base.Ref, Draft: pull.Draft, Body: withoutClosingReference(pull.Body, issue.Number), State: prState, Claimed: prClaimed, CreatedAt: pull.CreatedAt}
 			for _, label := range pull.Labels {
 				item.Synchronization = item.Synchronization || label.Name == "sync"
 			}
@@ -770,4 +770,8 @@ func withClosingReference(body string, number int) string {
 		body += footer
 	}
 	return body
+}
+
+func withoutClosingReference(body string, number int) string {
+	return strings.TrimSuffix(body, fmt.Sprintf("\n\nCloses #%d\n", number))
 }

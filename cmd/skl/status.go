@@ -28,7 +28,7 @@ func statusCommand(newBackend backendFactory, stdout io.Writer) *cli.Command {
 		if !ok {
 			return fmt.Errorf("backend does not support status")
 		}
-		outcome, err := workflow.ObserveStatus(c.Context, repository.Root, repository.Remote, port)
+		outcome, err := workflow.ObserveStatus(c.Context, port)
 		if err != nil {
 			var violation *workflow.InvariantError
 			if errors.As(err, &violation) {

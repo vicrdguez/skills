@@ -109,7 +109,7 @@ func loadImplementation(ctx context.Context, backend ImplementationBackend) ([]I
 	return items, err
 }
 
-func InspectImplementation(ctx context.Context, root, remote string, id WorkItemID, backend ImplementationBackend) (ImplementationOutcome, error) {
+func InspectImplementation(ctx context.Context, root string, id WorkItemID, backend ImplementationBackend) (ImplementationOutcome, error) {
 	items, err := loadImplementation(ctx, backend)
 	if err != nil {
 		return ImplementationOutcome{}, err

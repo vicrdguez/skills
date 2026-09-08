@@ -172,6 +172,11 @@ func (b *implementationMemory) ImplementationItems(context.Context) ([]workflow.
 			if items[i].Order == 0 {
 				items[i].Order = number
 			}
+			if items[i].Submission != nil {
+				submission := *items[i].Submission
+				submission.Body = strings.TrimSuffix(submission.Body, fmt.Sprintf("\n\nCloses #%d\n", number))
+				items[i].Submission = &submission
+			}
 		}
 	}
 	return items, nil

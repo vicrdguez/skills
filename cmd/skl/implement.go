@@ -38,7 +38,7 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 					if command.Int("item") <= 0 {
 						return fmt.Errorf("inspect requires --item")
 					}
-					outcome, err = workflow.InspectImplementation(command.Context, repository.Root, repository.Remote, workItemID(command.Int("item")), port)
+					outcome, err = workflow.InspectImplementation(command.Context, repository.Root, workItemID(command.Int("item")), port)
 				} else if name == "needs-human" {
 					outcome, err = workflow.PauseImplementation(command.Context, repository.Root, repository.Remote, workItemID(command.Int("item")), command.String("reason"), command.Path("decision"), command.Path("body"), port)
 				} else if name == "submit" {

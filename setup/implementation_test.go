@@ -47,8 +47,6 @@ func TestGitHubImplementationRejectsDuplicateSourceOwnership(t *testing.T) {
 			defer server.Close()
 			b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
 			ctx := context.Background()
-			repo := github.RepositoryID{Owner: "acme", Name: "widgets"}
-			b.BindRepository(repo)
 			items, err := b.ImplementationItems(ctx)
 			if err != nil || len(items) != 2 {
 				t.Fatalf("items = %#v, %v", items, err)
@@ -90,7 +88,6 @@ func TestGitHubImplementationRejectsReassignedSourceBeforePublication(t *testing
 	}))
 	defer server.Close()
 	b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
-	b.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
 	_, err := b.PublishImplementation(context.Background(), workflow.ImplementationItem{ID: "7", Branch: "widget"}, workflow.Submission{ID: "11", Head: "fixed", Base: "main", Body: "replacement"})
 	if err == nil || writes != 0 {
 		t.Fatalf("reassigned source allowed publication: %v, writes=%d", err, writes)
@@ -126,7 +123,6 @@ func TestGitHubImplementationNormalizesPaginatedWork(t *testing.T) {
 	}))
 	defer server.Close()
 	backend := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
-	backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
 	items, err := backend.ImplementationItems(context.Background())
 	if err != nil || len(items) != 1 || items[0].ID != "7" || items[0].Order != 7 || !slices.Equal(items[0].Blockers, []workflow.WorkItemID{"2", "3"}) || items[0].State != workflow.Ready || items[0].Branch != "widget" || items[0].CreatedAt != "2020-01-01T00:00:00Z" {
 		t.Fatalf("items = %#v, %v", items, err)
@@ -142,8 +138,6 @@ func TestGitHubLifecycleRejectsInvalidIdentitiesBeforeTransport(t *testing.T) {
 	defer server.Close()
 	b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
 	ctx := context.Background()
-	repo := github.RepositoryID{Owner: "acme", Name: "widgets"}
-	b.BindRepository(repo)
 	guard := func() error { return nil }
 	operations := map[string]func(workflow.ImplementationItem) error{
 		"claim": func(item workflow.ImplementationItem) error {
@@ -305,8 +299,6 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 	defer server.Close()
 	b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
 	ctx := context.Background()
-	repo := github.RepositoryID{Owner: "acme", Name: "widgets"}
-	b.BindRepository(repo)
 	item := workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Ready, TargetSnapshot: "snapshot"}
 	if err := b.ClaimImplementation(ctx, item); err != nil {
 		t.Fatal(err)
@@ -426,7 +418,6 @@ func TestGitHubImplementationRejectsForeignAttachmentsAndConflictingMetadata(t *
 			}))
 			defer server.Close()
 			b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
-			b.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
 			items, err := b.ImplementationItems(context.Background())
 			if err != nil || len(items) != 1 {
 				t.Fatalf("items = %#v %v", items, err)

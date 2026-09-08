@@ -231,8 +231,9 @@ func TestWatchdogPassRetryChecksMergeability(t *testing.T) {
 					continue
 				}
 				t.Run(fmt.Sprintf("claimed=%t/%s/%s", claimed, mergeability, phase), func(t *testing.T) {
-					body := "opaque final\n\nCloses #7\n"
-					b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.ReadyForMerge, Claimed: claimed, Submission: &workflow.Submission{ID: "11", Head: head, ReviewedHead: head, Base: "main", State: workflow.ReadyForMerge, Claimed: claimed, Body: body, Mergeability: "mergeable", Bounces: 1, Comments: []skilldist.ReviewComment{{Body: "pass", Commit: head}}}}}, remoteHeads: map[string]string{"widget": head, "main": target}}
+					body := "opaque final"
+					storedBody := body + "\n\nCloses #7\n"
+					b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.ReadyForMerge, Claimed: claimed, Submission: &workflow.Submission{ID: "11", Head: head, ReviewedHead: head, Base: "main", State: workflow.ReadyForMerge, Claimed: claimed, Body: storedBody, Mergeability: "mergeable", Bounces: 1, Comments: []skilldist.ReviewComment{{Body: "pass", Commit: head}}}}}, remoteHeads: map[string]string{"widget": head, "main": target}}
 					change := func() { b.work[0].Submission.Mergeability = mergeability }
 					switch phase {
 					case "entry":
@@ -266,7 +267,7 @@ func TestWatchdogPassRetryChecksMergeability(t *testing.T) {
 					} else if got.Status != "fix_required" || !strings.Contains(got.Reason, "mergeability") || phase != "readback" && b.work[0].Claimed != claimed {
 						t.Fatalf("unsafe retry accepted or Claim released: %#v; item: %#v", got, b.work[0])
 					}
-					if b.work[0].Submission.Bounces != 1 || len(b.work[0].Submission.Comments) != 1 || b.work[0].Submission.Body != body {
+					if b.work[0].Submission.Bounces != 1 || len(b.work[0].Submission.Comments) != 1 || b.work[0].Submission.Body != storedBody {
 						t.Fatalf("retry changed review evidence: %#v", b.work[0].Submission)
 					}
 				})

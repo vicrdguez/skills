@@ -14,7 +14,7 @@ type StatusBackend interface {
 	CloseCoordination(context.Context, WorkItemID) error
 }
 
-func ObserveStatus(ctx context.Context, root, remote string, backend ImplementationBackend) (StatusOutcome, error) {
+func ObserveStatus(ctx context.Context, backend ImplementationBackend) (StatusOutcome, error) {
 	items, err := loadImplementation(ctx, backend)
 	if err != nil {
 		return StatusOutcome{}, err
