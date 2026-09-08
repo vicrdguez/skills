@@ -26,15 +26,27 @@ func (app *stageApp) RunContext(ctx context.Context, args []string) error {
 		if command != nil && command.Name == "next" {
 			for i := 3; i < len(args); i++ {
 				arg := args[i]
-				if arg == "--" {
+				if arg == "--" || !strings.HasPrefix(arg, "-") {
 					break
 				}
-				if arg == "--wait" && (i+1 == len(args) || strings.HasPrefix(args[i+1], "--") || args[i+1] == "-h") {
-					args[i] = "--wait=15m"
-					continue
+				if arg == "--wait" {
+					next := ""
+					if i+1 < len(args) {
+						next = args[i+1]
+					}
+					// Negative numbers remain explicit values, so --wait -1s
+					// reports an invalid wait rather than an unknown flag.
+					flag := len(next) > 1 && next[0] == '-' && !strings.ContainsAny(next[1:2], "0123456789.")
+					if i+1 == len(args) || flag {
+						args[i] = "--wait=15m"
+						continue
+					}
 				}
 				if !strings.Contains(arg, "=") {
 					for _, flag := range command.Flags {
+						if valueFlag, ok := flag.(cli.DocGenerationFlag); !ok || !valueFlag.TakesValue() {
+							continue
+						}
 						for _, name := range flag.Names() {
 							if arg == "--"+name || arg == "-"+name {
 								i++
@@ -80,6 +92,9 @@ func nextWork(ctx context.Context, wait, poll time.Duration, selectWork func() (
 		if err := ctx.Err(); err != nil {
 			return workflow.ImplementationOutcome{}, err
 		}
+		if !time.Now().Before(deadline) {
+			return workflow.ImplementationOutcome{Status: "idle_timeout", Reason: "no claimable work in this queue during the idle window; not global completion"}, nil
+		}
 		outcome, err = selectWork()
 		// The idle window stops new attempts, never an in-flight Claim.
 		if err != nil || outcome.Status != "no_work" {
@@ -97,12 +112,6 @@ func nextWork(ctx context.Context, wait, poll time.Duration, selectWork func() (
 				return workflow.ImplementationOutcome{}, ctx.Err()
 			case <-timer.C:
 			}
-		}
-		if err := ctx.Err(); err != nil {
-			return workflow.ImplementationOutcome{}, err
-		}
-		if !time.Now().Before(deadline) {
-			return workflow.ImplementationOutcome{Status: "idle_timeout", Reason: "no claimable work in this queue during the idle window; not global completion"}, nil
 		}
 	}
 }
