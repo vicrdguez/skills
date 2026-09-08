@@ -47,15 +47,15 @@ Add semantic Watchdog and status operations that supply a fixed review packet to
 - Deleting remote branches or guaranteeing post-merge artifact-commit retention
 
 ## Definition of Done
-- [ ] Watchdog deterministically claims or resumes the oldest eligible Awaiting Review Work Item and returns a fixed concrete packet to a fresh Worker Session, or reports `no_work` without mutation.
-- [ ] A first failing review publishes the agent's opaque findings and transitions the same Work Item to Rework with its Claim released.
-- [ ] A second failing review publishes the current ledger and enters Needs Human instead of issuing another bounce.
-- [ ] A passing review with no active blocking or human verdict becomes Ready for Merge, carries Manual Verification and the issue-closing footer, and creates no artifact archive.
-- [ ] Passing code-local Notes may be materialized only as Debt Marker comments under preserved Watchdog checks, without CLI Markdown or source parsing.
-- [ ] A merge conflict after review creates Synchronization Rework with a fresh Target Snapshot and does not spend the finding-driven bounce.
-- [ ] Human merge is observed as Merged, closes the source issue through GitHub, releases dependent Work Items, and closes a fully merged Coordination Item on the next observation.
-- [ ] Human comments and explicit requeue projections resume Needs Human work in the correct Rework or Awaiting Review state without CLI interpretation of prose.
-- [ ] Pi queue adapters preserve fresh-context separation and stop or continue only from structured verified Workflow outcomes.
+- [x] Watchdog deterministically claims or resumes the oldest eligible Awaiting Review Work Item and returns a fixed concrete packet to a fresh Worker Session, or reports `no_work` without mutation.
+- [x] A first failing review publishes the agent's opaque findings and transitions the same Work Item to Rework with its Claim released.
+- [x] A second failing review publishes the current ledger and enters Needs Human instead of issuing another bounce.
+- [x] A passing review with no active blocking or human verdict becomes Ready for Merge, carries Manual Verification and the issue-closing footer, and creates no artifact archive.
+- [x] Passing code-local Notes may be materialized only as Debt Marker comments under preserved Watchdog checks, without CLI Markdown or source parsing.
+- [x] A merge conflict after review creates Synchronization Rework with a fresh Target Snapshot and does not spend the finding-driven bounce.
+- [x] Human merge is observed as Merged, closes the source issue through GitHub, releases dependent Work Items, and closes a fully merged Coordination Item on the next observation.
+- [x] Human comments and explicit requeue projections resume Needs Human work in the correct Rework or Awaiting Review state without CLI interpretation of prose.
+- [x] Pi queue adapters preserve fresh-context separation and stop or continue only from structured verified Workflow outcomes.
 
 ## Manual verification
 - [ ] Run one implementation and Watchdog queue iteration in separate Pi sessions and confirm that each Worker Session is fresh and the loop follows only structured `skl` outcomes.
