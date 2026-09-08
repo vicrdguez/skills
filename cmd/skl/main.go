@@ -16,11 +16,11 @@ import (
 
 type backendFactory func() (setup.Backend, error)
 
-func newApp(newBackend backendFactory, stdin io.Reader, stdout, stderr io.Writer) *cli.App {
+func newApp(newBackend backendFactory, stdin io.Reader, stdout, stderr io.Writer) *stageApp {
 	return newAppWithSkillHome(newBackend, stdin, stdout, stderr, "")
 }
 
-func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, stderr io.Writer, home string) *cli.App {
+func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, stderr io.Writer, home string) *stageApp {
 	app := cli.NewApp()
 	app.Name = "skl"
 	app.Writer = stdout
@@ -190,7 +190,7 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 		},
 	}}
 	app.Commands = append(app.Commands, statusCommand(newBackend, stdout))
-	return app
+	return &stageApp{app}
 }
 
 func proposalRequest(command *cli.Context) (workflow.PublishRequest, error) {

@@ -42,7 +42,9 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 					if name == "resume" && number == 0 {
 						number = -1
 					}
-					outcome, err = workflow.StartImplementation(command.Context, command.Path("repo"), command.String("remote"), number, command.String("target-snapshot"), command.String("reviewed-head"), port)
+					outcome, err = nextWork(command.Duration("wait"), command.Duration("poll"), func() (workflow.ImplementationOutcome, error) {
+						return workflow.StartImplementation(command.Context, command.Path("repo"), command.String("remote"), number, command.String("target-snapshot"), command.String("reviewed-head"), port)
+					})
 				}
 				if err != nil {
 					var violation *workflow.InvariantError
@@ -56,5 +58,6 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 		})
 	}
 	commands[0].Aliases = []string{"start"}
+	commands[0].Flags = append(commands[0].Flags, waitFlags()...)
 	return commands
 }
