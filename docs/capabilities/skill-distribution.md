@@ -11,6 +11,9 @@
 - Includes guaranteed supporting Skill Definitions once per packet and retrieves conditional Skill Resources only when needed.
 - Resolves definitions and resources only from the running binary's embedded catalog; Consumer Repository files cannot override them.
 - Keeps Setup as a direct deterministic command rather than an agent skill.
+- Embeds and installs Pi-only implementation and Watchdog queue prompts, fresh-context runner definitions, and a structured-outcome continuation check under `.pi/agent/`. Refreshes only `skl.pi/v1` assets and preserves user-owned files.
+- Pi queues use semantic Work Start commands rather than selecting board records. They continue only after a verified stage handoff with the Claim released, and stop on `no_work`, the item limit, incomplete Claims, or ambiguous results. Implementation and Watchdog schedulers use separate Pi sessions.
+- Watchdog packets include fixed review facts and historical contract files without bundling Audit or duplicating supporting definitions. Pi runners consume the packet manifest instead of preloading the same skills again.
 
 ## Out of scope
 

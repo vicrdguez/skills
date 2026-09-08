@@ -3,6 +3,8 @@ description: Drain the watchdog queue with one fresh subagent per work item
 argument-hint: "[max-items] [model=provider/model:thinking]"
 ---
 
+<!-- skl-owned: skl.pi/v1 -->
+
 Act only as the scheduler for the watchdog queue. This Pi session is dedicated to the watchdog loop and must not run the implementation loop.
 
 Arguments: $@
@@ -16,20 +18,18 @@ Process at most the parsed item limit. Without a model override, use the agent's
 
 For each iteration, launch exactly one foreground subagent with `agent: "watchdog-runner"`, `context: "fresh"`, the current project as `cwd`, and this task:
 
-> Load and follow the watchdog skill exactly. Process at most one eligible work item, complete its full handoff, report the result, and exit. Do not run the outer queue loop.
+> Run `skl watchdog next` and follow its concrete packet in this fresh context. Process at most one Work Item, complete its full handoff, return the final CLI JSON unchanged, and exit. Do not run the outer queue loop.
 
-Wait for it to finish, then record its PR URL and board state.
+Wait for it to finish. Write its final structured CLI JSON to a private temporary file, then run `node ~/.pi/agent/prompts/queue-next.mjs watchdog <completed-count> <item-limit> <result-file>`.
 
-Continue with another fresh runner when:
-- the item reached verified `done`, `rework` or `needs-human`; or
-- the runner definitively failed before claiming an item.
+Continue with another fresh runner only when the adapter reports `continue`: a verified `ready_for_merge`, `rework`, or `needs_human` handoff with its Claim released.
 
 Stop when:
-- no eligible `review` item remains;
-- a claimed item did not reach verified `done`, `rework` or `needs-human`;
+- the structured outcome is `no_work`;
+- a claimed item did not reach a verified terminal handoff;
 - the result does not establish whether an item was claimed;
 - the item limit is reached.
 
 Never resume or reuse a previous runner. Never pass one runner's conversation into the next. Do not review, audit, or reinterpret findings yourself. The skill owns the work contract; you own only sequential lifecycle control. Never launch a runner at a `needs-human` item: only a person requeues those.
 
-At completion, summarize every attempted PR and its final board state.
+At completion, summarize every attempted Work Item and its canonical Workflow State. Stop on adapter errors or any result other than exact `continue`.

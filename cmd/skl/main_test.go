@@ -162,7 +162,7 @@ func TestSetupInfersGitHubConsumerRepository(t *testing.T) {
 	if got := stdout.String(); got != "Link CLAUDE.md to AGENTS.md? [y/N] Prepared "+root+" for GitHub workflow on trunk.\n" {
 		t.Fatalf("stdout = %q", got)
 	}
-	if len(backend.labels) != 6 {
+	if len(backend.labels) != 7 {
 		t.Fatalf("prepared %d labels", len(backend.labels))
 	}
 	if got := readFile(t, filepath.Join(root, ".gitignore")); got != ".worktrees/\n" {
@@ -189,6 +189,42 @@ func TestSetupDeclinesClaudeMigrationAtEndOfInput(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(root, "CLAUDE.md")); !os.IsNotExist(err) {
 		t.Fatalf("CLAUDE.md created without confirmation: %v", err)
+	}
+}
+
+func TestDocumentedImplementResourceCommands(t *testing.T) {
+	for _, file := range []string{"skills/dev/implement/SKILL.md", "README.md"} {
+		t.Run(file, func(t *testing.T) {
+			seen := map[string]bool{}
+			for _, command := range strings.Split(readRepositoryFile(t, file), "`") {
+				if !strings.HasPrefix(command, "skl skill ") || !strings.Contains(command, "--resource") {
+					continue
+				}
+				args := strings.Fields(command)
+				resource := ""
+				for _, arg := range args {
+					if strings.HasPrefix(arg, "reference/") {
+						resource = arg
+					}
+				}
+				if resource == "" {
+					continue
+				}
+				seen[resource] = true
+				var output bytes.Buffer
+				app := newApp(nil, bytes.NewReader(nil), &output, &output)
+				if err := app.Run(args); err != nil {
+					t.Errorf("%s: %v", command, err)
+					continue
+				}
+				if output.String() != readRepositoryFile(t, "skills/dev/"+args[len(args)-1]+"/"+resource) {
+					t.Errorf("%s returned the wrong resource", command)
+				}
+			}
+			if !seen["reference/submission.md"] || !seen["reference/decision.md"] {
+				t.Errorf("missing concrete template commands: %v", seen)
+			}
+		})
 	}
 }
 
@@ -223,7 +259,11 @@ func TestInstallSupportedSkillStubs(t *testing.T) {
 			if want := skillFrontmatter(t, readRepositoryFile(t, source)); !strings.HasPrefix(stub, want+"\n") {
 				t.Fatalf("%s %s stub changed source frontmatter:\n%s", harness, name, stub)
 			}
-			if !strings.Contains(stub, "skl skill "+name) || !strings.Contains(stub, "skl.stub/v1") {
+			command := "skl skill " + name
+			if name == "implement" {
+				command = "skl implement next"
+			}
+			if !strings.Contains(stub, command) || !strings.Contains(stub, "skl.stub/v1") {
 				t.Fatalf("%s %s stub does not delegate to skl:\n%s", harness, name, stub)
 			}
 		}
