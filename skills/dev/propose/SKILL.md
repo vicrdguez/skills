@@ -30,6 +30,7 @@ Break the work into **tracer-bullets** tickets.
 - Each slice is sized to fit in a single fresh context window
 - Prefer separate Work Items for behaviors that deliver safe, useful results independently. Assess independence after declared Dependencies are Merged, without requiring later Work Items.
 - Combine independently useful behaviors only for a concrete reduction in overall implementation or review burden. Shared files or a shared Workflow stage alone are insufficient.
+- Assess review burden from the behavior and materially different correctness, failure, and recovery concerns a reviewer must understand together, using agreed requirements and focused repository inspection rather than line counts or exhaustive implementation planning. Different error cases alone do not require separate Work Items.
 - Write the artifacts, then publish them to the project's issue tracker as explained below. 
 
 Use the `design` skill to sketch the seams at which this change will be tested.
@@ -45,6 +46,7 @@ Present the proposed breakdown as a numbered list. For each ticket show:
 - *Title*: Short and descriptive name
 - *Blocked by* which other tickets (if any) must complete first
 - *What it delivers*: the end-to-end behavior this ticket makes work
+- *Review burden*: Briefly explain those concerns and any concrete reason for combining independently useful behaviors
 
 
 Ask the user:

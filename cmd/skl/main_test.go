@@ -379,6 +379,14 @@ func TestRetrieveConcreteProposeInstructions(t *testing.T) {
 			"Combine independently useful behaviors only for a concrete reduction in overall implementation or review burden",
 			"Shared files or a shared Workflow stage alone are insufficient",
 		},
+		"review burden": {
+			"Assess review burden from the behavior and materially different correctness, failure, and recovery concerns a reviewer must understand together",
+			"using agreed requirements and focused repository inspection rather than line counts or exhaustive implementation planning",
+			"Different error cases alone do not require separate Work Items",
+			"*Review burden*: Briefly explain those concerns and any concrete reason for combining independently useful behaviors",
+			"*Title*", "*Blocked by*", "*What it delivers*",
+			"Does the granularity feel right?", "Are the blocking edges correct", "Should any tickets be merged or split further?",
+		},
 	} {
 		t.Run(section, func(t *testing.T) {
 			for _, want := range requirements {
