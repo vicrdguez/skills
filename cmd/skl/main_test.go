@@ -162,15 +162,43 @@ func TestSetupInfersGitHubConsumerRepository(t *testing.T) {
 	if got := stdout.String(); got != "Link CLAUDE.md to AGENTS.md? [y/N] Prepared "+root+" for GitHub workflow on trunk.\n" {
 		t.Fatalf("stdout = %q", got)
 	}
-	if len(backend.labels) != 6 {
+	if len(backend.labels) != 7 {
 		t.Fatalf("prepared %d labels", len(backend.labels))
 	}
 	if got := readFile(t, filepath.Join(root, ".gitignore")); got != ".worktrees/\n" {
 		t.Fatalf(".gitignore = %q", got)
 	}
-	if got := readFile(t, filepath.Join(root, "AGENTS.md")); got != setup.AgentsBlock {
-		t.Fatalf("AGENTS.md = %q", got)
+	section := readRepositoryFile(t, "cmd/skl/testdata/simplicity.md")
+	workflow := "<!-- dev-pipeline:start -->\n## Workflow\n\nUse `skl` as the Workflow entrypoint. Do not manually mutate Workflow Projections. Only a human merges.\n"
+	wantBlock := workflow + "\n" + section + "<!-- dev-pipeline:end -->\n"
+	agentsPath := filepath.Join(root, "AGENTS.md")
+	installed := readFile(t, agentsPath)
+	if installed != wantBlock || strings.Count(installed, "## Simplicity\n") != 1 {
+		t.Fatalf("fresh AGENTS.md = %q, want %q", installed, wantBlock)
 	}
+	t.Run("refresh and repeat", func(t *testing.T) {
+		before, after := "# User guidance\r\nKeep this spacing.  \n\n", "\nUser footer\twithout final newline"
+		original := before + workflow + "<!-- dev-pipeline:end -->\n" + after
+		if err := os.WriteFile(agentsPath, []byte(original), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		want := before + wantBlock + after
+		for range 2 {
+			stdout.Reset()
+			app := newApp(func() (setup.Backend, error) { return backend, nil }, bytes.NewBufferString("n\n"), &stdout, &stderr)
+			if err := app.Run([]string{"skl", "setup", "--repo", root}); err != nil {
+				t.Fatal(err)
+			}
+			if got := stdout.String(); got != "Link CLAUDE.md to AGENTS.md? [y/N] Prepared "+root+" for GitHub workflow on trunk.\n" {
+				t.Errorf("stdout = %q", got)
+			}
+			got := readFile(t, agentsPath)
+			if got != want || strings.Count(got, "## Simplicity\n") != 1 {
+				t.Fatalf("AGENTS.md = %q, want %q", got, want)
+			}
+			want = got
+		}
+	})
 	if _, err := os.Stat(filepath.Join(root, ".skl.yml")); !os.IsNotExist(err) {
 		t.Fatalf("workflow configuration was written: %v", err)
 	}
@@ -189,6 +217,42 @@ func TestSetupDeclinesClaudeMigrationAtEndOfInput(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(root, "CLAUDE.md")); !os.IsNotExist(err) {
 		t.Fatalf("CLAUDE.md created without confirmation: %v", err)
+	}
+}
+
+func TestDocumentedImplementResourceCommands(t *testing.T) {
+	for _, file := range []string{"skills/dev/implement/SKILL.md", "README.md"} {
+		t.Run(file, func(t *testing.T) {
+			seen := map[string]bool{}
+			for _, command := range strings.Split(readRepositoryFile(t, file), "`") {
+				if !strings.HasPrefix(command, "skl skill ") || !strings.Contains(command, "--resource") {
+					continue
+				}
+				args := strings.Fields(command)
+				resource := ""
+				for _, arg := range args {
+					if strings.HasPrefix(arg, "reference/") {
+						resource = arg
+					}
+				}
+				if resource == "" {
+					continue
+				}
+				seen[resource] = true
+				var output bytes.Buffer
+				app := newApp(nil, bytes.NewReader(nil), &output, &output)
+				if err := app.Run(args); err != nil {
+					t.Errorf("%s: %v", command, err)
+					continue
+				}
+				if output.String() != readRepositoryFile(t, "skills/dev/"+args[len(args)-1]+"/"+resource) {
+					t.Errorf("%s returned the wrong resource", command)
+				}
+			}
+			if !seen["reference/submission.md"] || !seen["reference/decision.md"] {
+				t.Errorf("missing concrete template commands: %v", seen)
+			}
+		})
 	}
 }
 
@@ -223,7 +287,11 @@ func TestInstallSupportedSkillStubs(t *testing.T) {
 			if want := skillFrontmatter(t, readRepositoryFile(t, source)); !strings.HasPrefix(stub, want+"\n") {
 				t.Fatalf("%s %s stub changed source frontmatter:\n%s", harness, name, stub)
 			}
-			if !strings.Contains(stub, "skl skill "+name) || !strings.Contains(stub, "skl.stub/v1") {
+			command := "skl skill " + name
+			if name == "implement" {
+				command = "skl implement next"
+			}
+			if !strings.Contains(stub, command) || !strings.Contains(stub, "skl.stub/v1") {
 				t.Fatalf("%s %s stub does not delegate to skl:\n%s", harness, name, stub)
 			}
 		}
@@ -1065,6 +1133,48 @@ func TestRetrieveEquivalentTypedInstructions(t *testing.T) {
 	}
 }
 
+func TestRetrieveAuditWithoutPonytail(t *testing.T) {
+	for _, format := range []string{"markdown", "json"} {
+		t.Run(format, func(t *testing.T) {
+			var output bytes.Buffer
+			app := newApp(nil, bytes.NewReader(nil), &output, &output)
+			if err := app.Run([]string{"skl", "skill", "--format", format, "audit"}); err != nil {
+				t.Fatal(err)
+			}
+			instructions := output.String()
+			if format == "json" {
+				var packet skilldist.Packet
+				if err := json.Unmarshal(output.Bytes(), &packet); err != nil {
+					t.Fatal(err)
+				}
+				if len(packet.IncludedSkills) != 0 || !slices.Equal(packet.Resources, []string{"reference/smells.md"}) {
+					t.Fatalf("unexpected Audit dependencies: %#v", packet)
+				}
+				instructions = packet.Instructions
+			} else {
+				header := "Protocol: skl.instructions/v1\nSkill: audit\nIncluded skills: none\nFacts: {}\nResources: reference/smells.md\n\n"
+				if !strings.HasPrefix(instructions, header) {
+					t.Fatalf("unexpected Audit manifest: %s", instructions)
+				}
+				instructions = strings.TrimPrefix(instructions, header)
+			}
+			if instructions != readRepositoryFile(t, "skills/dev/audit/SKILL.md") {
+				t.Error("retrieved Audit differs from its authoritative definition")
+			}
+			for _, forbidden := range []string{"ponytail", "750", "net-lines", "## Simplicity"} {
+				if strings.Contains(strings.ToLower(instructions), strings.ToLower(forbidden)) {
+					t.Errorf("Audit retains or injects %q", forbidden)
+				}
+			}
+			for _, required := range []string{"**Standards**", "**Artifacts**", "**smell baseline**", "**The documented gate**", "**Artifact integrity**", "`HARD` or `JUDGEMENT`", "Under 500 words.", "### 6. Aggregate", "Do **not** merge or rerank findings"} {
+				if !strings.Contains(instructions, required) {
+					t.Errorf("Audit lost ordinary review instruction %q", required)
+				}
+			}
+		})
+	}
+}
+
 func TestRetrieveOneNamedResource(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, t.TempDir())
@@ -1104,6 +1214,50 @@ func TestBundleGuaranteedSupportingSkills(t *testing.T) {
 	}
 	if packet.Instructions != wantInstructions {
 		t.Fatalf("bundled instructions differ from canonical definitions:\n%s", packet.Instructions)
+	}
+	if !slices.Equal(packet.Resources, []string{"reference/decision.md", "reference/submission.md"}) {
+		t.Fatalf("implementation resources changed: %v", packet.Resources)
+	}
+	for _, format := range []string{"markdown", "json"} {
+		t.Run(format, func(t *testing.T) {
+			var direct, bundled bytes.Buffer
+			for _, request := range []struct {
+				name string
+				out  *bytes.Buffer
+			}{{"audit", &direct}, {"implement", &bundled}} {
+				app := newApp(nil, bytes.NewReader(nil), request.out, request.out)
+				if err := app.Run([]string{"skl", "skill", "--format", format, request.name}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			audit, implementation := direct.String(), bundled.String()
+			if format == "json" {
+				var directPacket, bundledPacket skilldist.Packet
+				if err := json.Unmarshal(direct.Bytes(), &directPacket); err != nil {
+					t.Fatal(err)
+				}
+				if err := json.Unmarshal(bundled.Bytes(), &bundledPacket); err != nil {
+					t.Fatal(err)
+				}
+				audit, implementation = directPacket.Instructions, bundledPacket.Instructions
+			} else {
+				_, audit, _ = strings.Cut(audit, "\n\n")
+				wantHeader := "Protocol: skl.instructions/v1\nSkill: implement\nIncluded skills: tdd, audit, design, domain\nFacts: {}\nResources: reference/decision.md, reference/submission.md\n\n"
+				if bundled.String() != wantHeader+wantInstructions {
+					t.Fatal("rendered implementation manifest or supporting definitions changed")
+				}
+			}
+			_, includedAudit, found := strings.Cut(implementation, "\n\n## Included Skill: audit\n\n")
+			includedAudit, _, _ = strings.Cut(includedAudit, "\n\n## Included Skill:")
+			if !found || includedAudit != audit {
+				t.Error("bundled Audit differs from direct retrieval")
+			}
+			for _, forbidden := range []string{"ponytail", "## simplicity"} {
+				if strings.Contains(strings.ToLower(implementation), forbidden) {
+					t.Errorf("implementation packet retains or injects %q", forbidden)
+				}
+			}
+		})
 	}
 
 	if err := app.Run([]string{"skl", "install"}); err != nil {
