@@ -5,9 +5,9 @@
   {"name":"human handoff","stage":"implement","completed":1,"limit":10,"result":{"status":"needs_human","item":{"Number":7,"State":"needs_human","Claimed":false}},"want":"continue"},
   {"name":"no work","stage":"watchdog","completed":1,"limit":10,"result":{"status":"no_work"},"want":"stop"},
   {"name":"limit","stage":"implement","completed":10,"limit":10,"result":{"status":"needs_human","item":{"Number":7,"State":"needs_human","Claimed":false}},"want":"stop"},
-  {"name":"claim incomplete","stage":"watchdog","completed":1,"limit":10,"result":{"status":"rework","item":{"Number":7,"State":"rework","Claimed":true}},"want":"stop"},
+  {"name":"claim incomplete","stage":"watchdog","completed":1,"limit":10,"result":{"status":"rework","item":{"Number":7,"State":"rework","Claimed":true,"Submission":{"Number":11,"Head":"fixed"}}},"want":"stop"},
   {"name":"ambiguous","stage":"watchdog","completed":1,"limit":10,"result":{"status":"ready_for_merge"},"want":"stop"},
-  {"name":"wrong stage","stage":"implement","completed":1,"limit":10,"result":{"status":"ready_for_merge","item":{"Number":7,"State":"ready_for_merge","Claimed":false}},"want":"stop"},
+  {"name":"wrong stage","stage":"implement","completed":1,"limit":10,"result":{"status":"ready_for_merge","item":{"Number":7,"State":"ready_for_merge","Claimed":false,"Submission":{"Number":11,"Head":"fixed"}}},"want":"stop"},
   {"name":"prose","stage":"watchdog","completed":1,"limit":10,"result":"done, trust me","want":"stop"},
   {"name":"invalid limit","stage":"watchdog","completed":1,"limit":-1,"result":{},"want":"stop"},
   {"name":"missing submission","stage":"watchdog","completed":1,"limit":10,"result":{"status":"ready_for_merge","item":{"Number":7,"State":"ready_for_merge","Claimed":false}},"want":"stop"}

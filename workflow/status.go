@@ -69,6 +69,9 @@ func ObserveStatus(ctx context.Context, root, remote string, backend Implementat
 				if current.Head != item.Submission.Head || current.Merged {
 					return Refuse("Submission changed during status reconciliation")
 				}
+				if item.Submission.PendingReview == ReadyForMerge && current.Mergeability != "mergeable" {
+					return Refuse("mergeability unavailable or changed during status reconciliation; retry to observe the current target")
+				}
 				return nil
 			}
 			if err := port.CompleteReview(ctx, repository, item, item.Submission.PendingReview, guard); err != nil {

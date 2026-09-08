@@ -352,16 +352,34 @@ func TestWatchdogClaimsOldestSubmissionAndPinsPacket(t *testing.T) {
 }
 
 func TestWatchdogReportsNoEligibleWork(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "widget")
+	runGit(t, root, "rm", "-r", ".changes/widget")
+	runGit(t, root, "commit", "-m", "retire")
+	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	for _, work := range [][]workflow.ImplementationItem{nil, {
-		{Number: 1, State: workflow.AwaitingReview, Claimed: true},
+		{Number: 1, Branch: "widget", State: workflow.AwaitingReview, Claimed: true, Submission: &workflow.Submission{Number: 11, State: workflow.AwaitingReview, Claimed: true, Head: head, ReviewedHead: head}},
 		{Number: 2, State: workflow.NeedsHuman},
 		{Number: 3, State: workflow.Ready},
 	}} {
 		b := &implementationMemory{work: work}
-		before := append([]workflow.ImplementationItem(nil), work...)
-		got := watchdogCLI(t, proposalRepository(t), b, "next")
-		if got.Status != "no_work" || !reflect.DeepEqual(before, b.work) {
+		before, err := json.Marshal(b.work)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := watchdogCLI(t, root, b, "next")
+		after, err := json.Marshal(b.work)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Status != "no_work" || !bytes.Equal(before, after) {
 			t.Fatalf("no work: %#v %#v", got, b.work)
+		}
+		if len(work) != 0 {
+			resumed := watchdogCLI(t, root, b, "resume", "--item", "1")
+			if resumed.Status != "work_available" || resumed.Item == nil || resumed.Item.Number != 1 || resumed.Item.Submission == nil || resumed.Item.Submission.Number != 11 || resumed.Packet == nil || resumed.Packet.Facts.Watchdog == nil || resumed.Packet.Facts.Watchdog.ReviewedHead != head {
+				t.Fatalf("resume excluded Claim: %#v", resumed)
+			}
 		}
 	}
 }

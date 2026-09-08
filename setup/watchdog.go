@@ -96,6 +96,10 @@ func (b *GitHubBackend) ReviewSubmission(ctx context.Context, repository workflo
 			if event.Event == "labeled" && event.Label.Name == "review" {
 				reviewing = true
 			}
+			// A completed pause ends this review; a later human requeue is not a bounce.
+			if labels["needs-human"] && !labels["review"] && !labels["wip"] {
+				reviewing = false
+			}
 			if reviewing && labels["rework"] && !labels["review"] && !labels["wip"] {
 				if !labels["sync"] {
 					result.Bounces++
