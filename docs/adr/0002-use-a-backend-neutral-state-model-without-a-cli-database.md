@@ -2,6 +2,18 @@
 
 The Workflow Engine owns canonical states, eligibility, ordering, invariants, and transitions rather than treating GitHub labels as the domain model. One Work Item keeps the same identity from publication through merge while backend issues and pull requests are projections or attachments. A backend exposes normalized records and conditional mutation primitives, while its labels and fields are projections of engine state. Durable truth is reconstructed from the active backend together with Git branches and active change artifacts; the CLI keeps no private authoritative database. This preserves one set of mechanics for the initial GitHub backend and a later complete local backend without duplicating workflow policy.
 
+## Backend independence correction
+
+Correct provider assumptions across all existing Workflow operations as a separate, behavior-preserving change, rather than limiting the correction to implementation operations. Its scope includes operations introduced by intervening slices before the correction lands. Workflow Mechanics must use a backend-independent seam; this correction does not add another Backend or require a complete Local Backend to prove that seam. The aim is to make later extension local to the Backend integration without changing existing observable behavior.
+
+The correction follows merge of every Work Item under Coordination Item #3, so it covers the complete set of Workflow Mechanics delivered by that proposal rather than an intermediate subset.
+
+The Workflow Engine receives a repository-bound Backend selected outside the engine. Provider discovery, credentials, endpoints, and native representations belong to the Backend integration. Work Item and Submission identities cross the seam as small opaque values, not interfaces with native rendering behavior; existing external identifiers remain unchanged. The engine does not interpret those values as issue numbers or provider-specific references.
+
+The Backend translates its projections into semantic records and materializes requested mutations; it does not own eligibility or other workflow decisions. Canonical state meanings, ordering, invariants, and permitted transitions belong exclusively to the Workflow Engine. For example, Awaiting Review is canonical state, while GitHub's `review` label is only its Workflow Projection. Provider-specific presentation and linking syntax remain outside Workflow Mechanics.
+
+Git evidence remains a separate concern supplied by the concrete Repository module, not hidden behind the Backend. The Workflow Engine combines commit, tree, and ancestry evidence with Backend observations to enforce its mechanics. Provider discovery stays outside the engine, and Git remote selection is supplied explicitly rather than assumed to be `origin`; this correction does not require another Repository abstraction.
+
 ## Consequences
 
 - Backend and Git state can diverge during multi-system operations, so commands must detect and recover partial transitions.

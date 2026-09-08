@@ -2,6 +2,8 @@
 
 `skl setup` prepares a Consumer Repository to use the repository-owned Workflow and its active Workflow Backend.
 
+Run it from any directory inside the Consumer Repository, or pass `--repo <path>`. When GitHub remote inference is ambiguous, rerun with `--remote <name>`.
+
 ## Behaviors
 
 - Validates the repository, backend access, and authentication before changing state.
@@ -13,6 +15,13 @@
 - Offers a `CLAUDE.md` symlink when safe and preserves substantive existing guidance unless replacement is explicitly authorized.
 - Removes the superseded `docs/github.md` protocol document.
 - Produces the same owned guidance and backend preparation when repeated with the same choices.
+
+## Planned extension after issue #3
+
+- Installs and maintains a repository-owned simplicity standard in the managed `AGENTS.md` block as part of normal Setup, without an opt-in. It applies to coding and review inside and outside the Workflow.
+- The standard preserves accepted behavior and required verification, favors adequate existing mechanisms and justified structure, and directs simplification toward maintenance burden rather than line counts. Test guidance preserves distinct regression protection while simplifying repeated setup and incidental implementation coupling.
+- The installed standard is the agent-facing source of truth; Instruction Packets do not repeat it, and it requires no separate Skill Definition. PR size and reviewability remain outside this extension.
+- Existing Skill Definitions and resources remain unchanged except for removal of Audit's optional `ponytail-review` integration. Overlapping guidance is retained; consolidation is outside this extension.
 
 ## Out of scope
 
