@@ -397,7 +397,7 @@ func TestInstallPreservesOpenCodeSkillsAndConfiguration(t *testing.T) {
 	files := map[string]string{
 		"skills/audit/SKILL.md":    "---\nname: audit\n---\nMy own audit skill\n",
 		"skills/personal/SKILL.md": "My unrelated skill\n",
-		"opencode.json":           `{"skills":{"paths":["~/.pi/agent/skills","/my/other/skills"]},"theme":"system"}`,
+		"opencode.json":            `{"skills":{"paths":["~/.pi/agent/skills","/my/other/skills"]},"theme":"system"}`,
 	}
 	for file, contents := range files {
 		path := filepath.Join(root, ".config/opencode", file)
