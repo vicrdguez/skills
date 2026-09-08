@@ -23,14 +23,14 @@ Move provider selection and repository binding outside Workflow Mechanics, then 
 - Unrelated refactoring, dependency changes, and a standalone portability test suite.
 
 ## Definition of Done
-- [ ] B1 Setup preserves its owned guidance and Workflow Projections through a repository-bound Backend.
-- [ ] B2 Repository selection preserves supported remote inference and refusal-before-mutation behavior without provider discovery inside Mechanics.
-- [ ] B3 A single-slice Proposal publishes through opaque identities while retaining the existing GitHub-facing record and artifact reference.
-- [ ] B4 Coordinated publication preserves engine-owned dependency ordering and graph rejection.
-- [ ] B5 Retrying interrupted publication adopts durable records without duplicating or prematurely readying Work Items.
-- [ ] B6 Publication still enforces pushed-head, target-ancestry, and Artifact Baseline evidence from Git before backend writes.
-- [ ] Setup and publication Mechanics contain no provider parsing, native identifier formatting, label definitions, or backend repository coordinates; shared identity and Backend wiring conform to ADR 0002 and every affected caller still builds.
-- [ ] Existing Setup and publication checks remain green; documentation describes the corrected ownership without advertising new capabilities.
+- [x] B1 Setup preserves its owned guidance and Workflow Projections through a repository-bound Backend.
+- [x] B2 Repository selection preserves supported remote inference and refusal-before-mutation behavior without provider discovery inside Mechanics.
+- [x] B3 A single-slice Proposal publishes through opaque identities while retaining the existing GitHub-facing record and artifact reference.
+- [x] B4 Coordinated publication preserves engine-owned dependency ordering and graph rejection.
+- [x] B5 Retrying interrupted publication adopts durable records without duplicating or prematurely readying Work Items.
+- [x] B6 Publication still enforces pushed-head, target-ancestry, and Artifact Baseline evidence from Git before backend writes.
+- [x] Setup and publication Mechanics contain no provider parsing, native identifier formatting, label definitions, or backend repository coordinates; shared identity and Backend wiring conform to ADR 0002 and every affected caller still builds.
+- [x] Existing Setup and publication checks remain green; documentation describes the corrected ownership without advertising new capabilities.
 
 ## Manual verification
 None.
