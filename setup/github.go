@@ -44,6 +44,10 @@ func newGitHubBackend(baseURL string, client *http.Client, tokenSource func() (s
 }
 
 type githubIssue struct {
+	CreatedAt        string `json:"created_at"`
+	SubIssuesSummary struct {
+		Total int `json:"total"`
+	} `json:"sub_issues_summary"`
 	ID     int64  `json:"id"`
 	Number int    `json:"number"`
 	Title  string `json:"title"`

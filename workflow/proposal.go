@@ -422,50 +422,20 @@ func primaryWorktree(root string) (string, error) {
 }
 
 func artifactBaseline(root, slug, head string) (string, error) {
-	commits, err := git(root, "rev-list", "--first-parent", "--reverse", head)
+	history, err := InspectLedger(root, head, slug)
 	if err != nil {
 		return "", err
 	}
-	path := ".changes/" + slug
-	present := false
-	var baseline string
-	for _, commit := range strings.Fields(commits) {
-		parents, err := git(root, "rev-list", "--parents", "-n", "1", commit)
-		if err != nil {
-			return "", err
-		}
-		parentFields := strings.Fields(parents)
-		if len(parentFields) > 2 {
-			currentTree, _ := git(root, "rev-parse", commit+":"+path)
-			firstParentTree, _ := git(root, "rev-parse", parentFields[1]+":"+path)
-			if currentTree != firstParentTree {
-				return "", errors.New("merge changes the ledger relative to its first parent")
-			}
-		}
-		now := gitOK(root, "cat-file", "-e", commit+":"+path) == nil
-		if !present && now {
-			if baseline != "" {
-				return "", errors.New("ledger is introduced more than once")
-			}
-			baseline = commit
-		}
-		if present && !now {
-			return "", errors.New("ledger is removed before publication")
-		}
-		present = now
+	if len(history.Violations) > 0 {
+		return "", errors.New(strings.Join(history.Violations, "; "))
 	}
-	if baseline == "" {
-		return "", errors.New("ledger is missing")
+	if history.Phase == "retired" {
+		return "", errors.New("ledger is removed before publication")
 	}
-	if baseline != head {
+	if history.Baseline != head {
 		return "", errors.New("Artifact Baseline is not the published branch head")
 	}
-	for _, required := range []string{"intent.md", "behavior.md"} {
-		if gitOK(root, "cat-file", "-e", baseline+":"+filepath.Join(path, required)) != nil {
-			return "", fmt.Errorf("ledger misses %s", required)
-		}
-	}
-	return baseline, nil
+	return history.Baseline, nil
 }
 
 func fix(invariant, repair string) Outcome {
