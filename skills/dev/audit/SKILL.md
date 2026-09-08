@@ -50,7 +50,7 @@ Look for the originating artifacts, in this order:
 
 Anything in the repo that documents how code should be written, such as `CODING_STANDARDS.md` or `CONTRIBUTING.md`.
 
-On top of whatever the repo documents, the Standards axis always carries the **smell baseline** in [smells.md](./reference/smells.md) — a fixed set of Fowler code smells (_Refactoring_, ch.3) that applies even when a repo documents nothing, plus the two rules that bind it.
+On top of whatever the repo documents, the Standards axis always carries the **smell baseline** from `skl skill --resource reference/smells.md audit` — a fixed set of Fowler code smells (_Refactoring_, ch.3) that applies even when a repo documents nothing, plus the two rules that bind it.
 
 ### 4. Run the deterministic checks once
 
@@ -70,7 +70,7 @@ Dispatch both axes as parallel sub-agents, each in a fresh context carrying its 
 **Standards sub-agent prompt** — include:
 
 - The full diff command and commit list.
-- The list of standards-source files you found in step 3, plus the absolute path to [smells.md](./reference/smells.md). Instruct the sub-agent to read them.
+- The list of standards-source files you found in step 3, plus `skl skill --resource reference/smells.md audit`. Instruct the sub-agent to read those files and the command's output.
 - The gate results from step 4.
 - The precedence between sources, so the sub-agent knows what outranks what: frozen artifacts, then required tooling and CI, then the project's `AGENTS.md`, standards docs and quality skills, then language and framework correctness, security and accessibility rules, then the generic smell baseline. An explicit project or language `MUST`, `ALWAYS`, `NEVER` or equivalent can be a hard violation; a generic smell stays a judgement call unless a local rule or a concrete behavior or maintenance impact elevates it.
 - The brief: "Report — per file/hunk where relevant — (a) every place the diff violates a documented standard: cite the standard (file + the rule); and (b) any baseline smell you spot: name it and quote the hunk. Tag each finding as `HARD` or `JUDGEMENT` as its first token; documented-standard breaches can be `HARD`, but baseline smells are always `JUDGEMENT`, and a documented repo standard overrides the baseline. Skip anything tooling enforces. Report each finding as its own bullet, anchored to `file:line`. Under 500 words. Compress findings rather than omit any."

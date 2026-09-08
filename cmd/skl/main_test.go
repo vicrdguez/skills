@@ -306,6 +306,102 @@ func TestInstallSupportedSkillStubs(t *testing.T) {
 	}
 }
 
+func TestEmbeddedResourceDelegationSmoke(t *testing.T) {
+	home := t.TempDir()
+	previous, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(previous) })
+	run := func(t *testing.T, command string) string {
+		t.Helper()
+		var stdout, stderr bytes.Buffer
+		app := newAppWithSkillHome(func() (setup.Backend, error) {
+			t.Fatal("read-only retrieval and installation must not open a backend")
+			return nil, nil
+		}, bytes.NewReader(nil), &stdout, &stderr, home)
+		if err := app.Run(strings.Fields(command)); err != nil {
+			t.Fatalf("%s: %v\n%s", command, err, stderr.String())
+		}
+		if stderr.Len() != 0 {
+			t.Fatalf("%s stderr: %s", command, stderr.String())
+		}
+		return stdout.String()
+	}
+	run(t, "skl install")
+	for _, harness := range []string{".pi/agent/skills", ".codex/skills", ".claude/skills"} {
+		for _, skill := range []string{"audit", "brainstorm", "design", "domain", "explore", "implement", "propose", "shape", "tdd", "watchdog", "writing-for-agents"} {
+			directory := filepath.Join(home, harness, skill)
+			entries, err := os.ReadDir(directory)
+			if err != nil || len(entries) != 1 || entries[0].Name() != "SKILL.md" {
+				t.Fatalf("%s must contain only a stub: %v (%v)", directory, entries, err)
+			}
+			stub := readFile(t, filepath.Join(directory, "SKILL.md"))
+			_, body, found := strings.Cut(strings.TrimPrefix(stub, "---\n"), "\n---\n")
+			command := "skl skill " + skill
+			if skill == "implement" {
+				command = "skl implement next"
+			}
+			want := "\n<!-- skl-owned: skl.stub/v1 -->\n\nRun `" + command + "`. Skip activation for every skill named in `included_skills`; its definition is already in the packet.\n"
+			if !found || body != want {
+				t.Fatalf("%s is not a thin CLI-delegating stub: %s", directory, stub)
+			}
+		}
+	}
+	for _, tc := range []struct {
+		skill, resource, pointer, command, content string
+	}{
+		{"domain", "", "Use the format from `skl skill --resource reference/CONTEXT-FORMAT.md domain`.", "skl skill --resource reference/CONTEXT-FORMAT.md domain", "# CONTEXT.md Format"},
+		{"domain", "", "If any of the three is missing, skip the ADR. Use the format from `skl skill --resource reference/ADR-FORMAT.md domain`.", "skl skill --resource reference/ADR-FORMAT.md domain", "# ADR Format"},
+		{"domain", "", "Use the format from `skl skill --resource reference/CAPABILITIES-FORMAT.md domain`.", "skl skill --resource reference/CAPABILITIES-FORMAT.md domain", "# Capability Doc Format"},
+		{"tdd", "", "See `skl skill --resource reference/tests.md tdd` for examples", "skl skill --resource reference/tests.md tdd", "# Good and Bad Tests"},
+		{"tdd", "", "`skl skill --resource reference/mocking.md tdd` for mocking guidelines.", "skl skill --resource reference/mocking.md tdd", "Mock at **system boundaries** only:"},
+		{"audit", "", "the Standards axis always carries the **smell baseline** from `skl skill --resource reference/smells.md audit`", "skl skill --resource reference/smells.md audit", "# Smell Baseline"},
+		{"audit", "", "The list of standards-source files you found in step 3, plus `skl skill --resource reference/smells.md audit`. Instruct the sub-agent to read those files and the command's output.", "skl skill --resource reference/smells.md audit", "**The repo overrides.** A documented repo standard always wins"},
+	} {
+		t.Run(tc.skill+"/"+tc.pointer, func(t *testing.T) {
+			if tc.resource != "" {
+				if got := run(t, "skl skill --resource "+tc.resource+" "+tc.skill); !strings.Contains(got, tc.pointer) {
+					t.Errorf("resource lacks %q", tc.pointer)
+				}
+			} else {
+				skills := []string{tc.skill}
+				if slices.Contains([]string{"tdd", "audit", "design", "domain"}, tc.skill) {
+					skills = append(skills, "implement")
+				}
+				for _, skill := range skills {
+					for _, format := range []string{"markdown", "json"} {
+						got := run(t, "skl skill --format "+format+" "+skill)
+						if format == "json" {
+							var packet skilldist.Packet
+							if err := json.Unmarshal([]byte(got), &packet); err != nil {
+								t.Fatal(err)
+							}
+							if skill == "implement" && !slices.Equal(packet.IncludedSkills, []string{"tdd", "audit", "design", "domain"}) {
+								t.Fatalf("included skills = %v", packet.IncludedSkills)
+							}
+							got = packet.Instructions
+						}
+						if skill == "implement" {
+							_, got, _ = strings.Cut(got, "\n\n## Included Skill: "+tc.skill+"\n\n")
+						}
+						got, _, _ = strings.Cut(got, "\n\n## Included Skill:")
+						if !strings.Contains(got, tc.pointer) {
+							t.Errorf("%s %s lacks %q", skill, format, tc.pointer)
+						}
+					}
+				}
+			}
+			if got := run(t, tc.command); !strings.Contains(got, tc.content) {
+				t.Errorf("%s lacks meaningful content %q", tc.command, tc.content)
+			}
+		})
+	}
+}
+
 func TestInstallFailsWithoutUserHome(t *testing.T) {
 	t.Setenv("HOME", "")
 	var output bytes.Buffer
