@@ -22,15 +22,15 @@ Carry implementation selection, Claims, resume, inspection, and handoffs through
 - Running agent judgments or project gates inside the CLI, and a standalone portability test suite.
 
 ## Definition of Done
-- [ ] B1 Selection and no-work preserve engine-owned eligibility, ordering, and Claim effects through normalized Backend records.
-- [ ] B2 Explicit and worktree resume retain the same opaque Work Item identity and existing pinned obligations.
-- [ ] B3 First-pass and Rework packets preserve their distinct synchronization instructions and once-only skill composition.
-- [ ] B4 Inspection and invalid handoffs retain all existing Git/state invariants and repair outcomes independently of provider representation.
-- [ ] B5 First-pass and Rework review submission preserve the same Submission, opaque body, native closing reference, and lifecycle effects.
-- [ ] B6 Needs Human preserves issue-only versus draft handoffs, resume state, and Result Document lifetime.
-- [ ] B7 Interrupted handoffs resume forward with the same Claim, head obligations, and durable identity without duplicate publication.
-- [ ] Every implementation decision is engine-owned and every provider detail is integration-owned, as verified against ADR 0002 across production callers, Backend code, and packet rendering.
-- [ ] Existing implementation, adapter, Repository, and Catalog regression checks remain green; documentation reflects ownership without changing advertised behavior.
+- [x] B1 Selection and no-work preserve engine-owned eligibility, ordering, and Claim effects through normalized Backend records.
+- [x] B2 Explicit and worktree resume retain the same opaque Work Item identity and existing pinned obligations.
+- [x] B3 First-pass and Rework packets preserve their distinct synchronization instructions and once-only skill composition.
+- [x] B4 Inspection and invalid handoffs retain all existing Git/state invariants and repair outcomes independently of provider representation.
+- [x] B5 First-pass and Rework review submission preserve the same Submission, opaque body, native closing reference, and lifecycle effects.
+- [x] B6 Needs Human preserves issue-only versus draft handoffs, resume state, and Result Document lifetime.
+- [x] B7 Interrupted handoffs resume forward with the same Claim, head obligations, and durable identity without duplicate publication.
+- [x] Every implementation decision is engine-owned and every provider detail is integration-owned, as verified against ADR 0002 across production callers, Backend code, and packet rendering.
+- [x] Existing implementation, adapter, Repository, and Catalog regression checks remain green; documentation reflects ownership without changing advertised behavior.
 
 ## Manual verification
 None.
