@@ -24,7 +24,7 @@ func TestInstallPiQueueAdaptersWithoutDuplicatingSkills(t *testing.T) {
 			if got != want {
 				t.Fatalf("installed adapter %s differs", file)
 			}
-			for _, other := range []string{".codex", ".claude"} {
+			for _, other := range []string{".codex", ".claude", ".config/opencode"} {
 				if _, err := os.Stat(filepath.Join(home, other, file)); !os.IsNotExist(err) {
 					t.Fatalf("Pi adapter installed in %s", other)
 				}

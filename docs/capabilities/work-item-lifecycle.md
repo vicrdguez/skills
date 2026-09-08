@@ -36,14 +36,14 @@ The command integration binds the publication Backend and selects the Git remote
 
 The Workflow Engine owns graph validation, blocker-first publication, Git preflight, Ready timing, and interrupted-publication recovery. The Backend observes durable records and materializes the requested effects. Shared Work Item, Submission, and relationship identities are opaque; the integration preserves numeric GitHub CLI and packet representations and supplies the existing numeric ordering fact separately. Implementation, review, and status retain their existing decisions; their remaining backend-independence migration is separate from this correction.
 
-## Planned extension after issue #3: Proposal decomposition
+## Proposal decomposition
 
 - Prefers separate Work Items for behaviors that deliver safe, useful results independently. Independence is assessed after declared Dependencies are Merged, without requiring later Work Items; each delivery remains vertically complete.
 - Combines independently useful behaviors only for a concrete reduction in overall implementation or review burden. Shared files or a shared Workflow stage are insufficient reasons.
 - Judges slice size by the behavior and materially different correctness, failure, and recovery concerns a reviewer must understand together, using agreed requirements and focused repository inspection rather than line counts or exhaustive implementation planning. Different error cases alone do not require separate Work Items.
 - Explains those review concerns in the existing breakdown approval, including the reason for combining independently useful behaviors. This remains Agent Worker judgment, not a Workflow Engine score or gate.
 - Revisits the existing approval loop before publication when artifact elaboration materially changes proposed boundaries or Dependencies. Ordinary elaboration does not require renewed approval; frozen Work Items cannot be split during implementation under this guidance.
-- Adds no separate skill, artifact, metric, or approval stage. This extension is limited to Proposal decomposition, separate from the Consumer Repository simplicity standard.
+- Adds no separate skill, artifact, metric, or approval stage. This guidance is limited to Proposal decomposition, separate from the Consumer Repository simplicity standard.
 
 ## Planned extension: Independent queue draining
 
