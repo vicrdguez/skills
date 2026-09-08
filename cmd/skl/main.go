@@ -189,6 +189,7 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 			return err
 		},
 	}}
+	app.Commands = append(app.Commands, statusCommand(newBackend, stdout))
 	return app
 }
 

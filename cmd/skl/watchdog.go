@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 
@@ -10,19 +11,39 @@ import (
 )
 
 func watchdogCommands(newBackend backendFactory, stdout io.Writer) []*cli.Command {
-	return []*cli.Command{{Name: "next", Flags: []cli.Flag{&cli.PathFlag{Name: "repo", Value: "."}, &cli.StringFlag{Name: "remote"}}, Action: func(c *cli.Context) error {
-		backend, err := newBackend()
-		if err != nil {
-			return err
-		}
-		port, ok := backend.(workflow.ImplementationBackend)
-		if !ok {
-			return fmt.Errorf("workflow backend does not support Watchdog")
-		}
-		outcome, err := workflow.StartWatchdog(c.Context, c.Path("repo"), c.String("remote"), port)
-		if err != nil {
-			return err
-		}
-		return json.NewEncoder(stdout).Encode(outcome)
-	}}}
+	var commands []*cli.Command
+	for _, name := range []string{"next", "resume", "submit"} {
+		commands = append(commands, &cli.Command{Name: name, Flags: []cli.Flag{&cli.PathFlag{Name: "repo", Value: "."}, &cli.StringFlag{Name: "remote"}, &cli.IntFlag{Name: "item"}, &cli.StringFlag{Name: "verdict"}, &cli.StringFlag{Name: "reviewed-head"}, &cli.PathFlag{Name: "summary"}, &cli.PathFlag{Name: "findings"}, &cli.PathFlag{Name: "body"}, &cli.StringFlag{Name: "head"}}, Action: func(c *cli.Context) error {
+			if c.NArg() != 0 || name == "resume" && c.Int("item") <= 0 || name == "next" && c.IsSet("item") {
+				return fmt.Errorf("resume requires --item; next selects its own Work Item")
+			}
+			backend, err := newBackend()
+			if err != nil {
+				return err
+			}
+			port, ok := backend.(workflow.ImplementationBackend)
+			if !ok {
+				return fmt.Errorf("workflow backend does not support Watchdog")
+			}
+			var outcome workflow.ImplementationOutcome
+			if name == "submit" {
+				review, ok := backend.(workflow.ReviewBackend)
+				if !ok {
+					return fmt.Errorf("backend does not support review publication")
+				}
+				outcome, err = workflow.SubmitWatchdog(c.Context, c.Path("repo"), c.String("remote"), c.Int("item"), c.String("reviewed-head"), c.String("head"), c.String("verdict"), c.Path("summary"), c.Path("findings"), c.Path("body"), review)
+			} else {
+				outcome, err = workflow.StartWatchdog(c.Context, c.Path("repo"), c.String("remote"), c.Int("item"), port)
+			}
+			if err != nil {
+				var violation *workflow.InvariantError
+				if errors.As(err, &violation) {
+					return json.NewEncoder(stdout).Encode(workflow.ImplementationOutcome{Status: "fix_required", Reason: violation.Reason})
+				}
+				return err
+			}
+			return json.NewEncoder(stdout).Encode(outcome)
+		}})
+	}
+	return commands
 }

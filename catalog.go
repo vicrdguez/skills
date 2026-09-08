@@ -15,7 +15,19 @@ import (
 const InstructionProtocol = "skl.instructions/v1"
 
 type InvocationFacts struct {
+	Watchdog       *WatchdogFacts       `json:"watchdog,omitempty"`
 	Implementation *ImplementationFacts `json:"implementation,omitempty"`
+}
+
+type WatchdogFacts struct {
+	WorkItem           int             `json:"work_item"`
+	Submission         int             `json:"submission"`
+	Branch             string          `json:"branch"`
+	ReviewedHead       string          `json:"reviewed_head"`
+	ArtifactBaseline   string          `json:"artifact_baseline"`
+	ArtifactCompletion string          `json:"artifact_completion"`
+	AuditBody          string          `json:"audit_body"`
+	Comments           []ReviewComment `json:"comments,omitempty"`
 }
 
 type ImplementationFacts struct {
@@ -36,6 +48,8 @@ type ImplementationFacts struct {
 }
 
 type ReviewComment struct {
+	Line        int    `json:"line,omitempty"`
+	Side        string `json:"side,omitempty"`
 	Body        string `json:"body"`
 	Author      string `json:"author"`
 	Association string `json:"association"`

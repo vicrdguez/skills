@@ -31,10 +31,11 @@ type WorkItem struct {
 }
 
 type CoordinationItem struct {
-	Number int
-	Title  string
-	Body   string
-	Closed bool
+	Children []int
+	Number   int
+	Title    string
+	Body     string
+	Closed   bool
 }
 
 type Backend interface {

@@ -25,21 +25,27 @@ const (
 )
 
 type ImplementationItem struct {
-	Problem        string
-	ResumeState    State
-	Submission     *Submission
-	Branch         string
-	TargetSnapshot string
-	TargetBranch   string
-	Number         int
-	State          State
-	CreatedAt      string
-	Claimed        bool
-	Blockers       []int
-	Transition     *ImplementationTransition
+	Synchronization bool
+	Problem         string
+	ResumeState     State
+	Submission      *Submission
+	Branch          string
+	TargetSnapshot  string
+	TargetBranch    string
+	Number          int
+	State           State
+	CreatedAt       string
+	Claimed         bool
+	Blockers        []int
+	Transition      *ImplementationTransition
 }
 
 type Submission struct {
+	Merged               bool
+	Mergeability         string
+	Bounces              int
+	CreatedAt            string
+	ReviewedHead         string
 	State                State
 	Claimed              bool
 	Number               int
@@ -97,6 +103,12 @@ func loadImplementation(ctx context.Context, root, remote string, backend Implem
 		return RepositoryID{}, nil, err
 	}
 	items, err := backend.ImplementationItems(ctx, repository)
+	for i := range items {
+		if items[i].Submission != nil && items[i].Submission.Merged {
+			items[i].State = Merged
+			items[i].Claimed = false
+		}
+	}
 	return repository, items, err
 }
 
@@ -307,7 +319,7 @@ func prepareImplementationStart(ctx context.Context, root, remote string, reposi
 }
 
 func implementationPacket(root, remote string, item ImplementationItem) (ImplementationOutcome, error) {
-	if item.State == Rework && (item.Submission == nil || item.Submission.PreviousReviewedHead == "") {
+	if item.State == Rework && !item.Synchronization && (item.Submission == nil || item.Submission.PreviousReviewedHead == "") {
 		return ImplementationOutcome{Status: "fix_required", Item: &item, Reason: "previous reviewed head needs agent extraction from the supplied watchdog summary; resume --reviewed-head <full-sha> without rewriting history"}, nil
 	}
 	main, err := primaryWorktree(root)
@@ -337,9 +349,12 @@ func implementationPacket(root, remote string, item ImplementationItem) (Impleme
 	if item.Submission != nil {
 		facts.Submission, facts.PreviousReviewedHead, facts.Comments = item.Submission.Number, item.Submission.PreviousReviewedHead, item.Submission.Comments
 	}
-	if item.State == Rework {
+	if item.State == Rework && !item.Synchronization {
 		facts.TargetSnapshot = ""
 		facts.ResumeCommand = fmt.Sprintf("skl implement resume --item %d", item.Number)
+	}
+	if item.Synchronization {
+		facts.PreviousReviewedHead = ""
 	}
 	facts.ResultDirectory, err = os.MkdirTemp("", "skl-implement-")
 	if err != nil {
