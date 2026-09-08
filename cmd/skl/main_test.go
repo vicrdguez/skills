@@ -387,6 +387,12 @@ func TestRetrieveConcreteProposeInstructions(t *testing.T) {
 			"*Title*", "*Blocked by*", "*What it delivers*",
 			"Does the granularity feel right?", "Are the blocking edges correct", "Should any tickets be merged or split further?",
 		},
+		"bounded reconsideration": {
+			"If artifact elaboration materially changes proposed boundaries or Dependencies, return to this approval loop before publication",
+			"explain the discovery and propose the revised breakdown for approval before freezing the artifacts",
+			"Ordinary elaboration within an unchanged coherent delivery needs no renewed approval",
+			"Publishing them freezes them", "There is no later addition and no exception",
+		},
 	} {
 		t.Run(section, func(t *testing.T) {
 			for _, want := range requirements {

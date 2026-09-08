@@ -57,6 +57,8 @@ Ask the user:
 
 Iterate until the user approves the breakdown. A single ticket is possible if the change is small.
 
+If artifact elaboration materially changes proposed boundaries or Dependencies, return to this approval loop before publication: explain the discovery and propose the revised breakdown for approval before freezing the artifacts. Ordinary elaboration within an unchanged coherent delivery needs no renewed approval.
+
 ### 5. Prepare and publish
 
 1. Run `skl propose cleanup --repo <root>` before preparing new slices. It removes only safe local Git state for Work Items already observed Merged and reports everything it preserves.
