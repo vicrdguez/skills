@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"context"
 	"fmt"
 	"io"
 	"os"
@@ -222,10 +221,20 @@ func proposalRequest(command *cli.Context) (workflow.PublishRequest, error) {
 
 func main() {
 	app := newApp(setup.NewGitHubBackendFromEnv, os.Stdin, os.Stdout, os.Stderr)
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	err := app.RunContext(ctx, os.Args)
-	stop()
-	if err != nil {
+	for _, lane := range []string{"implement", "watchdog"} {
+		command := app.Command(lane).Command("next")
+		action := command.Action
+		command.Action = func(c *cli.Context) error {
+			// Only waiting selections translate process signals into cancellation.
+			if c.Duration("wait") > 0 {
+				ctx, stop := signal.NotifyContext(c.Context, os.Interrupt, syscall.SIGTERM)
+				defer stop()
+				c.Context = ctx
+			}
+			return action(c)
+		}
+	}
+	if err := app.Run(os.Args); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
