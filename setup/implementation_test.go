@@ -15,6 +15,55 @@ import (
 	"github.com/vicrdguez/skills/workflow"
 )
 
+func TestGitHubImplementationRejectsDuplicateSourceOwnership(t *testing.T) {
+	for _, attached := range []bool{false, true} {
+		t.Run(fmt.Sprint(attached), func(t *testing.T) {
+			writes := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet {
+					writes++
+					http.Error(w, "unexpected mutation", 500)
+					return
+				}
+				switch r.URL.Path {
+				case "/repos/acme/widgets/issues":
+					fmt.Fprint(w, `[{"number":7,"title":"widget","state":"open","labels":[{"name":"ready"}]},{"number":8,"title":"widget","state":"open","labels":[{"name":"ready"}]}]`)
+				case "/repos/acme/widgets/pulls":
+					if attached {
+						fmt.Fprint(w, `[{"number":11,"state":"open","body":"original","head":{"ref":"widget","sha":"fixed","repo":{"full_name":"acme/widgets"}},"base":{"ref":"main"}}]`)
+					} else {
+						fmt.Fprint(w, `[]`)
+					}
+				default:
+					fmt.Fprint(w, `[]`)
+				}
+			}))
+			defer server.Close()
+			b := NewGitHubBackend(server.URL, "token", server.Client())
+			ctx := context.Background()
+			repo := workflow.RepositoryID{Owner: "acme", Name: "widgets"}
+			items, err := b.ImplementationItems(ctx, repo)
+			if err != nil || len(items) != 2 {
+				t.Fatalf("items = %#v, %v", items, err)
+			}
+			for _, item := range items {
+				if !strings.Contains(item.Problem, "multiple source") {
+					t.Errorf("ambiguous ownership accepted: %#v", item)
+				}
+				if err := b.ClaimImplementation(ctx, repo, item); err == nil {
+					t.Error("ambiguous Claim accepted")
+				}
+				if _, err := b.PublishImplementation(ctx, repo, item, workflow.Submission{Head: "fixed", Base: "main", Body: "replacement"}); err == nil {
+					t.Error("ambiguous publication accepted")
+				}
+			}
+			if writes != 0 {
+				t.Fatalf("ambiguous ownership caused %d mutations", writes)
+			}
+		})
+	}
+}
+
 func TestGitHubImplementationNormalizesPaginatedWork(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

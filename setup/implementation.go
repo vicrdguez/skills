@@ -171,6 +171,14 @@ func (b *GitHubBackend) implementationLabelMutation(ctx context.Context, reposit
 }
 
 func (b *GitHubBackend) PublishImplementation(ctx context.Context, repository workflow.RepositoryID, item workflow.ImplementationItem, wanted workflow.Submission) (workflow.Submission, error) {
+	issues, err := b.listIssues(ctx, repository)
+	if err != nil {
+		return workflow.Submission{}, err
+	}
+	owners := implementationBranchOwners(issues)
+	if owners[item.Branch] != 1 {
+		return workflow.Submission{}, workflow.Refuse("missing or multiple source issues own the conventional branch; repair attachments before publication")
+	}
 	var matches []githubPull
 	for page := 1; ; page++ {
 		var pulls []githubPull
@@ -330,6 +338,16 @@ type implementationMetadata struct {
 	ResumeState     workflow.State                     `json:"resume_state,omitempty"`
 }
 
+func implementationBranchOwners(issues []githubIssue) map[string]int {
+	owners := make(map[string]int)
+	for _, issue := range issues {
+		if len(issue.PullRequest) == 0 && issue.SubIssuesSummary.Total == 0 {
+			owners[issue.Title]++
+		}
+	}
+	return owners
+}
+
 func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository workflow.RepositoryID) ([]workflow.ImplementationItem, error) {
 	issues, err := b.listIssues(ctx, repository)
 	if err != nil {
@@ -346,6 +364,7 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository work
 			break
 		}
 	}
+	owners := implementationBranchOwners(issues)
 	var items []workflow.ImplementationItem
 	for _, issue := range issues {
 		if len(issue.PullRequest) != 0 || issue.SubIssuesSummary.Total > 0 {
@@ -532,6 +551,9 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository work
 					item.ResumeState = transition.From
 				}
 			}
+		}
+		if owners[item.Branch] > 1 {
+			item.Problem = "multiple source issues own the conventional branch"
 		}
 		items = append(items, item)
 	}
