@@ -39,6 +39,27 @@
 - Revisits the existing approval loop before publication when artifact elaboration materially changes proposed boundaries or Dependencies. Ordinary elaboration does not require renewed approval; frozen Work Items cannot be split during implementation under this guidance.
 - Adds no separate skill, artifact, metric, or approval stage. This extension is limited to Proposal decomposition, separate from the Consumer Repository simplicity standard.
 
+## Planned extension: Independent queue draining
+
+- Supports the same implementation and Watchdog queue workflow in Pi, OpenCode, and Codex, replacing the Pi-specific queue integration in PR #19 while preserving its shared Workflow mechanics.
+- Retains Pi's existing subagent extension for worker and Audit delegation. OpenCode and Codex use native delegation; replacing Pi's execution mechanism is a separate change.
+- Keeps implementation-loop and watchdog-loop entry points separate from the single-item skills, with shared workflow instructions and thin harness prompt shortcuts or commands where supported.
+- Installs managed worker definitions with explicit role-specific defaults: Astra with low reasoning for implementation, and Astra with high reasoning for both Audit axes and Watchdog. It does not change the supervisor model, unrelated user-wide permissions, or execution limits. Missing delegation prerequisites require actionable guidance rather than running worker tasks in the supervisor context. Harness smoke tests are not part of this extension.
+- Leaves role-specific model and supported reasoning settings in native harness configuration rather than Workflow Engine flags. Consumer-repository role configuration overrides installed defaults and remains outside installer ownership. Existing Pi runner model choices need not be retained.
+- Documents native model-only overrides for Pi and OpenCode, and a complete thin project-level role definition for Codex, whose project role replaces the global definition. Codex overrides include startup instructions but do not duplicate shared Workflow policy; no cross-harness model configuration layer is added.
+- Recommends, but does not enforce, different implementation and reviewer models to reduce correlated review blind spots. The shipped same-model profile does not provide model diversity or claim measured superiority; each role remains configurable.
+- Runs independent implementation and Watchdog supervisors, each dispatching one fresh Agent Worker at a time. The Workflow Engine owns waiting, selection, Claims, and authoritative continuation decisions; workers retrieve their Instruction Packets using the startup command returned to the supervisor.
+- Keeps `next` immediate by default. Bare `--wait` waits up to 15 minutes; an explicit duration overrides that maximum. Waiting checks for claimable work immediately and polls at a configurable interval, defaulting to 30 seconds, until work is claimed or the idle window expires.
+- Starts a new idle window for each request. An idle timeout describes only that queue's lack of claimable work during the window, not global completion.
+- Drains without an attempt cap, preserving the per-change review-bounce allowance and human merge boundary. Worker prose alone never establishes a completed handoff.
+- Leaves handoff validation and continuation decisions to the Workflow Engine, not the supervisor. An interrupted or failed worker may be followed by more work only when the engine confirms its handoff completed; otherwise the supervisor stops and reports explicit recovery instructions without automatically replacing the worker.
+- Supplies a worker startup command and a supervisor continuation command for each dispatch. Continuation verifies that dispatch's durable handoff before selecting or waiting for more work, including when the other lane has already advanced the Work Item.
+- Preserves Claims and partial work on dispatch or handoff failure. The other lane remains independent.
+- Stops after interrupted or ambiguous selection without blindly issuing another `next`, expiring Claims, or automatically recovering them. Recovery remains explicit and may require manual inspection when dispatch identity was not received.
+- Reports forge-query failures as operational errors rather than empty-queue observations, retaining existing backend retries without adding a waiting-loop retry policy.
+- Retires installation of the Pi-specific queue assets without adding automatic cleanup or migration logic. Previously installed copies are removed manually.
+- Retains the single-operator assumption: at most one supervisor per lane per project. Shared status views, cross-supervisor coordination, and competing same-lane consumers are outside this extension.
+
 ## Out of scope
 
 - Editing product code, performing ordinary commits or pushes, or running Consumer Repository Full Gates.
