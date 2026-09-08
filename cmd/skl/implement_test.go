@@ -315,6 +315,63 @@ func TestImplementResumePreservesTargetAndRejectsAmbiguousHistory(t *testing.T) 
 	}
 }
 
+func TestInstalledImplementActivationLoadsDefinitionsOnce(t *testing.T) {
+	for _, harness := range []string{".pi/agent/skills", ".codex/skills", ".claude/skills"} {
+		t.Run(harness, func(t *testing.T) {
+			home := t.TempDir()
+			root := proposalRepository(t)
+			prepareSlice(t, root, "widget")
+			b := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{"main": strings.TrimSpace(runGitOutput(t, root, "rev-parse", "main"))}}
+			var output bytes.Buffer
+			app := newAppWithSkillHome(func() (setup.Backend, error) { return b, nil }, bytes.NewReader(nil), &output, &output, home)
+			if err := app.Run([]string{"skl", "install"}); err != nil {
+				t.Fatal(err)
+			}
+			stub := readFile(t, filepath.Join(home, harness, "implement/SKILL.md"))
+			_, rest, ok := strings.Cut(stub, "Run `")
+			command, _, end := strings.Cut(rest, "`")
+			if !ok || !end {
+				t.Fatal("stub has no activation command")
+			}
+			instructions := ""
+			for step := 0; step < 2; step++ {
+				output.Reset()
+				args := strings.Fields(command)
+				if args[1] == "implement" {
+					args = append(args, "--repo", root)
+				}
+				if err := app.Run(args); err != nil {
+					t.Fatal(err)
+				}
+				if args[1] == "skill" {
+					instructions += output.String()
+					if !strings.Contains(output.String(), "`skl implement next`") {
+						t.Fatal("generic packet has no Work Start command")
+					}
+					command = "skl implement next"
+					continue
+				}
+				var outcome workflow.ImplementationOutcome
+				if err := json.Unmarshal(output.Bytes(), &outcome); err != nil || outcome.Packet == nil {
+					t.Fatalf("activation did not reach work: %s, %v", &output, err)
+				}
+				t.Cleanup(func() { os.RemoveAll(outcome.Packet.Facts.Implementation.ResultDirectory) })
+				instructions += outcome.Packet.Instructions
+				break
+			}
+			for _, name := range []string{"implement", "tdd", "audit", "design", "domain"} {
+				definition := readRepositoryFile(t, "skills/dev/"+name+"/SKILL.md")
+				if count := strings.Count(instructions, definition); count != 1 {
+					t.Errorf("activation loaded %s %d times", name, count)
+				}
+			}
+			if !b.work[0].Claimed {
+				t.Fatal("activation did not claim work")
+			}
+		})
+	}
+}
+
 func TestImplementUsesSelectedGitHubRemoteThroughout(t *testing.T) {
 	for _, layout := range []string{"upstream only", "non-GitHub origin", "ambiguous", "explicit over origin"} {
 		t.Run(layout, func(t *testing.T) {

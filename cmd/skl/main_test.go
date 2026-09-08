@@ -259,7 +259,11 @@ func TestInstallSupportedSkillStubs(t *testing.T) {
 			if want := skillFrontmatter(t, readRepositoryFile(t, source)); !strings.HasPrefix(stub, want+"\n") {
 				t.Fatalf("%s %s stub changed source frontmatter:\n%s", harness, name, stub)
 			}
-			if !strings.Contains(stub, "skl skill "+name) || !strings.Contains(stub, "skl.stub/v1") {
+			command := "skl skill " + name
+			if name == "implement" {
+				command = "skl implement next"
+			}
+			if !strings.Contains(stub, command) || !strings.Contains(stub, "skl.stub/v1") {
 				t.Fatalf("%s %s stub does not delegate to skl:\n%s", harness, name, stub)
 			}
 		}
