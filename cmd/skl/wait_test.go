@@ -9,11 +9,13 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
 
+	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/setup"
 	"github.com/vicrdguez/skills/workflow"
 )
@@ -25,7 +27,7 @@ type waitingMemory struct {
 	claim         func(context.Context) error
 }
 
-func (b *waitingMemory) ImplementationItems(ctx context.Context, repo workflow.RepositoryID) ([]workflow.ImplementationItem, error) {
+func (b *waitingMemory) ImplementationItems(ctx context.Context, repo github.RepositoryID) ([]workflow.ImplementationItem, error) {
 	b.reads++
 	if b.observe != nil {
 		if err := b.observe(ctx); err != nil {
@@ -35,7 +37,7 @@ func (b *waitingMemory) ImplementationItems(ctx context.Context, repo workflow.R
 	return b.implementationMemory.ImplementationItems(ctx, repo)
 }
 
-func (b *waitingMemory) ClaimImplementation(ctx context.Context, repo workflow.RepositoryID, item workflow.ImplementationItem) error {
+func (b *waitingMemory) ClaimImplementation(ctx context.Context, repo github.RepositoryID, item workflow.ImplementationItem) error {
 	b.claims++
 	if err := b.implementationMemory.ClaimImplementation(ctx, repo, item); err != nil {
 		return err
@@ -50,25 +52,25 @@ func waitFixture(t *testing.T, lane string) (string, *waitingMemory) {
 	t.Helper()
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
-	b := &waitingMemory{implementationMemory: implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{"main": strings.TrimSpace(runGitOutput(t, root, "rev-parse", "main"))}}}
+	b := &waitingMemory{implementationMemory: implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{"main": strings.TrimSpace(runGitOutput(t, root, "rev-parse", "main"))}}}
 	if lane == "watchdog" {
 		runGit(t, root, "rm", "-r", ".changes/widget")
 		runGit(t, root, "commit", "-m", "retire")
 		b.work[0].State = workflow.AwaitingReview
-		b.work[0].Submission = &workflow.Submission{Number: 11, Head: strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))}
+		b.work[0].Submission = &workflow.Submission{ID: "11", Head: strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))}
 	}
 	runGit(t, root, "remote", "rename", "origin", "upstream")
 	runGit(t, root, "remote", "add", "origin", "https://github.com/other/widgets.git")
 	return root, b
 }
 
-func waitingCLI(t *testing.T, ctx context.Context, root, lane string, b *waitingMemory, options ...string) (workflow.ImplementationOutcome, error) {
+func waitingCLI(t *testing.T, ctx context.Context, root, lane string, b *waitingMemory, options ...string) (setup.ImplementationOutput, error) {
 	t.Helper()
 	var out, stderr bytes.Buffer
-	app := newApp(func() (setup.Backend, error) { return b, nil }, nil, &out, &stderr)
+	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return b, nil }, nil, &out, &stderr)
 	args := append([]string{"skl", lane, "next", "--repo", root, "--remote", "upstream"}, options...)
 	err := app.RunContext(ctx, args)
-	var got workflow.ImplementationOutcome
+	var got setup.ImplementationOutput
 	if err != nil && out.Len() != 0 {
 		t.Fatalf("operational failure wrote an outcome: %s", &out)
 	}
@@ -179,7 +181,7 @@ func TestNextWaitInvalidOptionsBeforeBackend(t *testing.T) {
 			t.Run(lane+"/"+tc.option, func(t *testing.T) {
 				calls := 0
 				var out bytes.Buffer
-				app := newApp(func() (setup.Backend, error) { calls++; return &waitingMemory{}, nil }, nil, &out, &out)
+				app := newApp(func(github.RepositoryID) (setup.Backend, error) { calls++; return &waitingMemory{}, nil }, nil, &out, &out)
 				args := append([]string{"skl", lane, "next", "--repo", root}, strings.Fields(tc.option)...)
 				err := app.Run(args)
 				if err == nil || !strings.Contains(err.Error(), tc.flag) || calls != 0 {
@@ -356,12 +358,12 @@ func TestNextWaitStopsOnFailure(t *testing.T) {
 					work := b.work
 					b.work = nil
 					if failure == "invalid evidence" {
-						substitute := workflow.ImplementationItem{Number: 8, Branch: "substitute", State: work[0].State, CreatedAt: "2026"}
+						substitute := workflow.ImplementationItem{ID: "8", Branch: "substitute", State: work[0].State, CreatedAt: "2026"}
 						prepareSlice(t, root, substitute.Branch)
 						if lane == "watchdog" {
 							runGit(t, root, "rm", "-r", ".changes/substitute")
 							runGit(t, root, "commit", "-m", "retire")
-							substitute.Submission = &workflow.Submission{Number: 12, Head: strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD")), CreatedAt: "2026"}
+							substitute.Submission = &workflow.Submission{ID: "12", Head: strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD")), CreatedAt: "2026"}
 						}
 						work = append(work, substitute)
 						if lane == "implement" {
@@ -422,14 +424,14 @@ func TestNextWaitCanonicalEligibility(t *testing.T) {
 			// still the selected Backend and packet remote throughout polling.
 			b := &waitingMemory{implementationMemory: implementationMemory{remoteHeads: map[string]string{"main": strings.TrimSpace(runGitOutput(t, root, "rev-parse", "main"))}}}
 			work := []workflow.ImplementationItem{
-				{Number: 1, State: workflow.Ready, CreatedAt: "2000", Blockers: []int{9}},
-				{Number: 2, State: workflow.Ready, CreatedAt: "2022"},
-				{Number: 3, State: workflow.Rework, CreatedAt: "2024"},
-				{Number: 4, State: workflow.AwaitingReview, CreatedAt: "2000"},
-				{Number: 5, State: workflow.AwaitingReview, CreatedAt: "2026"},
-				{Number: 6, State: workflow.Ready, CreatedAt: "1990", Claimed: true},
-				{Number: 7, State: workflow.NeedsHuman, CreatedAt: "1990", ResumeState: workflow.Ready},
-				{Number: 9, State: workflow.ReadyForMerge},
+				{ID: "1", State: workflow.Ready, CreatedAt: "2000", Blockers: []workflow.WorkItemID{"9"}},
+				{ID: "2", State: workflow.Ready, CreatedAt: "2022"},
+				{ID: "3", State: workflow.Rework, CreatedAt: "2024"},
+				{ID: "4", State: workflow.AwaitingReview, CreatedAt: "2000"},
+				{ID: "5", State: workflow.AwaitingReview, CreatedAt: "2026"},
+				{ID: "6", State: workflow.Ready, CreatedAt: "1990", Claimed: true},
+				{ID: "7", State: workflow.NeedsHuman, CreatedAt: "1990", ResumeState: workflow.Ready},
+				{ID: "9", State: workflow.ReadyForMerge},
 			}
 			if lane == "watchdog" {
 				work[5].State = workflow.AwaitingReview
@@ -437,17 +439,21 @@ func TestNextWaitCanonicalEligibility(t *testing.T) {
 			}
 			for i := range work {
 				item := &work[i]
-				item.Branch = fmt.Sprintf("slice-%d", item.Number)
+				item.Branch = fmt.Sprintf("slice-%s", item.ID)
 				prepareSlice(t, root, item.Branch)
 				if item.State != workflow.Ready && item.ResumeState != workflow.Ready {
 					runGit(t, root, "rm", "-r", ".changes/"+item.Branch)
 					runGit(t, root, "commit", "-m", "retire")
 					head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
-					item.Submission = &workflow.Submission{Number: item.Number + 100, Head: head, PreviousReviewedHead: head, Base: "main", State: item.State, Claimed: item.Claimed, CreatedAt: "2025"}
-					if item.Number == 5 {
+					number, err := strconv.Atoi(string(item.ID))
+					if err != nil {
+						t.Fatal(err)
+					}
+					item.Submission = &workflow.Submission{ID: workflow.SubmissionID(strconv.Itoa(number + 100)), Head: head, PreviousReviewedHead: head, Base: "main", State: item.State, Claimed: item.Claimed, CreatedAt: "2025"}
+					if item.ID == "5" {
 						item.Submission.CreatedAt = "2023"
 					}
-					if item.Number == 6 {
+					if item.ID == "6" {
 						item.Submission.CreatedAt = "1990"
 						item.Submission.ReviewedHead = head
 					}
@@ -522,7 +528,10 @@ func TestNextWaitHelp(t *testing.T) {
 	for _, lane := range []string{"implement", "watchdog"} {
 		t.Run(lane, func(t *testing.T) {
 			var out bytes.Buffer
-			app := newApp(func() (setup.Backend, error) { t.Fatal("help constructed a Backend"); return nil, nil }, nil, &out, &out)
+			app := newApp(func(github.RepositoryID) (setup.Backend, error) {
+				t.Fatal("help constructed a Backend")
+				return nil, nil
+			}, nil, &out, &out)
 			if err := app.Run([]string{"skl", lane, "next", "--help"}); err != nil {
 				t.Fatal(err)
 			}

@@ -7,6 +7,8 @@ import (
 	"io"
 
 	"github.com/urfave/cli/v2"
+	"github.com/vicrdguez/skills/github"
+	"github.com/vicrdguez/skills/setup"
 	"github.com/vicrdguez/skills/workflow"
 )
 
@@ -15,7 +17,7 @@ func statusCommand(newBackend backendFactory, stdout io.Writer) *cli.Command {
 		if c.NArg() != 0 {
 			return fmt.Errorf("status takes no positional arguments")
 		}
-		backend, err := newBackend()
+		backend, err := newBackend(github.RepositoryID{})
 		if err != nil {
 			return err
 		}
@@ -31,6 +33,10 @@ func statusCommand(newBackend backendFactory, stdout io.Writer) *cli.Command {
 			}
 			return err
 		}
-		return json.NewEncoder(stdout).Encode(outcome)
+		output, err := setup.PresentStatus(outcome)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(stdout).Encode(output)
 	}}
 }

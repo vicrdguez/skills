@@ -6,13 +6,14 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/setup"
 )
 
 func TestInstallPiQueueAdaptersWithoutDuplicatingSkills(t *testing.T) {
 	home := t.TempDir()
 	var output bytes.Buffer
-	app := newAppWithSkillHome(func() (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, home)
+	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, home)
 	for range 2 {
 		if err := app.Run([]string{"skl", "install"}); err != nil {
 			t.Fatal(err)
@@ -23,7 +24,7 @@ func TestInstallPiQueueAdaptersWithoutDuplicatingSkills(t *testing.T) {
 			if got != want {
 				t.Fatalf("installed adapter %s differs", file)
 			}
-			for _, other := range []string{".codex", ".claude"} {
+			for _, other := range []string{".codex", ".claude", ".config/opencode"} {
 				if _, err := os.Stat(filepath.Join(home, other, file)); !os.IsNotExist(err) {
 					t.Fatalf("Pi adapter installed in %s", other)
 				}

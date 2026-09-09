@@ -35,7 +35,7 @@ func Install(home string) (InstallOutcome, error) {
 		return InstallOutcome{}, err
 	}
 	var outcome InstallOutcome
-	for _, harness := range []string{".pi/agent/skills", ".codex/skills", ".claude/skills"} {
+	for _, harness := range []string{".pi/agent/skills", ".codex/skills", ".claude/skills", ".config/opencode/skills"} {
 		for _, name := range SkillNames() {
 			frontmatter, err := definitionFrontmatter(name)
 			if err != nil {

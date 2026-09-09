@@ -35,14 +35,20 @@
 - Uses the idle deadline only to stop new polls, not to cancel an in-flight Claim. A late Claim and packet, operational error, or deterministic refusal is retained; a late empty observation becomes `idle_timeout`. Errors and refusals stop waiting after existing Backend retry handling, without a new waiting-loop retry policy or substitute selection.
 - Interrupts waiting on SIGINT/SIGTERM or caller cancellation with an actionable nonzero interruption error, not an empty-queue outcome. A successful in-flight Claim and packet is still returned. Uncertain Claims are neither released nor retried; recovery requires inspection and explicit resume.
 
-## Planned extension after issue #3: Proposal decomposition
+## Publication ownership
+
+The command integration binds the publication Backend and selects the Git remote together, using a GitHub `origin`, the sole GitHub remote, or an explicit `--remote` when needed. Ambiguous selection is refused before mutation. Publication Mechanics use that explicit remote for Git evidence and opaque Work Item and Coordination Item references for Backend operations. The GitHub integration retains native issue numbers, relationship syntax, and the supplied artifact-reference Markdown without migrating existing records.
+
+The Workflow Engine owns graph validation, blocker-first publication, Git preflight, Ready timing, and interrupted-publication recovery. The Backend observes durable records and materializes the requested effects. Shared Work Item, Submission, and relationship identities are opaque; the integration preserves numeric GitHub CLI and packet representations and supplies the existing numeric ordering fact separately. Implementation, review, and status retain their existing decisions; their remaining backend-independence migration is separate from this correction.
+
+## Proposal decomposition
 
 - Prefers separate Work Items for behaviors that deliver safe, useful results independently. Independence is assessed after declared Dependencies are Merged, without requiring later Work Items; each delivery remains vertically complete.
 - Combines independently useful behaviors only for a concrete reduction in overall implementation or review burden. Shared files or a shared Workflow stage are insufficient reasons.
 - Judges slice size by the behavior and materially different correctness, failure, and recovery concerns a reviewer must understand together, using agreed requirements and focused repository inspection rather than line counts or exhaustive implementation planning. Different error cases alone do not require separate Work Items.
 - Explains those review concerns in the existing breakdown approval, including the reason for combining independently useful behaviors. This remains Agent Worker judgment, not a Workflow Engine score or gate.
 - Revisits the existing approval loop before publication when artifact elaboration materially changes proposed boundaries or Dependencies. Ordinary elaboration does not require renewed approval; frozen Work Items cannot be split during implementation under this guidance.
-- Adds no separate skill, artifact, metric, or approval stage. This extension is limited to Proposal decomposition, separate from the Consumer Repository simplicity standard.
+- Adds no separate skill, artifact, metric, or approval stage. This guidance is limited to Proposal decomposition, separate from the Consumer Repository simplicity standard.
 
 ## Planned extension: Independent queue draining
 

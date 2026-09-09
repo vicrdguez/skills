@@ -11,11 +11,12 @@ import (
 
 	"github.com/urfave/cli/v2"
 	skilldist "github.com/vicrdguez/skills"
+	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/setup"
 	"github.com/vicrdguez/skills/workflow"
 )
 
-type backendFactory func() (setup.Backend, error)
+type backendFactory func(github.RepositoryID) (setup.Backend, error)
 
 func newApp(newBackend backendFactory, stdin io.Reader, stdout, stderr io.Writer) *stageApp {
 	return newAppWithSkillHome(newBackend, stdin, stdout, stderr, "")
@@ -91,17 +92,22 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 				&cli.PathFlag{Name: "parent-body"},
 			},
 			Action: func(command *cli.Context) error {
-				backend, err := newBackend()
+				request, err := proposalRequest(command)
+				if err != nil {
+					return err
+				}
+				repository, err := setup.ResolveRepository(request.Root, request.Remote)
+				if err != nil {
+					return err
+				}
+				request.Root, request.Remote = repository.Root, repository.Remote
+				backend, err := newBackend(repository.Repository)
 				if err != nil {
 					return err
 				}
 				proposalBackend, ok := backend.(workflow.Backend)
 				if !ok {
 					return fmt.Errorf("workflow backend does not support proposal publication")
-				}
-				request, err := proposalRequest(command)
-				if err != nil {
-					return err
 				}
 				outcome, err := workflow.Publish(command.Context, request, proposalBackend)
 				if err != nil {
@@ -122,7 +128,15 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 				&cli.StringFlag{Name: "remote"},
 			},
 			Action: func(command *cli.Context) error {
-				backend, err := newBackend()
+				remote := command.String("remote")
+				if remote == "" {
+					remote = "origin"
+				}
+				repository, err := setup.ResolveRepository(command.Path("repo"), remote)
+				if err != nil {
+					return err
+				}
+				backend, err := newBackend(repository.Repository)
 				if err != nil {
 					return err
 				}
@@ -130,11 +144,7 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 				if !ok {
 					return fmt.Errorf("workflow backend does not support proposal cleanup")
 				}
-				root := command.Path("repo")
-				if root == "" {
-					root = "."
-				}
-				outcome, err := workflow.Cleanup(command.Context, root, command.String("remote"), proposalBackend)
+				outcome, err := workflow.Cleanup(command.Context, repository.Root, proposalBackend)
 				if err != nil {
 					return err
 				}
@@ -160,18 +170,17 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 			&cli.StringFlag{Name: "remote"},
 		},
 		Action: func(command *cli.Context) error {
-			backend, err := newBackend()
+			repository, err := setup.ResolveRepository(command.Path("repo"), command.String("remote"))
 			if err != nil {
 				return err
 			}
-			location := command.Path("repo")
-			if location == "" {
-				location = "."
+			backend, err := newBackend(repository.Repository)
+			if err != nil {
+				return err
 			}
 			reader := bufio.NewReader(stdin)
 			outcome, err := setup.Run(command.Context, setup.Request{
-				Location: location,
-				Remote:   command.String("remote"),
+				Location: repository.Root,
 				Confirm: func(prompt string) (bool, error) {
 					if _, err := fmt.Fprint(stdout, prompt); err != nil {
 						return false, err

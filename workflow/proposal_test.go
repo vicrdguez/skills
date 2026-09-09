@@ -1,11 +1,76 @@
 package workflow
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
 )
+
+type publicationBackend struct {
+	Backend
+	items []WorkItem
+	ready []WorkItemID
+}
+
+func (b *publicationBackend) FindWorkItems(context.Context, []WorkItem, []Dependency) ([]WorkItem, error) {
+	return b.items, nil
+}
+
+func (b *publicationBackend) CreateWorkItem(_ context.Context, item WorkItem) (WorkItem, error) {
+	item.ID = "work:alpha/opaque"
+	b.items = append(b.items, item)
+	return item, nil
+}
+
+func (b *publicationBackend) SetReady(_ context.Context, id WorkItemID) error {
+	for i := range b.items {
+		if b.items[i].ID == id {
+			b.items[i].Ready = true
+			b.ready = append(b.ready, id)
+			return nil
+		}
+	}
+	return fmt.Errorf("unknown Work Item %q", id)
+}
+
+func TestPublishOpaqueIdentityWithExplicitRemote(t *testing.T) {
+	root := newGitRepository(t)
+	runGit(t, root, "remote", "add", "upstream", t.TempDir())
+	runGit(t, root, "update-ref", "refs/remotes/upstream/main", "HEAD")
+	runGit(t, root, "switch", "-c", "slice")
+	commitLedger(t, root, "slice", true)
+	baseline := gitOutput(t, root, "rev-parse", "HEAD")
+	runGit(t, root, "update-ref", "refs/remotes/upstream/slice", "HEAD")
+	body := filepath.Join(t.TempDir(), "issue.md")
+	if err := os.WriteFile(body, []byte("agent-authored body\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	request := PublishRequest{Root: root, Target: "main", Slices: []Slice{{Slug: "slice", BodyPath: body}}}
+	if outcome, err := Publish(context.Background(), request, nil); err == nil || err.Error() != "publication requires an explicit Git remote" || outcome != (Outcome{}) {
+		t.Fatalf("missing remote = %#v, %v", outcome, err)
+	}
+	request.Remote = "upstream"
+	backend := &publicationBackend{}
+	for range 2 {
+		outcome, err := Publish(context.Background(), request, backend)
+		if err != nil || outcome != (Outcome{Status: "completed"}) {
+			t.Fatalf("Publish() = %#v, %v", outcome, err)
+		}
+	}
+	if len(backend.items) != 1 {
+		t.Fatalf("items = %#v", backend.items)
+	}
+	item := backend.items[0]
+	if item.ID != "work:alpha/opaque" || item.Title != "slice" || item.Branch != "slice" || item.Body != "agent-authored body\n" || item.ArtifactBaseline != baseline || !item.Ready {
+		t.Fatalf("item = %#v", item)
+	}
+	if len(backend.ready) != 1 || backend.ready[0] != "work:alpha/opaque" {
+		t.Fatalf("ready identities = %#v", backend.ready)
+	}
+}
 
 func TestArtifactBaselineHistory(t *testing.T) {
 	tests := map[string]struct {
