@@ -32,15 +32,15 @@ Resolve the Artifact Baseline and Artifact Completion from slice-scoped commit-s
 
 ## Definition of Done
 
-- [ ] D1: A new slice publishes only with its complete, uniquely marked Artifact Baseline at the pushed head, without needing an issue identity first. Covered by B1.
-- [ ] D2: Inspection scopes exact marker subjects to the slice and selected reachable history and reports missing or ambiguous required evidence without guessing or extra global backend searches. Covered by B2 and B3.
-- [ ] D3: Endpoint validation enforces identical paths, mode `100644`, object type `blob`, exact content except permitted ticks, and phase-appropriate automated/manual checkbox rules. Covered by B4 and B5.
-- [ ] D4: Review requires Baseline to be an ancestor of or equal to Completion, Completion before later retirement, and ledger absence at the review head; restored intermediate edits do not invalidate valid endpoints. Covered by B6 and B7.
-- [ ] D5: Inspection and existing startup support baseline-only progress; implementation submission requires valid retired completion while Needs Human can preserve incomplete work. Covered by B8, B9, and B10.
-- [ ] D6: Watchdog startup and verdict submission apply the same endpoint contract at fixed review/final heads and retain historical contract access and independent verification guidance. Covered by B11.
-- [ ] D7: Explicit endpoint SHAs support markerless evidence only on relevant invocations, apply the same checks, reject ambiguous markers, and survive generated resume/inspection/handoff instructions without persisted Adoption state. Covered by B12 and B13.
-- [ ] D8: Representative-history public CLI checks prove there are no content loads or Git processes per history commit; a runnable benchmark reports measurements rather than gating elapsed time. Covered by B14.
-- [ ] D9: Paired skills, packet guidance, and capability documentation agree with these scenarios, explicitly supersede older ADR mandates only for this scope, and leave other corrections planned. Covered by the final documentation task and runnable CLI instruction/resource checks.
+- [x] D1: A new slice publishes only with its complete, uniquely marked Artifact Baseline at the pushed head, without needing an issue identity first. Covered by B1.
+- [x] D2: Inspection scopes exact marker subjects to the slice and selected reachable history and reports missing or ambiguous required evidence without guessing or extra global backend searches. Covered by B2 and B3.
+- [x] D3: Endpoint validation enforces identical paths, mode `100644`, object type `blob`, exact content except permitted ticks, and phase-appropriate automated/manual checkbox rules. Covered by B4 and B5.
+- [x] D4: Review requires Baseline to be an ancestor of or equal to Completion, Completion before later retirement, and ledger absence at the review head; restored intermediate edits do not invalidate valid endpoints. Covered by B6 and B7.
+- [x] D5: Inspection and existing startup support baseline-only progress; implementation submission requires valid retired completion while Needs Human can preserve incomplete work. Covered by B8, B9, and B10.
+- [x] D6: Watchdog startup and verdict submission apply the same endpoint contract at fixed review/final heads and retain historical contract access and independent verification guidance. Covered by B11.
+- [x] D7: Explicit endpoint SHAs support markerless evidence only on relevant invocations, apply the same checks, reject ambiguous markers, and survive generated resume/inspection/handoff instructions without persisted Adoption state. Covered by B12 and B13.
+- [x] D8: Representative-history public CLI checks prove there are no content loads or Git processes per history commit; a runnable benchmark reports measurements rather than gating elapsed time. Covered by B14.
+- [x] D9: Paired skills, packet guidance, and capability documentation agree with these scenarios, explicitly supersede older ADR mandates only for this scope, and leave other corrections planned. Covered by the final documentation task and runnable CLI instruction/resource checks.
 
 ## Manual verification
 
