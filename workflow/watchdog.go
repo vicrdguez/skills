@@ -79,7 +79,7 @@ func StartWatchdog(ctx context.Context, root, remote string, id WorkItemID, back
 				}
 				facts.Bounces = observed.Bounces
 			}
-			round, reference, err := prepareDispatch(ctx, root, remote, repository, current, WatchdogLane, id != "", backend)
+			round, reference, err := prepareDispatch(ctx, repository, current, WatchdogLane, id != "", backend)
 			if err != nil {
 				return ImplementationOutcome{}, err
 			}

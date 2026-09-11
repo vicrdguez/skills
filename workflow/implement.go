@@ -183,7 +183,7 @@ func StartImplementation(ctx context.Context, root, remote string, id WorkItemID
 					return ImplementationOutcome{}, err
 				}
 				item = prepared
-				round, reference, err := prepareDispatch(ctx, root, remote, repository, item, ImplementLane, true, backend)
+				round, reference, err := prepareDispatch(ctx, repository, item, ImplementLane, true, backend)
 				if err != nil {
 					return ImplementationOutcome{}, err
 				}
@@ -240,7 +240,7 @@ func StartImplementation(ctx context.Context, root, remote string, id WorkItemID
 		}
 		for _, current := range observed {
 			if current.ID == item.ID && current.Claimed && current.State == item.State && current.Problem == "" && current.Branch == item.Branch && current.TargetSnapshot == item.TargetSnapshot {
-				round, reference, err := prepareDispatch(ctx, root, remote, repository, current, ImplementLane, false, backend)
+				round, reference, err := prepareDispatch(ctx, repository, current, ImplementLane, false, backend)
 				if err != nil {
 					return ImplementationOutcome{}, err
 				}

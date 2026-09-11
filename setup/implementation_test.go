@@ -431,7 +431,7 @@ func TestGitHubDispatchRoundsSurvivePaginationAndLostResponses(t *testing.T) {
 			comments[commentsNumber] = append(comments[commentsNumber], map[string]any{"author_association": "OWNER", "body": "unrelated"})
 		}
 		completed := start
-		completed.Outcome, completed.Head = tc.outcome, "head"
+		completed.Outcome, completed.Head, completed.Released = tc.outcome, "head", true
 		if err := backend.RecordDispatchRound(ctx, repo, completed); err != nil {
 			t.Fatal(err)
 		}

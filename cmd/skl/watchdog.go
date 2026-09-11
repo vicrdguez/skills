@@ -35,23 +35,9 @@ func watchdogCommands(newBackend backendFactory, stdout io.Writer) []*cli.Comman
 				}
 				outcome, err = workflow.SubmitWatchdog(c.Context, c.Path("repo"), c.String("remote"), workItemID(c.Int("item")), c.String("reviewed-head"), c.String("head"), c.String("verdict"), c.Path("summary"), c.Path("findings"), c.Path("body"), review)
 			} else {
-				var previous workflow.CompletedHandoff
-				if reference := c.String("after"); reference != "" {
-					previous, err = workflow.VerifyDispatch(c.Context, c.Path("repo"), c.String("remote"), workflow.WatchdogLane, reference, port)
-					var violation *workflow.InvariantError
-					if errors.As(err, &violation) {
-						outcome = workflow.ImplementationOutcome{Status: "fix_required", Reason: violation.Reason, Item: &workflow.ImplementationItem{ID: previous.Item}}
-						err = nil
-					}
-				}
-				if err == nil && outcome.Status == "" {
-					outcome, err = nextWork(c.Context, c.Duration("wait"), c.Duration("poll"), func() (workflow.ImplementationOutcome, error) {
-						return workflow.StartWatchdog(c.Context, c.Path("repo"), c.String("remote"), workItemID(c.Int("item")), port)
-					})
-					if c.String("after") != "" {
-						outcome.PreviousHandoff = &previous
-					}
-				}
+				outcome, err = continuedWork(c.Context, c.Path("repo"), c.String("remote"), c.String("after"), workflow.WatchdogLane, c.Duration("wait"), c.Duration("poll"), c.IsSet("poll"), port, func() (workflow.ImplementationOutcome, error) {
+					return workflow.StartWatchdog(c.Context, c.Path("repo"), c.String("remote"), workItemID(c.Int("item")), port)
+				})
 			}
 			if err != nil {
 				var violation *workflow.InvariantError
@@ -59,14 +45,6 @@ func watchdogCommands(newBackend backendFactory, stdout io.Writer) []*cli.Comman
 					return json.NewEncoder(stdout).Encode(workflow.ImplementationOutcome{Status: "fix_required", Reason: violation.Reason})
 				}
 				return err
-			}
-			if outcome.Dispatch != nil {
-				if c.Duration("wait") != 0 {
-					outcome.Dispatch.Wait = c.Duration("wait").String()
-					outcome.Dispatch.Poll = c.Duration("poll").String()
-				} else if c.IsSet("poll") {
-					outcome.Dispatch.Poll = c.Duration("poll").String()
-				}
 			}
 			output, err := setup.PresentImplementation(outcome)
 			if err != nil {

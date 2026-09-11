@@ -45,23 +45,9 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 					if name == "resume" && id == "" {
 						id = workflow.CurrentWorktree
 					}
-					var previous workflow.CompletedHandoff
-					if reference := command.String("after"); reference != "" {
-						previous, err = workflow.VerifyDispatch(command.Context, command.Path("repo"), command.String("remote"), workflow.ImplementLane, reference, port)
-						var violation *workflow.InvariantError
-						if errors.As(err, &violation) {
-							outcome = workflow.ImplementationOutcome{Status: "fix_required", Reason: violation.Reason, Item: &workflow.ImplementationItem{ID: previous.Item}}
-							err = nil
-						}
-					}
-					if err == nil && outcome.Status == "" {
-						outcome, err = nextWork(command.Context, command.Duration("wait"), command.Duration("poll"), func() (workflow.ImplementationOutcome, error) {
-							return workflow.StartImplementation(command.Context, command.Path("repo"), command.String("remote"), id, command.String("target-snapshot"), command.String("reviewed-head"), port)
-						})
-						if command.String("after") != "" {
-							outcome.PreviousHandoff = &previous
-						}
-					}
+					outcome, err = continuedWork(command.Context, command.Path("repo"), command.String("remote"), command.String("after"), workflow.ImplementLane, command.Duration("wait"), command.Duration("poll"), command.IsSet("poll"), port, func() (workflow.ImplementationOutcome, error) {
+						return workflow.StartImplementation(command.Context, command.Path("repo"), command.String("remote"), id, command.String("target-snapshot"), command.String("reviewed-head"), port)
+					})
 				}
 				if err != nil {
 					var violation *workflow.InvariantError
@@ -69,14 +55,6 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 						return json.NewEncoder(stdout).Encode(workflow.ImplementationOutcome{Status: "fix_required", Reason: violation.Reason})
 					}
 					return err
-				}
-				if outcome.Dispatch != nil {
-					if command.Duration("wait") != 0 {
-						outcome.Dispatch.Wait = command.Duration("wait").String()
-						outcome.Dispatch.Poll = command.Duration("poll").String()
-					} else if command.IsSet("poll") {
-						outcome.Dispatch.Poll = command.Duration("poll").String()
-					}
 				}
 				output, err := setup.PresentImplementation(outcome)
 				if err != nil {
