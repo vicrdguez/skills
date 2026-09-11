@@ -113,8 +113,7 @@ func TestImplementRefusesInvalidHandoff(t *testing.T) {
 				t.Fatal(err)
 			}
 			if invariant != "ledger" {
-				runGit(t, root, "rm", "-r", ".changes/widget")
-				runGit(t, root, "commit", "-m", "retire")
+				completeAndRetireSlice(t, root, "widget")
 			}
 			backend.remoteHeads["widget"] = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 			switch invariant {
@@ -710,6 +709,68 @@ func TestB8InspectAndStartBaselineOnlyImplementation(t *testing.T) {
 	}
 }
 
+func TestB9SubmitOnlyACompletedRetiredContract(t *testing.T) {
+	for _, test := range []struct {
+		name, phase, want string
+		rework            bool
+	}{
+		{"first pass retired", "retired", "awaiting_review", false},
+		{"first pass baseline only", "baseline", "fix_required", false},
+		{"first pass incomplete completion", "incomplete", "fix_required", false},
+		{"first pass completion still present", "present", "fix_required", false},
+		{"finding driven rework", "retired", "awaiting_review", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := proposalRepository(t)
+			prepareSlice(t, root, "widget")
+			state := workflow.Ready
+			var submission *workflow.Submission
+			if test.rework {
+				head := completeAndRetireSlice(t, root, "widget")
+				state = workflow.Rework
+				submission = &workflow.Submission{ID: "42", Head: head, PreviousReviewedHead: head}
+			}
+			backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: state, Claimed: true, TargetBranch: "main", TargetSnapshot: strings.TrimSpace(runGitOutput(t, root, "rev-parse", "main")), Submission: submission}}, remoteHeads: map[string]string{}}
+			start := implementCLI(t, root, backend, "resume", "--item", "7")
+			body := filepath.Join(start.Packet.Facts.Implementation.ResultDirectory, "submission.md")
+			if err := os.WriteFile(body, []byte("opaque audit\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			switch test.phase {
+			case "retired":
+				if test.rework {
+					break
+				}
+				completeAndRetireSlice(t, root, "widget")
+			case "incomplete":
+				if err := os.WriteFile(filepath.Join(root, ".changes/widget/intent.md"), []byte("- [ ] unfinished\n"), 0644); err != nil {
+					t.Fatal(err)
+				}
+				runGit(t, root, "commit", "-am", "[completion] widget")
+				runGit(t, root, "rm", "-r", ".changes/widget")
+				runGit(t, root, "commit", "-m", "retire widget")
+			case "present":
+				runGit(t, root, "commit", "--allow-empty", "-m", "[completion] widget")
+			}
+			backend.remoteHeads["widget"] = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+			got := implementCLI(t, root, backend, "submit", "--item", "7", "--body", body)
+			if got.Status != test.want {
+				t.Fatalf("submit = %#v, want %s", got, test.want)
+			}
+			if test.want == "fix_required" {
+				if !backend.work[0].Claimed {
+					t.Fatal("refusal released Claim")
+				}
+				if _, err := os.Stat(body); err != nil {
+					t.Fatalf("refusal removed Result Document: %v", err)
+				}
+			} else if backend.work[0].Claimed || backend.work[0].Submission == nil || test.rework && backend.work[0].Submission.ID != "42" {
+				t.Fatalf("successful handoff = %#v", backend.work[0])
+			}
+		})
+	}
+}
+
 func TestImplementSubmitsCompletedFirstImplementation(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
@@ -719,8 +780,7 @@ func TestImplementSubmitsCompletedFirstImplementation(t *testing.T) {
 	if err := os.WriteFile(body, []byte("opaque audit [not even Markdown\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, root, "rm", "-r", ".changes/widget")
-	runGit(t, root, "commit", "-m", "retire")
+	completeAndRetireSlice(t, root, "widget")
 	backend.remoteHeads["widget"] = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	got := implementCLI(t, root, backend, "submit", "--item", "7", "--body", body)
 	if got.Status != "awaiting_review" || backend.work[0].Claimed || backend.work[0].State != workflow.AwaitingReview {
@@ -749,8 +809,7 @@ func TestImplementClaimsOldestEligibleWork(t *testing.T) {
 		item.Branch = fmt.Sprintf("slice-%s", item.ID)
 		prepareSlice(t, root, item.Branch)
 		if item.State == workflow.Rework {
-			runGit(t, root, "rm", "-r", ".changes/"+item.Branch)
-			runGit(t, root, "commit", "-m", "retire")
+			completeAndRetireSlice(t, root, item.Branch)
 			head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 			number, err := strconv.Atoi(string(item.ID))
 			if err != nil {
@@ -798,8 +857,7 @@ func TestImplementAndWatchdogUseNumericTieBreak(t *testing.T) {
 				item := &b.work[i]
 				prepareSlice(t, root, item.Branch)
 				if command == "watchdog" {
-					runGit(t, root, "rm", "-r", ".changes/"+item.Branch)
-					runGit(t, root, "commit", "-m", "retire")
+					completeAndRetireSlice(t, root, item.Branch)
 					item.State = workflow.AwaitingReview
 					item.Submission = &workflow.Submission{ID: workflow.SubmissionID(item.ID), Head: strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD")), CreatedAt: "2026"}
 				}
@@ -838,8 +896,7 @@ func TestImplementLifecycleOrdersOpaqueIDsByBackendFact(t *testing.T) {
 	for i := range b.work {
 		item := &b.work[i]
 		runGit(t, root, "switch", item.Branch)
-		runGit(t, root, "rm", "-r", ".changes/"+item.Branch)
-		runGit(t, root, "commit", "-m", "retire")
+		completeAndRetireSlice(t, root, item.Branch)
 		item.State, item.Claimed = workflow.AwaitingReview, false
 		item.Submission = &workflow.Submission{ID: workflow.SubmissionID("review-" + item.ID), Head: strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD")), CreatedAt: "2026"}
 	}
@@ -1014,8 +1071,7 @@ func TestImplementUsesSelectedGitHubRemoteThroughout(t *testing.T) {
 			if err := os.WriteFile(body, []byte("audit"), 0600); err != nil {
 				t.Fatal(err)
 			}
-			runGit(t, root, "rm", "-r", ".changes/widget")
-			runGit(t, root, "commit", "-m", "retire")
+			completeAndRetireSlice(t, root, "widget")
 			b.remoteHeads["widget"] = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 			got = implementCLI(t, root, b, "submit", "--remote", "upstream", "--item", "7", "--body", body)
 			if got.Status != "awaiting_review" || b.repository.Owner != "acme" {
@@ -1094,8 +1150,7 @@ func TestImplementPinsTargetAndBundlesInstructions(t *testing.T) {
 func TestImplementStartsFindingDrivenRework(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
-	runGit(t, root, "rm", "-r", ".changes/widget")
-	runGit(t, root, "commit", "-m", "retire")
+	completeAndRetireSlice(t, root, "widget")
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	comments := []skilldist.ReviewComment{{Body: "W1 BLOCK evidence", Author: "reviewer"}, {Body: "W1 NOTE reason", Author: "owner", Association: "OWNER"}}
 	backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Rework, Submission: &workflow.Submission{ID: "11", Head: head, PreviousReviewedHead: head, Comments: comments}}}}
@@ -1122,8 +1177,7 @@ func TestImplementResubmitsExistingRework(t *testing.T) {
 		if err := os.WriteFile(body, []byte("current Audit and rework dispositions\n"), 0600); err != nil {
 			t.Fatal(err)
 		}
-		runGit(t, root, "rm", "-r", ".changes/widget")
-		runGit(t, root, "commit", "-m", "retire")
+		completeAndRetireSlice(t, root, "widget")
 		head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 		backend.work[0].State, backend.work[0].TargetSnapshot = workflow.Rework, ""
 		if hasSubmission {
@@ -1196,8 +1250,7 @@ func TestImplementPublishesOpaqueResultAndCleansSuccessfulDirectory(t *testing.T
 	if err := os.WriteFile(body, []byte(prose), 0600); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, root, "rm", "-r", ".changes/widget")
-	runGit(t, root, "commit", "-m", "retire")
+	completeAndRetireSlice(t, root, "widget")
 	backend.remoteHeads["widget"] = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	got := implementCLI(t, root, backend, "submit", "--item", "7", "--body", body)
 	if got.Status != "awaiting_review" || backend.work[0].Submission.Body != prose+"\n\nCloses #7\n" {
@@ -1250,8 +1303,7 @@ func TestImplementReconcilesInterruptedHandoffs(t *testing.T) {
 			}
 			args := []string{kind, "--item", "7"}
 			if kind == "submit" {
-				runGit(t, root, "rm", "-r", ".changes/widget")
-				runGit(t, root, "commit", "-m", "retire")
+				completeAndRetireSlice(t, root, "widget")
 				args = append(args, "--body", filepath.Join(dir, "submission.md"))
 			} else {
 				args = append(args, "--reason", "mandatory_rule", "--decision", filepath.Join(dir, "decision.md"))
@@ -1291,8 +1343,7 @@ func TestImplementChecksContradictionsAndHeadDuringProjection(t *testing.T) {
 			if err := os.WriteFile(body, []byte("opaque"), 0600); err != nil {
 				t.Fatal(err)
 			}
-			runGit(t, root, "rm", "-r", ".changes/widget")
-			runGit(t, root, "commit", "-m", "retire")
+			completeAndRetireSlice(t, root, "widget")
 			b.remoteHeads["widget"] = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 			switch fault {
 			case "contradiction":

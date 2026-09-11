@@ -1761,6 +1761,14 @@ func prepareSlice(t *testing.T, root, slug string) string {
 	return head
 }
 
+func completeAndRetireSlice(t *testing.T, root, slug string) string {
+	t.Helper()
+	runGit(t, root, "commit", "--allow-empty", "-m", "[completion] "+slug)
+	runGit(t, root, "rm", "-r", filepath.Join(".changes", slug))
+	runGit(t, root, "commit", "-m", "retire "+slug)
+	return strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+}
+
 func writeLedger(t *testing.T, root, slug string, complete bool) {
 	t.Helper()
 	directory := filepath.Join(root, ".changes", slug)
