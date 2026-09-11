@@ -508,6 +508,23 @@ func TestB5EnforcePhaseAppropriateCompletionTicks(t *testing.T) {
 }
 
 func TestB6RequireEndpointAncestryAndLaterLedgerRetirement(t *testing.T) {
+	t.Run("markerless equal explicit endpoints before later retirement", func(t *testing.T) {
+		root := proposalRepository(t)
+		runGit(t, root, "switch", "-c", "ship-widget", "main")
+		writeLedger(t, root, "ship-widget", true)
+		runGit(t, root, "add", ".changes/ship-widget")
+		runGit(t, root, "commit", "-m", "legacy completed artifacts")
+		endpoint := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+		runGit(t, root, "rm", "-r", ".changes/ship-widget")
+		runGit(t, root, "commit", "-m", "retire later")
+
+		backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "ship-widget", State: workflow.AwaitingReview}}}
+		got := implementCLI(t, root, backend, "inspect", "--item", "7", "--artifact-baseline", endpoint, "--artifact-completion", endpoint)
+		if got.Status != "inspected" || got.Ledger == nil || got.Ledger.Baseline != endpoint || got.Ledger.Completion != endpoint || got.Ledger.Phase != "retired" || len(got.Ledger.Violations) != 0 {
+			t.Fatalf("equal explicit endpoint inspection = %#v", got)
+		}
+	})
+
 	for _, test := range []struct {
 		name, want string
 		arrange    func(*testing.T, string)
@@ -1231,16 +1248,46 @@ func TestB10PreserveIncompleteWorkInNeedsHuman(t *testing.T) {
 		name, preserved string
 		body, existing  bool
 		want            string
+		baseline        func(*testing.T, string)
 	}{
-		{"baseline only", "none", false, false, "needs_human"},
-		{"pushed partial implementation", "partial", true, false, "needs_human"},
-		{"existing draft Submission", "partial", true, true, "needs_human"},
-		{"ambiguous baseline", "ambiguous", false, false, "fix_required"},
-		{"unordered Completion", "unordered", false, false, "fix_required"},
+		{"baseline only", "none", false, false, "needs_human", nil},
+		{"pushed partial implementation", "partial", true, false, "needs_human", nil},
+		{"existing draft Submission", "partial", true, true, "needs_human", nil},
+		{"ambiguous baseline", "ambiguous", false, false, "fix_required", nil},
+		{"unordered Completion", "unordered", false, false, "fix_required", nil},
+		{"baseline missing ledger directory", "malformed", true, false, "fix_required", func(t *testing.T, root string) {
+			runGit(t, root, "switch", "-c", "widget", "main")
+			runGit(t, root, "commit", "--allow-empty", "-m", "[baseline] widget")
+		}},
+		{"baseline ledger root is a file", "malformed", true, false, "fix_required", func(t *testing.T, root string) {
+			runGit(t, root, "switch", "-c", "widget", "main")
+			if err := os.MkdirAll(filepath.Join(root, ".changes"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, ".changes/widget"), []byte("not a directory\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			runGit(t, root, "add", ".changes/widget")
+			runGit(t, root, "commit", "-m", "[baseline] widget")
+		}},
+		{"baseline artifact has executable mode", "malformed", true, false, "fix_required", func(t *testing.T, root string) {
+			runGit(t, root, "switch", "-c", "widget", "main")
+			writeLedger(t, root, "widget", true)
+			if err := os.Chmod(filepath.Join(root, ".changes/widget/intent.md"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			runGit(t, root, "add", ".changes/widget")
+			runGit(t, root, "commit", "-m", "[baseline] widget")
+		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			root := proposalRepository(t)
-			baseline := prepareSlice(t, root, "widget")
+			if test.baseline == nil {
+				prepareSlice(t, root, "widget")
+			} else {
+				test.baseline(t, root)
+			}
+			baseline := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 			if test.preserved == "ambiguous" {
 				runGit(t, root, "commit", "--allow-empty", "-m", "[baseline] widget duplicate")
 			}

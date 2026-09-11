@@ -136,8 +136,8 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 		if history.Phase != "retired" || len(history.Violations) > 0 {
 			return ImplementationOutcome{}, Refuse(fmt.Sprint(history.Violations) + "; complete permitted ticks, commit Completion, then delete the entire ledger in a child commit and push")
 		}
-	} else if len(history.identity) != 0 || len(history.baseline) != 0 {
-		return ImplementationOutcome{}, Refuse(fmt.Sprint(append(history.identity, history.baseline...)) + "; repair endpoint identity or the accepted baseline before pausing")
+	} else if len(history.endpointIdentityViolations) != 0 || len(history.acceptedBaselineViolations) != 0 {
+		return ImplementationOutcome{}, Refuse(fmt.Sprint(append(history.endpointIdentityViolations, history.acceptedBaselineViolations...)) + "; repair endpoint identity or the accepted baseline before pausing")
 	} else if bodyPath == "" {
 		changed, err := git(root, "diff", "--name-only", history.Baseline, head, "--", ".", ":(exclude).changes/"+item.Branch)
 		if err != nil {

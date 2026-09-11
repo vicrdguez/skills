@@ -10,13 +10,13 @@ import (
 )
 
 type LedgerHistory struct {
-	Baseline   string
-	Completion string
-	Deletion   string
-	Phase      string
-	Violations []string
-	identity   []string
-	baseline   []string
+	Baseline                   string
+	Completion                 string
+	Deletion                   string
+	Phase                      string
+	Violations                 []string
+	endpointIdentityViolations []string
+	acceptedBaselineViolations []string
 }
 
 type ArtifactEndpoints struct {
@@ -59,30 +59,30 @@ func InspectLedger(root, ref, slug string, explicit ArtifactEndpoints, policy Le
 		result.Violations = append(result.Violations, "slice "+slug+" is missing [completion] "+slug+" marker")
 	}
 	if len(result.Violations) != 0 {
-		result.identity = slices.Clone(result.Violations)
+		result.endpointIdentityViolations = slices.Clone(result.Violations)
 		slices.Sort(result.Violations)
 		return result, nil
 	}
 
 	baseline, err := endpointFiles(root, result.Baseline, slug)
 	if err != nil {
-		return endpointViolation(result, err)
+		return endpointViolation(result, err, true)
 	}
-	result.baseline = append(result.baseline, requiredArtifacts(baseline, result.Baseline, slug)...)
+	result.acceptedBaselineViolations = append(result.acceptedBaselineViolations, requiredArtifacts(baseline, result.Baseline, slug)...)
 	for name, contents := range baseline {
-		result.baseline = append(result.baseline, ledgerBoxes(contents, false, result.Baseline+":"+name)...)
+		result.acceptedBaselineViolations = append(result.acceptedBaselineViolations, ledgerBoxes(contents, false, result.Baseline+":"+name)...)
 	}
-	result.Violations = append(result.Violations, result.baseline...)
+	result.Violations = append(result.Violations, result.acceptedBaselineViolations...)
 
 	if result.Completion != "" {
 		if gitOK(root, "merge-base", "--is-ancestor", result.Baseline, result.Completion) != nil {
 			violation := "Artifact Baseline " + result.Baseline + " is not an ancestor of Completion " + result.Completion
 			result.Violations = append(result.Violations, violation)
-			result.identity = append(result.identity, violation)
+			result.endpointIdentityViolations = append(result.endpointIdentityViolations, violation)
 		} else {
 			completion, err := endpointFiles(root, result.Completion, slug)
 			if err != nil {
-				return endpointViolation(result, err)
+				return endpointViolation(result, err, false)
 			}
 			result.Violations = append(result.Violations, compareEndpoints(baseline, completion, result.Baseline, result.Completion, policy != PreserveIncompleteArtifacts)...)
 		}
@@ -94,7 +94,7 @@ func InspectLedger(root, ref, slug string, explicit ArtifactEndpoints, policy Le
 		if result.Completion == "" && ref != result.Baseline {
 			provisional, err := endpointFiles(root, ref, slug)
 			if err != nil {
-				return endpointViolation(result, err)
+				return endpointViolation(result, err, false)
 			}
 			result.Violations = append(result.Violations, compareEndpoints(baseline, provisional, result.Baseline, ref, false)...)
 		}
@@ -156,10 +156,13 @@ func validateExplicitEndpoint(root, ref, kind, endpoint string) string {
 	return ""
 }
 
-func endpointViolation(result LedgerHistory, err error) (LedgerHistory, error) {
+func endpointViolation(result LedgerHistory, err error, acceptedBaseline bool) (LedgerHistory, error) {
 	var violation *InvariantError
 	if errors.As(err, &violation) {
 		result.Violations = append(result.Violations, violation.Reason)
+		if acceptedBaseline {
+			result.acceptedBaselineViolations = append(result.acceptedBaselineViolations, violation.Reason)
+		}
 		slices.Sort(result.Violations)
 		return result, nil
 	}

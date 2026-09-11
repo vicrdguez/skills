@@ -136,11 +136,7 @@ func InspectImplementation(ctx context.Context, root, remote string, id WorkItem
 		if err != nil {
 			return ImplementationOutcome{}, err
 		}
-		policy := InspectArtifacts
-		if item.State == Rework || item.State == AwaitingReview || item.State == ReadyForMerge {
-			policy = RequireRetiredArtifacts
-		}
-		history, err := InspectLedger(root, head, item.Branch, endpoints, policy)
+		history, err := InspectLedger(root, head, item.Branch, endpoints, implementationLedgerPolicy(item.State))
 		return ImplementationOutcome{Status: "inspected", Item: &item, Head: head, Ledger: &history}, err
 	}
 	return ImplementationOutcome{Status: "fix_required", Reason: "Work Item unavailable; supply its explicit stable --item identity"}, nil
@@ -260,11 +256,7 @@ func prepareImplementationStart(ctx context.Context, root, remote string, reposi
 	if err != nil {
 		return refuse("branch unavailable; fetch the published branch and resume")
 	}
-	policy := InspectArtifacts
-	if item.State == Rework {
-		policy = RequireRetiredArtifacts
-	}
-	history, err := InspectLedger(root, head, item.Branch, endpoints, policy)
+	history, err := InspectLedger(root, head, item.Branch, endpoints, implementationLedgerPolicy(item.State))
 	if err != nil {
 		return item, ImplementationOutcome{}, err
 	}
@@ -351,11 +343,7 @@ func implementationPacket(root, remote string, item ImplementationItem, endpoint
 		if headErr != nil {
 			return ImplementationOutcome{Status: "fix_required", Reason: "branch unavailable; fetch and create the conventional worktree before resuming"}, nil
 		}
-		policy := InspectArtifacts
-		if item.State == Rework {
-			policy = RequireRetiredArtifacts
-		}
-		history, err = InspectLedger(root, head, item.Branch, endpoints, policy)
+		history, err = InspectLedger(root, head, item.Branch, endpoints, implementationLedgerPolicy(item.State))
 		if err != nil {
 			return ImplementationOutcome{}, err
 		}
@@ -383,4 +371,11 @@ func implementationPacket(root, remote string, item ImplementationItem, endpoint
 		return ImplementationOutcome{}, err
 	}
 	return ImplementationOutcome{Status: "work_available", Item: &item, Facts: &skilldist.InvocationFacts{Implementation: &facts}}, nil
+}
+
+func implementationLedgerPolicy(state State) LedgerPolicy {
+	if state == Rework || state == AwaitingReview || state == ReadyForMerge {
+		return RequireRetiredArtifacts
+	}
+	return InspectArtifacts
 }
