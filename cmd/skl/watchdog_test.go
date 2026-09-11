@@ -38,6 +38,91 @@ func watchdogCLI(t *testing.T, root string, backend *implementationMemory, args 
 	return result
 }
 
+func TestB11ValidateWatchdogAgainstTheSameArtifactEndpoints(t *testing.T) {
+	for _, test := range []struct {
+		name, evidence, operation, want string
+	}{
+		{"marked first review", "valid", "next", "work_available"},
+		{"unchanged endpoints after Rework", "rework", "next", "work_available"},
+		{"Debt Marker descendant", "debt", "submit", "ready_for_merge"},
+		{"final head reintroduces ledger", "reintroduced", "submit", "fix_required"},
+		{"invalid Completion", "invalid", "next", "fix_required"},
+		{"ambiguous Completion", "ambiguous", "next", "fix_required"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := proposalRepository(t)
+			prepareSlice(t, root, "widget")
+			if test.evidence == "invalid" {
+				if err := os.WriteFile(filepath.Join(root, ".changes/widget/behavior.md"), []byte("changed contract\n"), 0644); err != nil {
+					t.Fatal(err)
+				}
+				runGit(t, root, "commit", "-am", "[completion] widget")
+				runGit(t, root, "rm", "-r", ".changes/widget")
+				runGit(t, root, "commit", "-m", "retire widget")
+			} else {
+				if test.evidence == "ambiguous" {
+					runGit(t, root, "commit", "--allow-empty", "-m", "[completion] widget first")
+				}
+				completeAndRetireSlice(t, root, "widget")
+			}
+			reviewed := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+			if test.evidence == "rework" {
+				runGit(t, root, "commit", "--allow-empty", "-m", "finding-driven rework")
+				reviewed = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+			}
+			final := reviewed
+			if test.evidence == "debt" {
+				if err := os.WriteFile(filepath.Join(root, "debt.go"), []byte("package widget\n// DEBT(#11/W1): deferred\n"), 0644); err != nil {
+					t.Fatal(err)
+				}
+				runGit(t, root, "add", "debt.go")
+				runGit(t, root, "commit", "-m", "record debt")
+				final = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+			}
+			if test.evidence == "reintroduced" {
+				writeLedger(t, root, "widget", true)
+				runGit(t, root, "add", ".changes/widget")
+				runGit(t, root, "commit", "-m", "reintroduce ledger")
+				final = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+			}
+			claimed := test.operation == "submit"
+			submission := &workflow.Submission{ID: "11", Head: final, ReviewedHead: reviewed, Base: "main", Mergeability: "mergeable"}
+			backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Claimed: claimed, Submission: submission}}, remoteHeads: map[string]string{"widget": final}}
+			var got setup.ImplementationOutput
+			if test.operation == "next" {
+				got = watchdogCLI(t, root, backend, "next")
+			} else {
+				directory := t.TempDir()
+				summary, body := filepath.Join(directory, "summary.md"), filepath.Join(directory, "body.md")
+				if err := os.WriteFile(summary, []byte("independent review\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(body, []byte("approved\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				got = watchdogCLI(t, root, backend, "submit", "--item", "7", "--reviewed-head", reviewed, "--head", final, "--verdict", "pass", "--summary", summary, "--body", body)
+				if test.want == "fix_required" {
+					if _, err := os.Stat(summary); err != nil {
+						t.Fatalf("refusal removed review prose: %v", err)
+					}
+				}
+			}
+			if got.Status != test.want {
+				t.Fatalf("watchdog = %#v, want %s", got, test.want)
+			}
+			if test.want == "work_available" {
+				facts := got.Packet.Facts.Watchdog
+				if facts.BaselineFiles[".changes/widget/intent.md"] == "" || facts.CompletionFiles[".changes/widget/intent.md"] == "" || !strings.Contains(got.Packet.Instructions, "endpoint") {
+					t.Fatalf("historical contract or independent guidance missing: %#v", facts)
+				}
+			}
+			if test.want == "fix_required" && backend.work[0].Claimed != claimed {
+				t.Fatalf("refusal mutated Claim: %#v", backend.work[0])
+			}
+		})
+	}
+}
+
 func TestWatchdogBouncesFirstFailureWithOpaqueFindings(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")

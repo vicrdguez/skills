@@ -112,12 +112,21 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	if err := guard(); err != nil {
 		return ImplementationOutcome{}, err
 	}
-	history, err := InspectLedger(root, head, item.Branch, ArtifactEndpoints{}, RequireRetiredArtifacts)
+	history, err := InspectLedger(root, reviewed, item.Branch, ArtifactEndpoints{}, RequireRetiredArtifacts)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
 	if history.Phase != "retired" || len(history.Violations) > 0 {
-		return ImplementationOutcome{}, Refuse("restore valid retired ledger history")
+		return ImplementationOutcome{}, Refuse(fmt.Sprint(history.Violations) + "; restore valid retired ledger history at reviewed head " + reviewed)
+	}
+	if head != reviewed {
+		history, err = InspectLedger(root, head, item.Branch, ArtifactEndpoints{}, RequireRetiredArtifacts)
+		if err != nil {
+			return ImplementationOutcome{}, err
+		}
+		if history.Phase != "retired" || len(history.Violations) > 0 {
+			return ImplementationOutcome{}, Refuse(fmt.Sprint(history.Violations) + "; keep the ledger retired at final head " + head)
+		}
 	}
 	summary, err := os.ReadFile(summaryPath)
 	if err != nil {
