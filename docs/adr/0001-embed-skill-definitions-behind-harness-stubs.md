@@ -10,8 +10,8 @@ Author harness-independent skill definitions and their named resources as Markdo
 - Supporting resources are embedded and retrieved by name instead of being injected into every instruction packet.
 - Skill Definitions guaranteed for an invocation are bundled once and listed in the packet manifest; conditional dependencies remain deferred, and adapters do not activate stubs already listed in the packet.
 - Harness-specific execution capabilities remain outside the shared skill definition unless selected through deterministic adapter metadata.
-- Pi, Codex, and Claude Code receive equivalent skill discovery and one-item workflow operations in V1; automated queue draining may remain Pi-only.
-- V1 installs the binary from this repository with Go. The binary then writes its embedded common Skill Stubs into the supported Pi, Codex, and Claude Code user skill directories; prebuilt releases, plugin packages, automatic updates, and uninstall machinery are deferred.
+- Pi, Codex, Claude Code, and OpenCode receive equivalent skill discovery and one-item workflow operations in V1; automated queue draining may remain Pi-only.
+- V1 installs the binary from this repository with Go. The binary then writes its embedded common Skill Stubs into the supported Pi, Codex, Claude Code, and OpenCode user skill directories. OpenCode uses `~/.config/opencode/skills/<name>/SKILL.md` without cross-harness discovery dependencies or configuration migration; prebuilt releases, plugin packages, automatic updates, and uninstall machinery are deferred.
 - Installation may also write harness-specific queue adapters where supported; deterministic Setup is a CLI command and has no Skill Stub.
 - Skill templates use Go `text/template` with typed inputs and a deliberately small helper set; Consumer Repositories cannot override them in V1.
 - Agent-authored handoff results use template-guided Markdown files in private temporary directories rather than command-line prose or tracked files. The CLI passes their contents through without parsing or validating the Markdown.

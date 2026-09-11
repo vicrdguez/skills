@@ -16,6 +16,10 @@ Run it from any directory inside the Consumer Repository, or pass `--repo <path>
 - Removes the superseded `docs/github.md` protocol document.
 - Produces the same owned guidance and backend preparation when repeated with the same choices.
 
+## Ownership
+
+The command integration resolves the Consumer Repository and selected Git remote before entering Setup, and supplies a repository-bound Backend. Setup owns local-file safety and calls semantic validation and preparation; the GitHub integration owns repository coordinates, authentication, target-branch discovery, and the fixed Workflow Projection labels. No provider discovery or label vocabulary is required by Setup Mechanics.
+
 ## Simplicity standard
 
 - Installs and maintains a repository-owned simplicity standard in the managed `AGENTS.md` block as part of normal Setup, without an opt-in. It applies to coding and review inside and outside the Workflow.

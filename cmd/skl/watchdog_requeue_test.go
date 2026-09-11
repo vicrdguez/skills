@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/setup"
 	"github.com/vicrdguez/skills/workflow"
 )
@@ -57,7 +58,7 @@ func TestWatchdogHumanRequeuePreservesFirstFailureBounce(t *testing.T) {
 			}))
 			defer server.Close()
 			adapter := setup.NewGitHubBackend(server.URL, "token", server.Client())
-			submission, err := adapter.ReviewSubmission(context.Background(), workflow.RepositoryID{Owner: "acme", Name: "widgets"}, 11)
+			submission, err := adapter.ReviewSubmission(context.Background(), github.RepositoryID{Owner: "acme", Name: "widgets"}, "11")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -65,7 +66,7 @@ func TestWatchdogHumanRequeuePreservesFirstFailureBounce(t *testing.T) {
 				t.Errorf("timeline bounces = %d, want %d", submission.Bounces, tc.bounces)
 			}
 			submission.ReviewedHead = head
-			b := &implementationMemory{work: []workflow.ImplementationItem{{Number: 7, Branch: "widget", State: submission.State, Claimed: submission.Claimed, Submission: &submission}}, remoteHeads: map[string]string{"widget": head}}
+			b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: submission.State, Claimed: submission.Claimed, Submission: &submission}}, remoteHeads: map[string]string{"widget": head}}
 			summary := filepath.Join(t.TempDir(), "summary.md")
 			if err := os.WriteFile(summary, []byte("first actual finding-driven failure"), 0600); err != nil {
 				t.Fatal(err)

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/workflow"
 )
 
@@ -22,6 +23,7 @@ func (function roundTripFunc) RoundTrip(request *http.Request) (*http.Response, 
 }
 
 func TestGitHubBackendMapsRepositoryAndLabels(t *testing.T) {
+	mutations := 0
 	labels := map[string]Label{
 		"ready":  {Name: "ready", Color: "ffffff", Description: "stale"},
 		"custom": {Name: "custom", Color: "123456", Description: "unrelated"},
@@ -40,12 +42,14 @@ func TestGitHubBackendMapsRepositoryAndLabels(t *testing.T) {
 			}
 			_ = json.NewEncoder(response).Encode(values)
 		case request.Method == http.MethodPatch:
+			mutations++
 			var label Label
 			_ = json.NewDecoder(request.Body).Decode(&label)
 			label.Name = strings.TrimPrefix(request.URL.Path, "/repos/acme/widgets/labels/")
 			labels[label.Name] = label
 			response.WriteHeader(http.StatusOK)
 		case request.Method == http.MethodPost && request.URL.Path == "/repos/acme/widgets/labels":
+			mutations++
 			var label Label
 			_ = json.NewDecoder(request.Body).Decode(&label)
 			labels[label.Name] = label
@@ -56,21 +60,28 @@ func TestGitHubBackendMapsRepositoryAndLabels(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 	backend := NewGitHubBackend(server.URL, "secret", server.Client())
-	repository := RepositoryID{Owner: "acme", Name: "widgets"}
+	backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
 
-	branch, err := backend.Validate(context.Background(), repository)
+	branch, err := backend.Validate(context.Background())
 	if err != nil || branch != "trunk" {
 		t.Fatalf("Validate() = %q, %v", branch, err)
 	}
-	if err := backend.EnsureLabels(context.Background(), repository, WorkflowLabels); err != nil {
+	if err := backend.Prepare(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+	firstMutations := mutations
+	if err := backend.Prepare(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if firstMutations == 0 || mutations != firstMutations {
+		t.Fatalf("Prepare mutations = %d then %d", firstMutations, mutations)
 	}
 	for _, want := range WorkflowLabels {
 		if got := labels[want.Name]; got != want {
 			t.Fatalf("label %q = %#v", want.Name, got)
 		}
 	}
-	if got := labels["custom"]; got.Description != "unrelated" {
+	if got := labels["custom"]; got != (Label{Name: "custom", Color: "123456", Description: "unrelated"}) {
 		t.Fatalf("unrelated label changed: %#v", got)
 	}
 }
@@ -116,7 +127,8 @@ func TestGitHubBackendDefersAuthenticationUntilValidation(t *testing.T) {
 	if resolved != 0 {
 		t.Fatal("authentication resolved during backend construction")
 	}
-	if _, err := backend.Validate(context.Background(), RepositoryID{Owner: "acme", Name: "widgets"}); err != nil {
+	backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
+	if _, err := backend.Validate(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if resolved != 1 {
@@ -141,11 +153,12 @@ func TestGitHubBackendPublishesSuppliedMarkdownWithoutInterpretation(t *testing.
 	})}
 	backend := NewGitHubBackend("https://api.github.test", "secret", client)
 
-	item, err := backend.CreateWorkItem(context.Background(), workflow.RepositoryID{Owner: "acme", Name: "widgets"}, workflow.WorkItem{Title: "opaque-slice", Body: wantBody})
+	backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
+	item, err := backend.CreateWorkItem(context.Background(), workflow.WorkItem{Title: "opaque-slice", Body: wantBody})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if item.Number != 17 || item.Title != "opaque-slice" || item.Body != wantBody {
+	if item.ID != "17" || item.Title != "opaque-slice" || item.Body != wantBody {
 		t.Fatalf("item = %#v", item)
 	}
 }
@@ -166,26 +179,26 @@ func TestGitHubBackendMapsNativeProposalRelationships(t *testing.T) {
 		return jsonResponse(http.StatusCreated, `{}`), nil
 	})}
 	backend := NewGitHubBackend("https://api.github.test", "secret", client)
-	repository := workflow.RepositoryID{Owner: "acme", Name: "widgets"}
-	parent, err := backend.CreateCoordinationItem(context.Background(), repository, workflow.CoordinationItem{Title: "parent"})
+	backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
+	parent, err := backend.CreateCoordinationItem(context.Background(), workflow.CoordinationItem{Title: "parent"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	blocker, err := backend.CreateWorkItem(context.Background(), repository, workflow.WorkItem{Title: "blocker"})
+	blocker, err := backend.CreateWorkItem(context.Background(), workflow.WorkItem{Title: "blocker"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	dependent, err := backend.CreateWorkItem(context.Background(), repository, workflow.WorkItem{Title: "dependent"})
+	dependent, err := backend.CreateWorkItem(context.Background(), workflow.WorkItem{Title: "dependent"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := backend.AddChild(context.Background(), repository, parent.Number, dependent.Number); err != nil {
+	if err := backend.AddChild(context.Background(), parent.ID, dependent.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := backend.AddDependency(context.Background(), repository, dependent.Number, blocker.Number); err != nil {
+	if err := backend.AddDependency(context.Background(), dependent.ID, blocker.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := backend.SetReady(context.Background(), repository, dependent.Number); err != nil {
+	if err := backend.SetReady(context.Background(), dependent.ID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -215,11 +228,12 @@ func TestGitHubBackendNormalizesProposalState(t *testing.T) {
 	})}
 	backend := NewGitHubBackend("https://api.github.test", "secret", client)
 
-	items, err := backend.FindWorkItems(context.Background(), workflow.RepositoryID{Owner: "acme", Name: "widgets"}, []workflow.WorkItem{{Title: "slice"}}, nil)
+	backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
+	items, err := backend.FindWorkItems(context.Background(), []workflow.WorkItem{{Title: "slice"}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 1 || !items[0].Ready || items[0].Merged || items[0].Parent != 10 || !slices.Equal(items[0].Blockers, []int{16}) {
+	if len(items) != 1 || items[0].ID != "17" || !items[0].Ready || items[0].Merged || items[0].Parent != "10" || !slices.Equal(items[0].Blockers, []workflow.WorkItemID{"16"}) {
 		t.Fatalf("items = %#v", items)
 	}
 }
@@ -227,9 +241,9 @@ func TestGitHubBackendNormalizesProposalState(t *testing.T) {
 func TestGitHubBackendReconcilesDeclaredFallback(t *testing.T) {
 	for _, test := range []struct {
 		name, supplied, persisted string
-		blockers                  []int
+		blockers                  []workflow.WorkItemID
 	}{
-		{"declared fallback", "opaque\n", "opaque\n\nBlocked by: #1\n", []int{1}},
+		{"declared fallback", "opaque\n", "opaque\n\nBlocked by: #1\n", []workflow.WorkItemID{"1"}},
 		{"authored lookalike", "opaque\n\nBlocked by: #1\n", "opaque\n\nBlocked by: #1\n", nil},
 		{"conflicting prose", "opaque\n", "changed\n\nBlocked by: #1\n", nil},
 		{"undeclared suffix", "opaque\n", "opaque\n\nBlocked by: #99\n", nil},
@@ -250,7 +264,8 @@ func TestGitHubBackendReconcilesDeclaredFallback(t *testing.T) {
 				}
 			})}
 			backend := NewGitHubBackend("https://api.github.test", "secret", client)
-			items, err := backend.FindWorkItems(context.Background(), workflow.RepositoryID{Owner: "acme", Name: "widgets"},
+			backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
+			items, err := backend.FindWorkItems(context.Background(),
 				[]workflow.WorkItem{{Title: "base", Body: "base"}, {Title: "dependent", Body: test.supplied}},
 				[]workflow.Dependency{{Dependent: "dependent", Blocker: "base"}})
 			wantBody := test.persisted
@@ -288,7 +303,8 @@ func TestGitHubBackendReportsOnlyCommitClosedWorkflowItemsAsMerged(t *testing.T)
 	})}
 	backend := NewGitHubBackend("https://api.github.test", "secret", client)
 
-	items, err := backend.ListMergedWorkItems(context.Background(), workflow.RepositoryID{Owner: "acme", Name: "widgets"})
+	backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
+	items, err := backend.ListMergedWorkItems(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,8 +331,9 @@ func TestGitHubBackendReadsMergedLifecycleAcrossTimelinePages(t *testing.T) {
 		}
 	})}
 	backend := NewGitHubBackend("https://api.github.test", "secret", client)
-	items, err := backend.ListMergedWorkItems(context.Background(), workflow.RepositoryID{Owner: "acme", Name: "widgets"})
-	if err != nil || len(items) != 1 || items[0].Number != 17 || !items[0].Merged || items[0].AcceptedHead != "accepted" {
+	backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
+	items, err := backend.ListMergedWorkItems(context.Background())
+	if err != nil || len(items) != 1 || items[0].ID != "17" || !items[0].Merged || items[0].AcceptedHead != "accepted" {
 		t.Fatalf("Merged lifecycle = %#v, %v", items, err)
 	}
 }
@@ -346,7 +363,8 @@ func TestGitHubBackendIdentifiesAcceptedSubmissionHead(t *testing.T) {
 				}
 			})}
 			backend := NewGitHubBackend("https://api.github.test", "secret", client)
-			items, err := backend.ListMergedWorkItems(context.Background(), workflow.RepositoryID{Owner: "acme", Name: "widgets"})
+			backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
+			items, err := backend.ListMergedWorkItems(context.Background())
 			if err != nil || len(items) != 1 || items[0].AcceptedHead != test.want {
 				t.Fatalf("accepted Submission = %#v, %v; want %q", items, err, test.want)
 			}
@@ -394,11 +412,12 @@ func TestGitHubBackendRecognizesCloseBeforeMerge(t *testing.T) {
 				}
 			})}
 			backend := NewGitHubBackend("https://api.github.test", "secret", client)
-			items, err := backend.ListMergedWorkItems(context.Background(), workflow.RepositoryID{Owner: "acme", Name: "widgets"})
+			backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
+			items, err := backend.ListMergedWorkItems(context.Background())
 			if err != nil || len(items) != test.wantItems {
 				t.Fatalf("Merged Work Items = %#v, %v; want %d", items, err, test.wantItems)
 			}
-			if len(items) == 1 && (!items[0].Merged || items[0].Number != 17 || items[0].Branch != "slice" || items[0].AcceptedHead != test.wantHead) {
+			if len(items) == 1 && (!items[0].Merged || items[0].ID != "17" || items[0].Branch != "slice" || items[0].AcceptedHead != test.wantHead) {
 				t.Fatalf("accepted Submission = %#v; want head %q", items[0], test.wantHead)
 			}
 		})
@@ -423,14 +442,99 @@ func TestGitHubBackendFallsBackWhenNativeDependenciesAreUnavailable(t *testing.T
 		return nil, nil
 	})}
 	backend := NewGitHubBackend("https://api.github.test", "secret", client)
+	backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
 	backend.issueIDs[1] = 501
 	backend.issueBodies[2] = "opaque body\n"
 
-	if err := backend.AddDependency(context.Background(), workflow.RepositoryID{Owner: "acme", Name: "widgets"}, 2, 1); err != nil {
+	if err := backend.AddDependency(context.Background(), "2", "1"); err != nil {
 		t.Fatal(err)
 	}
 	if patchedBody != "opaque body\n\nBlocked by: #1\n" {
 		t.Fatalf("body = %q", patchedBody)
+	}
+}
+
+func TestGitHubBackendRefusesUnboundOperations(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		t.Fatalf("unbound operation requested %s", request.URL)
+		return nil, nil
+	})}
+	backend := NewGitHubBackend("https://api.github.test", "secret", client)
+	ctx := context.Background()
+	operations := map[string]func() error{
+		"Validate": func() error { _, err := backend.Validate(ctx); return err },
+		"Prepare":  func() error { return backend.Prepare(ctx) },
+		"FindWorkItems": func() error {
+			_, err := backend.FindWorkItems(ctx, nil, nil)
+			return err
+		},
+		"ListMergedWorkItems": func() error { _, err := backend.ListMergedWorkItems(ctx); return err },
+		"CreateWorkItem": func() error {
+			_, err := backend.CreateWorkItem(ctx, workflow.WorkItem{Title: "slice"})
+			return err
+		},
+		"FindCoordinationItems": func() error { _, err := backend.FindCoordinationItems(ctx, "parent"); return err },
+		"CreateCoordinationItem": func() error {
+			_, err := backend.CreateCoordinationItem(ctx, workflow.CoordinationItem{Title: "parent"})
+			return err
+		},
+		"AddChild":      func() error { return backend.AddChild(ctx, "1", "2") },
+		"AddDependency": func() error { return backend.AddDependency(ctx, "2", "1") },
+		"SetReady":      func() error { return backend.SetReady(ctx, "2") },
+	}
+	for _, repository := range []github.RepositoryID{{}, {Owner: "acme"}, {Name: "widgets"}} {
+		backend.BindRepository(repository)
+		for name, operation := range operations {
+			if err := operation(); err == nil || !strings.Contains(err.Error(), "not bound") {
+				t.Errorf("%s with %#v = %v; want unbound refusal", name, repository, err)
+			}
+		}
+	}
+}
+
+func TestGitHubBackendRefusesInvalidMutationIdentities(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		t.Fatalf("invalid identity requested %s", request.URL)
+		return nil, nil
+	})}
+	backend := NewGitHubBackend("https://api.github.test", "secret", client)
+	backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
+	backend.issueIDs[1] = 501
+	ctx := context.Background()
+	for _, id := range []workflow.WorkItemID{"", "opaque", "0", "-1", "+1", "01", "1/labels", "999999999999999999999999999"} {
+		for name, err := range map[string]error{
+			"parent":    backend.AddChild(ctx, id, "1"),
+			"child":     backend.AddChild(ctx, "1", id),
+			"dependent": backend.AddDependency(ctx, id, "1"),
+			"blocker":   backend.AddDependency(ctx, "1", id),
+			"ready":     backend.SetReady(ctx, id),
+		} {
+			if err == nil || !strings.Contains(err.Error(), "invalid GitHub issue identity") {
+				t.Errorf("%s identity %q = %v; want invalid identity refusal", name, id, err)
+			}
+		}
+	}
+}
+
+func TestGitHubBackendRebindingDiscardsRepositoryCaches(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.Method != http.MethodPost || request.URL.Path != "/repos/acme/widgets/issues" {
+			t.Fatalf("unexpected request: %s %s", request.Method, request.URL)
+		}
+		return jsonResponse(http.StatusCreated, `{"id":501,"number":1}`), nil
+	})}
+	backend := NewGitHubBackend("https://api.github.test", "secret", client)
+	backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
+	ctx := context.Background()
+	if _, err := backend.CreateWorkItem(ctx, workflow.WorkItem{Title: "slice", Body: "body"}); err != nil {
+		t.Fatal(err)
+	}
+	backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "other"})
+	if len(backend.issueIDs) != 0 || len(backend.issueBodies) != 0 {
+		t.Fatal("rebinding retained repository-specific caches")
+	}
+	if err := backend.AddChild(ctx, "2", "1"); err == nil {
+		t.Fatal("relationship reused an issue ID from another repository")
 	}
 }
 

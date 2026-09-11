@@ -8,8 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-
-	"github.com/vicrdguez/skills/workflow"
 )
 
 const AgentsBlock = `<!-- dev-pipeline:start -->
@@ -71,38 +69,18 @@ separately.
 <!-- dev-pipeline:end -->
 `
 
-type RepositoryID = workflow.RepositoryID
-
-type Label struct {
-	Name        string `json:"name"`
-	Color       string `json:"color"`
-	Description string `json:"description"`
-}
-
-var WorkflowLabels = []Label{
-	{Name: "sync", Color: "fbca04", Description: "Synchronization Rework; does not consume the finding bounce"},
-	{Name: "ready", Color: "0e8a16", Description: "proposed change awaiting an implementor"},
-	{Name: "wip", Color: "fbca04", Description: "additive Worker Claim. An agent is working on it"},
-	{Name: "review", Color: "1d76db", Description: "built change awaiting a reviewer"},
-	{Name: "rework", Color: "d93f0b", Description: "reviewer bounced it back to the implementor after review"},
-	{Name: "needs-human", Color: "b60205", Description: "automation paused for a narrow human decision"},
-	{Name: "done", Color: "5319e7", Description: "passed review, awaiting the human's approval to merge"},
-}
-
 type Backend interface {
-	Validate(context.Context, RepositoryID) (targetBranch string, err error)
-	EnsureLabels(context.Context, RepositoryID, []Label) error
+	Validate(context.Context) (targetBranch string, err error)
+	Prepare(context.Context) error
 }
 
 type Request struct {
 	Location string
-	Remote   string
 	Confirm  func(string) (bool, error)
 }
 
 type Outcome struct {
 	Root         string
-	Repository   RepositoryID
 	TargetBranch string
 }
 
@@ -110,18 +88,6 @@ func Run(ctx context.Context, request Request, backend Backend) (Outcome, error)
 	root, err := git(request.Location, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return Outcome{}, errors.New("not a Git repository")
-	}
-	remote, err := workflow.ResolveGitHubRemote(root, request.Remote)
-	if err != nil {
-		return Outcome{}, err
-	}
-	remoteURL, err := git(root, "remote", "get-url", remote)
-	if err != nil {
-		return Outcome{}, fmt.Errorf("resolve GitHub remote %q: %w", remote, err)
-	}
-	repository, err := parseGitHubRemote(remoteURL)
-	if err != nil {
-		return Outcome{}, err
 	}
 	agents, err := planAgents(filepath.Join(root, "AGENTS.md"))
 	if err != nil {
@@ -141,9 +107,9 @@ func Run(ctx context.Context, request Request, backend Backend) (Outcome, error)
 	if err != nil {
 		return Outcome{}, err
 	}
-	targetBranch, err := backend.Validate(ctx, repository)
+	targetBranch, err := backend.Validate(ctx)
 	if err != nil {
-		return Outcome{}, fmt.Errorf("validate GitHub repository: %w", err)
+		return Outcome{}, fmt.Errorf("validate repository: %w", err)
 	}
 	linkClaude := false
 	if offerClaude && request.Confirm != nil {
@@ -153,8 +119,8 @@ func Run(ctx context.Context, request Request, backend Backend) (Outcome, error)
 		}
 	}
 
-	if err := backend.EnsureLabels(ctx, repository, WorkflowLabels); err != nil {
-		return Outcome{}, fmt.Errorf("prepare workflow labels: %w", err)
+	if err := backend.Prepare(ctx); err != nil {
+		return Outcome{}, fmt.Errorf("prepare workflow backend: %w", err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), agents, 0o644); err != nil {
 		return Outcome{}, err
@@ -175,7 +141,7 @@ func Run(ctx context.Context, request Request, backend Backend) (Outcome, error)
 			return Outcome{}, err
 		}
 	}
-	return Outcome{Root: root, Repository: repository, TargetBranch: targetBranch}, nil
+	return Outcome{Root: root, TargetBranch: targetBranch}, nil
 }
 
 func planGitignore(path string) ([]byte, error) {
@@ -278,8 +244,4 @@ func git(directory string, args ...string) (string, error) {
 	command := exec.Command("git", append([]string{"-C", directory}, args...)...)
 	output, err := command.Output()
 	return strings.TrimSpace(string(output)), err
-}
-
-func parseGitHubRemote(remote string) (RepositoryID, error) {
-	return workflow.ParseGitHubRemote(remote)
 }

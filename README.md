@@ -96,6 +96,22 @@ Write the Audit-bearing `submission.md` in the packet's private temporary direct
 
 For a permitted human decision, use `skl implement needs-human --item <number> --reason <reason> --decision <absolute-decision.md>`; also supply `--body` and push when a draft Submission must preserve implementation work. Retrieve both Result Document templates through `skl skill --resource reference/submission.md implement` or `skl skill --resource reference/decision.md implement`.
 
+### Wait for claimable work
+
+Both `skl implement next` and `skl watchdog next` check once and return `work_available` with a claimed item and packet, or `no_work`, by default. Add bounded waiting when another lane or a human merge may make work eligible:
+
+```sh
+skl implement next --wait --repo <path> --remote upstream
+skl watchdog next --wait=2m --poll 5s --repo <path> --remote upstream
+skl implement next --wait 2m --poll=5s
+```
+
+Bare `--wait` means up to 15 minutes; `--wait=2m` and `--wait 2m` override that idle window. `--poll` defaults to 30 seconds. Durations must be positive Go durations with units; invalid values fail before Backend effects. A valid `--poll` without `--wait` is accepted but does not enable waiting.
+
+Selection runs immediately, then waits between completed empty observations for the smaller of the poll interval and remaining idle window. Each invocation starts a new window, including Backend operation time. It emits only one final JSON outcome: a Claim and packet, an existing refusal, or successful `idle_timeout`. The timeout means only local queue inactivity, not global completion; it creates no Claim, private Result Document directory, or persistent run record. Waiting does not launch an Agent Worker or change eligibility, ordering, Dependencies, or handoffs.
+
+The idle deadline prevents new polls but does not cancel an in-flight Claim: a late successful Claim, refusal, or operational error is returned as-is; a late empty observation becomes `idle_timeout`. Operational errors and refusals stop waiting without added retries. SIGINT/SIGTERM or caller cancellation interrupts waiting with a nonzero error, not `no_work` or `idle_timeout`, unless the in-flight selection successfully returns its Claim and packet. No Claim is automatically released or retried. If selection was interrupted and a Claim may have been acquired, inspect the Work Item and explicitly resume it rather than blindly running `next` again.
+
 ### Install skills
 
 ```sh
@@ -103,7 +119,20 @@ go install ./cmd/skl
 skl install
 ```
 
-`skl install` refreshes its owned Skill Stubs in Pi, Codex, and Claude Code, plus Pi-only queue prompts, runners, and their continuation check, without touching unrelated user files. This replaces the former Pi package and Claude plugin distribution. Run `skl skill <name>` for rendered instructions, `skl skill --format json <name>` for the typed packet, or `skl skill --resource <path> <name>` for one named resource. Flags precede the skill name.
+`skl install` refreshes its owned Skill Stubs in Pi, Codex, Claude Code, and OpenCode, plus Pi-only queue prompts, runners, and their continuation check, without touching unrelated user files. OpenCode receives independent common stubs at `~/.config/opencode/skills/<name>/SKILL.md`, not links to another harness or the authoring tree. This replaces the former Pi package and Claude plugin distribution. Run `skl skill <name>` for rendered instructions, `skl skill --format json <name>` for the typed packet, or `skl skill --resource <path> <name>` for one named resource. Flags precede the skill name.
+
+For a one-time OpenCode cutover, first install the new binary and run `skl install` as above, keeping any existing discovery workaround until the native stubs are available. Then manually remove only obsolete Pi skill-directory or raw-source entries from OpenCode's `skills.paths`; retain unrelated settings and intentionally configured other skills. Do not delete another harness's skills or replace the override with Claude or Codex paths. The installer does not edit discovery settings. Quit and restart OpenCode, then confirm the workflow skills load from `~/.config/opencode/skills/` as thin CLI stubs without claiming work.
+
+The `skills/` tree is authoring input. Installed `SKILL.md` files are thin discovery stubs; the running `skl` binary supplies the embedded definitions and resources, not the source checkout or files beside a stub. After updating this checkout, run `go install ./cmd/skl` here to rebuild the binary, then `skl install` to refresh its owned stubs and adapters. Editing Markdown alone does not update an already-installed binary.
+
+Resource names are exact and relative to their owning skill, even inside a nested resource or bundled definition:
+
+```sh
+skl skill --resource reference/DEEPENING.md design
+skl skill --resource SKILL-MECHANICS.md writing-for-agents
+```
+
+Retrieve a parent definition with `skl skill <name>` only when it is not already supplied; `SKILL.md` is not a resource name. Raw source-tree registrations bypass this distribution arrangement. OpenCode can consume the installed Claude-compatible stubs rather than registering the authoring tree.
 
 ### Review and human completion
 

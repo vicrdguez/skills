@@ -28,6 +28,9 @@ Break the work into **tracer-bullets** tickets.
 - Each slice cuts a narrow but COMPLETE path through every layer (schema, API, UI, tests) - vertical, NOT a horizontal slice of one layer
 - A completed slice is demoable and verifiable on its own
 - Each slice is sized to fit in a single fresh context window
+- Prefer separate Work Items for behaviors that deliver safe, useful results independently. Assess independence after declared Dependencies are Merged, without requiring later Work Items.
+- Combine independently useful behaviors only for a concrete reduction in overall implementation or review burden. Shared files or a shared Workflow stage alone are insufficient.
+- Assess review burden from the behavior and materially different correctness, failure, and recovery concerns a reviewer must understand together, using agreed requirements and focused repository inspection rather than line counts or exhaustive implementation planning. Different error cases alone do not require separate Work Items.
 - Write the artifacts, then publish them to the project's issue tracker as explained below. 
 
 Use the `design` skill to sketch the seams at which this change will be tested.
@@ -43,6 +46,7 @@ Present the proposed breakdown as a numbered list. For each ticket show:
 - *Title*: Short and descriptive name
 - *Blocked by* which other tickets (if any) must complete first
 - *What it delivers*: the end-to-end behavior this ticket makes work
+- *Review burden*: Briefly explain those concerns and any concrete reason for combining independently useful behaviors
 
 
 Ask the user:
@@ -52,6 +56,8 @@ Ask the user:
 - Should any tickets be merged or split further?
 
 Iterate until the user approves the breakdown. A single ticket is possible if the change is small.
+
+If artifact elaboration materially changes proposed boundaries or Dependencies, return to this approval loop before publication: explain the discovery and propose the revised breakdown for approval before freezing the artifacts. Ordinary elaboration within an unchanged coherent delivery needs no renewed approval.
 
 ### 5. Prepare and publish
 
@@ -81,9 +87,9 @@ Publishing them freezes them. From that commit on, the only edit anyone may make
 So resolve the contradictions now, while you still can — between the artifacts themselves, and between them and the project's own rules. Afterwards nobody downstream can fix them; they can only stop and ask you.
 
 **Always**:
-- `intent.md`: Why / What / Scope / Out of scope / Definition of Done. Follow the [intent.md](./reference/intent.md) template
-- `behavior.md`: The exact required behavior(s) to implement, in *Gherkin notation* that map to `intent.md` *Definition of Done* section. Since seams are where we test at, use `tdd` to define good tests and avoid anti-patterns. The final list of behaviours will translate directly to what should be implemented and tested. Follow the [behavior.md](./reference/behavior.md) template
+- `intent.md`: Why / What / Scope / Out of scope / Definition of Done. Follow the template from `skl skill --resource reference/intent.md propose`
+- `behavior.md`: The exact required behavior(s) to implement, in *Gherkin notation* that map to `intent.md` *Definition of Done* section. Since seams are where we test at, use `tdd` to define good tests and avoid anti-patterns. The final list of behaviours will translate directly to what should be implemented and tested. Follow the template from `skl skill --resource reference/behavior.md propose`
 
 **When warranted**:
-- `plan.md`: The approach, the module shapes and seams chosen for implementation and any pinned decision the implementer MUST NOT make on its own. Follow the [plan.md](./reference/plan.md) template
-- `tasks.md`: Follow the [tasks.md](./reference/tasks.md) template — it states when it is warranted
+- `plan.md`: The approach, the module shapes and seams chosen for implementation and any pinned decision the implementer MUST NOT make on its own. Follow the template from `skl skill --resource reference/plan.md propose`
+- `tasks.md`: Follow the template from `skl skill --resource reference/tasks.md propose` — it states when it is warranted

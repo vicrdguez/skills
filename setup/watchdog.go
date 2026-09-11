@@ -4,38 +4,44 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	skilldist "github.com/vicrdguez/skills"
+	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/workflow"
 )
 
-func (b *GitHubBackend) CompleteReview(ctx context.Context, repository workflow.RepositoryID, item workflow.ImplementationItem, target workflow.State, guard func() error) error {
+func (b *GitHubBackend) CompleteReview(ctx context.Context, repository github.RepositoryID, item workflow.ImplementationItem, target workflow.State, guard func() error) error {
 	label := map[workflow.State]string{workflow.Rework: "rework", workflow.NeedsHuman: "needs-human", workflow.ReadyForMerge: "done"}[target]
 	if label == "" || item.Submission == nil {
 		return fmt.Errorf("invalid review target or missing Submission")
+	}
+	itemNumber, submissionNumber, err := githubImplementationNumbers(item)
+	if err != nil {
+		return err
 	}
 	if err := guard(); err != nil {
 		return err
 	}
 	if item.Synchronization && target == workflow.Rework {
-		if err := b.publishImplementationMetadata(ctx, repository, item.Number, implementationMetadata{SynchronizationTarget: item.TargetSnapshot, TargetBranch: item.TargetBranch}); err != nil {
+		if err := b.publishImplementationMetadata(ctx, repository, itemNumber, implementationMetadata{SynchronizationTarget: item.TargetSnapshot, TargetBranch: item.TargetBranch}); err != nil {
 			return err
 		}
-		if err := b.implementationLabelMutation(ctx, repository, item.Submission.Number, []string{"sync"}, nil, guard); err != nil {
+		if err := b.implementationLabelMutation(ctx, repository, submissionNumber, []string{"sync"}, nil, guard); err != nil {
 			return err
 		}
 	}
 	if target == workflow.NeedsHuman {
-		if err := b.publishImplementationMetadata(ctx, repository, item.Number, implementationMetadata{ResumeState: item.ResumeState}); err != nil {
+		if err := b.publishImplementationMetadata(ctx, repository, itemNumber, implementationMetadata{ResumeState: item.ResumeState}); err != nil {
 			return err
 		}
 	}
-	if err := b.implementationLabelMutation(ctx, repository, item.Submission.Number, []string{label}, nil, guard); err != nil {
+	if err := b.implementationLabelMutation(ctx, repository, submissionNumber, []string{label}, nil, guard); err != nil {
 		return err
 	}
 	// Keep the target overlap and Claim until source cleanup is observed.
 	if target != workflow.NeedsHuman {
-		if err := b.implementationLabelMutation(ctx, repository, item.Number, nil, []string{"needs-human"}, guard); err != nil {
+		if err := b.implementationLabelMutation(ctx, repository, itemNumber, nil, []string{"needs-human"}, guard); err != nil {
 			return err
 		}
 	}
@@ -46,16 +52,20 @@ func (b *GitHubBackend) CompleteReview(ctx context.Context, repository workflow.
 	if target != workflow.ReadyForMerge {
 		remove = append(remove, "done")
 	}
-	return b.implementationLabelMutation(ctx, repository, item.Submission.Number, nil, append(remove, "wip"), guard)
+	return b.implementationLabelMutation(ctx, repository, submissionNumber, nil, append(remove, "wip"), guard)
 }
 
-func (b *GitHubBackend) ReviewSubmission(ctx context.Context, repository workflow.RepositoryID, number int) (workflow.Submission, error) {
+func (b *GitHubBackend) ReviewSubmission(ctx context.Context, repository github.RepositoryID, id workflow.SubmissionID) (workflow.Submission, error) {
+	number, err := githubIssueNumber(workflow.WorkItemID(id))
+	if err != nil {
+		return workflow.Submission{}, err
+	}
 	var pull githubPull
 	if err := b.request(ctx, http.MethodGet, b.repositoryPath(repository)+fmt.Sprintf("/pulls/%d", number), nil, &pull); err != nil {
 		return workflow.Submission{}, err
 	}
 	state, claimed, _ := implementationLabels(pull.githubIssue)
-	result := workflow.Submission{Number: pull.Number, Head: pull.Head.SHA, Base: pull.Base.Ref, Body: pull.Body, Draft: pull.Draft, State: state, Claimed: claimed, Merged: pull.Merged || pull.MergedAt != "", Mergeability: "unknown"}
+	result := workflow.Submission{ID: workflow.SubmissionID(strconv.Itoa(pull.Number)), Head: pull.Head.SHA, Base: pull.Base.Ref, Body: pull.Body, Draft: pull.Draft, State: state, Claimed: claimed, Merged: pull.Merged || pull.MergedAt != "", Mergeability: "unknown"}
 	if pull.Mergeable != nil {
 		result.Mergeability = "conflicting"
 		if *pull.Mergeable {
@@ -136,18 +146,25 @@ func (b *GitHubBackend) ReviewSubmission(ctx context.Context, repository workflo
 	return result, nil
 }
 
-func (b *GitHubBackend) PublishReview(ctx context.Context, repository workflow.RepositoryID, item workflow.ImplementationItem, comments []skilldist.ReviewComment, guard func() error) error {
+func (b *GitHubBackend) PublishReview(ctx context.Context, repository github.RepositoryID, item workflow.ImplementationItem, comments []skilldist.ReviewComment, guard func() error) error {
+	if item.Submission == nil {
+		return fmt.Errorf("review requires a Submission")
+	}
+	number, err := githubIssueNumber(workflow.WorkItemID(item.Submission.ID))
+	if err != nil {
+		return err
+	}
 	for _, comment := range comments {
 		if err := guard(); err != nil {
 			return err
 		}
 		if comment.Path == "" {
-			if err := b.implementationComment(ctx, repository, item.Submission.Number, comment.Body, false); err != nil {
+			if err := b.implementationComment(ctx, repository, number, comment.Body, false); err != nil {
 				return err
 			}
 			continue
 		}
-		stream := fmt.Sprintf("/pulls/%d/comments", item.Submission.Number)
+		stream := fmt.Sprintf("/pulls/%d/comments", number)
 		published := func() (bool, error) {
 			current, err := b.implementationComments(ctx, repository, stream)
 			for _, c := range current {
