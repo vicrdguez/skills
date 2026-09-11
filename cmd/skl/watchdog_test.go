@@ -152,14 +152,16 @@ func TestWatchdogPassAcceptsPushedDebtMarkerHead(t *testing.T) {
 	runGit(t, root, "rm", "-r", ".changes/widget")
 	runGit(t, root, "commit", "-m", "retire")
 	reviewed := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Submission: &workflow.Submission{ID: "11", Head: reviewed, Base: "main", Mergeability: "mergeable"}}}, remoteHeads: map[string]string{"widget": reviewed}}
+	dispatch := watchdogCLI(t, root, b, "next")
 	if err := os.WriteFile(filepath.Join(root, "debt.go"), []byte("package widget\n// DEBT(#11/W1): retained note\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	runGit(t, root, "add", "debt.go")
 	runGit(t, root, "commit", "-m", "record debt")
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
-	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Claimed: true, Submission: &workflow.Submission{ID: "11", Head: head, ReviewedHead: reviewed, Base: "main", Mergeability: "mergeable"}}}, remoteHeads: map[string]string{"widget": reviewed}}
-	summary := filepath.Join(t.TempDir(), "summary.md")
+	b.work[0].Submission.Head = head
+	summary := filepath.Join(dispatch.Packet.Facts.Watchdog.ResultDirectory, "summary.md")
 	os.WriteFile(summary, []byte("opaque pass"), 0600)
 	args := []string{"submit", "--item", "7", "--reviewed-head", reviewed, "--head", head, "--verdict", "pass", "--summary", summary, "--body", summary}
 	if got := watchdogCLI(t, root, b, args...); got.Status != "fix_required" || !b.work[0].Claimed {
@@ -169,6 +171,11 @@ func TestWatchdogPassAcceptsPushedDebtMarkerHead(t *testing.T) {
 	got := watchdogCLI(t, root, b, args...)
 	if got.Status != "ready_for_merge" || got.Head != head {
 		t.Fatalf("post-marker pass: %#v", got)
+	}
+	reference := strings.Trim(strings.Fields(dispatch.ContinuationCommand)[4], "'")
+	continued := watchdogCLI(t, root, b, "next", "--after", reference)
+	if continued.Status != "no_work" || continued.PreviousHandoff == nil || continued.PreviousHandoff.Outcome != workflow.ReadyForMerge {
+		t.Fatalf("post-marker continuation: %#v", continued)
 	}
 }
 
@@ -416,8 +423,9 @@ func TestWatchdogResumesFixedClaim(t *testing.T) {
 	runGit(t, root, "rm", "-r", ".changes/widget")
 	runGit(t, root, "commit", "-m", "retire")
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	runGit(t, root, "remote", "rename", "origin", "upstream")
 	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Claimed: true, Submission: &workflow.Submission{ID: "11", Head: head, ReviewedHead: head}}, {ID: "1", State: workflow.AwaitingReview}}}
-	got := watchdogCLI(t, root, b, "resume", "--item", "7")
+	got := watchdogCLI(t, root, b, "resume", "--item", "7", "--remote", "upstream")
 	if got.Status != "work_available" || got.Packet.Facts.Watchdog.ReviewedHead != head || b.work[1].Claimed || !strings.Contains(got.WorkerCommand, "skl watchdog resume --item 7") || !strings.Contains(got.ContinuationCommand, "skl watchdog next --after '") {
 		t.Fatalf("resume: %#v", got)
 	}
@@ -515,6 +523,28 @@ func TestWatchdogContinuationVerifiesItsCompletedRound(t *testing.T) {
 	continued := watchdogCLI(t, root, b, "next", "--after", reference)
 	if continued.Status != "no_work" || continued.PreviousHandoff == nil || continued.PreviousHandoff.Number != 7 || continued.PreviousHandoff.Outcome != workflow.Rework {
 		t.Fatalf("continuation: %#v", continued)
+	}
+}
+
+func TestEarlierWatchdogCompletionCannotAuthorizeLaterEqualHeadRound(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "widget")
+	runGit(t, root, "rm", "-r", ".changes/widget")
+	runGit(t, root, "commit", "-m", "retire")
+	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Submission: &workflow.Submission{ID: "11", Head: head}}}, remoteHeads: map[string]string{"widget": head}}
+	first := watchdogCLI(t, root, b, "next")
+	summary := filepath.Join(first.Packet.Facts.Watchdog.ResultDirectory, "summary.md")
+	os.WriteFile(summary, []byte("W1 BLOCK"), 0600)
+	watchdogCLI(t, root, b, "submit", "--item", "7", "--reviewed-head", head, "--verdict", "rework", "--summary", summary)
+	b.work[0].State, b.work[0].Claimed = workflow.AwaitingReview, false
+	b.work[0].Submission.State, b.work[0].Submission.Claimed = workflow.AwaitingReview, false
+	b.work[0].Submission.Head, b.work[0].Submission.ReviewedHead = head, ""
+	second := watchdogCLI(t, root, b, "next")
+	reference := strings.Trim(strings.Fields(second.ContinuationCommand)[4], "'")
+	got := watchdogCLI(t, root, b, "next", "--after", reference)
+	if got.Status != "fix_required" || got.PreviousHandoff != nil || !b.work[0].Claimed {
+		t.Fatalf("earlier Watchdog receipt authorized equal-head round: %#v %#v", got, b.rounds["7"])
 	}
 }
 

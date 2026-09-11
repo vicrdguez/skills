@@ -471,6 +471,33 @@ func TestGitHubDispatchRoundsRejectUntrustedAndConflictingEvidence(t *testing.T)
 	}
 }
 
+func TestGitHubDispatchRoundWriteUncertaintyStopsWithoutReplay(t *testing.T) {
+	for _, mode := range []string{"unapplied", "readback unavailable"} {
+		t.Run(mode, func(t *testing.T) {
+			reads, writes := 0, 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodPost {
+					writes++
+					http.Error(w, "write response lost", http.StatusInternalServerError)
+					return
+				}
+				reads++
+				if mode == "readback unavailable" && reads > 1 {
+					http.Error(w, "observation unavailable", http.StatusServiceUnavailable)
+					return
+				}
+				json.NewEncoder(w).Encode([]any{})
+			}))
+			defer server.Close()
+			b := NewGitHubBackend(server.URL, "token", server.Client())
+			round := workflow.DispatchRound{ID: "round", Lane: workflow.ImplementLane, Item: "7", Obligation: "fixed", Directory: "skl-implement-fixed"}
+			if err := b.RecordDispatchRound(context.Background(), github.RepositoryID{Owner: "acme", Name: "widgets"}, round); err == nil || writes != 1 || reads != 2 {
+				t.Fatalf("uncertain write replayed or passed: err=%v reads=%d writes=%d", err, reads, writes)
+			}
+		})
+	}
+}
+
 func TestGitHubImplementationRejectsForeignAttachmentsAndConflictingMetadata(t *testing.T) {
 	for _, kind := range []string{"fork", "untrusted metadata", "conflicting metadata"} {
 		t.Run(kind, func(t *testing.T) {

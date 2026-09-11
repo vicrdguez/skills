@@ -60,6 +60,7 @@ type dispatchReference struct {
 	Repository string       `json:"repository"`
 	Lane       DispatchLane `json:"lane"`
 	Item       WorkItemID   `json:"item"`
+	Submission SubmissionID `json:"submission,omitempty"`
 	Round      string       `json:"round"`
 }
 
@@ -72,7 +73,7 @@ func newDispatchID() (string, error) {
 }
 
 func encodeDispatchReference(repository github.RepositoryID, round DispatchRound) (string, error) {
-	data, err := json.Marshal(dispatchReference{Version: 1, Owner: repository.Owner, Repository: repository.Name, Lane: round.Lane, Item: round.Item, Round: round.ID})
+	data, err := json.Marshal(dispatchReference{Version: 1, Owner: repository.Owner, Repository: repository.Name, Lane: round.Lane, Item: round.Item, Submission: round.Submission, Round: round.ID})
 	return base64.RawURLEncoding.EncodeToString(data), err
 }
 
@@ -283,7 +284,7 @@ func VerifyDispatch(ctx context.Context, root, remote string, lane DispatchLane,
 			found = &copy
 		}
 	}
-	if found == nil || found.Item != decoded.Item || found.Lane != lane {
+	if found == nil || found.Item != decoded.Item || found.Lane != lane || found.Submission != decoded.Submission {
 		return handoff, Refuse("dispatch round is unknown or its durable binding contradicts the reference")
 	}
 	handoff.Outcome = found.Outcome

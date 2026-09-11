@@ -651,9 +651,10 @@ func TestImplementPinsTargetAndBundlesInstructions(t *testing.T) {
 func TestImplementDispatchSuppliesRootBoundWorkerAndContinuationCommands(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
+	runGit(t, root, "remote", "rename", "origin", "upstream")
 	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}}
 
-	start := implementCLI(t, root, b, "next", "--remote", "origin")
+	start := implementCLI(t, root, b, "next", "--remote", "upstream")
 	if start.Status != "work_available" || start.WorkerCommand == "" || start.ContinuationCommand == "" {
 		t.Fatalf("dispatch commands: %#v", start)
 	}
@@ -661,12 +662,12 @@ func TestImplementDispatchSuppliesRootBoundWorkerAndContinuationCommands(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, wanted := range []string{"skl implement resume", "--item 7", "--repo '" + physicalRoot + "'", "--remote 'origin'"} {
+	for _, wanted := range []string{"skl implement resume", "--item 7", "--repo '" + physicalRoot + "'", "--remote 'upstream'"} {
 		if !strings.Contains(start.WorkerCommand, wanted) {
 			t.Fatalf("worker command %q lacks %q", start.WorkerCommand, wanted)
 		}
 	}
-	if !strings.Contains(start.ContinuationCommand, "skl implement next --after '") || !strings.Contains(start.ContinuationCommand, "--repo '") || !strings.Contains(start.ContinuationCommand, "--remote 'origin'") {
+	if !strings.Contains(start.ContinuationCommand, "skl implement next --after '") || !strings.Contains(start.ContinuationCommand, "--repo '") || !strings.Contains(start.ContinuationCommand, "--remote 'upstream'") {
 		t.Fatalf("continuation command = %q", start.ContinuationCommand)
 	}
 	document := filepath.Join(start.Packet.Facts.Implementation.ResultDirectory, "decision.md")
@@ -676,7 +677,7 @@ func TestImplementDispatchSuppliesRootBoundWorkerAndContinuationCommands(t *test
 	originalTarget := start.Packet.Facts.Implementation.TargetSnapshot
 	runGit(t, root, "switch", "main")
 	runGit(t, root, "commit", "--allow-empty", "-m", "target advanced after dispatch")
-	runGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
+	runGit(t, root, "update-ref", "refs/remotes/upstream/main", "HEAD")
 	runGit(t, root, "switch", "widget")
 
 	resumed := returnedCLI(t, b, start.WorkerCommand)
@@ -819,26 +820,46 @@ func TestContinuationReferencesFailBeforeSelection(t *testing.T) {
 
 	start := implementCLI(t, root, b, "next")
 	reference := strings.Trim(strings.Fields(start.ContinuationCommand)[4], "'")
+	round := b.rounds["7"][0]
 	b.rounds["7"] = nil
 	got := implementCLI(t, root, b, "next", "--after", reference)
 	if got.Status != "fix_required" || got.Item == nil || got.Item.Number != 7 {
 		t.Fatalf("unknown round = %#v", got)
 	}
+	b.rounds["7"] = []workflow.DispatchRound{round}
+	if got := watchdogCLI(t, root, b, "next", "--after", reference); got.Status != "fix_required" || !strings.Contains(got.Reason, "another workflow lane") {
+		t.Fatalf("cross-lane reference = %#v", got)
+	}
+	decoded, _ := base64.RawURLEncoding.DecodeString(reference)
+	var binding map[string]any
+	json.Unmarshal(decoded, &binding)
+	binding["submission"] = "11"
+	changed, _ := json.Marshal(binding)
+	if got := implementCLI(t, root, b, "next", "--after", base64.RawURLEncoding.EncodeToString(changed)); got.Status != "fix_required" || !strings.Contains(got.Reason, "binding") {
+		t.Fatalf("contradictory Submission binding = %#v", got)
+	}
+	runGit(t, root, "remote", "set-url", "origin", "https://github.com/other/widgets.git")
+	if got := implementCLI(t, root, b, "next", "--after", reference); got.Status != "fix_required" || !strings.Contains(got.Reason, "another repository") {
+		t.Fatalf("cross-repository reference = %#v", got)
+	}
 }
 
 func TestContinuationUsesFreshGitHubRoundEvidence(t *testing.T) {
-	var comments []map[string]any
+	comments := make(map[int][]map[string]any)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets")
-		switch path {
-		case "/issues/7/comments":
+		var number int
+		if _, err := fmt.Sscanf(path, "/issues/%d/comments", &number); err == nil {
 			if r.Method == http.MethodPost {
 				var payload map[string]any
 				json.NewDecoder(r.Body).Decode(&payload)
 				payload["author_association"] = "OWNER"
-				comments = append(comments, payload)
+				comments[number] = append(comments[number], payload)
 			}
-			json.NewEncoder(w).Encode(comments)
+			json.NewEncoder(w).Encode(comments[number])
+			return
+		}
+		switch path {
 		case "/issues", "/pulls":
 			json.NewEncoder(w).Encode([]any{})
 		default:
@@ -847,28 +868,36 @@ func TestContinuationUsesFreshGitHubRoundEvidence(t *testing.T) {
 	}))
 	defer server.Close()
 	repo := github.RepositoryID{Owner: "acme", Name: "widgets"}
-	backend := setup.NewGitHubBackend(server.URL, "token", server.Client())
-	round := workflow.DispatchRound{ID: "durable-round", Lane: workflow.ImplementLane, Item: "7", Obligation: "fixed", Directory: "skl-implement-fixed"}
-	if err := backend.RecordDispatchRound(t.Context(), repo, round); err != nil {
-		t.Fatal(err)
-	}
-	round.Outcome, round.Head, round.Released = workflow.AwaitingReview, "head", true
-	if err := backend.RecordDispatchRound(t.Context(), repo, round); err != nil {
-		t.Fatal(err)
-	}
-	referenceJSON, _ := json.Marshal(map[string]any{"v": 1, "owner": "acme", "repository": "widgets", "lane": "implement", "item": "7", "round": "durable-round"})
-	reference := base64.RawURLEncoding.EncodeToString(referenceJSON)
 	root := proposalRepository(t)
-	var output bytes.Buffer
-	app := newApp(func(github.RepositoryID) (setup.Backend, error) {
-		return setup.NewGitHubBackend(server.URL, "token", server.Client()), nil
-	}, bytes.NewReader(nil), &output, &output)
-	if err := app.Run([]string{"skl", "implement", "next", "--repo", root, "--after", reference}); err != nil {
-		t.Fatal(err)
-	}
-	var got setup.ImplementationOutput
-	if err := json.Unmarshal(output.Bytes(), &got); err != nil || got.Status != "no_work" || got.PreviousHandoff == nil || got.PreviousHandoff.Number != 7 || got.PreviousHandoff.Outcome != workflow.AwaitingReview {
-		t.Fatalf("fresh HTTP continuation = %#v, %v", got, err)
+	for _, tc := range []struct {
+		lane       string
+		item       workflow.WorkItemID
+		submission workflow.SubmissionID
+		outcome    workflow.State
+	}{{"implement", "7", "", workflow.AwaitingReview}, {"watchdog", "8", "11", workflow.ReadyForMerge}} {
+		backend := setup.NewGitHubBackend(server.URL, "token", server.Client())
+		round := workflow.DispatchRound{ID: "durable-" + tc.lane, Lane: workflow.DispatchLane(tc.lane), Item: tc.item, Submission: tc.submission, Obligation: "fixed", Directory: "skl-" + tc.lane + "-fixed"}
+		if err := backend.RecordDispatchRound(t.Context(), repo, round); err != nil {
+			t.Fatal(err)
+		}
+		round.Outcome, round.Head, round.Released = tc.outcome, "head", true
+		if err := backend.RecordDispatchRound(t.Context(), repo, round); err != nil {
+			t.Fatal(err)
+		}
+		referenceJSON, _ := json.Marshal(map[string]any{"v": 1, "owner": "acme", "repository": "widgets", "lane": tc.lane, "item": tc.item, "round": round.ID, "submission": tc.submission})
+		reference := base64.RawURLEncoding.EncodeToString(referenceJSON)
+		var output bytes.Buffer
+		app := newApp(func(github.RepositoryID) (setup.Backend, error) {
+			return setup.NewGitHubBackend(server.URL, "token", server.Client()), nil
+		}, bytes.NewReader(nil), &output, &output)
+		if err := app.Run([]string{"skl", tc.lane, "next", "--repo", root, "--after", reference}); err != nil {
+			t.Fatal(err)
+		}
+		var got setup.ImplementationOutput
+		want, _ := strconv.Atoi(string(tc.item))
+		if err := json.Unmarshal(output.Bytes(), &got); err != nil || got.Status != "no_work" || got.PreviousHandoff == nil || got.PreviousHandoff.Number != want || got.PreviousHandoff.Outcome != tc.outcome {
+			t.Fatalf("fresh %s HTTP continuation = %#v, %v", tc.lane, got, err)
+		}
 	}
 }
 
