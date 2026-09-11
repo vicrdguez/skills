@@ -112,7 +112,7 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	if err := guard(); err != nil {
 		return ImplementationOutcome{}, err
 	}
-	history, err := InspectLedger(root, head, item.Branch)
+	history, err := InspectLedger(root, head, item.Branch, ArtifactEndpoints{}, RequireRetiredArtifacts)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}

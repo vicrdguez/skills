@@ -136,7 +136,11 @@ func InspectImplementation(ctx context.Context, root, remote string, id WorkItem
 		if err != nil {
 			return ImplementationOutcome{}, err
 		}
-		history, err := InspectLedger(root, head, item.Branch)
+		policy := InspectArtifacts
+		if item.State == Rework || item.State == AwaitingReview || item.State == ReadyForMerge {
+			policy = RequireRetiredArtifacts
+		}
+		history, err := InspectLedger(root, head, item.Branch, ArtifactEndpoints{}, policy)
 		return ImplementationOutcome{Status: "inspected", Item: &item, Head: head, Ledger: &history}, err
 	}
 	return ImplementationOutcome{Status: "fix_required", Reason: "Work Item unavailable; supply its explicit stable --item identity"}, nil
@@ -256,7 +260,11 @@ func prepareImplementationStart(ctx context.Context, root, remote string, reposi
 	if err != nil {
 		return refuse("branch unavailable; fetch the published branch and resume")
 	}
-	history, err := InspectLedger(root, head, item.Branch)
+	policy := InspectArtifacts
+	if item.State == Rework {
+		policy = RequireRetiredArtifacts
+	}
+	history, err := InspectLedger(root, head, item.Branch, ArtifactEndpoints{}, policy)
 	if err != nil {
 		return item, ImplementationOutcome{}, err
 	}
@@ -343,7 +351,11 @@ func implementationPacket(root, remote string, item ImplementationItem) (Impleme
 		if headErr != nil {
 			return ImplementationOutcome{Status: "fix_required", Reason: "branch unavailable; fetch and create the conventional worktree before resuming"}, nil
 		}
-		history, err = InspectLedger(root, head, item.Branch)
+		policy := InspectArtifacts
+		if item.State == Rework {
+			policy = RequireRetiredArtifacts
+		}
+		history, err = InspectLedger(root, head, item.Branch, ArtifactEndpoints{}, policy)
 		if err != nil {
 			return ImplementationOutcome{}, err
 		}

@@ -38,7 +38,7 @@ func StartWatchdog(ctx context.Context, root, remote string, id WorkItemID, back
 		if item.Submission.ReviewedHead != "" && item.Submission.ReviewedHead != item.Submission.Head && item.Claimed {
 			return ImplementationOutcome{Status: "fix_required", Reason: "Submission moved after Claim; restore the fixed reviewed head before resuming"}, nil
 		}
-		history, err := InspectLedger(root, item.Submission.Head, item.Branch)
+		history, err := InspectLedger(root, item.Submission.Head, item.Branch, ArtifactEndpoints{}, RequireRetiredArtifacts)
 		if err != nil {
 			return ImplementationOutcome{}, err
 		}
@@ -60,11 +60,11 @@ func StartWatchdog(ctx context.Context, root, remote string, id WorkItemID, back
 				continue
 			}
 			facts := skilldist.WatchdogFacts{Branch: item.Branch, ReviewedHead: submission.Head, ArtifactBaseline: history.Baseline, ArtifactCompletion: history.Completion, AuditBody: submission.Body, Comments: submission.Comments}
-			facts.BaselineFiles, err = ledgerFiles(root, history.Baseline, ".changes/"+item.Branch)
+			facts.BaselineFiles, err = endpointFiles(root, history.Baseline, item.Branch)
 			if err != nil {
 				return ImplementationOutcome{}, err
 			}
-			facts.CompletionFiles, err = ledgerFiles(root, history.Completion, ".changes/"+item.Branch)
+			facts.CompletionFiles, err = endpointFiles(root, history.Completion, item.Branch)
 			if err != nil {
 				return ImplementationOutcome{}, err
 			}

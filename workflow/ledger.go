@@ -17,89 +17,125 @@ type LedgerHistory struct {
 	Violations []string
 }
 
-// InspectLedger resolves immutable snapshots from first-parent trees, not prose.
-func InspectLedger(root, ref, slug string) (LedgerHistory, error) {
+type ArtifactEndpoints struct {
+	Baseline   string
+	Completion string
+}
+
+type LedgerPolicy int
+
+const (
+	InspectArtifacts LedgerPolicy = iota
+	RequireRetiredArtifacts
+)
+
+// InspectLedger resolves slice markers and validates only accepted endpoint snapshots.
+func InspectLedger(root, ref, slug string, explicit ArtifactEndpoints, policy LedgerPolicy) (LedgerHistory, error) {
 	result := LedgerHistory{Phase: "absent"}
 	if slug == "" || strings.ContainsAny(slug, "/\\") || slug == "." || slug == ".." {
 		result.Violations = []string{"invalid ledger slug; use the conventional branch identity"}
 		return result, nil
 	}
-	commits, err := git(root, "rev-list", "--first-parent", "--reverse", ref)
+	markers, err := artifactMarkers(root, ref, slug)
 	if err != nil {
 		return result, err
 	}
-	path := ".changes/" + slug
-	previous := ""
-	present := false
-	var previousFiles map[string]string
-	for _, commit := range strings.Fields(commits) {
-		parents, err := git(root, "rev-list", "--parents", "-n", "1", commit)
-		if err != nil {
-			return result, err
-		}
-		if len(strings.Fields(parents)) > 2 {
-			currentTree, _ := git(root, "rev-parse", "--verify", commit+":"+path)
-			parentTree, _ := git(root, "rev-parse", "--verify", previous+":"+path)
-			if currentTree != parentTree {
-				result.Violations = append(result.Violations, "merge changes ledger relative to first parent at "+commit)
-			}
-		}
-		now := gitOK(root, "cat-file", "-e", commit+":"+path) == nil
-		var files map[string]string
-		if now {
-			files, err = ledgerFiles(root, commit, path)
-			if err != nil {
-				var violation *InvariantError
-				if errors.As(err, &violation) {
-					result.Violations = append(result.Violations, violation.Reason)
-					slices.Sort(result.Violations)
-					return result, nil
-				}
-				return result, err
-			}
-			for name, contents := range files {
-				if present {
-					old, exists := previousFiles[name]
-					if !exists || !permittedTicks(old, contents) {
-						result.Violations = append(result.Violations, "frozen ledger changed at "+commit+":"+name)
-					}
-				}
-				result.Violations = append(result.Violations, ledgerBoxes(contents, false, commit+":"+name)...)
-			}
-			if present && len(files) != len(previousFiles) {
-				result.Violations = append(result.Violations, "frozen ledger paths changed at "+commit)
-			}
-		}
-		if now && !present {
-			if result.Baseline != "" {
-				result.Violations = append(result.Violations, "ledger is introduced more than once at "+commit)
-			} else {
-				result.Baseline = commit
-			}
-			result.Phase = "present"
-			for _, required := range []string{"intent.md", "behavior.md"} {
-				if _, ok := files[path+"/"+required]; !ok {
-					result.Violations = append(result.Violations, "ledger misses "+required+" at Artifact Baseline")
-				}
-			}
-		}
-		if !now && present {
-			result.Completion, result.Deletion, result.Phase = previous, commit, "retired"
-			for name, contents := range previousFiles {
-				result.Violations = append(result.Violations, ledgerBoxes(contents, true, previous+":"+name)...)
-			}
-		}
-		previous, present = commit, now
-		previousFiles = files
-	}
+	result.Baseline = resolveMarker(&result, slug, "baseline", markers["baseline"], explicit.Baseline)
+	result.Completion = resolveMarker(&result, slug, "completion", markers["completion"], explicit.Completion)
 	if result.Baseline == "" {
-		result.Violations = append(result.Violations, fmt.Sprintf("ledger is missing at %s", path))
+		result.Violations = append(result.Violations, "slice "+slug+" is missing [baseline] "+slug+" marker")
+	}
+	if policy == RequireRetiredArtifacts && result.Completion == "" {
+		result.Violations = append(result.Violations, "slice "+slug+" is missing [completion] "+slug+" marker")
+	}
+	if len(result.Violations) != 0 {
+		slices.Sort(result.Violations)
+		return result, nil
+	}
+
+	baseline, err := endpointFiles(root, result.Baseline, slug)
+	if err != nil {
+		return endpointViolation(result, err)
+	}
+	result.Violations = append(result.Violations, requiredArtifacts(baseline, result.Baseline)...)
+	for name, contents := range baseline {
+		result.Violations = append(result.Violations, ledgerBoxes(contents, false, result.Baseline+":"+name)...)
+	}
+
+	if result.Completion != "" {
+		if gitOK(root, "merge-base", "--is-ancestor", result.Baseline, result.Completion) != nil {
+			result.Violations = append(result.Violations, "Artifact Baseline "+result.Baseline+" is not an ancestor of Completion "+result.Completion)
+		} else {
+			completion, err := endpointFiles(root, result.Completion, slug)
+			if err != nil {
+				return endpointViolation(result, err)
+			}
+			result.Violations = append(result.Violations, compareEndpoints(baseline, completion, result.Baseline, result.Completion)...)
+		}
+	}
+
+	present := gitOK(root, "cat-file", "-e", ref+":.changes/"+slug) == nil
+	if present {
+		result.Phase = "present"
+	} else if result.Completion != "" {
+		result.Phase = "retired"
+	}
+	if policy == RequireRetiredArtifacts && present {
+		result.Violations = append(result.Violations, "ledger .changes/"+slug+" must be absent at review head "+ref)
 	}
 	slices.Sort(result.Violations)
 	return result, nil
 }
 
-func ledgerFiles(root, commit, path string) (map[string]string, error) {
+func artifactMarkers(root, ref, slug string) (map[string][]string, error) {
+	output, err := exec.Command("git", "-C", root, "log", "--format=%H%x00%s%x00", ref).Output()
+	if err != nil {
+		return nil, err
+	}
+	markers := map[string][]string{"baseline": {}, "completion": {}}
+	fields := strings.Split(strings.TrimSuffix(string(output), "\n"), "\x00")
+	for i := 0; i+1 < len(fields); i += 2 {
+		sha, subject := strings.TrimSpace(fields[i]), fields[i+1]
+		for _, kind := range []string{"baseline", "completion"} {
+			prefix := "[" + kind + "] " + slug
+			if subject == prefix || strings.HasPrefix(subject, prefix+" ") {
+				markers[kind] = append(markers[kind], sha)
+			}
+		}
+	}
+	return markers, nil
+}
+
+func resolveMarker(result *LedgerHistory, slug, kind string, markers []string, explicit string) string {
+	if len(markers) > 1 {
+		result.Violations = append(result.Violations, fmt.Sprintf("slice %s has ambiguous [%s] %s markers: %s", slug, kind, slug, strings.Join(markers, ", ")))
+		return ""
+	}
+	if len(markers) == 1 {
+		return markers[0]
+	}
+	return explicit
+}
+
+func endpointViolation(result LedgerHistory, err error) (LedgerHistory, error) {
+	var violation *InvariantError
+	if errors.As(err, &violation) {
+		result.Violations = append(result.Violations, violation.Reason)
+		slices.Sort(result.Violations)
+		return result, nil
+	}
+	return result, err
+}
+
+func endpointFiles(root, commit, slug string) (map[string]string, error) {
+	path := ".changes/" + slug
+	kind, err := git(root, "cat-file", "-t", commit+":"+path)
+	if err != nil {
+		return nil, Refuse("artifact endpoint " + commit + " is missing ledger directory " + path)
+	}
+	if kind != "tree" {
+		return nil, Refuse("artifact endpoint " + commit + " has invalid ledger shape at " + path + ": expected directory")
+	}
 	entries, err := exec.Command("git", "-C", root, "ls-tree", "-rz", commit, "--", path).Output()
 	if err != nil {
 		return nil, err
@@ -112,7 +148,7 @@ func ledgerFiles(root, commit, path string) (map[string]string, error) {
 		metadata, name, ok := strings.Cut(entry, "\t")
 		fields := strings.Fields(metadata)
 		if !ok || len(fields) != 3 || fields[0] != "100644" || fields[1] != "blob" {
-			return nil, Refuse(fmt.Sprintf("ledger must contain regular non-executable files at %s: %s; restore the frozen file mode", commit, entry))
+			return nil, Refuse(fmt.Sprintf("artifact endpoint %s requires mode 100644 blob at %s", commit, name))
 		}
 		contents, err := exec.Command("git", "-C", root, "cat-file", "blob", fields[2]).Output()
 		if err != nil {
@@ -121,6 +157,38 @@ func ledgerFiles(root, commit, path string) (map[string]string, error) {
 		files[name] = string(contents)
 	}
 	return files, nil
+}
+
+func requiredArtifacts(files map[string]string, endpoint string) []string {
+	var violations []string
+	for _, name := range []string{"intent.md", "behavior.md"} {
+		found := false
+		for path := range files {
+			found = found || strings.HasSuffix(path, "/"+name)
+		}
+		if !found {
+			violations = append(violations, "ledger misses "+name+" at Artifact Baseline "+endpoint)
+		}
+	}
+	return violations
+}
+
+func compareEndpoints(baseline, completion map[string]string, baselineSHA, completionSHA string) []string {
+	if len(baseline) != len(completion) {
+		return []string{"artifact path set differs between Baseline " + baselineSHA + " and Completion " + completionSHA}
+	}
+	var violations []string
+	for name, before := range baseline {
+		after, ok := completion[name]
+		if !ok {
+			return []string{"artifact path set differs between Baseline " + baselineSHA + " and Completion " + completionSHA + ": " + name}
+		}
+		if !permittedTicks(before, after) {
+			violations = append(violations, "artifact content changed outside permitted completion ticks at "+completionSHA+":"+name)
+		}
+		violations = append(violations, ledgerBoxes(after, true, completionSHA+":"+name)...)
+	}
+	return violations
 }
 
 var ledgerCheckbox = regexp.MustCompile(`^(\s*(?:[-*+]|[0-9]+[.)])\s+\[)([ xX])(\].*)$`)

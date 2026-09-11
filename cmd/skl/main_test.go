@@ -286,6 +286,49 @@ func TestSetupAndProposalResolveRepository(t *testing.T) {
 	}
 }
 
+func TestB1PublishAMarkedBaselineBeforeIssueCreation(t *testing.T) {
+	for _, test := range []struct {
+		name, subject, want string
+		extraHead, complete bool
+	}{
+		{"marked baseline", "[baseline] ship-widget", "completed\n", false, true},
+		{"missing marker", "Propose ship-widget", "missing [baseline] ship-widget marker", false, true},
+		{"marker before head", "[baseline] ship-widget", "Artifact Baseline must be the published branch head", true, true},
+		{"incomplete baseline", "[baseline] ship-widget", "ledger misses behavior.md", false, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := proposalRepository(t)
+			runGit(t, root, "switch", "-c", "ship-widget", "main")
+			writeLedger(t, root, "ship-widget", test.complete)
+			runGit(t, root, "add", ".changes/ship-widget")
+			runGit(t, root, "commit", "-m", test.subject)
+			baseline := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+			if test.extraHead {
+				runGit(t, root, "commit", "--allow-empty", "-m", "implementation")
+			}
+			runGit(t, root, "update-ref", "refs/remotes/origin/ship-widget", "HEAD")
+
+			backend := &memoryBackend{}
+			var output bytes.Buffer
+			app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+			err := app.Run([]string{"skl", "propose", "publish", "--repo", root, "--target", "main", "--slice", proposalSliceFlag(t, "ship-widget")})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(output.String(), test.want) {
+				t.Fatalf("output = %q, want %q", &output, test.want)
+			}
+			if test.want == "completed\n" {
+				if len(backend.items) != 1 || backend.items[0].ArtifactBaseline != baseline || backend.items[0].Body != "ship-widget body\n" || !backend.items[0].Ready {
+					t.Fatalf("publication = %#v", backend.items)
+				}
+			} else if len(backend.items) != 0 {
+				t.Fatalf("refusal mutated publication: %#v", backend.items)
+			}
+		})
+	}
+}
+
 func TestPublishExplicitRemoteChecksItsOwnGitEvidence(t *testing.T) {
 	for _, evidence := range []string{"missing target", "target ancestry", "pushed head", "artifact baseline"} {
 		t.Run(evidence, func(t *testing.T) {
@@ -1712,7 +1755,7 @@ func prepareSlice(t *testing.T, root, slug string) string {
 	runGit(t, root, "switch", "-c", slug, "main")
 	writeLedger(t, root, slug, true)
 	runGit(t, root, "add", filepath.Join(".changes", slug))
-	runGit(t, root, "commit", "-m", "Propose "+slug)
+	runGit(t, root, "commit", "-m", "[baseline] "+slug)
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	runGit(t, root, "update-ref", "refs/remotes/origin/"+slug, head)
 	return head
