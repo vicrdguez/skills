@@ -117,6 +117,14 @@ func TestNextWaitNewlyAvailable(t *testing.T) {
 					if err != nil || got.Status != "work_available" || got.Packet == nil || !got.Item.Claimed || b.claims != 1 || b.reads != 3 || time.Since(start) != elapsed || b.repository.Owner != "acme" {
 						t.Fatalf("got %#v, err %v, reads %d claims %d elapsed %s repo %#v", got, err, b.reads, b.claims, time.Since(start), b.repository)
 					}
+					for _, wanted := range []string{"--wait 15m0s", "--poll 30s"} {
+						if options != "--wait" {
+							wanted = map[string]string{"--wait 15m0s": "--wait 2m0s", "--poll 30s": "--poll 5s"}[wanted]
+						}
+						if !strings.Contains(got.ContinuationCommand, wanted) {
+							t.Fatalf("continuation %q lacks effective option %q", got.ContinuationCommand, wanted)
+						}
+					}
 				})
 			})
 		}

@@ -6,9 +6,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/vicrdguez/skills/github"
 )
@@ -41,6 +43,8 @@ type DispatchFacts struct {
 	Lane      DispatchLane
 	Root      string
 	Remote    string
+	Wait      string
+	Poll      string
 }
 
 type CompletedHandoff struct {
@@ -100,6 +104,16 @@ func resultDirectory(prefix, marker, existing string) (string, error) {
 	if err != nil || !info.IsDir() || info.Mode().Perm()&0077 != 0 {
 		return "", errors.New("persisted Result Directory is not a private directory")
 	}
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return "", err
+	}
+	for _, entry := range entries {
+		allowed := entry.Name() == ".skl-result" || marker == "skl.implement/v1\n" && slices.Contains([]string{"submission.md", "decision.md"}, entry.Name()) || marker == "skl.watchdog/v1\n" && slices.Contains([]string{".md", ".json"}, filepath.Ext(entry.Name()))
+		if !allowed || !entry.Type().IsRegular() {
+			return "", errors.New("persisted Result Directory contains unexpected files or symlinks")
+		}
+	}
 	data, err := os.ReadFile(filepath.Join(directory, ".skl-result"))
 	if err != nil || string(data) != marker {
 		return "", errors.New("persisted Result Directory marker is invalid")
@@ -142,14 +156,36 @@ func activeDispatch(rounds []DispatchRound, item ImplementationItem, lane Dispat
 	if active == nil {
 		return nil, nil
 	}
-	wanted, err := dispatchRound(item, lane, filepath.Join(os.TempDir(), active.Directory))
-	if err != nil {
-		return nil, err
+	wantedSubmission := SubmissionID("")
+	if item.Submission != nil && (lane == WatchdogLane || item.State == Rework) {
+		wantedSubmission = item.Submission.ID
 	}
-	if active.Item != wanted.Item || active.Submission != wanted.Submission || active.Obligation != wanted.Obligation {
+	wantedObligation := item.TargetSnapshot
+	if lane == ImplementLane && item.State == Rework && item.Submission != nil {
+		wantedObligation = item.Submission.PreviousReviewedHead
+	} else if lane == WatchdogLane && item.Submission != nil {
+		wantedObligation = item.Submission.ReviewedHead
+	}
+	if active.Item != item.ID || active.Submission != wantedSubmission || active.Obligation != wantedObligation {
 		return nil, Refuse("active dispatch round contradicts the fixed worker obligation")
 	}
 	return active, nil
+}
+
+func RemoveMarkerOnlyResultDirectory(directory, marker string) error {
+	info, err := os.Lstat(directory)
+	if err != nil || !info.IsDir() || info.Mode().Perm()&0077 != 0 || filepath.Dir(directory) != os.TempDir() {
+		return err
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil || len(entries) != 1 || entries[0].Name() != ".skl-result" || !entries[0].Type().IsRegular() {
+		return err
+	}
+	data, err := os.ReadFile(filepath.Join(directory, ".skl-result"))
+	if err != nil || string(data) != marker {
+		return err
+	}
+	return os.RemoveAll(directory)
 }
 
 func prepareDispatch(ctx context.Context, root, remote string, repository github.RepositoryID, item ImplementationItem, lane DispatchLane, resume bool, backend DispatchBackend) (DispatchRound, string, error) {
@@ -202,4 +238,98 @@ func prepareDispatch(ctx context.Context, root, remote string, repository github
 	_ = root
 	_ = remote
 	return *active, reference, nil
+}
+
+func VerifyDispatch(ctx context.Context, root, remote string, lane DispatchLane, reference string, backend DispatchBackend) (CompletedHandoff, error) {
+	data, err := base64.RawURLEncoding.DecodeString(reference)
+	if err != nil {
+		return CompletedHandoff{}, errors.New("--after requires a supported opaque dispatch reference")
+	}
+	var decoded dispatchReference
+	decoder := json.NewDecoder(strings.NewReader(string(data)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&decoded); err != nil || decoded.Version != 1 || decoded.Owner == "" || decoded.Repository == "" || decoded.Item == "" || decoded.Round == "" || decoded.Lane != ImplementLane && decoded.Lane != WatchdogLane {
+		return CompletedHandoff{}, errors.New("--after requires a supported opaque dispatch reference")
+	}
+	handoff := CompletedHandoff{Item: decoded.Item}
+	if decoded.Lane != lane {
+		return handoff, Refuse("dispatch reference belongs to another workflow lane")
+	}
+	remote, err = github.ResolveGitHubRemote(root, remote)
+	if err != nil {
+		return handoff, err
+	}
+	url, err := git(root, "remote", "get-url", remote)
+	if err != nil {
+		return handoff, err
+	}
+	repository, err := github.ParseGitHubRemote(url)
+	if err != nil {
+		return handoff, err
+	}
+	if repository.Owner != decoded.Owner || repository.Name != decoded.Repository {
+		return handoff, Refuse("dispatch reference belongs to another repository")
+	}
+	rounds, err := backend.DispatchRounds(ctx, repository, decoded.Item)
+	if err != nil {
+		return handoff, err
+	}
+	var found *DispatchRound
+	for i := range rounds {
+		if rounds[i].ID == decoded.Round {
+			if found != nil && *found != rounds[i] {
+				return handoff, Refuse("dispatch round has conflicting durable evidence")
+			}
+			copy := rounds[i]
+			found = &copy
+		}
+	}
+	if found == nil || found.Item != decoded.Item || found.Lane != lane {
+		return handoff, Refuse("dispatch round is unknown or its durable binding contradicts the reference")
+	}
+	handoff.Outcome = found.Outcome
+	allowed := lane == ImplementLane && slices.Contains([]State{AwaitingReview, NeedsHuman}, found.Outcome) || lane == WatchdogLane && slices.Contains([]State{ReadyForMerge, Rework, NeedsHuman}, found.Outcome)
+	if !allowed || found.Head == "" {
+		return handoff, Refuse("dispatch handoff is incomplete or has the wrong stage; explicitly inspect and resume the Work Item")
+	}
+	return handoff, nil
+}
+
+func completeDispatch(ctx context.Context, repository github.RepositoryID, item ImplementationItem, lane DispatchLane, outcome State, head string, backend DispatchBackend) error {
+	rounds, err := backend.DispatchRounds(ctx, repository, item.ID)
+	if err != nil {
+		return err
+	}
+	var active *DispatchRound
+	for i := range rounds {
+		if rounds[i].Lane == lane && rounds[i].Outcome == "" {
+			if active != nil {
+				return Refuse("multiple active dispatch rounds prevent completion proof")
+			}
+			copy := rounds[i]
+			active = &copy
+		}
+	}
+	if active == nil { // Legacy explicit handoffs remain supported but cannot authorize continuation.
+		return nil
+	}
+	if active.Item != item.ID || active.Submission != "" && (item.Submission == nil || active.Submission != item.Submission.ID) {
+		return Refuse("active dispatch binding changed before completion proof")
+	}
+	allowed := lane == ImplementLane && slices.Contains([]State{AwaitingReview, NeedsHuman}, outcome) || lane == WatchdogLane && slices.Contains([]State{ReadyForMerge, Rework, NeedsHuman}, outcome)
+	if !allowed {
+		return Refuse(fmt.Sprintf("%s cannot complete a %s dispatch", outcome, lane))
+	}
+	active.Outcome, active.Head = outcome, head
+	if err := backend.RecordDispatchRound(ctx, repository, *active); err != nil {
+		return err
+	}
+	observed, err := backend.DispatchRounds(ctx, repository, item.ID)
+	if err != nil {
+		return err
+	}
+	if !slices.Contains(observed, *active) {
+		return Refuse("completed dispatch evidence was not observed; explicitly inspect the handoff")
+	}
+	return nil
 }

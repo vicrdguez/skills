@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -380,6 +381,93 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 	items, err = b.ImplementationItems(ctx, repo)
 	if err != nil || items[0].State != workflow.NeedsHuman || items[0].Claimed || items[0].ResumeState != workflow.Rework || !items[0].Submission.Draft {
 		t.Fatalf("completed pause = %#v %v", items, err)
+	}
+}
+
+func TestGitHubDispatchRoundsSurvivePaginationAndLostResponses(t *testing.T) {
+	comments := make(map[int][]map[string]any)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var number int
+		if _, err := fmt.Sscanf(strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets"), "/issues/%d/comments", &number); err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method == http.MethodPost {
+			var payload map[string]any
+			json.NewDecoder(r.Body).Decode(&payload)
+			payload["author_association"] = "OWNER"
+			comments[number] = append(comments[number], payload)
+			http.Error(w, "response lost after durable comment", http.StatusInternalServerError)
+			return
+		}
+		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		if page < 1 {
+			page = 1
+		}
+		start := (page - 1) * 100
+		if start >= len(comments[number]) {
+			json.NewEncoder(w).Encode([]any{})
+			return
+		}
+		end := min(start+100, len(comments[number]))
+		json.NewEncoder(w).Encode(comments[number][start:end])
+	}))
+	defer server.Close()
+	repo := github.RepositoryID{Owner: "acme", Name: "widgets"}
+	ctx := context.Background()
+	for _, tc := range []struct {
+		item       workflow.WorkItemID
+		lane       workflow.DispatchLane
+		submission workflow.SubmissionID
+		outcome    workflow.State
+	}{{"7", workflow.ImplementLane, "", workflow.NeedsHuman}, {"8", workflow.WatchdogLane, "11", workflow.ReadyForMerge}} {
+		start := workflow.DispatchRound{ID: "round-" + string(tc.item), Lane: tc.lane, Item: tc.item, Submission: tc.submission, Obligation: "fixed", Directory: "skl-result-fixed"}
+		backend := NewGitHubBackend(server.URL, "token", server.Client())
+		if err := backend.RecordDispatchRound(ctx, repo, start); err != nil {
+			t.Fatal(err)
+		}
+		for range 105 {
+			commentsNumber, _ := strconv.Atoi(string(tc.item))
+			comments[commentsNumber] = append(comments[commentsNumber], map[string]any{"author_association": "OWNER", "body": "unrelated"})
+		}
+		completed := start
+		completed.Outcome, completed.Head = tc.outcome, "head"
+		if err := backend.RecordDispatchRound(ctx, repo, completed); err != nil {
+			t.Fatal(err)
+		}
+		later := start
+		later.ID += "-later"
+		if err := backend.RecordDispatchRound(ctx, repo, later); err != nil {
+			t.Fatal(err)
+		}
+		fresh := NewGitHubBackend(server.URL, "token", server.Client())
+		rounds, err := fresh.DispatchRounds(ctx, repo, tc.item)
+		if err != nil || len(rounds) != 2 || rounds[0] != completed || rounds[1] != later {
+			t.Fatalf("fresh paginated rounds = %#v, %v", rounds, err)
+		}
+	}
+}
+
+func TestGitHubDispatchRoundsRejectUntrustedAndConflictingEvidence(t *testing.T) {
+	trusted := func(round workflow.DispatchRound, association string) map[string]any {
+		payload, _ := json.Marshal(implementationMetadata{Round: &round})
+		return map[string]any{"author_association": association, "body": "<!-- skl.implement/v1\n" + string(payload) + "\n-->"}
+	}
+	base := workflow.DispatchRound{ID: "round", Lane: workflow.ImplementLane, Item: "7", Obligation: "fixed", Directory: "skl-implement-fixed"}
+	comments := []map[string]any{trusted(base, "OWNER"), trusted(workflow.DispatchRound{ID: "forged", Lane: workflow.ImplementLane, Item: "7", Obligation: "fixed", Directory: "skl-implement-forged", Outcome: workflow.AwaitingReview, Head: "head"}, "NONE")}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { json.NewEncoder(w).Encode(comments) }))
+	defer server.Close()
+	b := NewGitHubBackend(server.URL, "token", server.Client())
+	repo := github.RepositoryID{Owner: "acme", Name: "widgets"}
+	rounds, err := b.DispatchRounds(context.Background(), repo, "7")
+	if err != nil || !slices.Equal(rounds, []workflow.DispatchRound{base}) {
+		t.Fatalf("untrusted evidence accepted: %#v, %v", rounds, err)
+	}
+	conflict := base
+	conflict.Obligation = "changed"
+	comments = append(comments, trusted(conflict, "OWNER"))
+	if _, err := b.DispatchRounds(context.Background(), repo, "7"); err == nil {
+		t.Fatal("conflicting trusted evidence accepted")
 	}
 }
 

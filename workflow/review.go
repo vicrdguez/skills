@@ -218,12 +218,21 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 			}
 			for _, c := range current {
 				if c.ID == item.ID && c.Problem == "" && !c.Claimed && c.State == target {
+					if err := completeDispatch(ctx, repository, c, WatchdogLane, target, head, backend); err != nil {
+						return ImplementationOutcome{}, err
+					}
 					return ImplementationOutcome{Status: string(c.State), Item: &c, Head: head}, guard()
 				}
 			}
 			return ImplementationOutcome{}, Refuse("review handoff still incomplete; retain Claim and retry")
 		}
-		return ImplementationOutcome{Status: string(item.State), Item: &item, Head: head}, guard()
+		if err := guard(); err != nil {
+			return ImplementationOutcome{}, err
+		}
+		if err := completeDispatch(ctx, repository, item, WatchdogLane, target, head, backend); err != nil {
+			return ImplementationOutcome{}, err
+		}
+		return ImplementationOutcome{Status: string(item.State), Item: &item, Head: head}, nil
 	}
 	if verdict == "pass" {
 		body, err := os.ReadFile(bodyPath)
@@ -255,6 +264,9 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	}
 	for _, current := range observed {
 		if current.ID == id && current.Problem == "" && current.State == target && !current.Claimed {
+			if err := completeDispatch(ctx, repository, current, WatchdogLane, target, head, backend); err != nil {
+				return ImplementationOutcome{}, err
+			}
 			return ImplementationOutcome{Status: string(target), Item: &current, Head: head}, nil
 		}
 	}

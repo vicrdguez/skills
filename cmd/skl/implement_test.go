@@ -8,6 +8,7 @@ import (
 	"fmt"
 	skilldist "github.com/vicrdguez/skills"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -40,6 +41,12 @@ func (b *implementationMemory) DispatchRounds(_ context.Context, _ github.Reposi
 func (b *implementationMemory) RecordDispatchRound(_ context.Context, _ github.RepositoryID, round workflow.DispatchRound) error {
 	if b.rounds == nil {
 		b.rounds = make(map[workflow.WorkItemID][]workflow.DispatchRound)
+	}
+	for i := range b.rounds[round.Item] {
+		if b.rounds[round.Item][i].ID == round.ID {
+			b.rounds[round.Item][i] = round
+			return nil
+		}
 	}
 	if !slices.Contains(b.rounds[round.Item], round) {
 		b.rounds[round.Item] = append(b.rounds[round.Item], round)
@@ -226,6 +233,29 @@ func implementCLI(t *testing.T, root string, backend *implementationMemory, args
 	}
 	if result.Packet != nil && result.Packet.Facts.Implementation.ResultDirectory != "" {
 		t.Cleanup(func() { os.RemoveAll(result.Packet.Facts.Implementation.ResultDirectory) })
+	}
+	return result
+}
+
+func returnedCLI(t *testing.T, backend *implementationMemory, command string) setup.ImplementationOutput {
+	t.Helper()
+	parsed, err := exec.Command("sh", "-c", "set -- "+command+`; printf '%s\000' "$@"`).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields := bytes.Split(bytes.TrimSuffix(parsed, []byte{0}), []byte{0})
+	args := make([]string, len(fields))
+	for i := range fields {
+		args[i] = string(fields[i])
+	}
+	var output bytes.Buffer
+	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+	if err := app.Run(args); err != nil {
+		t.Fatalf("returned command failed: %v\n%s", err, &output)
+	}
+	var result setup.ImplementationOutput
+	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+		t.Fatal(err)
 	}
 	return result
 }
@@ -632,10 +662,136 @@ func TestImplementDispatchSuppliesRootBoundWorkerAndContinuationCommands(t *test
 	if !strings.Contains(start.ContinuationCommand, "skl implement next --after '") || !strings.Contains(start.ContinuationCommand, "--repo '") || !strings.Contains(start.ContinuationCommand, "--remote 'origin'") {
 		t.Fatalf("continuation command = %q", start.ContinuationCommand)
 	}
+	document := filepath.Join(start.Packet.Facts.Implementation.ResultDirectory, "decision.md")
+	if err := os.WriteFile(document, []byte("preserve me"), 0600); err != nil {
+		t.Fatal(err)
+	}
 
-	resumed := implementCLI(t, root, b, "resume", "--item", "7", "--remote", "origin")
+	resumed := returnedCLI(t, b, start.WorkerCommand)
 	if resumed.Status != "work_available" || resumed.ContinuationCommand != start.ContinuationCommand || resumed.Packet.Facts.Implementation.ResultDirectory != start.Packet.Facts.Implementation.ResultDirectory {
 		t.Fatalf("resume minted another dispatch: start=%#v resumed=%#v", start, resumed)
+	}
+	if data, err := os.ReadFile(document); err != nil || string(data) != "preserve me" {
+		t.Fatalf("resume discarded Result Document: %q, %v", data, err)
+	}
+}
+
+func TestImplementContinuationVerifiesHandoffBeforeSelectingAgain(t *testing.T) {
+	root := proposalRepository(t)
+	for _, branch := range []string{"first", "second"} {
+		prepareSlice(t, root, branch)
+	}
+	b := &implementationMemory{work: []workflow.ImplementationItem{
+		{ID: "7", Branch: "first", State: workflow.Ready, CreatedAt: "2020"},
+		{ID: "8", Branch: "second", State: workflow.Ready, CreatedAt: "2021"},
+	}, remoteHeads: map[string]string{}}
+
+	start := implementCLI(t, root, b, "next")
+	body := filepath.Join(start.Packet.Facts.Implementation.ResultDirectory, "submission.md")
+	if err := os.WriteFile(body, []byte("opaque"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "switch", "first")
+	runGit(t, root, "rm", "-r", ".changes/first")
+	runGit(t, root, "commit", "-m", "retire first")
+	b.remoteHeads["first"] = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	if got := implementCLI(t, root, b, "submit", "--item", "7", "--body", body); got.Status != "awaiting_review" {
+		t.Fatalf("handoff: %#v", got)
+	}
+	parts := strings.Fields(start.ContinuationCommand)
+	reference := strings.Trim(parts[4], "'")
+	continued := implementCLI(t, root, b, "next", "--after", reference)
+	if continued.Status != "work_available" || continued.Item.Number != 8 || continued.PreviousHandoff == nil || continued.PreviousHandoff.Number != 7 || continued.PreviousHandoff.Outcome != workflow.AwaitingReview {
+		t.Fatalf("continuation: %#v", continued)
+	}
+}
+
+func TestContinuationRefusesIncompleteOrWrongStageEvidence(t *testing.T) {
+	for _, condition := range []string{"incomplete", "wrong stage"} {
+		t.Run(condition, func(t *testing.T) {
+			root := proposalRepository(t)
+			for _, branch := range []string{"first", "second"} {
+				prepareSlice(t, root, branch)
+			}
+			b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "first", State: workflow.Ready, CreatedAt: "2020"}, {ID: "8", Branch: "second", State: workflow.Ready, CreatedAt: "2021"}}}
+			start := implementCLI(t, root, b, "next")
+			if condition == "wrong stage" {
+				round := b.rounds["7"][0]
+				round.Outcome, round.Head = workflow.ReadyForMerge, strings.Repeat("a", 40)
+				b.rounds["7"][0] = round
+				b.work[0].Claimed = false
+			}
+			reference := strings.Trim(strings.Fields(start.ContinuationCommand)[4], "'")
+			got := implementCLI(t, root, b, "next", "--after", reference, "--wait=1ms", "--poll=1ms")
+			if got.Status != "fix_required" || got.Item == nil || got.Item.Number != 7 || b.work[1].Claimed {
+				t.Fatalf("unsafe continuation: %#v %#v", got, b.work)
+			}
+		})
+	}
+}
+
+func TestCompletedImplementationRoundSurvivesWatchdogAdvancement(t *testing.T) {
+	root := proposalRepository(t)
+	for _, branch := range []string{"first", "second"} {
+		prepareSlice(t, root, branch)
+	}
+	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "first", State: workflow.Ready, CreatedAt: "2020"}, {ID: "8", Branch: "second", State: workflow.Ready, CreatedAt: "2021"}}, remoteHeads: map[string]string{}}
+	start := implementCLI(t, root, b, "next")
+	body := filepath.Join(start.Packet.Facts.Implementation.ResultDirectory, "submission.md")
+	os.WriteFile(body, []byte("opaque"), 0600)
+	runGit(t, root, "switch", "first")
+	runGit(t, root, "rm", "-r", ".changes/first")
+	runGit(t, root, "commit", "-m", "retire first")
+	b.remoteHeads["first"] = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	implementCLI(t, root, b, "submit", "--item", "7", "--body", body)
+	b.work[0].Claimed = true // The other lane advanced after the historical receipt.
+	b.work[0].Submission.Claimed = true
+	reference := strings.Trim(strings.Fields(start.ContinuationCommand)[4], "'")
+	got := implementCLI(t, root, b, "next", "--after", reference)
+	if got.Status != "work_available" || got.Item.Number != 8 || got.PreviousHandoff == nil || got.PreviousHandoff.Number != 7 || !b.work[0].Claimed {
+		t.Fatalf("historical completion lost or later Claim disturbed: %#v %#v", got, b.work)
+	}
+}
+
+func TestEarlierCompletionCannotAuthorizeLaterEqualHeadRound(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "widget")
+	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{}}
+	first := implementCLI(t, root, b, "next")
+	body := filepath.Join(first.Packet.Facts.Implementation.ResultDirectory, "submission.md")
+	os.WriteFile(body, []byte("opaque"), 0600)
+	runGit(t, root, "rm", "-r", ".changes/widget")
+	runGit(t, root, "commit", "-m", "retire")
+	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	b.remoteHeads["widget"] = head
+	implementCLI(t, root, b, "submit", "--item", "7", "--body", body)
+	b.work[0].State = workflow.Rework
+	b.work[0].Submission.Head = head
+	b.work[0].Submission.PreviousReviewedHead = head
+	second := implementCLI(t, root, b, "next")
+	reference := strings.Trim(strings.Fields(second.ContinuationCommand)[4], "'")
+	got := implementCLI(t, root, b, "next", "--after", reference)
+	if got.Status != "fix_required" || got.PreviousHandoff != nil || !b.work[0].Claimed {
+		t.Fatalf("earlier equal-head receipt authorized later round: %#v %#v", got, b.rounds["7"])
+	}
+}
+
+func TestContinuationReferencesFailBeforeSelection(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "widget")
+	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}}
+	var output bytes.Buffer
+	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return b, nil }, bytes.NewReader(nil), &output, &output)
+	if err := app.Run([]string{"skl", "implement", "next", "--repo", root, "--after", "not-a-reference"}); err == nil || b.work[0].Claimed {
+		t.Fatalf("malformed reference mutated selection: %v %#v", err, b.work)
+	}
+
+	start := implementCLI(t, root, b, "next")
+	reference := strings.Trim(strings.Fields(start.ContinuationCommand)[4], "'")
+	b.rounds["7"] = nil
+	got := implementCLI(t, root, b, "next", "--after", reference)
+	if got.Status != "fix_required" || got.Item == nil || got.Item.Number != 7 {
+		t.Fatalf("unknown round = %#v", got)
 	}
 }
 
@@ -704,6 +860,11 @@ func TestImplementPausesBeforeCodeExists(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, ".changes/widget/intent.md")); err != nil {
 		t.Fatal("pause retired incomplete ledger")
+	}
+	reference := strings.Trim(strings.Fields(start.ContinuationCommand)[4], "'")
+	continued := implementCLI(t, root, backend, "next", "--after", reference)
+	if continued.Status != "no_work" || continued.PreviousHandoff == nil || continued.PreviousHandoff.Number != 7 || continued.PreviousHandoff.Outcome != workflow.NeedsHuman {
+		t.Fatalf("Needs Human without Submission was not verified: %#v", continued)
 	}
 }
 

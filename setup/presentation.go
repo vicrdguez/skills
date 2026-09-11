@@ -2,7 +2,6 @@ package setup
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -17,6 +16,12 @@ type ImplementationOutput struct {
 	Item                *implementationItemOutput `json:"item,omitempty"`
 	WorkerCommand       string                    `json:"worker_command,omitempty"`
 	ContinuationCommand string                    `json:"continuation_command,omitempty"`
+	PreviousHandoff     *completedHandoffOutput   `json:"previous_handoff,omitempty"`
+}
+
+type completedHandoffOutput struct {
+	Number  int
+	Outcome workflow.State
 }
 
 type implementationItemOutput struct {
@@ -95,6 +100,13 @@ func presentItem(item workflow.ImplementationItem) (implementationItemOutput, er
 
 func PresentImplementation(outcome workflow.ImplementationOutcome) (ImplementationOutput, error) {
 	output := ImplementationOutput{ImplementationOutcome: outcome}
+	if outcome.PreviousHandoff != nil {
+		number, err := githubIssueNumber(outcome.PreviousHandoff.Item)
+		if err != nil {
+			return output, err
+		}
+		output.PreviousHandoff = &completedHandoffOutput{Number: number, Outcome: outcome.PreviousHandoff.Outcome}
+	}
 	if outcome.Item != nil {
 		item, err := presentItem(*outcome.Item)
 		if err != nil {
@@ -113,6 +125,12 @@ func PresentImplementation(outcome workflow.ImplementationOutcome) (Implementati
 	if outcome.Dispatch != nil {
 		output.WorkerCommand = fmt.Sprintf("skl %s resume --item %d --repo %s --remote %s", outcome.Dispatch.Lane, output.Item.Number, quote(outcome.Dispatch.Root), quote(outcome.Dispatch.Remote))
 		output.ContinuationCommand = fmt.Sprintf("skl %s next --after %s --repo %s --remote %s", outcome.Dispatch.Lane, quote(outcome.Dispatch.Reference), quote(outcome.Dispatch.Root), quote(outcome.Dispatch.Remote))
+		if outcome.Dispatch.Wait != "" {
+			output.ContinuationCommand += " --wait " + outcome.Dispatch.Wait
+		}
+		if outcome.Dispatch.Poll != "" {
+			output.ContinuationCommand += " --poll " + outcome.Dispatch.Poll
+		}
 	}
 	var skill, directory string
 	if source := facts.Implementation; source != nil {
@@ -144,7 +162,11 @@ func PresentImplementation(outcome workflow.ImplementationOutcome) (Implementati
 	packet, err := skilldist.BuildPacket(skill, facts)
 	if err != nil {
 		if directory != "" {
-			os.RemoveAll(directory)
+			marker := "skl.implement/v1\n"
+			if skill == "watchdog" {
+				marker = "skl.watchdog/v1\n"
+			}
+			_ = workflow.RemoveMarkerOnlyResultDirectory(directory, marker)
 		}
 		return output, err
 	}

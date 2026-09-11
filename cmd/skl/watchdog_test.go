@@ -470,6 +470,30 @@ func TestWatchdogCleansPrivateResultsOnlyAfterVerifiedHandoff(t *testing.T) {
 	}
 }
 
+func TestWatchdogContinuationVerifiesItsCompletedRound(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "widget")
+	runGit(t, root, "rm", "-r", ".changes/widget")
+	runGit(t, root, "commit", "-m", "retire")
+	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Submission: &workflow.Submission{ID: "11", Head: head}}}, remoteHeads: map[string]string{"widget": head}}
+
+	start := watchdogCLI(t, root, b, "next")
+	summary := filepath.Join(start.Packet.Facts.Watchdog.ResultDirectory, "summary.md")
+	if err := os.WriteFile(summary, []byte("W1 BLOCK"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := watchdogCLI(t, root, b, "submit", "--item", "7", "--reviewed-head", head, "--verdict", "rework", "--summary", summary); got.Status != "rework" {
+		t.Fatalf("handoff: %#v", got)
+	}
+	parts := strings.Fields(start.ContinuationCommand)
+	reference := strings.Trim(parts[4], "'")
+	continued := watchdogCLI(t, root, b, "next", "--after", reference)
+	if continued.Status != "no_work" || continued.PreviousHandoff == nil || continued.PreviousHandoff.Number != 7 || continued.PreviousHandoff.Outcome != workflow.Rework {
+		t.Fatalf("continuation: %#v", continued)
+	}
+}
+
 func TestWatchdogRefusesPassWhenMergeabilityChangesDuringPublication(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
