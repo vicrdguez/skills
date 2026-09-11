@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -380,6 +381,120 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 	items, err = b.ImplementationItems(ctx, repo)
 	if err != nil || items[0].State != workflow.NeedsHuman || items[0].Claimed || items[0].ResumeState != workflow.Rework || !items[0].Submission.Draft {
 		t.Fatalf("completed pause = %#v %v", items, err)
+	}
+}
+
+func TestGitHubDispatchRoundsSurvivePaginationAndLostResponses(t *testing.T) {
+	comments := make(map[int][]map[string]any)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var number int
+		if _, err := fmt.Sscanf(strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets"), "/issues/%d/comments", &number); err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method == http.MethodPost {
+			var payload map[string]any
+			json.NewDecoder(r.Body).Decode(&payload)
+			payload["author_association"] = "OWNER"
+			comments[number] = append(comments[number], payload)
+			http.Error(w, "response lost after durable comment", http.StatusInternalServerError)
+			return
+		}
+		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		if page < 1 {
+			page = 1
+		}
+		start := (page - 1) * 100
+		if start >= len(comments[number]) {
+			json.NewEncoder(w).Encode([]any{})
+			return
+		}
+		end := min(start+100, len(comments[number]))
+		json.NewEncoder(w).Encode(comments[number][start:end])
+	}))
+	defer server.Close()
+	repo := github.RepositoryID{Owner: "acme", Name: "widgets"}
+	ctx := context.Background()
+	for _, tc := range []struct {
+		item       workflow.WorkItemID
+		lane       workflow.DispatchLane
+		submission workflow.SubmissionID
+		outcome    workflow.State
+	}{{"7", workflow.ImplementLane, "", workflow.NeedsHuman}, {"8", workflow.WatchdogLane, "11", workflow.ReadyForMerge}} {
+		start := workflow.DispatchRound{ID: "round-" + string(tc.item), Lane: tc.lane, Item: tc.item, Submission: tc.submission, Obligation: "fixed", Directory: "skl-result-fixed"}
+		backend := NewGitHubBackend(server.URL, "token", server.Client())
+		if err := backend.RecordDispatchRound(ctx, repo, start); err != nil {
+			t.Fatal(err)
+		}
+		for range 105 {
+			commentsNumber, _ := strconv.Atoi(string(tc.item))
+			comments[commentsNumber] = append(comments[commentsNumber], map[string]any{"author_association": "OWNER", "body": "unrelated"})
+		}
+		completed := start
+		completed.Outcome, completed.Head, completed.Released = tc.outcome, "head", true
+		if err := backend.RecordDispatchRound(ctx, repo, completed); err != nil {
+			t.Fatal(err)
+		}
+		later := start
+		later.ID += "-later"
+		if err := backend.RecordDispatchRound(ctx, repo, later); err != nil {
+			t.Fatal(err)
+		}
+		fresh := NewGitHubBackend(server.URL, "token", server.Client())
+		rounds, err := fresh.DispatchRounds(ctx, repo, tc.item)
+		if err != nil || len(rounds) != 2 || rounds[0] != completed || rounds[1] != later {
+			t.Fatalf("fresh paginated rounds = %#v, %v", rounds, err)
+		}
+	}
+}
+
+func TestGitHubDispatchRoundsRejectUntrustedAndConflictingEvidence(t *testing.T) {
+	trusted := func(round workflow.DispatchRound, association string) map[string]any {
+		payload, _ := json.Marshal(implementationMetadata{Round: &round})
+		return map[string]any{"author_association": association, "body": "<!-- skl.implement/v1\n" + string(payload) + "\n-->"}
+	}
+	base := workflow.DispatchRound{ID: "round", Lane: workflow.ImplementLane, Item: "7", Obligation: "fixed", Directory: "skl-implement-fixed"}
+	comments := []map[string]any{trusted(base, "OWNER"), trusted(workflow.DispatchRound{ID: "forged", Lane: workflow.ImplementLane, Item: "7", Obligation: "fixed", Directory: "skl-implement-forged", Outcome: workflow.AwaitingReview, Head: "head"}, "NONE")}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { json.NewEncoder(w).Encode(comments) }))
+	defer server.Close()
+	b := NewGitHubBackend(server.URL, "token", server.Client())
+	repo := github.RepositoryID{Owner: "acme", Name: "widgets"}
+	rounds, err := b.DispatchRounds(context.Background(), repo, "7")
+	if err != nil || !slices.Equal(rounds, []workflow.DispatchRound{base}) {
+		t.Fatalf("untrusted evidence accepted: %#v, %v", rounds, err)
+	}
+	conflict := base
+	conflict.Obligation = "changed"
+	comments = append(comments, trusted(conflict, "OWNER"))
+	if _, err := b.DispatchRounds(context.Background(), repo, "7"); err == nil {
+		t.Fatal("conflicting trusted evidence accepted")
+	}
+}
+
+func TestGitHubDispatchRoundWriteUncertaintyStopsWithoutReplay(t *testing.T) {
+	for _, mode := range []string{"unapplied", "readback unavailable"} {
+		t.Run(mode, func(t *testing.T) {
+			reads, writes := 0, 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodPost {
+					writes++
+					http.Error(w, "write response lost", http.StatusInternalServerError)
+					return
+				}
+				reads++
+				if mode == "readback unavailable" && reads > 1 {
+					http.Error(w, "observation unavailable", http.StatusServiceUnavailable)
+					return
+				}
+				json.NewEncoder(w).Encode([]any{})
+			}))
+			defer server.Close()
+			b := NewGitHubBackend(server.URL, "token", server.Client())
+			round := workflow.DispatchRound{ID: "round", Lane: workflow.ImplementLane, Item: "7", Obligation: "fixed", Directory: "skl-implement-fixed"}
+			if err := b.RecordDispatchRound(context.Background(), github.RepositoryID{Owner: "acme", Name: "widgets"}, round); err == nil || writes != 1 || reads != 2 {
+				t.Fatalf("uncertain write replayed or passed: err=%v reads=%d writes=%d", err, reads, writes)
+			}
+		})
 	}
 }
 

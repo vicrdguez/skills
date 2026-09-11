@@ -115,3 +115,33 @@ func nextWork(ctx context.Context, wait, poll time.Duration, selectWork func() (
 		}
 	}
 }
+
+func continuedWork(ctx context.Context, root, remote, reference string, lane workflow.DispatchLane, wait, poll time.Duration, pollSet bool, backend workflow.DispatchBackend, selectWork func() (workflow.ImplementationOutcome, error)) (workflow.ImplementationOutcome, error) {
+	var previous workflow.CompletedHandoff
+	if reference != "" {
+		var err error
+		previous, err = workflow.VerifyDispatch(ctx, root, remote, lane, reference, backend)
+		var violation *workflow.InvariantError
+		if errors.As(err, &violation) {
+			return workflow.ImplementationOutcome{Status: "fix_required", Reason: violation.Reason, Item: &workflow.ImplementationItem{ID: previous.Item}}, nil
+		}
+		if err != nil {
+			return workflow.ImplementationOutcome{}, err
+		}
+	}
+	outcome, err := nextWork(ctx, wait, poll, selectWork)
+	if err != nil {
+		return outcome, err
+	}
+	if reference != "" {
+		outcome.PreviousHandoff = &previous
+	}
+	if outcome.Dispatch != nil {
+		if wait != 0 {
+			outcome.Dispatch.Wait, outcome.Dispatch.Poll = wait.String(), poll.String()
+		} else if pollSet {
+			outcome.Dispatch.Poll = poll.String()
+		}
+	}
+	return outcome, nil
+}

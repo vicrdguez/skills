@@ -207,6 +207,9 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 			continue
 		}
 		if current.Problem == "" && current.State == target && !current.Claimed && (bodyPath == "" || current.Submission != nil && current.Submission.Head == head && current.Submission.Draft == (target == NeedsHuman)) {
+			if err := completeDispatch(ctx, repository, current, ImplementLane, target, head, backend); err != nil {
+				return ImplementationOutcome{}, err
+			}
 			transition.Completed = true
 			if err := backend.RecordImplementationTransition(ctx, repository, current, transition); err != nil {
 				return ImplementationOutcome{}, err
