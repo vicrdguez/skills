@@ -334,6 +334,121 @@ func TestB3RefuseMissingOrAmbiguousRequiredMarkers(t *testing.T) {
 	}
 }
 
+func TestB4EnforceEndpointPathsModesAndExactContent(t *testing.T) {
+	type mutation struct {
+		name, want string
+		baseline   func(*testing.T, string)
+		completion func(*testing.T, string)
+	}
+	write := func(t *testing.T, root, path, contents string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, path)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, path), []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	removeBehavior := func(t *testing.T, root string) {
+		t.Helper()
+		if err := os.Remove(filepath.Join(root, ".changes/ship-widget/behavior.md")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cases := []mutation{
+		{name: "permitted ticks"},
+		{name: "added path", want: "path set", completion: func(t *testing.T, root string) { write(t, root, ".changes/ship-widget/extra.md", "extra\n") }},
+		{name: "missing path", want: "path set", completion: removeBehavior},
+		{name: "renamed path", want: "path set", completion: func(t *testing.T, root string) {
+			runGit(t, root, "mv", ".changes/ship-widget/behavior.md", ".changes/ship-widget/renamed.md")
+		}},
+		{name: "nested extra path", want: "path set", completion: func(t *testing.T, root string) { write(t, root, ".changes/ship-widget/nested/extra.md", "extra\n") }},
+		{name: "executable", want: "mode 100644 blob", completion: func(t *testing.T, root string) {
+			if err := os.Chmod(filepath.Join(root, ".changes/ship-widget/intent.md"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "symlink entry", want: "mode 100644 blob", completion: func(t *testing.T, root string) {
+			if err := os.Symlink("intent.md", filepath.Join(root, ".changes/ship-widget/link.md")); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "gitlink entry", want: "mode 100644 blob", completion: func(t *testing.T, root string) {
+			link := filepath.Join(root, ".changes/ship-widget/link")
+			if err := os.Mkdir(link, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			runGit(t, link, "init")
+			runGit(t, link, "config", "user.name", "Test")
+			runGit(t, link, "config", "user.email", "test@example.com")
+			runGit(t, link, "commit", "--allow-empty", "-m", "linked")
+		}},
+		{name: "changed prose", want: "content changed", completion: func(t *testing.T, root string) { write(t, root, ".changes/ship-widget/behavior.md", "changed\n") }},
+		{name: "changed whitespace", want: "content changed", completion: func(t *testing.T, root string) { write(t, root, ".changes/ship-widget/behavior.md", "behavior.md  \n") }},
+		{name: "changed line order", want: "content changed", baseline: func(t *testing.T, root string) { write(t, root, ".changes/ship-widget/behavior.md", "one\ntwo\n") }, completion: func(t *testing.T, root string) { write(t, root, ".changes/ship-widget/behavior.md", "two\none\n") }},
+		{name: "changed line endings", want: "content changed", completion: func(t *testing.T, root string) { write(t, root, ".changes/ship-widget/behavior.md", "behavior.md\r\n") }},
+		{name: "changed final newline", want: "content changed", completion: func(t *testing.T, root string) { write(t, root, ".changes/ship-widget/behavior.md", "behavior.md") }},
+		{name: "ledger root blob", want: "invalid ledger shape", baseline: func(t *testing.T, root string) {
+			if err := os.RemoveAll(filepath.Join(root, ".changes/ship-widget")); err != nil {
+				t.Fatal(err)
+			}
+			write(t, root, ".changes/ship-widget", "not a directory\n")
+		}},
+		{name: "ledger root symlink", want: "invalid ledger shape", baseline: func(t *testing.T, root string) {
+			if err := os.RemoveAll(filepath.Join(root, ".changes/ship-widget")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink("elsewhere", filepath.Join(root, ".changes/ship-widget")); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "missing required artifact", want: "ledger misses behavior.md", baseline: removeBehavior},
+		{name: "nested required artifacts", want: "ledger misses intent.md", baseline: func(t *testing.T, root string) {
+			if err := os.Mkdir(filepath.Join(root, ".changes/ship-widget/nested"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{"intent.md", "behavior.md"} {
+				if err := os.Rename(filepath.Join(root, ".changes/ship-widget", name), filepath.Join(root, ".changes/ship-widget/nested", name)); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			root := proposalRepository(t)
+			runGit(t, root, "switch", "-c", "ship-widget", "main")
+			writeLedger(t, root, "ship-widget", true)
+			write(t, root, ".changes/ship-widget/intent.md", "# Intent\n- [ ] Ship\n## Manual verification\n- [ ] Human\n")
+			if test.baseline != nil {
+				test.baseline(t, root)
+			}
+			runGit(t, root, "add", "-A")
+			runGit(t, root, "commit", "-m", "[baseline] ship-widget")
+			if _, err := os.Stat(filepath.Join(root, ".changes/ship-widget/intent.md")); err == nil {
+				write(t, root, ".changes/ship-widget/intent.md", "# Intent\n- [x] Ship\n## Manual verification\n- [ ] Human\n")
+			}
+			if test.completion != nil {
+				test.completion(t, root)
+			}
+			runGit(t, root, "add", "-A")
+			runGit(t, root, "commit", "--allow-empty", "-m", "[completion] ship-widget")
+			if err := os.RemoveAll(filepath.Join(root, ".changes/ship-widget")); err != nil {
+				t.Fatal(err)
+			}
+			runGit(t, root, "add", "-A")
+			runGit(t, root, "commit", "-m", "retire")
+
+			backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "ship-widget", State: workflow.AwaitingReview}}}
+			got := implementCLI(t, root, backend, "inspect", "--item", "7")
+			violations := strings.Join(got.Ledger.Violations, "\n")
+			if test.want == "" && violations != "" || test.want != "" && !strings.Contains(violations, test.want) {
+				t.Fatalf("violations = %q, want %q", violations, test.want)
+			}
+		})
+	}
+}
+
 func TestImplementSubmitsCompletedFirstImplementation(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")

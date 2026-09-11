@@ -57,7 +57,7 @@ func InspectLedger(root, ref, slug string, explicit ArtifactEndpoints, policy Le
 	if err != nil {
 		return endpointViolation(result, err)
 	}
-	result.Violations = append(result.Violations, requiredArtifacts(baseline, result.Baseline)...)
+	result.Violations = append(result.Violations, requiredArtifacts(baseline, result.Baseline, slug)...)
 	for name, contents := range baseline {
 		result.Violations = append(result.Violations, ledgerBoxes(contents, false, result.Baseline+":"+name)...)
 	}
@@ -159,14 +159,10 @@ func endpointFiles(root, commit, slug string) (map[string]string, error) {
 	return files, nil
 }
 
-func requiredArtifacts(files map[string]string, endpoint string) []string {
+func requiredArtifacts(files map[string]string, endpoint, slug string) []string {
 	var violations []string
 	for _, name := range []string{"intent.md", "behavior.md"} {
-		found := false
-		for path := range files {
-			found = found || strings.HasSuffix(path, "/"+name)
-		}
-		if !found {
+		if _, found := files[".changes/"+slug+"/"+name]; !found {
 			violations = append(violations, "ledger misses "+name+" at Artifact Baseline "+endpoint)
 		}
 	}
