@@ -13,8 +13,10 @@ import (
 // These projections retain the numeric GitHub CLI contract, not engine identity.
 type ImplementationOutput struct {
 	workflow.ImplementationOutcome
-	Packet *skilldist.Packet         `json:"packet,omitempty"`
-	Item   *implementationItemOutput `json:"item,omitempty"`
+	Packet              *skilldist.Packet         `json:"packet,omitempty"`
+	Item                *implementationItemOutput `json:"item,omitempty"`
+	WorkerCommand       string                    `json:"worker_command,omitempty"`
+	ContinuationCommand string                    `json:"continuation_command,omitempty"`
 }
 
 type implementationItemOutput struct {
@@ -108,6 +110,10 @@ func PresentImplementation(outcome workflow.ImplementationOutcome) (Implementati
 	}
 	facts := *outcome.Facts
 	quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'" }
+	if outcome.Dispatch != nil {
+		output.WorkerCommand = fmt.Sprintf("skl %s resume --item %d --repo %s --remote %s", outcome.Dispatch.Lane, output.Item.Number, quote(outcome.Dispatch.Root), quote(outcome.Dispatch.Remote))
+		output.ContinuationCommand = fmt.Sprintf("skl %s next --after %s --repo %s --remote %s", outcome.Dispatch.Lane, quote(outcome.Dispatch.Reference), quote(outcome.Dispatch.Root), quote(outcome.Dispatch.Remote))
+	}
 	var skill, directory string
 	if source := facts.Implementation; source != nil {
 		f := *source

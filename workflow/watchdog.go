@@ -79,21 +79,18 @@ func StartWatchdog(ctx context.Context, root, remote string, id WorkItemID, back
 				}
 				facts.Bounces = observed.Bounces
 			}
+			round, reference, err := prepareDispatch(ctx, root, remote, repository, current, WatchdogLane, id != "", backend)
+			if err != nil {
+				return ImplementationOutcome{}, err
+			}
 			main, err := primaryWorktree(root)
 			if err != nil {
 				return ImplementationOutcome{}, err
 			}
 			facts.Worktree = filepath.Join(main, ".worktrees", item.Branch)
 			facts.Remote = remote
-			facts.ResultDirectory, err = os.MkdirTemp("", "skl-watchdog-")
-			if err != nil {
-				return ImplementationOutcome{}, err
-			}
-			if err := os.WriteFile(filepath.Join(facts.ResultDirectory, ".skl-result"), []byte("skl.watchdog/v1\n"), 0600); err != nil {
-				os.RemoveAll(facts.ResultDirectory)
-				return ImplementationOutcome{}, err
-			}
-			return ImplementationOutcome{Status: "work_available", Item: &current, Facts: &skilldist.InvocationFacts{Watchdog: &facts}}, nil
+			facts.ResultDirectory = filepath.Join(os.TempDir(), round.Directory)
+			return ImplementationOutcome{Status: "work_available", Item: &current, Facts: &skilldist.InvocationFacts{Watchdog: &facts}, Dispatch: &DispatchFacts{Reference: reference, Lane: WatchdogLane, Root: main, Remote: remote}}, nil
 		}
 		return ImplementationOutcome{Status: "fix_required", Reason: "Watchdog Claim changed; inspect and explicitly resume"}, nil
 	}

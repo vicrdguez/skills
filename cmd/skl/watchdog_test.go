@@ -394,8 +394,13 @@ func TestWatchdogResumesFixedClaim(t *testing.T) {
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Claimed: true, Submission: &workflow.Submission{ID: "11", Head: head, ReviewedHead: head}}, {ID: "1", State: workflow.AwaitingReview}}}
 	got := watchdogCLI(t, root, b, "resume", "--item", "7")
-	if got.Status != "work_available" || got.Packet.Facts.Watchdog.ReviewedHead != head || b.work[1].Claimed {
+	if got.Status != "work_available" || got.Packet.Facts.Watchdog.ReviewedHead != head || b.work[1].Claimed || !strings.Contains(got.WorkerCommand, "skl watchdog resume --item 7") || !strings.Contains(got.ContinuationCommand, "skl watchdog next --after '") {
 		t.Fatalf("resume: %#v", got)
+	}
+	directory, continuation := got.Packet.Facts.Watchdog.ResultDirectory, got.ContinuationCommand
+	got = watchdogCLI(t, root, b, "resume", "--item", "7")
+	if got.Packet.Facts.Watchdog.ResultDirectory != directory || got.ContinuationCommand != continuation {
+		t.Fatalf("resume minted another Watchdog dispatch: %#v", got)
 	}
 	b.work[0].Submission.Head = strings.Repeat("f", 40)
 	got = watchdogCLI(t, root, b, "resume", "--item", "7")

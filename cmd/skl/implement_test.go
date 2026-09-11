@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -29,6 +30,21 @@ type implementationMemory struct {
 	failTransition   bool
 	beforeTransition func()
 	afterCompletion  func()
+	rounds           map[workflow.WorkItemID][]workflow.DispatchRound
+}
+
+func (b *implementationMemory) DispatchRounds(_ context.Context, _ github.RepositoryID, item workflow.WorkItemID) ([]workflow.DispatchRound, error) {
+	return append([]workflow.DispatchRound(nil), b.rounds[item]...), nil
+}
+
+func (b *implementationMemory) RecordDispatchRound(_ context.Context, _ github.RepositoryID, round workflow.DispatchRound) error {
+	if b.rounds == nil {
+		b.rounds = make(map[workflow.WorkItemID][]workflow.DispatchRound)
+	}
+	if !slices.Contains(b.rounds[round.Item], round) {
+		b.rounds[round.Item] = append(b.rounds[round.Item], round)
+	}
+	return nil
 }
 
 func (b *implementationMemory) RecordImplementationTransition(_ context.Context, _ github.RepositoryID, item workflow.ImplementationItem, transition workflow.ImplementationTransition) error {
@@ -592,6 +608,34 @@ func TestImplementPinsTargetAndBundlesInstructions(t *testing.T) {
 	}
 	if strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD")) != baseline {
 		t.Fatal("Work Start changed Git")
+	}
+}
+
+func TestImplementDispatchSuppliesRootBoundWorkerAndContinuationCommands(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "widget")
+	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}}
+
+	start := implementCLI(t, root, b, "next", "--remote", "origin")
+	if start.Status != "work_available" || start.WorkerCommand == "" || start.ContinuationCommand == "" {
+		t.Fatalf("dispatch commands: %#v", start)
+	}
+	physicalRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, wanted := range []string{"skl implement resume", "--item 7", "--repo '" + physicalRoot + "'", "--remote 'origin'"} {
+		if !strings.Contains(start.WorkerCommand, wanted) {
+			t.Fatalf("worker command %q lacks %q", start.WorkerCommand, wanted)
+		}
+	}
+	if !strings.Contains(start.ContinuationCommand, "skl implement next --after '") || !strings.Contains(start.ContinuationCommand, "--repo '") || !strings.Contains(start.ContinuationCommand, "--remote 'origin'") {
+		t.Fatalf("continuation command = %q", start.ContinuationCommand)
+	}
+
+	resumed := implementCLI(t, root, b, "resume", "--item", "7", "--remote", "origin")
+	if resumed.Status != "work_available" || resumed.ContinuationCommand != start.ContinuationCommand || resumed.Packet.Facts.Implementation.ResultDirectory != start.Packet.Facts.Implementation.ResultDirectory {
+		t.Fatalf("resume minted another dispatch: start=%#v resumed=%#v", start, resumed)
 	}
 }
 

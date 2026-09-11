@@ -394,6 +394,89 @@ type implementationMetadata struct {
 	ReviewedHead          string                             `json:"reviewed_head,omitempty"`
 	ReviewRoundHead       string                             `json:"review_round_head,omitempty"`
 	ResumeState           workflow.State                     `json:"resume_state,omitempty"`
+	Round                 *workflow.DispatchRound            `json:"round,omitempty"`
+}
+
+func (b *GitHubBackend) RecordDispatchRound(ctx context.Context, repository github.RepositoryID, round workflow.DispatchRound) error {
+	number, err := githubIssueNumber(round.Item)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(implementationMetadata{Round: &round})
+	if err != nil {
+		return err
+	}
+	body := "<!-- skl.implement/v1\n" + string(payload) + "\n-->"
+	published := func(comments []skilldist.ReviewComment) bool {
+		for _, comment := range comments {
+			if comment.Body == body && trustedMetadata(comment) {
+				return true
+			}
+		}
+		return false
+	}
+	stream := fmt.Sprintf("/issues/%d/comments", number)
+	comments, err := b.implementationComments(ctx, repository, stream)
+	if err != nil || published(comments) {
+		return err
+	}
+	writeErr := b.request(ctx, http.MethodPost, b.repositoryPath(repository)+stream, map[string]string{"body": body}, nil)
+	comments, err = b.implementationComments(ctx, repository, stream)
+	if err != nil {
+		return err
+	}
+	if published(comments) {
+		return nil
+	}
+	if writeErr != nil {
+		return writeErr
+	}
+	return errors.New("dispatch evidence publication not observed; explicitly inspect the retained Claim")
+}
+
+func (b *GitHubBackend) DispatchRounds(ctx context.Context, repository github.RepositoryID, item workflow.WorkItemID) ([]workflow.DispatchRound, error) {
+	number, err := githubIssueNumber(item)
+	if err != nil {
+		return nil, err
+	}
+	comments, err := b.implementationComments(ctx, repository, fmt.Sprintf("/issues/%d/comments", number))
+	if err != nil {
+		return nil, err
+	}
+	positions := make(map[string]int)
+	var rounds []workflow.DispatchRound
+	for _, comment := range comments {
+		body, ok := strings.CutPrefix(comment.Body, "<!-- skl.implement/v1\n")
+		if !ok || !strings.HasSuffix(body, "\n-->") || !trustedMetadata(comment) {
+			continue
+		}
+		var metadata implementationMetadata
+		if err := json.Unmarshal([]byte(strings.TrimSuffix(body, "\n-->")), &metadata); err != nil {
+			return nil, workflow.Refuse("invalid trusted dispatch metadata")
+		}
+		if metadata.Round == nil {
+			continue
+		}
+		round := *metadata.Round
+		if round.ID == "" || round.Item != item || round.Lane != workflow.ImplementLane && round.Lane != workflow.WatchdogLane || round.Directory == "" || round.Obligation == "" {
+			return nil, workflow.Refuse("dispatch evidence has invalid or contradictory bindings")
+		}
+		index, exists := positions[round.ID]
+		if !exists {
+			positions[round.ID] = len(rounds)
+			rounds = append(rounds, round)
+			continue
+		}
+		previous := rounds[index]
+		sameBinding := previous.ID == round.ID && previous.Lane == round.Lane && previous.Item == round.Item && previous.Submission == round.Submission && previous.Obligation == round.Obligation && previous.Directory == round.Directory
+		if !sameBinding || previous.Outcome != "" && previous != round || previous.Outcome == "" && round.Outcome == "" && previous != round {
+			return nil, workflow.Refuse("conflicting trusted dispatch evidence")
+		}
+		if round.Outcome != "" {
+			rounds[index] = round
+		}
+	}
+	return rounds, nil
 }
 
 func implementationBranchOwners(issues []githubIssue) map[string]int {

@@ -65,6 +65,7 @@ type Submission struct {
 }
 
 type ImplementationBackend interface {
+	DispatchBackend
 	ImplementationTarget(context.Context, github.RepositoryID) (string, error)
 	ImplementationItems(context.Context, github.RepositoryID) ([]ImplementationItem, error)
 	ClaimImplementation(context.Context, github.RepositoryID, ImplementationItem) error
@@ -92,12 +93,14 @@ func (e *InvariantError) Error() string { return e.Reason }
 func Refuse(reason string) error        { return &InvariantError{Reason: reason} }
 
 type ImplementationOutcome struct {
-	Ledger *LedgerHistory             `json:"ledger,omitempty"`
-	Head   string                     `json:"head,omitempty"`
-	Facts  *skilldist.InvocationFacts `json:"-"`
-	Status string                     `json:"status"`
-	Reason string                     `json:"reason,omitempty"`
-	Item   *ImplementationItem        `json:"item,omitempty"`
+	Ledger          *LedgerHistory             `json:"ledger,omitempty"`
+	Head            string                     `json:"head,omitempty"`
+	Facts           *skilldist.InvocationFacts `json:"-"`
+	Status          string                     `json:"status"`
+	Reason          string                     `json:"reason,omitempty"`
+	Item            *ImplementationItem        `json:"item,omitempty"`
+	Dispatch        *DispatchFacts             `json:"-"`
+	PreviousHandoff *CompletedHandoff          `json:"-"`
 }
 
 func loadImplementation(ctx context.Context, root, remote string, backend ImplementationBackend) (github.RepositoryID, []ImplementationItem, error) {
@@ -180,7 +183,16 @@ func StartImplementation(ctx context.Context, root, remote string, id WorkItemID
 					return ImplementationOutcome{}, err
 				}
 				item = prepared
-				return implementationPacket(root, remote, item)
+				round, reference, err := prepareDispatch(ctx, root, remote, repository, item, ImplementLane, true, backend)
+				if err != nil {
+					return ImplementationOutcome{}, err
+				}
+				outcome, err = implementationPacket(root, remote, item, filepath.Join(os.TempDir(), round.Directory))
+				if err == nil {
+					main, _ := primaryWorktree(root)
+					outcome.Dispatch = &DispatchFacts{Reference: reference, Lane: ImplementLane, Root: main, Remote: remote}
+				}
+				return outcome, err
 			}
 		}
 		return ImplementationOutcome{Status: "fix_required", Reason: "explicit Work Item is not an unambiguous implementation Claim; repair its projections before resuming"}, nil
@@ -228,7 +240,16 @@ func StartImplementation(ctx context.Context, root, remote string, id WorkItemID
 		}
 		for _, current := range observed {
 			if current.ID == item.ID && current.Claimed && current.State == item.State && current.Problem == "" && current.Branch == item.Branch && current.TargetSnapshot == item.TargetSnapshot {
-				return implementationPacket(root, remote, current)
+				round, reference, err := prepareDispatch(ctx, root, remote, repository, current, ImplementLane, false, backend)
+				if err != nil {
+					return ImplementationOutcome{}, err
+				}
+				outcome, err := implementationPacket(root, remote, current, filepath.Join(os.TempDir(), round.Directory))
+				if err == nil {
+					main, _ := primaryWorktree(root)
+					outcome.Dispatch = &DispatchFacts{Reference: reference, Lane: ImplementLane, Root: main, Remote: remote}
+				}
+				return outcome, err
 			}
 		}
 		if claimErr != nil {
@@ -325,7 +346,7 @@ func prepareImplementationStart(ctx context.Context, root, remote string, reposi
 	return item, ImplementationOutcome{}, nil
 }
 
-func implementationPacket(root, remote string, item ImplementationItem) (ImplementationOutcome, error) {
+func implementationPacket(root, remote string, item ImplementationItem, directory string) (ImplementationOutcome, error) {
 	if item.State == Rework && !item.Synchronization && (item.Submission == nil || item.Submission.PreviousReviewedHead == "") {
 		return ImplementationOutcome{Status: "fix_required", Item: &item, Reason: "previous reviewed head needs agent extraction from the supplied watchdog summary; resume --reviewed-head <full-sha> without rewriting history"}, nil
 	}
@@ -361,14 +382,7 @@ func implementationPacket(root, remote string, item ImplementationItem) (Impleme
 	if item.Synchronization {
 		facts.PreviousReviewedHead = ""
 	}
-	facts.ResultDirectory, err = os.MkdirTemp("", "skl-implement-")
-	if err != nil {
-		return ImplementationOutcome{}, err
-	}
+	facts.ResultDirectory = directory
 	facts.Remote = remote
-	if err := os.WriteFile(filepath.Join(facts.ResultDirectory, ".skl-result"), []byte("skl.implement/v1\n"), 0600); err != nil {
-		os.RemoveAll(facts.ResultDirectory)
-		return ImplementationOutcome{}, err
-	}
 	return ImplementationOutcome{Status: "work_available", Item: &item, Facts: &skilldist.InvocationFacts{Implementation: &facts}}, nil
 }
