@@ -1244,6 +1244,7 @@ func TestImplementPausesBeforeCodeExists(t *testing.T) {
 }
 
 func TestB10PreserveIncompleteWorkInNeedsHuman(t *testing.T) {
+	const unfinished = "# Intent\n- [ ] Implement widget\n- [ ] Verify widget automatically\n"
 	for _, test := range []struct {
 		name, preserved string
 		body, existing  bool
@@ -1282,7 +1283,16 @@ func TestB10PreserveIncompleteWorkInNeedsHuman(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			root := proposalRepository(t)
-			if test.baseline == nil {
+			if test.want == "needs_human" {
+				runGit(t, root, "switch", "-c", "widget", "main")
+				writeLedger(t, root, "widget", true)
+				if err := os.WriteFile(filepath.Join(root, ".changes/widget/intent.md"), []byte(unfinished), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				runGit(t, root, "add", ".changes/widget")
+				runGit(t, root, "commit", "-m", "[baseline] widget")
+				runGit(t, root, "update-ref", "refs/remotes/origin/widget", "HEAD")
+			} else if test.baseline == nil {
 				prepareSlice(t, root, "widget")
 			} else {
 				test.baseline(t, root)
@@ -1305,7 +1315,7 @@ func TestB10PreserveIncompleteWorkInNeedsHuman(t *testing.T) {
 			}
 			item := workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Ready, Claimed: true, TargetBranch: "main", TargetSnapshot: strings.TrimSpace(runGitOutput(t, root, "rev-parse", "main"))}
 			if test.existing {
-				item.Submission = &workflow.Submission{ID: "42", Draft: true}
+				item.Submission = &workflow.Submission{ID: "42", Draft: true, Head: baseline, Body: "previous draft\n"}
 			}
 			backend := &implementationMemory{work: []workflow.ImplementationItem{item}, remoteHeads: map[string]string{}}
 			start := implementCLI(t, root, backend, "resume", "--item", "7")
@@ -1331,12 +1341,41 @@ func TestB10PreserveIncompleteWorkInNeedsHuman(t *testing.T) {
 				args = append(args, "--body", body)
 				backend.remoteHeads["widget"] = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 			}
+			head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 			got := implementCLI(t, root, backend, args...)
 			if got.Status != test.want {
 				t.Fatalf("pause = %#v, want %s", got, test.want)
 			}
-			if test.want == "needs_human" && (got.Item.ResumeState != workflow.Ready || got.Item.Claimed || test.body && (got.Item.Submission == nil || !got.Item.Submission.Draft || test.existing && got.Item.Submission.Number != 42)) {
-				t.Fatalf("preservation = %#v", got)
+			if test.want == "needs_human" {
+				paused := backend.work[0]
+				if got.Item == nil || got.Item.ResumeState != item.State || got.Item.Claimed || paused.State != workflow.NeedsHuman || paused.ResumeState != item.State || paused.Claimed || backend.decisions["7"] != "human decision\n" {
+					t.Fatalf("preservation = %#v, work = %#v", got, paused)
+				}
+				if !test.body {
+					if got.Item.Submission != nil || paused.Submission != nil {
+						t.Fatalf("no-body pause created a Submission: %#v, work = %#v", got.Item, paused)
+					}
+				} else if got.Item.Submission == nil || !got.Item.Submission.Draft || got.Item.Submission.Head != head || paused.Submission == nil || !paused.Submission.Draft || paused.Submission.Head != head || backend.remoteHeads["widget"] != head || paused.Submission.Body != "preserve work\n\n\nCloses #7\n" || test.existing && (got.Item.Submission.Number != 42 || paused.Submission.ID != "42") {
+					t.Fatalf("draft not preserved at pushed head %s: %#v, work = %#v", head, got.Item, paused)
+				}
+				if current := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD")); current != head {
+					t.Fatalf("pause moved head: %s, want %s", current, head)
+				}
+				for name, want := range map[string]string{"intent.md": unfinished, "behavior.md": "behavior.md\n"} {
+					path := ".changes/widget/" + name
+					for _, ref := range []string{baseline, "HEAD"} {
+						if contents := runGitOutput(t, root, "show", ref+":"+path); contents != want {
+							t.Fatalf("%s at %s changed unfinished artifacts: %q, want %q", path, ref, contents, want)
+						}
+					}
+					if contents := readFile(t, filepath.Join(root, path)); contents != want {
+						t.Fatalf("working tree %s changed unfinished artifacts: %q, want %q", path, contents, want)
+					}
+				}
+				inspected := implementCLI(t, root, backend, "inspect", "--item", "7")
+				if inspected.Status != "inspected" || inspected.Head != head || inspected.Ledger == nil || inspected.Ledger.Baseline != baseline || inspected.Ledger.Completion != "" || inspected.Ledger.Phase != "present" || len(inspected.Ledger.Violations) != 0 {
+					t.Fatalf("pause lost incomplete ledger or invented Completion: %#v", inspected)
+				}
 			}
 			if test.want == "fix_required" && (!backend.work[0].Claimed || backend.work[0].State != workflow.Ready) {
 				t.Fatalf("refusal mutated work = %#v", backend.work[0])
