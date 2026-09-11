@@ -48,7 +48,7 @@ type ImplementationItem struct {
 
 type Submission struct {
 	PendingReview   State
-	ReviewClaimedAt string
+	ClaimAcquiredAt string
 	Merged          bool
 	Mergeability    string
 	CreatedAt       string

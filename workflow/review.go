@@ -154,7 +154,7 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
-	comments := []skilldist.ReviewComment{{Body: string(summary), Commit: head, Verdict: verdict}}
+	comments := []skilldist.ReviewComment{{Body: string(summary), Commit: reviewed, Verdict: verdict}}
 	if findingsPath != "" {
 		data, err := os.ReadFile(findingsPath)
 		if err != nil {
@@ -177,7 +177,7 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 			if err != nil {
 				return ImplementationOutcome{}, err
 			}
-			comments = append(comments, skilldist.ReviewComment{Body: string(body), Commit: head, Path: a.Path, Line: a.Line, Side: a.Side})
+			comments = append(comments, skilldist.ReviewComment{Body: string(body), Commit: reviewed, Path: a.Path, Line: a.Line, Side: a.Side})
 		}
 	}
 	finalBody := ""
@@ -197,7 +197,7 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	if retry && (!evidenceMatches || receiptCount != 1) {
 		return ImplementationOutcome{}, Refuse("recorded review differs from the supplied summary, verdict, body, or inline evidence; replay the original fixed-number command and Result Documents")
 	}
-	if receiptCount > 0 && item.State == AwaitingReview && (receiptCount != 1 || !evidenceMatches || !claimPrecedesReceipt(submission.ReviewClaimedAt, receipt.CreatedAt)) {
+	if receiptCount > 0 && item.State == AwaitingReview && (receiptCount != 1 || !evidenceMatches || !claimPrecedesReceipt(submission.ClaimAcquiredAt, receipt.CreatedAt)) {
 		return ImplementationOutcome{}, Refuse("exact review receipt cannot be assigned unambiguously to the current Awaiting Review Claim; replay its original fixed-number command or submit a fresh next round")
 	}
 	target := Rework

@@ -75,7 +75,8 @@ func (b *GitHubBackend) ReviewSubmission(ctx context.Context, repository github.
 	labels := map[string]bool{}
 	latest := ""
 	synchronizing := false
-	reviewClaimedAt := ""
+	claimAcquiredAt := ""
+	claimAmbiguous := false
 	for page := 1; ; page++ {
 		var events []struct {
 			Event     string `json:"event"`
@@ -91,14 +92,16 @@ func (b *GitHubBackend) ReviewSubmission(ctx context.Context, repository github.
 			if event.Event != "labeled" && event.Event != "unlabeled" {
 				continue
 			}
-			labels[event.Label.Name] = event.Event == "labeled"
-			if event.Label.Name == "review" {
+			if event.Label.Name == "wip" {
 				if event.Event == "labeled" {
-					reviewClaimedAt = event.CreatedAt
+					claimAmbiguous = claimAmbiguous || labels["wip"]
+					claimAcquiredAt = event.CreatedAt
 				} else {
-					reviewClaimedAt = ""
+					claimAcquiredAt = ""
+					claimAmbiguous = false
 				}
 			}
+			labels[event.Label.Name] = event.Event == "labeled"
 			if event.Event == "labeled" && (event.Label.Name == "review" || event.Label.Name == "rework" || event.Label.Name == "done" || event.Label.Name == "needs-human") {
 				// A conflicting pass retry can add rework before its claimed review is removed.
 				synchronizing = event.Label.Name == "rework" && latest == "done" && labels["done"] && labels["sync"] && (!labels["review"] || labels["wip"]) && !labels["needs-human"] && !labels["ready"]
@@ -121,8 +124,8 @@ func (b *GitHubBackend) ReviewSubmission(ctx context.Context, repository github.
 		result.PendingReview = map[string]workflow.State{"rework": workflow.Rework, "done": workflow.ReadyForMerge, "needs-human": workflow.NeedsHuman}[latest]
 		result.State = result.PendingReview
 	}
-	if current["review"] && claimed && states == 1 {
-		result.ReviewClaimedAt = reviewClaimedAt
+	if current["review"] && claimed && states == 1 && labels["wip"] && !claimAmbiguous {
+		result.ClaimAcquiredAt = claimAcquiredAt
 	}
 	if (states == 2 && !current["review"] || states == 3 && current["review"] && claimed && labels["wip"]) && current["review"] == labels["review"] && current["done"] && current["rework"] && current["sync"] && labels["done"] && labels["rework"] && labels["sync"] && synchronizing {
 		result.PendingReview = workflow.Rework

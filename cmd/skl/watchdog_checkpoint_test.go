@@ -330,7 +330,13 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 				if caller == "other" {
 					location = other
 				}
-				start := f.start(t, location)
+				start := setup.ImplementationOutput{}
+				if caller == "other" {
+					f.start(t, f.root)
+					start = f.run(t, location, "watchdog", "resume", "--item", "7")
+				} else {
+					start = f.start(t, location)
+				}
 				if start.Packet.Facts.Watchdog.ReviewCount != 2 || start.Packet.Facts.Watchdog.ReviewNumber != 3 || strings.Contains(start.Packet.Instructions, ".watchdog") {
 					t.Fatalf("encapsulation: %#v", start.Packet.Facts.Watchdog)
 				}
@@ -436,44 +442,78 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 
 	t.Run("B4 invalid checkpoint and submit inputs refuse", func(t *testing.T) {
 		for _, invalid := range []string{"", "\n", "1:", " 1:" + strings.Repeat("a", 40) + "\n", "x:" + strings.Repeat("a", 40), "-1:" + strings.Repeat("a", 40), "+1:" + strings.Repeat("a", 40), strconv.FormatUint(uint64(^uint(0)>>1)+1, 10) + ":" + strings.Repeat("a", 40), "18446744073709551616:" + strings.Repeat("a", 40), "1:abc", "1:" + strings.Repeat("a", 39), "1:" + strings.Repeat("g", 40), "1:" + strings.Repeat("a", 64), "1:" + strings.Repeat("a", 40) + ":x", "1:" + strings.Repeat("a", 40) + "\nextra"} {
-			t.Run(strconv.Quote(invalid), func(t *testing.T) {
+			for _, command := range []string{"next", "resume"} {
+				t.Run(strconv.Quote(invalid)+" "+command, func(t *testing.T) {
+					f := newReviewFixture(t)
+					if err := os.WriteFile(f.checkpoint, []byte(invalid), 0600); err != nil {
+						t.Fatal(err)
+					}
+					args := []string{"watchdog", command}
+					if command == "resume" {
+						f.forge.labels = []string{"review", "wip"}
+						args = append(args, "--item", "7")
+					}
+					labels := append([]string(nil), f.forge.labels...)
+					got := f.run(t, f.root, args...)
+					if got.Status != "fix_required" || !strings.Contains(got.Reason, "Review Checkpoint") || !strings.Contains(got.Reason, "repair") || len(f.forge.summaries) != 0 || !slices.Equal(f.forge.labels, labels) {
+						t.Fatalf("accepted %q through %s: %#v", invalid, command, got)
+					}
+				})
+			}
+		}
+		for _, command := range []string{"next", "resume"} {
+			t.Run("unreadable checkpoint "+command, func(t *testing.T) {
 				f := newReviewFixture(t)
-				if err := os.WriteFile(f.checkpoint, []byte(invalid), 0600); err != nil {
-					t.Fatal(err)
+				_ = os.WriteFile(f.checkpoint, []byte("1:"+f.head+"\n"), 0000)
+				defer os.Chmod(f.checkpoint, 0600)
+				args := []string{"watchdog", command}
+				if command == "resume" {
+					f.forge.labels = []string{"review", "wip"}
+					args = append(args, "--item", "7")
 				}
-				got := f.start(t, f.root)
-				if got.Status != "fix_required" || !strings.Contains(got.Reason, "Review Checkpoint") || !strings.Contains(got.Reason, "repair") || len(f.forge.summaries) != 0 || slices.Contains(f.forge.labels, "wip") {
-					t.Fatalf("accepted %q: %#v", invalid, got)
+				labels := append([]string(nil), f.forge.labels...)
+				if got := f.run(t, f.root, args...); got.Status != "fix_required" || !strings.Contains(got.Reason, "repair access") || !slices.Equal(f.forge.labels, labels) {
+					t.Fatalf("unreadable checkpoint accepted through %s: %#v", command, got)
+				}
+			})
+			t.Run("selected worktree cannot be resolved "+command, func(t *testing.T) {
+				f := newReviewFixture(t)
+				if command == "resume" {
+					f.forge.labels = []string{"review", "wip"}
+				}
+				labels := append([]string(nil), f.forge.labels...)
+				runGit(t, f.root, "worktree", "remove", "--force", f.worktree)
+				args := []string{"watchdog", command}
+				if command == "resume" {
+					args = append(args, "--item", "7")
+				}
+				if got := f.run(t, f.root, args...); got.Status != "fix_required" || !strings.Contains(got.Reason, "resolve private Git directory") || !slices.Equal(f.forge.labels, labels) {
+					t.Fatalf("missing selected worktree accepted through %s: %#v", command, got)
 				}
 			})
 		}
-		t.Run("unreadable checkpoint", func(t *testing.T) {
-			f := newReviewFixture(t)
-			_ = os.WriteFile(f.checkpoint, []byte("1:"+f.head+"\n"), 0000)
-			defer os.Chmod(f.checkpoint, 0600)
-			if got := f.start(t, f.root); got.Status != "fix_required" || !strings.Contains(got.Reason, "repair access") || slices.Contains(f.forge.labels, "wip") {
-				t.Fatalf("unreadable checkpoint accepted: %#v", got)
-			}
-		})
-		t.Run("selected worktree cannot be resolved", func(t *testing.T) {
-			f := newReviewFixture(t)
-			runGit(t, f.root, "worktree", "remove", "--force", f.worktree)
-			if got := f.start(t, f.root); got.Status != "fix_required" || !strings.Contains(got.Reason, "resolve private Git directory") || slices.Contains(f.forge.labels, "wip") {
-				t.Fatalf("missing selected worktree accepted: %#v", got)
-			}
-		})
 		for _, branch := range []string{"team/widget", "../outside"} {
-			t.Run("invalid checkpoint branch "+branch, func(t *testing.T) {
-				f := newReviewFixture(t)
-				f.forge.branch = branch
-				outside := filepath.Join(f.root, "outside", ".watchdog")
-				_ = os.MkdirAll(filepath.Dir(outside), 0700)
-				_ = os.WriteFile(outside, []byte("sentinel"), 0600)
-				got := f.start(t, f.root)
-				if got.Status != "fix_required" || !strings.Contains(got.Reason, "invalid conventional branch") || readFile(t, outside) != "sentinel" || slices.Contains(f.forge.labels, "wip") {
-					t.Fatalf("unsafe branch reached checkpoint storage: %#v", got)
-				}
-			})
+			for _, command := range []string{"next", "resume"} {
+				t.Run("invalid checkpoint branch "+branch+" "+command, func(t *testing.T) {
+					f := newReviewFixture(t)
+					f.forge.branch = branch
+					if command == "resume" {
+						f.forge.labels = []string{"review", "wip"}
+					}
+					labels := append([]string(nil), f.forge.labels...)
+					outside := filepath.Join(f.root, "outside", ".watchdog")
+					_ = os.MkdirAll(filepath.Dir(outside), 0700)
+					_ = os.WriteFile(outside, []byte("sentinel"), 0600)
+					args := []string{"watchdog", command}
+					if command == "resume" {
+						args = append(args, "--item", "7")
+					}
+					got := f.run(t, f.root, args...)
+					if got.Status != "fix_required" || !strings.Contains(got.Reason, "invalid conventional branch") || readFile(t, outside) != "sentinel" || !slices.Equal(f.forge.labels, labels) {
+						t.Fatalf("unsafe branch reached checkpoint storage through %s: %#v", command, got)
+					}
+				})
+			}
 		}
 		for _, number := range []string{"0", "-1", "18446744073709551616"} {
 			t.Run("submit number "+number, func(t *testing.T) {
@@ -888,7 +928,7 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 				f := newReviewFixture(t)
 				_ = os.WriteFile(f.checkpoint, []byte("1:"+f.head+"\n"), 0600)
 				f.forge.labels = []string{"review", "wip"}
-				f.forge.timeline = []map[string]any{{"event": "labeled", "created_at": tc.claim, "label": map[string]string{"name": "review"}}}
+				f.forge.timeline = []map[string]any{{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": "review"}}, {"event": "labeled", "created_at": tc.claim, "label": map[string]string{"name": "wip"}}}
 				f.forge.summaries = []map[string]any{{"body": "round 1", "commit_id": f.head, "state": "CHANGES_REQUESTED", "submitted_at": tc.receipt}}
 				checkpoint, labels := checkpointSnapshot(f.checkpoint), append([]string(nil), f.forge.labels...)
 				if got := f.submit(t, 1, f.head, "rework"); got.Status != "fix_required" {
@@ -897,6 +937,30 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 				assertReviewUnchanged(t, f, checkpoint, labels, 1, 0, "")
 			})
 		}
+		t.Run("receipt after review but before wip Claim", func(t *testing.T) {
+			f := newReviewFixture(t)
+			_ = os.WriteFile(f.checkpoint, []byte("1:"+f.head+"\n"), 0600)
+			f.forge.labels = []string{"review", "wip"}
+			f.forge.timeline = []map[string]any{{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": "review"}}, {"event": "labeled", "created_at": "2026-01-01T00:00:03Z", "label": map[string]string{"name": "wip"}}}
+			f.forge.summaries = []map[string]any{{"body": "round 1", "commit_id": f.head, "state": "CHANGES_REQUESTED", "submitted_at": "2026-01-01T00:00:02Z"}}
+			checkpoint, labels := checkpointSnapshot(f.checkpoint), append([]string(nil), f.forge.labels...)
+			if got := f.submit(t, 1, f.head, "rework"); got.Status != "fix_required" {
+				t.Fatalf("pre-Claim receipt consumed round: %#v", got)
+			}
+			assertReviewUnchanged(t, f, checkpoint, labels, 1, 0, "")
+		})
+		t.Run("ambiguous active wip Claim", func(t *testing.T) {
+			f := newReviewFixture(t)
+			_ = os.WriteFile(f.checkpoint, []byte("1:"+f.head+"\n"), 0600)
+			f.forge.labels = []string{"review", "wip"}
+			f.forge.timeline = []map[string]any{{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": "review"}}, {"event": "labeled", "created_at": "2026-01-01T00:00:02Z", "label": map[string]string{"name": "wip"}}, {"event": "labeled", "created_at": "2026-01-01T00:00:03Z", "label": map[string]string{"name": "wip"}}}
+			f.forge.summaries = []map[string]any{{"body": "round 1", "commit_id": f.head, "state": "CHANGES_REQUESTED", "submitted_at": "2026-01-01T00:00:04Z"}}
+			checkpoint, labels := checkpointSnapshot(f.checkpoint), append([]string(nil), f.forge.labels...)
+			if got := f.submit(t, 1, f.head, "rework"); got.Status != "fix_required" {
+				t.Fatalf("ambiguous Claim consumed round: %#v", got)
+			}
+			assertReviewUnchanged(t, f, checkpoint, labels, 1, 0, "")
+		})
 		t.Run("recorded rework cannot be replayed as pass", func(t *testing.T) {
 			f := newReviewFixture(t)
 			f.start(t, f.root)
@@ -1106,15 +1170,17 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 			final := strings.TrimSpace(runGitOutput(t, f.worktree, "rev-parse", "HEAD"))
 			f.forge.head = final
 			dir := t.TempDir()
-			summary, body := filepath.Join(dir, "summary.md"), filepath.Join(dir, "submission.md")
+			summary, body, inline, findings := filepath.Join(dir, "summary.md"), filepath.Join(dir, "submission.md"), filepath.Join(dir, "inline.md"), filepath.Join(dir, "findings.json")
 			_ = os.WriteFile(summary, []byte("pass round 2"), 0600)
 			_ = os.WriteFile(body, []byte("final"), 0600)
-			args := []string{"watchdog", "submit", "--item", "7", "--review-number", "2", "--reviewed-head", reviewed, "--head", final, "--verdict", "pass", "--summary", summary, "--body", body}
+			_ = os.WriteFile(inline, []byte("anchored at H"), 0600)
+			_ = os.WriteFile(findings, []byte(fmt.Sprintf(`[{"path":"README.md","line":1,"side":"RIGHT","body_file":%q}]`, inline)), 0600)
+			args := []string{"watchdog", "submit", "--item", "7", "--review-number", "2", "--reviewed-head", reviewed, "--head", final, "--verdict", "pass", "--summary", summary, "--findings", findings, "--body", body}
 			gitDir := filepath.Dir(f.checkpoint)
 			_ = os.Chmod(gitDir, 0500)
 			got := f.run(t, f.worktree, args...)
 			_ = os.Chmod(gitDir, 0700)
-			if got.Status != "fix_required" || checkpointSnapshot(f.checkpoint) != "1:"+reviewed+"\n" || strings.Contains(checkpointSnapshot(f.checkpoint), final) || len(f.forge.summaries) != 1 || f.forge.body != "final\n\nCloses #7\n" {
+			if got.Status != "fix_required" || checkpointSnapshot(f.checkpoint) != "1:"+reviewed+"\n" || strings.Contains(checkpointSnapshot(f.checkpoint), final) || len(f.forge.summaries) != 1 || f.forge.summaries[0]["commit_id"] != reviewed || len(f.forge.inlines) != 1 || f.forge.inlines[0]["commit_id"] != reviewed || f.forge.body != "final\n\nCloses #7\n" {
 				t.Fatalf("failed replacement recorded final head: %#v checkpoint=%q", got, checkpointSnapshot(f.checkpoint))
 			}
 			if retry := f.run(t, f.worktree, args...); retry.Status != "ready_for_merge" || fileExists(f.checkpoint) || len(f.forge.summaries) != 1 {

@@ -92,13 +92,7 @@ func (c reviewCheckpoint) replace(count uint64, head string) error {
 	if err != nil {
 		return fmt.Errorf("atomically replace Review Checkpoint: %w; repair private Git-directory access and retry the same fixed-number command", err)
 	}
-	directory, err := os.Open(filepath.Dir(c.Path))
-	if err == nil {
-		err = directory.Sync()
-		if closeErr := directory.Close(); err == nil {
-			err = closeErr
-		}
-	}
+	err = syncCheckpointDirectory(c.Path)
 	if err != nil {
 		return fmt.Errorf("sync Review Checkpoint directory after atomic replacement: %w; retain the Claim and retry the same fixed-number command", err)
 	}
@@ -106,8 +100,25 @@ func (c reviewCheckpoint) replace(count uint64, head string) error {
 }
 
 func (c reviewCheckpoint) remove() error {
-	if err := os.Remove(c.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := os.Remove(c.Path); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
 		return fmt.Errorf("review completed but remove Review Checkpoint %s: %w; remove it manually", c.Path, err)
 	}
+	if err := syncCheckpointDirectory(c.Path); err != nil {
+		return fmt.Errorf("review completed and removed Review Checkpoint %s but directory sync failed: %w; cleanup durability is uncertain, inspect the private Git directory and retry the same command", c.Path, err)
+	}
 	return nil
+}
+
+func syncCheckpointDirectory(path string) error {
+	directory, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	err = directory.Sync()
+	if closeErr := directory.Close(); err == nil {
+		err = closeErr
+	}
+	return err
 }
