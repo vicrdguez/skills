@@ -449,6 +449,52 @@ func TestB4EnforceEndpointPathsModesAndExactContent(t *testing.T) {
 	}
 }
 
+func TestB5EnforcePhaseAppropriateCompletionTicks(t *testing.T) {
+	for _, test := range []struct {
+		name, baseline, completion, want string
+		baselineOnly                     bool
+	}{
+		{"lowercase completion ticks", "# Intent\n1) [ ] Ship\n* [ ] Test\n## Manual Verification ###\n- [ ] Human\n", "# Intent\n1) [x] Ship\n* [x] Test\n## Manual Verification ###\n- [ ] Human\n", "", false},
+		{"automated box incomplete", "- [ ] Ship\n", "- [ ] Ship\n", "agent-verifiable checkbox unchecked", false},
+		{"manual box checked at baseline", "## Manual verification\n- [x] Human\n", "## Manual verification\n- [x] Human\n", "Manual Verification", false},
+		{"manual box checked at completion", "- [ ] Ship\n## Manual verification\n- [ ] Human\n", "- [x] Ship\n## Manual verification\n- [x] Human\n", "Manual Verification", false},
+		{"reverse tick", "- [x] Ship\n", "- [ ] Ship\n", "content changed", false},
+		{"uppercase tick", "- [ ] Ship\n", "- [X] Ship\n", "content changed", false},
+		{"baseline only incomplete", "- [ ] Ship\n## Manual verification\n- [ ] Human\n", "", "", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := proposalRepository(t)
+			runGit(t, root, "switch", "-c", "ship-widget", "main")
+			writeLedger(t, root, "ship-widget", true)
+			if err := os.WriteFile(filepath.Join(root, ".changes/ship-widget/intent.md"), []byte(test.baseline), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			runGit(t, root, "add", ".changes/ship-widget")
+			runGit(t, root, "commit", "-m", "[baseline] ship-widget")
+			state := workflow.Ready
+			if !test.baselineOnly {
+				if err := os.WriteFile(filepath.Join(root, ".changes/ship-widget/intent.md"), []byte(test.completion), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				runGit(t, root, "add", ".changes/ship-widget/intent.md")
+				runGit(t, root, "commit", "--allow-empty", "-m", "[completion] ship-widget")
+				runGit(t, root, "rm", "-r", ".changes/ship-widget")
+				runGit(t, root, "commit", "-m", "retire")
+				state = workflow.AwaitingReview
+			}
+			backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "ship-widget", State: state}}}
+			got := implementCLI(t, root, backend, "inspect", "--item", "7")
+			violations := strings.Join(got.Ledger.Violations, "\n")
+			if test.want == "" && violations != "" || test.want != "" && !strings.Contains(violations, test.want) {
+				t.Fatalf("violations = %q, want %q", violations, test.want)
+			}
+			if test.baselineOnly && (got.Ledger.Completion != "" || got.Ledger.Phase != "present") {
+				t.Fatalf("baseline-only phase = %#v", got.Ledger)
+			}
+		})
+	}
+}
+
 func TestImplementSubmitsCompletedFirstImplementation(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
