@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	skilldist "github.com/vicrdguez/skills"
@@ -94,11 +95,11 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	if err != nil {
 		return ImplementationOutcome{}, Refuse(err.Error())
 	}
-	if err := validateReviewHead(root, item.Branch, reviewed); err != nil {
-		return ImplementationOutcome{}, err
+	if !checkpoint.validHead(reviewed) {
+		return ImplementationOutcome{}, Refuse(fmt.Sprintf("reviewed and final heads must be full %d-character hexadecimal object IDs", checkpoint.ObjectIDWidth))
 	}
-	if err := validateReviewHead(root, item.Branch, head); err != nil && head != "" {
-		return ImplementationOutcome{}, err
+	if !checkpoint.validHead(head) {
+		return ImplementationOutcome{}, Refuse(fmt.Sprintf("reviewed and final heads must be full %d-character hexadecimal object IDs", checkpoint.ObjectIDWidth))
 	}
 	retry := reviewNumber == checkpoint.Count && checkpoint.Count > 0
 	completedDone := checkpoint.Count == 0 && item.State == ReadyForMerge && !item.Claimed
@@ -153,7 +154,7 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
-	comments := []skilldist.ReviewComment{{Body: string(summary), Commit: head}}
+	comments := []skilldist.ReviewComment{{Body: string(summary), Commit: head, Verdict: verdict}}
 	if findingsPath != "" {
 		data, err := os.ReadFile(findingsPath)
 		if err != nil {
@@ -178,6 +179,14 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 			}
 			comments = append(comments, skilldist.ReviewComment{Body: string(body), Commit: head, Path: a.Path, Line: a.Line, Side: a.Side})
 		}
+	}
+	finalBody := ""
+	if verdict == "pass" {
+		body, err := os.ReadFile(bodyPath)
+		if err != nil {
+			return ImplementationOutcome{}, err
+		}
+		finalBody = withClosingReference(string(body), item.ClosingReference)
 	}
 	submission, err := backend.ReviewSubmission(ctx, repository, item.Submission.ID)
 	if err != nil {
@@ -213,28 +222,17 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 		}
 		requireMergeable = target == ReadyForMerge
 	}
+	if retry {
+		if !reviewEvidenceMatches(item, comments, finalBody) {
+			return ImplementationOutcome{}, Refuse("recorded review differs from the supplied summary, verdict, body, or inline evidence; replay the original fixed-number command and Result Documents")
+		}
+	}
 	if item.State != AwaitingReview {
 		if item.Claimed && item.Submission.PendingReview == "" {
 			return ImplementationOutcome{}, Refuse("target-only Claim cannot prove it belongs to this review handoff; inspect before replaying the original fixed-number command")
 		}
 		compatible := verdict == "rework" && (item.State == Rework || item.State == NeedsHuman) || verdict == "needs-human" && item.State == NeedsHuman || verdict == "pass" && (item.State == ReadyForMerge || item.State == Rework && item.Synchronization)
-		for _, wanted := range comments {
-			found := false
-			for _, existing := range item.Submission.Comments {
-				if wanted.Body == existing.Body && wanted.Path == existing.Path && (wanted.Path == "" || wanted.Commit == existing.Commit && wanted.Line == existing.Line && wanted.Side == existing.Side) {
-					found = true
-					break
-				}
-			}
-			compatible = compatible && found
-		}
-		if verdict == "pass" {
-			body, err := os.ReadFile(bodyPath)
-			if err != nil {
-				return ImplementationOutcome{}, err
-			}
-			compatible = compatible && withClosingReference(string(body), item.ClosingReference) == item.Submission.Body
-		}
+		compatible = compatible && reviewEvidenceMatches(item, comments, finalBody)
 		if !compatible {
 			return ImplementationOutcome{}, Refuse("completed or partial review differs from supplied verdict; restore its exact Result Documents")
 		}
@@ -257,28 +255,18 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 			}
 			for _, c := range current {
 				if c.ID == item.ID && c.Problem == "" && !c.Claimed && c.State == target {
-					result := ImplementationOutcome{Status: string(c.State), Item: &c, Head: head}
-					if c.State == ReadyForMerge {
-						result.Reason = cleanupReviewCheckpoint(checkpoint)
-					}
+					result := completedReviewOutcome(c, head, checkpoint)
 					return result, guard()
 				}
 			}
 			return ImplementationOutcome{}, Refuse("review handoff still incomplete; retain Claim and retry")
 		}
-		result := ImplementationOutcome{Status: string(item.State), Item: &item, Head: head}
-		if item.State == ReadyForMerge {
-			result.Reason = cleanupReviewCheckpoint(checkpoint)
-		}
+		result := completedReviewOutcome(item, head, checkpoint)
 		return result, guard()
 	}
 	if verdict == "pass" {
-		body, err := os.ReadFile(bodyPath)
-		if err != nil {
-			return ImplementationOutcome{}, err
-		}
 		wanted := *item.Submission
-		wanted.Body = withClosingReference(string(body), item.ClosingReference)
+		wanted.Body = finalBody
 		published, err := backend.PublishImplementation(ctx, repository, item, wanted)
 		if err != nil {
 			return ImplementationOutcome{}, err
@@ -305,14 +293,22 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	}
 	for _, current := range observed {
 		if current.ID == id && current.Problem == "" && current.State == target && !current.Claimed {
-			result := ImplementationOutcome{Status: string(target), Item: &current, Head: head}
-			if target == ReadyForMerge {
-				result.Reason = cleanupReviewCheckpoint(checkpoint)
-			}
+			result := completedReviewOutcome(current, head, checkpoint)
 			return result, nil
 		}
 	}
 	return ImplementationOutcome{}, Refuse("review handoff incomplete; retry the same verdict and Result Documents")
+}
+
+func reviewEvidenceMatches(item ImplementationItem, wanted []skilldist.ReviewComment, finalBody string) bool {
+	for _, comment := range wanted {
+		if !slices.ContainsFunc(item.Submission.Comments, func(existing skilldist.ReviewComment) bool {
+			return comment.Body == existing.Body && comment.Path == existing.Path && comment.Verdict == existing.Verdict && comment.Commit == existing.Commit && (comment.Path == "" || comment.Line == existing.Line && comment.Side == existing.Side)
+		}) {
+			return false
+		}
+	}
+	return finalBody == "" || finalBody == item.Submission.Body
 }
 
 func cleanupReviewCheckpoint(checkpoint reviewCheckpoint) string {
@@ -320,4 +316,12 @@ func cleanupReviewCheckpoint(checkpoint reviewCheckpoint) string {
 		return err.Error()
 	}
 	return ""
+}
+
+func completedReviewOutcome(item ImplementationItem, head string, checkpoint reviewCheckpoint) ImplementationOutcome {
+	result := ImplementationOutcome{Status: string(item.State), Item: &item, Head: head}
+	if item.State == ReadyForMerge {
+		result.Reason = cleanupReviewCheckpoint(checkpoint)
+	}
+	return result
 }

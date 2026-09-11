@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 
 	skilldist "github.com/vicrdguez/skills"
@@ -132,6 +133,12 @@ func (b *GitHubBackend) PublishReview(ctx context.Context, repository github.Rep
 			return err
 		}
 		if comment.Path == "" {
+			if comment.Verdict != "" {
+				if err := b.publishReviewSummary(ctx, repository, number, comment); err != nil {
+					return err
+				}
+				continue
+			}
 			if err := b.implementationComment(ctx, repository, number, comment.Body, false); err != nil {
 				return err
 			}
@@ -163,4 +170,48 @@ func (b *GitHubBackend) PublishReview(ctx context.Context, repository github.Rep
 		}
 	}
 	return guard()
+}
+
+func (b *GitHubBackend) publishReviewSummary(ctx context.Context, repository github.RepositoryID, number int, wanted skilldist.ReviewComment) error {
+	states := map[string]string{"rework": "CHANGES_REQUESTED", "pass": "APPROVED", "needs-human": "COMMENTED"}
+	events := map[string]string{"rework": "REQUEST_CHANGES", "pass": "APPROVE", "needs-human": "COMMENT"}
+	state, event := states[wanted.Verdict], events[wanted.Verdict]
+	if state == "" {
+		return fmt.Errorf("invalid review verdict %q", wanted.Verdict)
+	}
+	path := b.repositoryPath(repository) + fmt.Sprintf("/pulls/%d/reviews", number)
+	published := func() (bool, error) {
+		type review struct {
+			Body   string `json:"body"`
+			Commit string `json:"commit_id"`
+			State  string `json:"state"`
+		}
+		for page := 1; ; page++ {
+			var reviews []review
+			if err := b.request(ctx, http.MethodGet, path+fmt.Sprintf("?per_page=100&page=%d", page), nil, &reviews); err != nil {
+				return false, err
+			}
+			if slices.ContainsFunc(reviews, func(review review) bool {
+				return review.Body == wanted.Body && review.Commit == wanted.Commit && review.State == state
+			}) {
+				return true, nil
+			}
+			if len(reviews) < 100 {
+				return false, nil
+			}
+		}
+	}
+	if found, err := published(); err != nil || found {
+		return err
+	}
+	writeErr := b.request(ctx, http.MethodPost, path, map[string]string{"body": wanted.Body, "commit_id": wanted.Commit, "event": event}, nil)
+	if found, err := published(); err != nil {
+		return err
+	} else if found {
+		return nil
+	}
+	if writeErr != nil {
+		return writeErr
+	}
+	return fmt.Errorf("review summary publication not observed; retry the same fixed-number command")
 }

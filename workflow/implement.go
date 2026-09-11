@@ -139,7 +139,7 @@ func InspectImplementation(ctx context.Context, root, remote string, id WorkItem
 	return ImplementationOutcome{Status: "fix_required", Reason: "Work Item unavailable; supply its explicit stable --item identity"}, nil
 }
 
-func StartImplementation(ctx context.Context, root, remote string, id WorkItemID, snapshot, _ string, backend ImplementationBackend) (ImplementationOutcome, error) {
+func StartImplementation(ctx context.Context, root, remote string, id WorkItemID, snapshot string, backend ImplementationBackend) (ImplementationOutcome, error) {
 	remote, err := github.ResolveGitHubRemote(root, remote)
 	if err != nil {
 		return ImplementationOutcome{}, err

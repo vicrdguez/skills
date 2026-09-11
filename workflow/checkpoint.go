@@ -12,9 +12,10 @@ import (
 )
 
 type reviewCheckpoint struct {
-	Count uint64
-	Head  string
-	Path  string
+	Count         uint64
+	Head          string
+	Path          string
+	ObjectIDWidth int
 }
 
 func loadReviewCheckpoint(root, branch string) (reviewCheckpoint, error) {
@@ -27,7 +28,11 @@ func loadReviewCheckpoint(root, branch string) (reviewCheckpoint, error) {
 	if err != nil {
 		return reviewCheckpoint{}, fmt.Errorf("resolve private Git directory for selected Work Item worktree %s: %w", worktree, err)
 	}
-	checkpoint := reviewCheckpoint{Path: filepath.Join(gitDir, ".watchdog")}
+	width := 40
+	if format, formatErr := git(worktree, "rev-parse", "--show-object-format"); formatErr == nil && format == "sha256" {
+		width = 64
+	}
+	checkpoint := reviewCheckpoint{Path: filepath.Join(gitDir, ".watchdog"), ObjectIDWidth: width}
 	data, err := os.ReadFile(checkpoint.Path)
 	if errors.Is(err, os.ErrNotExist) {
 		return checkpoint, nil
@@ -48,30 +53,15 @@ func loadReviewCheckpoint(root, branch string) (reviewCheckpoint, error) {
 	if err != nil || checkpoint.Count > math.MaxInt {
 		return checkpoint, fmt.Errorf("corrupt Review Checkpoint %s: count must be a nonnegative, nonoverflowing decimal; repair it explicitly", checkpoint.Path)
 	}
-	width := 40
-	if format, formatErr := git(worktree, "rev-parse", "--show-object-format"); formatErr == nil && format == "sha256" {
-		width = 64
-	}
-	if len(head) != width || strings.IndexFunc(head, func(r rune) bool { return !unicode.Is(unicode.ASCII_Hex_Digit, r) }) >= 0 {
-		return checkpoint, fmt.Errorf("corrupt Review Checkpoint %s: SHA must be a full %d-character hexadecimal object ID; repair it explicitly", checkpoint.Path, width)
+	if !checkpoint.validHead(head) {
+		return checkpoint, fmt.Errorf("corrupt Review Checkpoint %s: SHA must be a full %d-character hexadecimal object ID; repair it explicitly", checkpoint.Path, checkpoint.ObjectIDWidth)
 	}
 	checkpoint.Head = head
 	return checkpoint, nil
 }
 
-func validateReviewHead(root, branch, head string) error {
-	checkpoint, err := loadReviewCheckpoint(root, branch)
-	if err != nil {
-		return err
-	}
-	width := 40
-	if format, formatErr := git(filepath.Dir(checkpoint.Path), "rev-parse", "--show-object-format"); formatErr == nil && format == "sha256" {
-		width = 64
-	}
-	if len(head) != width || strings.HasPrefix(head, "-") || strings.IndexFunc(head, func(r rune) bool { return !unicode.Is(unicode.ASCII_Hex_Digit, r) }) >= 0 {
-		return Refuse(fmt.Sprintf("reviewed and final heads must be full %d-character hexadecimal object IDs", width))
-	}
-	return nil
+func (c reviewCheckpoint) validHead(head string) bool {
+	return len(head) == c.ObjectIDWidth && strings.IndexFunc(head, func(r rune) bool { return !unicode.Is(unicode.ASCII_Hex_Digit, r) }) < 0
 }
 
 func (c reviewCheckpoint) replace(count uint64, head string) error {

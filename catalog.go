@@ -19,6 +19,13 @@ type InvocationFacts struct {
 	Implementation *ImplementationFacts `json:"implementation,omitempty"`
 }
 
+type ReviewScope string
+
+const (
+	FullReview        ReviewScope = "full"
+	IncrementalReview ReviewScope = "incremental"
+)
+
 type WatchdogFacts struct {
 	Remote               string            `json:"remote"`
 	Worktree             string            `json:"worktree"`
@@ -29,7 +36,7 @@ type WatchdogFacts struct {
 	CompletionFiles      map[string]string `json:"completion_files"`
 	ReviewCount          uint64            `json:"review_count"`
 	ReviewNumber         uint64            `json:"review_number"`
-	ReviewScope          string            `json:"review_scope"`
+	ReviewScope          ReviewScope       `json:"review_scope"`
 	PreviousReviewedHead string            `json:"previous_reviewed_head,omitempty"`
 	WorkItem             int               `json:"work_item"`
 	Submission           int               `json:"submission"`
@@ -66,6 +73,7 @@ type ReviewComment struct {
 	Commit      string `json:"commit,omitempty"`
 	Path        string `json:"path,omitempty"`
 	CreatedAt   string `json:"created_at,omitempty"`
+	Verdict     string `json:"verdict,omitempty"`
 }
 
 type Packet struct {

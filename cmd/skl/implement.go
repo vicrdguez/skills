@@ -45,7 +45,7 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 					if name == "resume" && id == "" {
 						id = workflow.CurrentWorktree
 					}
-					outcome, err = workflow.StartImplementation(command.Context, command.Path("repo"), command.String("remote"), id, command.String("target-snapshot"), "", port)
+					outcome, err = workflow.StartImplementation(command.Context, command.Path("repo"), command.String("remote"), id, command.String("target-snapshot"), port)
 				}
 				if err != nil {
 					var violation *workflow.InvariantError

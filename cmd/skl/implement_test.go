@@ -333,7 +333,7 @@ func TestImplementLifecycleOrdersOpaqueIDsByBackendFact(t *testing.T) {
 		prepareSlice(t, root, item.Branch)
 	}
 	for _, want := range []workflow.WorkItemID{"zulu", "alpha"} {
-		got, err := workflow.StartImplementation(context.Background(), root, "origin", "", "", "", b)
+		got, err := workflow.StartImplementation(context.Background(), root, "origin", "", "", b)
 		if err != nil || got.Status != "work_available" || got.Item == nil || got.Item.ID != want || !got.Item.Claimed {
 			t.Fatalf("opaque implementation tie-break: %#v, %v; want %q", got, err, want)
 		}

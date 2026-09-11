@@ -485,7 +485,8 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository gith
 						return nil, err
 					}
 					for _, review := range reviews {
-						item.Submission.Comments = append(item.Submission.Comments, skilldist.ReviewComment{Body: review.Body, Author: review.User.Login, Association: review.Association, Commit: review.Commit, CreatedAt: review.SubmittedAt})
+						verdict := map[string]string{"CHANGES_REQUESTED": "rework", "APPROVED": "pass", "COMMENTED": "needs-human"}[review.State]
+						item.Submission.Comments = append(item.Submission.Comments, skilldist.ReviewComment{Body: review.Body, Author: review.User.Login, Association: review.Association, Commit: review.Commit, CreatedAt: review.SubmittedAt, Verdict: verdict})
 					}
 					if len(reviews) < 100 {
 						break

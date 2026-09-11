@@ -60,7 +60,7 @@ func StartWatchdog(ctx context.Context, root, remote string, id WorkItemID, back
 			if checkpoint.Count == ^uint64(0) {
 				return ImplementationOutcome{}, Refuse("Review Count cannot be incremented; repair the checkpoint explicitly")
 			}
-			facts := skilldist.WatchdogFacts{Branch: item.Branch, ReviewedHead: current.Submission.Head, ArtifactBaseline: history.Baseline, ArtifactCompletion: history.Completion, AuditBody: current.Submission.Body, Comments: current.Submission.Comments, ReviewCount: checkpoint.Count, ReviewNumber: checkpoint.Count + 1, ReviewScope: "full"}
+			facts := skilldist.WatchdogFacts{Branch: item.Branch, ReviewedHead: current.Submission.Head, ArtifactBaseline: history.Baseline, ArtifactCompletion: history.Completion, AuditBody: current.Submission.Body, Comments: current.Submission.Comments, ReviewCount: checkpoint.Count, ReviewNumber: checkpoint.Count + 1, ReviewScope: skilldist.FullReview}
 			facts.BaselineFiles, err = ledgerFiles(root, history.Baseline, ".changes/"+item.Branch)
 			if err != nil {
 				return ImplementationOutcome{}, err
@@ -84,7 +84,7 @@ func StartWatchdog(ctx context.Context, root, remote string, id WorkItemID, back
 			}
 			facts.Worktree = filepath.Join(main, ".worktrees", item.Branch)
 			if checkpoint.Count > 0 && checkpoint.Head != "" && gitOK(facts.Worktree, "cat-file", "-e", checkpoint.Head+"^{commit}") == nil && gitOK(facts.Worktree, "merge-base", "--is-ancestor", checkpoint.Head, facts.ReviewedHead) == nil {
-				facts.ReviewScope = "incremental"
+				facts.ReviewScope = skilldist.IncrementalReview
 				facts.PreviousReviewedHead = checkpoint.Head
 			}
 			facts.Remote = remote
