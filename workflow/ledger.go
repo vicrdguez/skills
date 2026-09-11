@@ -27,6 +27,7 @@ type LedgerPolicy int
 const (
 	InspectArtifacts LedgerPolicy = iota
 	RequireRetiredArtifacts
+	PreserveIncompleteArtifacts
 )
 
 // InspectLedger resolves slice markers and validates only accepted endpoint snapshots.
@@ -70,7 +71,7 @@ func InspectLedger(root, ref, slug string, explicit ArtifactEndpoints, policy Le
 			if err != nil {
 				return endpointViolation(result, err)
 			}
-			result.Violations = append(result.Violations, compareEndpoints(baseline, completion, result.Baseline, result.Completion, true)...)
+			result.Violations = append(result.Violations, compareEndpoints(baseline, completion, result.Baseline, result.Completion, policy != PreserveIncompleteArtifacts)...)
 		}
 	}
 
