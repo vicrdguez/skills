@@ -20,39 +20,43 @@ type InvocationFacts struct {
 }
 
 type WatchdogFacts struct {
-	Remote             string            `json:"remote"`
-	Worktree           string            `json:"worktree"`
-	ResultDirectory    string            `json:"result_directory"`
-	SubmitCommand      string            `json:"submit_command"`
-	ResumeCommand      string            `json:"resume_command"`
-	BaselineFiles      map[string]string `json:"baseline_files"`
-	CompletionFiles    map[string]string `json:"completion_files"`
-	Bounces            int               `json:"completed_bounces"`
-	WorkItem           int               `json:"work_item"`
-	Submission         int               `json:"submission"`
-	Branch             string            `json:"branch"`
-	ReviewedHead       string            `json:"reviewed_head"`
-	ArtifactBaseline   string            `json:"artifact_baseline"`
-	ArtifactCompletion string            `json:"artifact_completion"`
-	AuditBody          string            `json:"audit_body"`
-	Comments           []ReviewComment   `json:"comments,omitempty"`
+	Remote                     string            `json:"remote"`
+	Worktree                   string            `json:"worktree"`
+	ResultDirectory            string            `json:"result_directory"`
+	SubmitCommand              string            `json:"submit_command"`
+	ResumeCommand              string            `json:"resume_command"`
+	BaselineFiles              map[string]string `json:"baseline_files"`
+	CompletionFiles            map[string]string `json:"completion_files"`
+	Bounces                    int               `json:"completed_bounces"`
+	WorkItem                   int               `json:"work_item"`
+	Submission                 int               `json:"submission"`
+	Branch                     string            `json:"branch"`
+	ReviewedHead               string            `json:"reviewed_head"`
+	ArtifactBaseline           string            `json:"artifact_baseline"`
+	ArtifactCompletion         string            `json:"artifact_completion"`
+	SuppliedArtifactBaseline   string            `json:"supplied_artifact_baseline,omitempty"`
+	SuppliedArtifactCompletion string            `json:"supplied_artifact_completion,omitempty"`
+	AuditBody                  string            `json:"audit_body"`
+	Comments                   []ReviewComment   `json:"comments,omitempty"`
 }
 
 type ImplementationFacts struct {
-	Remote               string          `json:"remote"`
-	InspectCommand       string          `json:"inspect_command"`
-	ResultDirectory      string          `json:"result_directory"`
-	SubmitCommand        string          `json:"submit_command"`
-	Submission           int             `json:"submission,omitempty"`
-	PreviousReviewedHead string          `json:"previous_reviewed_head,omitempty"`
-	Comments             []ReviewComment `json:"comments,omitempty"`
-	WorkItem             int             `json:"work_item"`
-	Branch               string          `json:"branch"`
-	Worktree             string          `json:"worktree"`
-	TargetSnapshot       string          `json:"target_snapshot,omitempty"`
-	ArtifactBaseline     string          `json:"artifact_baseline,omitempty"`
-	ArtifactCompletion   string          `json:"artifact_completion,omitempty"`
-	ResumeCommand        string          `json:"resume_command"`
+	Remote                     string          `json:"remote"`
+	InspectCommand             string          `json:"inspect_command"`
+	ResultDirectory            string          `json:"result_directory"`
+	SubmitCommand              string          `json:"submit_command"`
+	Submission                 int             `json:"submission,omitempty"`
+	PreviousReviewedHead       string          `json:"previous_reviewed_head,omitempty"`
+	Comments                   []ReviewComment `json:"comments,omitempty"`
+	WorkItem                   int             `json:"work_item"`
+	Branch                     string          `json:"branch"`
+	Worktree                   string          `json:"worktree"`
+	TargetSnapshot             string          `json:"target_snapshot,omitempty"`
+	ArtifactBaseline           string          `json:"artifact_baseline,omitempty"`
+	ArtifactCompletion         string          `json:"artifact_completion,omitempty"`
+	SuppliedArtifactBaseline   string          `json:"supplied_artifact_baseline,omitempty"`
+	SuppliedArtifactCompletion string          `json:"supplied_artifact_completion,omitempty"`
+	ResumeCommand              string          `json:"resume_command"`
 }
 
 type ReviewComment struct {

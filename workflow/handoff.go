@@ -13,21 +13,21 @@ import (
 	"github.com/vicrdguez/skills/github"
 )
 
-func SubmitImplementation(ctx context.Context, root, remote string, id WorkItemID, bodyPath string, backend ImplementationBackend) (ImplementationOutcome, error) {
+func SubmitImplementation(ctx context.Context, root, remote string, id WorkItemID, bodyPath string, endpoints ArtifactEndpoints, backend ImplementationBackend) (ImplementationOutcome, error) {
 	if id == "" || bodyPath == "" {
 		return ImplementationOutcome{}, errors.New("submit requires --item and --body")
 	}
-	return handoffImplementation(ctx, root, remote, id, AwaitingReview, "", bodyPath, backend)
+	return handoffImplementation(ctx, root, remote, id, AwaitingReview, "", bodyPath, endpoints, backend)
 }
 
-func PauseImplementation(ctx context.Context, root, remote string, id WorkItemID, reason, decisionPath, bodyPath string, backend ImplementationBackend) (ImplementationOutcome, error) {
+func PauseImplementation(ctx context.Context, root, remote string, id WorkItemID, reason, decisionPath, bodyPath string, endpoints ArtifactEndpoints, backend ImplementationBackend) (ImplementationOutcome, error) {
 	if id == "" || decisionPath == "" || !slices.Contains([]string{"contradictory_artifacts", "mandatory_rule", "frozen_interface", "disputed_blocker", "bounce_cap"}, reason) {
 		return ImplementationOutcome{}, errors.New("Needs Human requires --item, --decision and a permitted --reason")
 	}
-	return handoffImplementation(ctx, root, remote, id, NeedsHuman, decisionPath, bodyPath, backend)
+	return handoffImplementation(ctx, root, remote, id, NeedsHuman, decisionPath, bodyPath, endpoints, backend)
 }
 
-func handoffImplementation(ctx context.Context, root, remote string, id WorkItemID, target State, decisionPath, bodyPath string, backend ImplementationBackend) (outcome ImplementationOutcome, err error) {
+func handoffImplementation(ctx context.Context, root, remote string, id WorkItemID, target State, decisionPath, bodyPath string, endpoints ArtifactEndpoints, backend ImplementationBackend) (outcome ImplementationOutcome, err error) {
 	remote, err = github.ResolveGitHubRemote(root, remote)
 	if err != nil {
 		return ImplementationOutcome{}, err
@@ -125,7 +125,7 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 	if target == NeedsHuman {
 		policy = PreserveIncompleteArtifacts
 	}
-	history, err := InspectLedger(root, head, item.Branch, ArtifactEndpoints{}, policy)
+	history, err := InspectLedger(root, head, item.Branch, endpoints, policy)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}

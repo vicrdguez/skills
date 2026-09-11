@@ -45,6 +45,13 @@ func InspectLedger(root, ref, slug string, explicit ArtifactEndpoints, policy Le
 	}
 	result.Baseline = resolveMarker(&result, slug, "baseline", markers["baseline"], explicit.Baseline)
 	result.Completion = resolveMarker(&result, slug, "completion", markers["completion"], explicit.Completion)
+	for kind, endpoint := range map[string]string{"baseline": explicit.Baseline, "completion": explicit.Completion} {
+		if len(markers[kind]) == 0 && endpoint != "" {
+			if violation := validateExplicitEndpoint(root, ref, kind, endpoint); violation != "" {
+				result.Violations = append(result.Violations, violation)
+			}
+		}
+	}
 	if result.Baseline == "" {
 		result.Violations = append(result.Violations, "slice "+slug+" is missing [baseline] "+slug+" marker")
 	}
@@ -126,9 +133,27 @@ func resolveMarker(result *LedgerHistory, slug, kind string, markers []string, e
 		return ""
 	}
 	if len(markers) == 1 {
+		if explicit != "" {
+			result.Violations = append(result.Violations, fmt.Sprintf("slice %s has authoritative [%s] marker %s; remove --artifact-%s rather than overriding marked evidence", slug, kind, markers[0], kind))
+		}
 		return markers[0]
 	}
 	return explicit
+}
+
+func validateExplicitEndpoint(root, ref, kind, endpoint string) string {
+	resolved, err := git(root, "rev-parse", "--verify", "--end-of-options", endpoint+"^{commit}")
+	if err != nil || resolved != endpoint {
+		return fmt.Sprintf("Artifact %s %s must be an available full commit SHA; fetch that exact commit or correct --artifact-%s", strings.Title(kind), endpoint, kind)
+	}
+	typeName, err := git(root, "cat-file", "-t", endpoint)
+	if err != nil || typeName != "commit" {
+		return fmt.Sprintf("Artifact %s %s must name a commit object", strings.Title(kind), endpoint)
+	}
+	if gitOK(root, "merge-base", "--is-ancestor", endpoint, ref) != nil {
+		return fmt.Sprintf("Artifact %s %s is not reachable from inspected head %s", strings.Title(kind), endpoint, ref)
+	}
+	return ""
 }
 
 func endpointViolation(result LedgerHistory, err error) (LedgerHistory, error) {

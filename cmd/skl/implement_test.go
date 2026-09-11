@@ -900,7 +900,7 @@ func TestImplementLifecycleOrdersOpaqueIDsByBackendFact(t *testing.T) {
 		prepareSlice(t, root, item.Branch)
 	}
 	for _, want := range []workflow.WorkItemID{"zulu", "alpha"} {
-		got, err := workflow.StartImplementation(context.Background(), root, "origin", "", "", "", b)
+		got, err := workflow.StartImplementation(context.Background(), root, "origin", "", "", "", workflow.ArtifactEndpoints{}, b)
 		if err != nil || got.Status != "work_available" || got.Item == nil || got.Item.ID != want || !got.Item.Claimed {
 			t.Fatalf("opaque implementation tie-break: %#v, %v; want %q", got, err, want)
 		}
@@ -914,7 +914,7 @@ func TestImplementLifecycleOrdersOpaqueIDsByBackendFact(t *testing.T) {
 		item.Submission = &workflow.Submission{ID: workflow.SubmissionID("review-" + item.ID), Head: strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD")), CreatedAt: "2026"}
 	}
 	for _, want := range []workflow.WorkItemID{"zulu", "alpha"} {
-		got, err := workflow.StartWatchdog(context.Background(), root, "origin", "", b)
+		got, err := workflow.StartWatchdog(context.Background(), root, "origin", "", workflow.ArtifactEndpoints{}, b)
 		if err != nil || got.Status != "work_available" || got.Item == nil || got.Item.ID != want || !got.Item.Claimed || got.Item.Submission.ID != workflow.SubmissionID("review-"+want) {
 			t.Fatalf("opaque review tie-break: %#v, %v; want %q", got, err, want)
 		}
@@ -1295,6 +1295,147 @@ func TestB10PreserveIncompleteWorkInNeedsHuman(t *testing.T) {
 				t.Fatalf("refusal mutated work = %#v", backend.work[0])
 			}
 		})
+	}
+}
+
+func TestB12ValidateExplicitMarkerlessEndpointSHAsWithoutAdoptionState(t *testing.T) {
+	type fixture struct {
+		root, baseline, completion, head string
+	}
+	markerless := func(t *testing.T, completionMarker, retired bool) fixture {
+		t.Helper()
+		root := proposalRepository(t)
+		runGit(t, root, "switch", "-c", "widget", "main")
+		writeLedger(t, root, "widget", true)
+		runGit(t, root, "add", ".changes/widget")
+		runGit(t, root, "commit", "-m", "legacy baseline")
+		baseline := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+		if !retired {
+			return fixture{root, baseline, "", baseline}
+		}
+		message := "legacy completion"
+		if completionMarker {
+			message = "[completion] widget"
+		}
+		runGit(t, root, "commit", "--allow-empty", "-m", message)
+		completion := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+		runGit(t, root, "rm", "-r", ".changes/widget")
+		runGit(t, root, "commit", "-m", "legacy retirement")
+		return fixture{root, baseline, completion, strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))}
+	}
+	for _, test := range []struct {
+		name string
+		run  func(*testing.T) (setup.ImplementationOutput, *implementationMemory)
+		want string
+	}{
+		{"markerless baseline-only implementation", func(t *testing.T) (setup.ImplementationOutput, *implementationMemory) {
+			f := markerless(t, false, false)
+			b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}}
+			return implementCLI(t, f.root, b, "inspect", "--item", "7", "--artifact-baseline", f.baseline), b
+		}, "valid present"},
+		{"markerless retired pair", func(t *testing.T) (setup.ImplementationOutput, *implementationMemory) {
+			f := markerless(t, false, true)
+			b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview}}}
+			return implementCLI(t, f.root, b, "inspect", "--item", "7", "--artifact-baseline", f.baseline, "--artifact-completion", f.completion), b
+		}, "valid retired"},
+		{"supplied baseline with marked completion", func(t *testing.T) (setup.ImplementationOutput, *implementationMemory) {
+			f := markerless(t, true, true)
+			b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview}}}
+			return implementCLI(t, f.root, b, "inspect", "--item", "7", "--artifact-baseline", f.baseline), b
+		}, "valid retired"},
+		{"markerless review misses Completion", func(t *testing.T) (setup.ImplementationOutput, *implementationMemory) {
+			f := markerless(t, false, true)
+			b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Submission: &workflow.Submission{ID: "11", Head: f.head}}}}
+			return watchdogCLI(t, f.root, b, "next", "--artifact-baseline", f.baseline), b
+		}, "fix_required"},
+		{"invalid explicit identities", func(t *testing.T) (setup.ImplementationOutput, *implementationMemory) {
+			f := markerless(t, false, true)
+			invalid := []string{"widget", f.baseline[:12], strings.TrimSpace(runGitOutput(t, f.root, "rev-parse", f.baseline+"^{tree}")), strings.Repeat("f", 40)}
+			b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}}
+			for _, endpoint := range invalid {
+				got := implementCLI(t, f.root, b, "inspect", "--item", "7", "--artifact-baseline", endpoint)
+				if got.Ledger == nil || !strings.Contains(strings.Join(got.Ledger.Violations, "\n"), "full commit SHA") && !strings.Contains(strings.Join(got.Ledger.Violations, "\n"), "commit object") {
+					t.Fatalf("accepted invalid endpoint %q: %#v", endpoint, got)
+				}
+			}
+			return implementCLI(t, f.root, b, "inspect", "--item", "7", "--artifact-baseline", invalid[0]), b
+		}, "full commit SHA"},
+		{"unreachable explicit baseline", func(t *testing.T) (setup.ImplementationOutput, *implementationMemory) {
+			root := proposalRepository(t)
+			runGit(t, root, "switch", "-c", "unreachable", "main")
+			writeLedger(t, root, "widget", true)
+			runGit(t, root, "add", ".changes/widget")
+			runGit(t, root, "commit", "-m", "legacy baseline")
+			baseline := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+			runGit(t, root, "switch", "-c", "widget", "main")
+			b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}}
+			return implementCLI(t, root, b, "inspect", "--item", "7", "--artifact-baseline", baseline), b
+		}, "not reachable"},
+		{"invalid explicit endpoint content", func(t *testing.T) (setup.ImplementationOutput, *implementationMemory) {
+			f := markerless(t, false, false)
+			if err := os.WriteFile(filepath.Join(f.root, ".changes/widget/behavior.md"), []byte("changed\n"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			runGit(t, f.root, "commit", "-am", "bad legacy completion")
+			bad := strings.TrimSpace(runGitOutput(t, f.root, "rev-parse", "HEAD"))
+			runGit(t, f.root, "rm", "-r", ".changes/widget")
+			runGit(t, f.root, "commit", "-m", "retire bad contract")
+			b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview}}}
+			return implementCLI(t, f.root, b, "inspect", "--item", "7", "--artifact-baseline", f.baseline, "--artifact-completion", bad), b
+		}, "content changed"},
+		{"ambiguous markers defeat explicit input", func(t *testing.T) (setup.ImplementationOutput, *implementationMemory) {
+			root := proposalRepository(t)
+			prepareSlice(t, root, "widget")
+			first := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+			runGit(t, root, "commit", "--allow-empty", "-m", "[baseline] widget duplicate")
+			b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}}
+			return implementCLI(t, root, b, "inspect", "--item", "7", "--artifact-baseline", first), b
+		}, "ambiguous"},
+		{"unique marker is authoritative", func(t *testing.T) (setup.ImplementationOutput, *implementationMemory) {
+			root := proposalRepository(t)
+			baseline := prepareSlice(t, root, "widget")
+			runGit(t, root, "commit", "--allow-empty", "-m", "other commit")
+			other := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+			b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}}
+			if baseline == other {
+				t.Fatal("fixture did not create distinct commit")
+			}
+			return implementCLI(t, root, b, "inspect", "--item", "7", "--artifact-baseline", other), b
+		}, "authoritative"},
+		{"markerless evidence without inputs", func(t *testing.T) (setup.ImplementationOutput, *implementationMemory) {
+			f := markerless(t, false, true)
+			b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}}
+			return implementCLI(t, f.root, b, "next"), b
+		}, "missing"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, backend := test.run(t)
+			detail := got.Reason
+			if got.Ledger != nil {
+				detail += strings.Join(got.Ledger.Violations, "\n")
+			}
+			if strings.HasPrefix(test.want, "valid ") {
+				phase := strings.TrimPrefix(test.want, "valid ")
+				if got.Status != "inspected" || got.Ledger == nil || got.Ledger.Phase != phase || len(got.Ledger.Violations) != 0 {
+					t.Fatalf("explicit evidence = %#v", got)
+				}
+			} else if test.want == "fix_required" {
+				if got.Status != test.want || backend.work[0].Claimed {
+					t.Fatalf("review accepted incomplete evidence: %#v", got)
+				}
+			} else if !strings.Contains(strings.ToLower(detail), strings.ToLower(test.want)) {
+				t.Fatalf("result = %#v, want %q", got, test.want)
+			}
+		})
+	}
+
+	root := proposalRepository(t)
+	for _, args := range [][]string{{"skl", "status", "--artifact-baseline", strings.Repeat("a", 40)}, {"skl", "setup", "--artifact-completion", strings.Repeat("b", 40)}, {"skl", "skill", "--artifact-baseline", strings.Repeat("c", 40)}} {
+		app := newApp(func(github.RepositoryID) (setup.Backend, error) { return &implementationMemory{}, nil }, bytes.NewReader(nil), &bytes.Buffer{}, &bytes.Buffer{})
+		args = append(args, "--repo", root)
+		if err := app.Run(args); err == nil {
+			t.Fatalf("unrelated operation accepted endpoint flag: %v", args)
+		}
 	}
 }
 
