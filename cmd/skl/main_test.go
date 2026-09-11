@@ -353,7 +353,7 @@ func TestPublishExplicitRemoteChecksItsOwnGitEvidence(t *testing.T) {
 			case "artifact baseline":
 				runGit(t, root, "update-ref", "refs/heads/widget", "main")
 				runGit(t, root, "update-ref", "refs/remotes/upstream/widget", "main")
-				invariant, repair = "ledger is missing at .changes/widget", "commit the complete ledger once at the published branch head"
+				invariant, repair = "slice widget is missing [baseline] widget marker", "commit the complete ledger once at the published branch head"
 			}
 			backend := &memoryBackend{}
 			var output bytes.Buffer
@@ -1000,8 +1000,8 @@ func TestRefuseInvalidProposalPreflight(t *testing.T) {
 		"missing target":                          {"target branch is unavailable", "fetch the target branch"},
 		"missing slice branch":                    {"slice branch missing is unavailable", "create the local slice branch"},
 		"unpushed slice":                          {"slice branch unpushed is not pushed at its local head", "push the slice branch"},
-		"missing ledger":                          {"ledger is missing", "commit the complete ledger once at the published branch head"},
-		"baseline not at head":                    {"Artifact Baseline is not the published branch head", "commit the complete ledger once at the published branch head"},
+		"missing ledger":                          {"missing [baseline] missing marker", "commit the complete ledger once at the published branch head"},
+		"baseline not at head":                    {"Artifact Baseline must be the published branch head", "commit the complete ledger once at the published branch head"},
 		"unknown dependency":                      {"Dependency graph contains an unknown or self-referencing edge", "correct the --depends values"},
 		"self dependency":                         {"Dependency graph contains an unknown or self-referencing edge", "correct the --depends values"},
 	}
@@ -1084,7 +1084,7 @@ func TestRefuseInvalidProposalPreflight(t *testing.T) {
 			runGit(t, root, "switch", "-c", "incomplete", "main")
 			writeLedger(t, root, "incomplete", false)
 			runGit(t, root, "add", ".changes/incomplete")
-			runGit(t, root, "commit", "-m", "incomplete")
+			runGit(t, root, "commit", "-m", "[baseline] incomplete")
 			runGit(t, root, "update-ref", "refs/remotes/origin/incomplete", "HEAD")
 			return root, []string{"--slice", proposalSliceFlag(t, "incomplete")}
 		},
