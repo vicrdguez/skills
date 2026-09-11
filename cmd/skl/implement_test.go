@@ -213,6 +213,19 @@ func implementCLI(t *testing.T, root string, backend *implementationMemory, args
 	return result
 }
 
+func newImplementationResultDirectory(t *testing.T) string {
+	t.Helper()
+	directory, err := os.MkdirTemp("", "skl-implement-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(directory) })
+	if err := os.WriteFile(filepath.Join(directory, ".skl-result"), []byte("skl.implement/v1\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return directory
+}
+
 func TestB2ResolveMarkersOnlyInSelectedSliceHistory(t *testing.T) {
 	for _, other := range []string{
 		"other slices",
@@ -1210,6 +1223,78 @@ func TestImplementPausesBeforeCodeExists(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, ".changes/widget/intent.md")); err != nil {
 		t.Fatal("pause retired incomplete ledger")
+	}
+}
+
+func TestB10PreserveIncompleteWorkInNeedsHuman(t *testing.T) {
+	for _, test := range []struct {
+		name, preserved string
+		body, existing  bool
+		want            string
+	}{
+		{"baseline only", "none", false, false, "needs_human"},
+		{"pushed partial implementation", "partial", true, false, "needs_human"},
+		{"existing draft Submission", "partial", true, true, "needs_human"},
+		{"ambiguous baseline", "ambiguous", false, false, "fix_required"},
+		{"unordered Completion", "unordered", false, false, "fix_required"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := proposalRepository(t)
+			baseline := prepareSlice(t, root, "widget")
+			if test.preserved == "ambiguous" {
+				runGit(t, root, "commit", "--allow-empty", "-m", "[baseline] widget duplicate")
+			}
+			if test.preserved == "unordered" {
+				runGit(t, root, "switch", "-c", "completion-side", "main")
+				writeLedger(t, root, "widget", true)
+				runGit(t, root, "add", ".changes/widget")
+				runGit(t, root, "commit", "-m", "[completion] widget")
+				completion := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+				runGit(t, root, "switch", "widget")
+				runGit(t, root, "merge", "--no-ff", "completion-side", "-m", "retain completion evidence")
+				if gitOK := runGitOutput(t, root, "rev-parse", completion); strings.TrimSpace(gitOK) == baseline {
+					t.Fatal("fixture endpoints unexpectedly equal")
+				}
+			}
+			item := workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Ready, Claimed: true, TargetBranch: "main", TargetSnapshot: strings.TrimSpace(runGitOutput(t, root, "rev-parse", "main"))}
+			if test.existing {
+				item.Submission = &workflow.Submission{ID: "42", Draft: true}
+			}
+			backend := &implementationMemory{work: []workflow.ImplementationItem{item}, remoteHeads: map[string]string{}}
+			start := implementCLI(t, root, backend, "resume", "--item", "7")
+			if start.Status == "fix_required" {
+				start = setup.ImplementationOutput{}
+				start.Packet = &skilldist.Packet{Facts: skilldist.InvocationFacts{Implementation: &skilldist.ImplementationFacts{ResultDirectory: newImplementationResultDirectory(t)}}}
+			}
+			directory := start.Packet.Facts.Implementation.ResultDirectory
+			decision := filepath.Join(directory, "decision.md")
+			if err := os.WriteFile(decision, []byte("human decision\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			args := []string{"needs-human", "--item", "7", "--reason", "mandatory_rule", "--decision", decision}
+			if test.body {
+				if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("partial implementation\n"), 0644); err != nil {
+					t.Fatal(err)
+				}
+				runGit(t, root, "commit", "-am", "partial implementation")
+				body := filepath.Join(directory, "submission.md")
+				if err := os.WriteFile(body, []byte("preserve work\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				args = append(args, "--body", body)
+				backend.remoteHeads["widget"] = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+			}
+			got := implementCLI(t, root, backend, args...)
+			if got.Status != test.want {
+				t.Fatalf("pause = %#v, want %s", got, test.want)
+			}
+			if test.want == "needs_human" && (got.Item.ResumeState != workflow.Ready || got.Item.Claimed || test.body && (got.Item.Submission == nil || !got.Item.Submission.Draft || test.existing && got.Item.Submission.Number != 42)) {
+				t.Fatalf("preservation = %#v", got)
+			}
+			if test.want == "fix_required" && (!backend.work[0].Claimed || backend.work[0].State != workflow.Ready) {
+				t.Fatalf("refusal mutated work = %#v", backend.work[0])
+			}
+		})
 	}
 }
 

@@ -121,7 +121,11 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 			return ImplementationOutcome{}, err
 		}
 	}
-	history, err := InspectLedger(root, head, item.Branch, ArtifactEndpoints{}, RequireRetiredArtifacts)
+	policy := RequireRetiredArtifacts
+	if target == NeedsHuman {
+		policy = PreserveIncompleteArtifacts
+	}
+	history, err := InspectLedger(root, head, item.Branch, ArtifactEndpoints{}, policy)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
@@ -132,10 +136,9 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 		if history.Phase != "retired" || len(history.Violations) > 0 {
 			return ImplementationOutcome{}, Refuse(fmt.Sprint(history.Violations) + "; complete permitted ticks, commit Completion, then delete the entire ledger in a child commit and push")
 		}
+	} else if len(history.identity) != 0 || len(history.baseline) != 0 {
+		return ImplementationOutcome{}, Refuse(fmt.Sprint(append(history.identity, history.baseline...)) + "; repair endpoint identity or the accepted baseline before pausing")
 	} else if bodyPath == "" {
-		if history.Baseline == "" {
-			return ImplementationOutcome{}, Refuse("ledger baseline missing; repair history before pausing")
-		}
 		changed, err := git(root, "diff", "--name-only", history.Baseline, head, "--", ".", ":(exclude).changes/"+item.Branch)
 		if err != nil {
 			return ImplementationOutcome{}, err

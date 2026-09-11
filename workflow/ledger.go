@@ -15,6 +15,8 @@ type LedgerHistory struct {
 	Deletion   string
 	Phase      string
 	Violations []string
+	identity   []string
+	baseline   []string
 }
 
 type ArtifactEndpoints struct {
@@ -50,6 +52,7 @@ func InspectLedger(root, ref, slug string, explicit ArtifactEndpoints, policy Le
 		result.Violations = append(result.Violations, "slice "+slug+" is missing [completion] "+slug+" marker")
 	}
 	if len(result.Violations) != 0 {
+		result.identity = slices.Clone(result.Violations)
 		slices.Sort(result.Violations)
 		return result, nil
 	}
@@ -58,14 +61,17 @@ func InspectLedger(root, ref, slug string, explicit ArtifactEndpoints, policy Le
 	if err != nil {
 		return endpointViolation(result, err)
 	}
-	result.Violations = append(result.Violations, requiredArtifacts(baseline, result.Baseline, slug)...)
+	result.baseline = append(result.baseline, requiredArtifacts(baseline, result.Baseline, slug)...)
 	for name, contents := range baseline {
-		result.Violations = append(result.Violations, ledgerBoxes(contents, false, result.Baseline+":"+name)...)
+		result.baseline = append(result.baseline, ledgerBoxes(contents, false, result.Baseline+":"+name)...)
 	}
+	result.Violations = append(result.Violations, result.baseline...)
 
 	if result.Completion != "" {
 		if gitOK(root, "merge-base", "--is-ancestor", result.Baseline, result.Completion) != nil {
-			result.Violations = append(result.Violations, "Artifact Baseline "+result.Baseline+" is not an ancestor of Completion "+result.Completion)
+			violation := "Artifact Baseline " + result.Baseline + " is not an ancestor of Completion " + result.Completion
+			result.Violations = append(result.Violations, violation)
+			result.identity = append(result.identity, violation)
 		} else {
 			completion, err := endpointFiles(root, result.Completion, slug)
 			if err != nil {
