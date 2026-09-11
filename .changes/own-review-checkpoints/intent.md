@@ -33,15 +33,15 @@ Deliver approved candidate-first slice 3, with no blocking Dependencies. The CLI
 
 ## Definition of Done
 
-- [ ] D1: CLI invocations from any supported repository location read and update only the selected Work Item's worktree-private checkpoint; workers are not taught its path, format, or file operations. Covered by B1.
-- [ ] D2: Watchdog next/resume supply consistent completed-count, scope, current-head, and concrete fixed-number handoff facts without recording an in-progress review; unavailable previous revisions widen scope without losing a valid count. Covered by B2 and B3.
-- [ ] D3: Missing checkpoints start at zero; corrupt or unreadable checkpoints and invalid submission counts/SHAs cause actionable refusals without reset, publication, or Claim release. Covered by B4.
-- [ ] D4: Every completed review, including Needs Human and a genuinely new review at the same SHA, consumes exactly one intended round; default two caps automatic failure-driven Rework, not pass. Covered by B5 and B6.
-- [ ] D5: Complete evidence precedes atomic checkpoint replacement, which precedes Claim release. Faults and exact fixed-number retries preserve this order without duplicate evidence or double counting; conflicting or insufficient observations stop rather than guess. Covered by B7, B8, B9, and B10.
-- [ ] D6: Explicit actual-reviewed and final-head inputs preserve existing Debt Marker pass safety, including pushed-head and ancestry checks, without a persisted in-progress head or CLI source parser. Covered by B11.
-- [ ] D7: Finding-driven implementation and its Audit proceed from current code, historical artifacts, and feedback without a previous-review cache or extracted SHA; unrelated worker obligations remain intact. Covered by B12.
-- [ ] D8: The checkpoint survives nonterminal work and cleaning, is deleted only after verified `done`, and cleanup failure is a warning rather than a failed verdict. Worktree loss/recreation intentionally resets the count without reconstruction. Covered by B13, B14, and B16.
-- [ ] D9: Review-count consumption is independent of target/conflict policy, status observation, and partial-handoff reconstruction. Timeline history is not a count source, and no alternate completion caller invents a review or bypasses required checkpointing. Covered by B15.
+- [x] D1: CLI invocations from any supported repository location read and update only the selected Work Item's worktree-private checkpoint; workers are not taught its path, format, or file operations. Covered by B1.
+- [x] D2: Watchdog next/resume supply consistent completed-count, scope, current-head, and concrete fixed-number handoff facts without recording an in-progress review; unavailable previous revisions widen scope without losing a valid count. Covered by B2 and B3.
+- [x] D3: Missing checkpoints start at zero; corrupt or unreadable checkpoints and invalid submission counts/SHAs cause actionable refusals without reset, publication, or Claim release. Covered by B4.
+- [x] D4: Every completed review, including Needs Human and a genuinely new review at the same SHA, consumes exactly one intended round; default two caps automatic failure-driven Rework, not pass. Covered by B5 and B6.
+- [x] D5: Complete evidence precedes atomic checkpoint replacement, which precedes Claim release. Faults and exact fixed-number retries preserve this order without duplicate evidence or double counting; conflicting or insufficient observations stop rather than guess. Covered by B7, B8, B9, and B10.
+- [x] D6: Explicit actual-reviewed and final-head inputs preserve existing Debt Marker pass safety, including pushed-head and ancestry checks, without a persisted in-progress head or CLI source parser. Covered by B11.
+- [x] D7: Finding-driven implementation and its Audit proceed from current code, historical artifacts, and feedback without a previous-review cache or extracted SHA; unrelated worker obligations remain intact. Covered by B12.
+- [x] D8: The checkpoint survives nonterminal work and cleaning, is deleted only after verified `done`, and cleanup failure is a warning rather than a failed verdict. Worktree loss/recreation intentionally resets the count without reconstruction. Covered by B13, B14, and B16.
+- [x] D9: Review-count consumption is independent of target/conflict policy, status observation, and partial-handoff reconstruction. Timeline history is not a count source, and no alternate completion caller invents a review or bypasses required checkpointing. Covered by B15.
 
 ## Manual verification
 
