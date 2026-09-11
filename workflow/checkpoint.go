@@ -65,6 +65,12 @@ func (c reviewCheckpoint) validHead(head string) bool {
 }
 
 func (c reviewCheckpoint) replace(count uint64, head string) error {
+	stale, _ := filepath.Glob(filepath.Join(filepath.Dir(c.Path), ".watchdog-*"))
+	for _, name := range stale {
+		if err := os.Remove(name); err != nil {
+			return fmt.Errorf("remove stale atomic Review Checkpoint replacement: %w; repair private Git-directory access and retry the same fixed-number command", err)
+		}
+	}
 	temporary, err := os.CreateTemp(filepath.Dir(c.Path), ".watchdog-*")
 	if err != nil {
 		return fmt.Errorf("create atomic Review Checkpoint replacement: %w; repair private Git-directory access and retry the same fixed-number command", err)

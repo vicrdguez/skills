@@ -47,18 +47,19 @@ type ImplementationItem struct {
 }
 
 type Submission struct {
-	PendingReview State
-	Merged        bool
-	Mergeability  string
-	CreatedAt     string
-	State         State
-	Claimed       bool
-	ID            SubmissionID
-	Head          string
-	Base          string
-	Body          string
-	Draft         bool
-	Comments      []skilldist.ReviewComment
+	PendingReview  State
+	ReviewRequeued bool
+	Merged         bool
+	Mergeability   string
+	CreatedAt      string
+	State          State
+	Claimed        bool
+	ID             SubmissionID
+	Head           string
+	Base           string
+	Body           string
+	Draft          bool
+	Comments       []skilldist.ReviewComment
 }
 
 type ImplementationBackend interface {

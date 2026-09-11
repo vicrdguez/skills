@@ -7,7 +7,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	skilldist "github.com/vicrdguez/skills"
@@ -192,6 +191,9 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
+	if retry && submission.ReviewRequeued {
+		return ImplementationOutcome{}, Refuse("recorded review command predates the current Awaiting Review Claim; submit the fresh review as the next round")
+	}
 	target := Rework
 	if reviewNumber >= 2 {
 		target = NeedsHuman
@@ -302,9 +304,13 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 
 func reviewEvidenceMatches(item ImplementationItem, wanted []skilldist.ReviewComment, finalBody string) bool {
 	for _, comment := range wanted {
-		if !slices.ContainsFunc(item.Submission.Comments, func(existing skilldist.ReviewComment) bool {
-			return comment.Body == existing.Body && comment.Path == existing.Path && comment.Verdict == existing.Verdict && comment.Commit == existing.Commit && (comment.Path == "" || comment.Line == existing.Line && comment.Side == existing.Side)
-		}) {
+		matches := 0
+		for _, existing := range item.Submission.Comments {
+			if comment.Body == existing.Body && comment.Path == existing.Path && comment.Verdict == existing.Verdict && comment.Commit == existing.Commit && (comment.Path == "" || comment.Line == existing.Line && comment.Side == existing.Side) {
+				matches++
+			}
+		}
+		if matches != 1 {
 			return false
 		}
 	}

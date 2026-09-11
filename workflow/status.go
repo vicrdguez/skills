@@ -64,13 +64,7 @@ func ObserveStatus(ctx context.Context, root, remote string, backend Implementat
 		}
 		if item.Submission != nil && item.Submission.PendingReview != "" {
 			if !conflictDiversion {
-				checkpoint, checkpointErr := loadReviewCheckpoint(root, item.Branch)
-				if checkpointErr != nil {
-					return StatusOutcome{}, Refuse(checkpointErr.Error())
-				}
-				if checkpoint.Count == 0 {
-					return StatusOutcome{}, Refuse("partial review has no recorded Review Checkpoint; retry its original fixed-number watchdog submit command")
-				}
+				return StatusOutcome{}, Refuse("partial review cannot prove its original submit context or evidence; retry its original fixed-number watchdog submit command")
 			}
 			port, ok := backend.(ReviewBackend)
 			if !ok {

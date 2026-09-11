@@ -32,6 +32,9 @@ func StartWatchdog(ctx context.Context, root, remote string, id WorkItemID, back
 		if id != "" && item.ID != id {
 			continue
 		}
+		if id != "" && item.Submission.PendingReview != "" {
+			return ImplementationOutcome{Status: "fix_required", Reason: "partial review requires its original fixed-number watchdog submit command and Result Documents"}, nil
+		}
 		if item.State != AwaitingReview || id == "" && item.Claimed || id != "" && !item.Claimed || item.Problem != "" {
 			continue
 		}

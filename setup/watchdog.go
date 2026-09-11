@@ -76,6 +76,8 @@ func (b *GitHubBackend) ReviewSubmission(ctx context.Context, repository github.
 	labels := map[string]bool{}
 	latest := ""
 	synchronizing := false
+	seenDisposition := false
+	reviewRequeued := false
 	for page := 1; ; page++ {
 		var events []struct {
 			Event string `json:"event"`
@@ -92,6 +94,12 @@ func (b *GitHubBackend) ReviewSubmission(ctx context.Context, repository github.
 			}
 			labels[event.Label.Name] = event.Event == "labeled"
 			if event.Event == "labeled" && (event.Label.Name == "review" || event.Label.Name == "rework" || event.Label.Name == "done" || event.Label.Name == "needs-human") {
+				if event.Label.Name == "review" && seenDisposition {
+					reviewRequeued = true
+				}
+				if event.Label.Name != "review" {
+					seenDisposition = true
+				}
 				// A conflicting pass retry can add rework before its claimed review is removed.
 				synchronizing = event.Label.Name == "rework" && latest == "done" && labels["done"] && labels["sync"] && (!labels["review"] || labels["wip"]) && !labels["needs-human"] && !labels["ready"]
 				latest = event.Label.Name
@@ -113,6 +121,7 @@ func (b *GitHubBackend) ReviewSubmission(ctx context.Context, repository github.
 		result.PendingReview = map[string]workflow.State{"rework": workflow.Rework, "done": workflow.ReadyForMerge, "needs-human": workflow.NeedsHuman}[latest]
 		result.State = result.PendingReview
 	}
+	result.ReviewRequeued = current["review"] && claimed && states == 1 && reviewRequeued
 	if (states == 2 && !current["review"] || states == 3 && current["review"] && claimed && labels["wip"]) && current["review"] == labels["review"] && current["done"] && current["rework"] && current["sync"] && labels["done"] && labels["rework"] && labels["sync"] && synchronizing {
 		result.PendingReview = workflow.Rework
 		result.State = workflow.Rework
