@@ -272,6 +272,68 @@ func TestB2ResolveMarkersOnlyInSelectedSliceHistory(t *testing.T) {
 	}
 }
 
+func TestB3RefuseMissingOrAmbiguousRequiredMarkers(t *testing.T) {
+	for _, problem := range []string{"missing baseline", "missing completion", "ambiguous baseline", "ambiguous completion"} {
+		t.Run(problem, func(t *testing.T) {
+			root := proposalRepository(t)
+			runGit(t, root, "switch", "-c", "ship-widget", "main")
+			writeLedger(t, root, "ship-widget", true)
+			runGit(t, root, "add", ".changes/ship-widget")
+			baselineSubject := "[baseline] ship-widget"
+			if problem == "missing baseline" {
+				baselineSubject = "unmarked baseline"
+			}
+			runGit(t, root, "commit", "-m", baselineSubject)
+			var competing []string
+			if problem == "ambiguous baseline" {
+				competing = append(competing, strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD")))
+				runGit(t, root, "commit", "--allow-empty", "-m", "[baseline] ship-widget duplicate")
+				competing = append(competing, strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD")))
+			}
+			if problem != "missing completion" {
+				if problem == "ambiguous completion" {
+					runGit(t, root, "switch", "-c", "completion-side")
+					runGit(t, root, "commit", "--allow-empty", "-m", "[completion] ship-widget side")
+					competing = append(competing, strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD")))
+					runGit(t, root, "switch", "ship-widget")
+				}
+				runGit(t, root, "commit", "--allow-empty", "-m", "[completion] ship-widget")
+				if problem == "ambiguous completion" {
+					competing = append(competing, strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD")))
+					runGit(t, root, "merge", "--no-ff", "completion-side", "-m", "merge competing completion")
+				}
+				runGit(t, root, "rm", "-r", ".changes/ship-widget")
+				runGit(t, root, "commit", "-m", "retire")
+			}
+			head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+			item := workflow.ImplementationItem{ID: "7", Branch: "ship-widget", State: workflow.AwaitingReview}
+			backend := &implementationMemory{work: []workflow.ImplementationItem{item}}
+			got := implementCLI(t, root, backend, "inspect", "--item", "7")
+			violations := strings.Join(got.Ledger.Violations, "\n")
+			kind := strings.TrimPrefix(problem, "missing ")
+			kind = strings.TrimPrefix(kind, "ambiguous ")
+			if !strings.Contains(violations, "ship-widget") || !strings.Contains(violations, kind) {
+				t.Fatalf("violations = %q", violations)
+			}
+			for _, sha := range competing {
+				if !strings.Contains(violations, sha) {
+					t.Fatalf("violations %q omit competing SHA %s", violations, sha)
+				}
+			}
+
+			backend.work[0].State = workflow.Ready
+			if strings.Contains(problem, "completion") {
+				backend.work[0].State = workflow.Rework
+				backend.work[0].Submission = &workflow.Submission{ID: "11", Head: head, PreviousReviewedHead: head}
+			}
+			start := implementCLI(t, root, backend, "next")
+			if start.Status != "fix_required" || backend.work[0].Claimed {
+				t.Fatalf("startup chose invalid evidence: %#v, work=%#v", start, backend.work)
+			}
+		})
+	}
+}
+
 func TestImplementSubmitsCompletedFirstImplementation(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
