@@ -281,6 +281,21 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	if err := backend.PublishReview(ctx, repository, item, comments, guard); err != nil {
 		return ImplementationOutcome{}, err
 	}
+	published, err := backend.ImplementationItems(ctx, repository)
+	if err != nil {
+		return ImplementationOutcome{}, err
+	}
+	matches := 0
+	var publishedItem ImplementationItem
+	for _, current := range published {
+		if current.ID == id {
+			matches++
+			publishedItem = current
+		}
+	}
+	if matches != 1 || publishedItem.Problem != "" || publishedItem.State != AwaitingReview || !publishedItem.Claimed || publishedItem.Submission == nil || !reviewEvidenceMatches(publishedItem, comments, finalBody) {
+		return ImplementationOutcome{}, Refuse("published review evidence is not exactly observable; retain the Claim and retry the same fixed-number command and Result Documents")
+	}
 	if err := checkpoint.replace(reviewNumber, reviewed); err != nil {
 		return ImplementationOutcome{}, Refuse(err.Error())
 	}

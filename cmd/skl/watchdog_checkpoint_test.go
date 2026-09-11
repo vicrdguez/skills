@@ -412,6 +412,27 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 				}
 			})
 		}
+		t.Run("MaxUint64 retained count refuses overflow", func(t *testing.T) {
+			for _, command := range []string{"next", "resume"} {
+				t.Run(command, func(t *testing.T) {
+					f := newReviewFixture(t)
+					checkpointBytes := []byte(strconv.FormatUint(^uint64(0), 10) + ":" + f.head + "\n")
+					if err := os.WriteFile(f.checkpoint, checkpointBytes, 0600); err != nil {
+						t.Fatal(err)
+					}
+					args := []string{"watchdog", command}
+					if command == "resume" {
+						f.forge.labels = []string{"review", "wip"}
+						args = append(args, "--item", "7")
+					}
+					labels := append([]string(nil), f.forge.labels...)
+					got := f.run(t, f.root, args...)
+					if got.Status != "fix_required" || !strings.Contains(got.Reason, "cannot be incremented") || !bytes.Equal([]byte(readFile(t, f.checkpoint)), checkpointBytes) || !slices.Equal(f.forge.labels, labels) {
+						t.Fatalf("overflow changed checkpoint or Claim through %s: %#v checkpoint=%q labels=%v", command, got, readFile(t, f.checkpoint), f.forge.labels)
+					}
+				})
+			}
+		})
 	})
 
 	t.Run("B3 resume refreshes PR head", func(t *testing.T) {
@@ -441,7 +462,7 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 	})
 
 	t.Run("B4 invalid checkpoint and submit inputs refuse", func(t *testing.T) {
-		for _, invalid := range []string{"", "\n", "1:", " 1:" + strings.Repeat("a", 40) + "\n", "x:" + strings.Repeat("a", 40), "-1:" + strings.Repeat("a", 40), "+1:" + strings.Repeat("a", 40), strconv.FormatUint(uint64(^uint(0)>>1)+1, 10) + ":" + strings.Repeat("a", 40), "18446744073709551616:" + strings.Repeat("a", 40), "1:abc", "1:" + strings.Repeat("a", 39), "1:" + strings.Repeat("g", 40), "1:" + strings.Repeat("a", 64), "1:" + strings.Repeat("a", 40) + ":x", "1:" + strings.Repeat("a", 40) + "\nextra"} {
+		for _, invalid := range []string{"", "\n", "1:", " 1:" + strings.Repeat("a", 40) + "\n", "x:" + strings.Repeat("a", 40), "-1:" + strings.Repeat("a", 40), "+1:" + strings.Repeat("a", 40), "18446744073709551616:" + strings.Repeat("a", 40), "1:abc", "1:" + strings.Repeat("a", 39), "1:" + strings.Repeat("g", 40), "1:" + strings.Repeat("a", 64), "1:" + strings.Repeat("a", 40) + ":x", "1:" + strings.Repeat("a", 40) + "\nextra"} {
 			for _, command := range []string{"next", "resume"} {
 				t.Run(strconv.Quote(invalid)+" "+command, func(t *testing.T) {
 					f := newReviewFixture(t)
@@ -1002,6 +1023,22 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 				}
 			})
 		}
+		t.Run("duplicate inline receipt stops newly published round", func(t *testing.T) {
+			f := newReviewFixture(t)
+			_ = os.WriteFile(f.checkpoint, []byte("1:"+f.head+"\n"), 0600)
+			f.start(t, f.root)
+			dir := t.TempDir()
+			summary, body, findings := filepath.Join(dir, "summary.md"), filepath.Join(dir, "inline.md"), filepath.Join(dir, "findings.json")
+			_ = os.WriteFile(summary, []byte("round 2"), 0600)
+			_ = os.WriteFile(body, []byte("duplicate finding"), 0600)
+			_ = os.WriteFile(findings, []byte(fmt.Sprintf(`[{"path":"README.md","line":1,"side":"RIGHT","body_file":%q}]`, body)), 0600)
+			f.forge.inlines = []map[string]any{{"body": "duplicate finding", "commit_id": f.head, "path": "README.md", "line": float64(1), "side": "RIGHT"}, {"body": "duplicate finding", "commit_id": f.head, "path": "README.md", "line": float64(1), "side": "RIGHT"}}
+			checkpoint, labels := checkpointSnapshot(f.checkpoint), append([]string(nil), f.forge.labels...)
+			got := f.run(t, f.worktree, "watchdog", "submit", "--item", "7", "--review-number", "2", "--reviewed-head", f.head, "--verdict", "rework", "--summary", summary, "--findings", findings)
+			if got.Status != "fix_required" || checkpointSnapshot(f.checkpoint) != checkpoint || !slices.Equal(f.forge.labels, labels) || len(f.forge.summaries) != 1 || f.forge.summaries[0]["body"] != "round 2" || len(f.forge.inlines) != 2 {
+				t.Fatalf("duplicate inline advanced round: %#v checkpoint=%q labels=%v summaries=%#v", got, checkpointSnapshot(f.checkpoint), f.forge.labels, f.forge.summaries)
+			}
+		})
 		t.Run("checkpoint SHA differs from command", func(t *testing.T) {
 			f := newReviewFixture(t)
 			prior := strings.TrimSpace(runGitOutput(t, f.root, "rev-parse", "main"))

@@ -3,7 +3,6 @@ package workflow
 import (
 	"errors"
 	"fmt"
-	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -53,7 +52,7 @@ func loadReviewCheckpoint(root, branch string) (reviewCheckpoint, error) {
 		return checkpoint, fmt.Errorf("corrupt Review Checkpoint %s: want <nonnegative-count>:<full-sha> with at most one terminal newline; repair it explicitly", checkpoint.Path)
 	}
 	checkpoint.Count, err = strconv.ParseUint(count, 10, 64)
-	if err != nil || checkpoint.Count > math.MaxInt {
+	if err != nil {
 		return checkpoint, fmt.Errorf("corrupt Review Checkpoint %s: count must be a nonnegative, nonoverflowing decimal; repair it explicitly", checkpoint.Path)
 	}
 	if !checkpoint.validHead(head) {

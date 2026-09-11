@@ -42,6 +42,9 @@ func StartWatchdog(ctx context.Context, root, remote string, id WorkItemID, back
 		if err != nil {
 			return ImplementationOutcome{}, Refuse(err.Error())
 		}
+		if checkpoint.Count == ^uint64(0) {
+			return ImplementationOutcome{}, Refuse("Review Count cannot be incremented; repair the checkpoint explicitly")
+		}
 		history, err := InspectLedger(root, item.Submission.Head, item.Branch)
 		if err != nil {
 			return ImplementationOutcome{}, err
@@ -59,9 +62,6 @@ func StartWatchdog(ctx context.Context, root, remote string, id WorkItemID, back
 		for _, current := range observed {
 			if current.ID != item.ID || !current.Claimed || current.State != AwaitingReview || current.Problem != "" || current.Submission == nil || current.Submission.Head != item.Submission.Head {
 				continue
-			}
-			if checkpoint.Count == ^uint64(0) {
-				return ImplementationOutcome{}, Refuse("Review Count cannot be incremented; repair the checkpoint explicitly")
 			}
 			facts := skilldist.WatchdogFacts{Branch: item.Branch, ReviewedHead: current.Submission.Head, ArtifactBaseline: history.Baseline, ArtifactCompletion: history.Completion, AuditBody: current.Submission.Body, Comments: current.Submission.Comments, ReviewCount: checkpoint.Count, ReviewNumber: checkpoint.Count + 1, ReviewScope: skilldist.FullReview}
 			facts.BaselineFiles, err = ledgerFiles(root, history.Baseline, ".changes/"+item.Branch)
