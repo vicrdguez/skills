@@ -15,6 +15,8 @@ import (
 type ReviewBackend interface {
 	ImplementationBackend
 	ReviewSubmission(context.Context, SubmissionID) (Submission, error)
+	// SubmissionBodyMatches compares an observation with the body publication would produce.
+	SubmissionBodyMatches(id WorkItemID, actual, supplied string) (bool, error)
 	PublishReview(context.Context, ImplementationItem, []skilldist.ReviewComment, func() error) error
 	CompleteReview(context.Context, ImplementationItem, State, func() error) error
 }
@@ -195,7 +197,11 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 			if err != nil {
 				return ImplementationOutcome{}, err
 			}
-			compatible = compatible && string(body) == item.Submission.Body
+			matches, err := backend.SubmissionBodyMatches(item.ID, item.Submission.Body, string(body))
+			if err != nil {
+				return ImplementationOutcome{}, err
+			}
+			compatible = compatible && matches
 		}
 		if !compatible {
 			return ImplementationOutcome{}, Refuse("completed or partial review differs from supplied verdict; restore its exact Result Documents")

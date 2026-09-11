@@ -174,6 +174,7 @@ func TestWatchdogHumanDirectionRequiresExplicitRequeue(t *testing.T) {
 			t.Fatalf("prose requeued: %#v", got)
 		}
 		b.work[0].State = resume
+		b.work[0].Submission.Lifecycle.States = []workflow.State{resume}
 		var comments []skilldist.ReviewComment
 		if resume == workflow.Rework {
 			got = implementCLI(t, root, b, "next")
@@ -276,9 +277,17 @@ func TestWatchdogPassRetryChecksMergeability(t *testing.T) {
 	}
 }
 
+func (b *implementationMemory) SubmissionBodyMatches(id workflow.WorkItemID, actual, supplied string) (bool, error) {
+	if _, err := strconv.Atoi(string(id)); err == nil {
+		return (&setup.GitHubBackend{}).SubmissionBodyMatches(id, actual, supplied)
+	}
+	return actual == supplied, nil
+}
+
 func (b *implementationMemory) ReviewSubmission(_ context.Context, id workflow.SubmissionID) (workflow.Submission, error) {
 	for _, item := range b.work {
 		if item.Submission != nil && item.Submission.ID == id {
+			item = workflow.ReconcileImplementation(implementationFixture(item))
 			return *item.Submission, nil
 		}
 	}
@@ -310,18 +319,21 @@ func (b *implementationMemory) CompleteReview(_ context.Context, item workflow.I
 	}
 	for i := range b.work {
 		if b.work[i].ID == item.ID {
-			b.work[i].State = target
+			b.work[i] = implementationFixture(b.work[i])
 			b.work[i].ResumeState = item.ResumeState
 			b.work[i].Synchronization = item.Synchronization
 			b.work[i].TargetSnapshot = item.TargetSnapshot
 			b.work[i].TargetBranch = item.TargetBranch
-			b.work[i].Claimed = false
-			b.work[i].Submission.State = target
-			b.work[i].Submission.Claimed = false
+			if target != workflow.NeedsHuman {
+				b.work[i].Source.States = slices.DeleteFunc(b.work[i].Source.States, func(state workflow.State) bool { return state == workflow.NeedsHuman })
+			}
+			b.work[i].Submission.Lifecycle.States = []workflow.State{target}
+			b.work[i].Submission.Lifecycle.Claimed = false
 			b.work[i].Submission.PendingReview = ""
 			if target == workflow.Rework && !item.Synchronization {
 				b.work[i].Submission.Bounces++
 			}
+			b.work[i] = workflow.ReconcileImplementation(b.work[i])
 		}
 	}
 	if b.afterCompletion != nil {

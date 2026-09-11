@@ -304,7 +304,7 @@ func (b *GitHubBackend) PublishImplementation(ctx context.Context, item workflow
 	return wanted, nil
 }
 
-func (b *GitHubBackend) AwaitImplementationReview(ctx context.Context, item workflow.ImplementationItem, guard func() error) (err error) {
+func (b *GitHubBackend) AwaitImplementationReview(ctx context.Context, item workflow.ImplementationItem, guard func() error) error {
 	if err := b.requireRepository(); err != nil {
 		return err
 	}
@@ -313,26 +313,15 @@ func (b *GitHubBackend) AwaitImplementationReview(ctx context.Context, item work
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if err != nil {
-			number := itemNumber
-			if item.State == workflow.Rework && item.Submission != nil {
-				number = submissionNumber
-			}
-			err = errors.Join(err, b.implementationLabelMutation(ctx, repository, number, []string{"wip"}, nil, nil))
-		}
-	}()
 	if item.Submission == nil {
-		return workflow.Refuse("review requires a durable Submission; publish it before retrying")
+		return workflow.PermitImplementationReview(nil)
 	}
 	var issue githubIssue
 	if err := b.request(ctx, http.MethodGet, b.repositoryPath(repository)+fmt.Sprintf("/issues/%d", submissionNumber), nil, &issue); err != nil {
 		return err
 	}
-	state, _, problem := implementationLabels(issue)
-	// Adding review is the first durable step; a retry can see both review and rework.
-	if state == workflow.NeedsHuman || state == workflow.ReadyForMerge || state == workflow.Ready || problem != "" && state != workflow.Rework && state != workflow.AwaitingReview {
-		return workflow.Refuse("Submission lifecycle contradicts review handoff; repair its projections")
+	if err := workflow.PermitImplementationReview(implementationLifecycle(issue)); err != nil {
+		return err
 	}
 	if err := b.implementationLabelMutation(ctx, repository, submissionNumber, []string{"review"}, []string{"rework", "wip", "sync"}, guard); err != nil {
 		return err
@@ -340,7 +329,7 @@ func (b *GitHubBackend) AwaitImplementationReview(ctx context.Context, item work
 	return b.implementationLabelMutation(ctx, repository, itemNumber, nil, []string{"ready", "wip"}, guard)
 }
 
-func (b *GitHubBackend) PauseImplementation(ctx context.Context, item workflow.ImplementationItem, decision string, guard func() error) (err error) {
+func (b *GitHubBackend) PauseImplementation(ctx context.Context, item workflow.ImplementationItem, decision string, guard func() error) error {
 	if err := b.requireRepository(); err != nil {
 		return err
 	}
@@ -349,15 +338,6 @@ func (b *GitHubBackend) PauseImplementation(ctx context.Context, item workflow.I
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if err != nil {
-			number := itemNumber
-			if item.State == workflow.Rework && item.Submission != nil {
-				number = submissionNumber
-			}
-			err = errors.Join(err, b.implementationLabelMutation(ctx, repository, number, []string{"wip"}, nil, nil))
-		}
-	}()
 	if err := guard(); err != nil {
 		return err
 	}
@@ -472,36 +452,20 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 		}
 		state, claimed, problem := implementationLabels(issue)
 		item := workflow.ImplementationItem{ID: workflow.WorkItemID(strconv.Itoa(issue.Number)), Order: issue.Number, Branch: issue.Title, CreatedAt: issue.CreatedAt, State: state, Claimed: claimed, Problem: problem}
+		item.Source = implementationLifecycle(issue)
 		if len(matches) > 1 {
 			item.Problem = "multiple Submissions share the conventional branch"
 		}
 		if len(matches) == 1 {
 			pull := matches[0]
-			prState, prClaimed, prProblem := implementationLabels(pull.githubIssue)
-			item.Submission = &workflow.Submission{ID: workflow.SubmissionID(strconv.Itoa(pull.Number)), Head: pull.Head.SHA, Base: pull.Base.Ref, Draft: pull.Draft, Body: withoutClosingReference(pull.Body, issue.Number), State: prState, Claimed: prClaimed, CreatedAt: pull.CreatedAt}
+			prState, prClaimed, _ := implementationLabels(pull.githubIssue)
+			item.Submission = &workflow.Submission{ID: workflow.SubmissionID(strconv.Itoa(pull.Number)), Head: pull.Head.SHA, Base: pull.Base.Ref, Draft: pull.Draft, Body: pull.Body, State: prState, Claimed: prClaimed, CreatedAt: pull.CreatedAt}
+			item.Submission.Lifecycle = implementationLifecycle(pull.githubIssue)
+			item.Submission.Lifecycle.Merged = pull.MergedAt != ""
 			for _, label := range pull.Labels {
 				item.Synchronization = item.Synchronization || label.Name == "sync"
 			}
-			item.Claimed = item.Claimed || prClaimed
-			if prProblem != "" {
-				item.Problem = prProblem
-			}
-			if state == workflow.NeedsHuman && (prState == workflow.Rework || prState == workflow.AwaitingReview) && prProblem == "" {
-				item.State = prState
-			} else if state == workflow.NeedsHuman || prState == workflow.NeedsHuman {
-				item.State = workflow.NeedsHuman
-			} else if prState != "" {
-				if state == workflow.Ready && prState != workflow.AwaitingReview {
-					item.Problem = "source Ready contradicts Submission lifecycle"
-				} else if state != workflow.Ready {
-					item.State = prState
-				}
-			}
-			if pull.MergedAt != "" {
-				item.State = workflow.Merged
-			} else if pull.State == "closed" {
-				item.State = workflow.Superseded
-			}
+			item = workflow.ReconcileImplementation(item)
 			if item.State == workflow.Rework || item.State == workflow.AwaitingReview || item.State == workflow.NeedsHuman || item.State == workflow.ReadyForMerge {
 				for _, stream := range []string{fmt.Sprintf("/issues/%d/comments", pull.Number), fmt.Sprintf("/pulls/%d/comments", pull.Number)} {
 					comments, err := b.implementationComments(ctx, repository, stream)
@@ -533,9 +497,7 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 				}
 			}
 		}
-		if issue.State == "closed" && item.State != workflow.Merged && item.State != workflow.ReadyForMerge && item.State != workflow.Superseded {
-			item.Problem = "source issue is closed without a merged Submission"
-		}
+		item = workflow.ReconcileImplementation(item)
 		if item.State == workflow.Ready {
 			for page := 1; ; page++ {
 				var blockers []githubIssue
@@ -612,51 +574,7 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 				}
 			}
 		}
-		if transition := item.Transition; transition != nil && !transition.Completed {
-			allowed := func(record githubIssue, states []workflow.State) bool {
-				for _, label := range record.Labels {
-					single := githubIssue{Labels: []struct {
-						Name string `json:"name"`
-					}{label}}
-					state, _, _ := implementationLabels(single)
-					if state != "" && !slices.Contains(states, state) {
-						return false
-					}
-				}
-				return true
-			}
-			sourceStates := []workflow.State{}
-			prStates := []workflow.State{}
-			if transition.From == workflow.Ready {
-				sourceStates = append(sourceStates, workflow.Ready)
-			} else if transition.From == workflow.Rework {
-				prStates = append(prStates, workflow.Rework)
-			}
-			prStates = append(prStates, transition.Target)
-			if transition.Target == workflow.NeedsHuman {
-				sourceStates = append(sourceStates, workflow.NeedsHuman)
-			}
-			valid := issue.State == "open" && allowed(issue, sourceStates) && (len(matches) == 0 || len(matches) == 1 && matches[0].State == "open" && allowed(matches[0].githubIssue, prStates))
-			if !valid {
-				item.Problem = "projections contradict the pending implementation transition"
-			}
-			if valid && (item.Problem == "" || item.Problem == "contradictory lifecycle projections" || item.Problem == "source Ready contradicts Submission lifecycle") {
-				item.Problem = ""
-				sourceState, sourceClaimed, sourceProblem := implementationLabels(issue)
-				final := !sourceClaimed && sourceProblem == ""
-				if transition.Target == workflow.AwaitingReview {
-					final = final && sourceState == "" && item.Submission != nil && item.Submission.State == workflow.AwaitingReview && !item.Submission.Claimed
-				} else {
-					final = final && sourceState == workflow.NeedsHuman && (item.Submission == nil || item.Submission.State == workflow.NeedsHuman && !item.Submission.Claimed)
-				}
-				item.State = transition.From
-				if final {
-					item.State = transition.Target
-				} else {
-					item.ResumeState = transition.From
-				}
-			}
-		}
+		item = workflow.ReconcileImplementation(item)
 		if owners[item.Branch] != issue.Number {
 			item.Problem = "multiple source issues own the conventional branch"
 		}
@@ -720,6 +638,18 @@ func implementationLabels(issue githubIssue) (workflow.State, bool, string) {
 	return state, claimed, problem
 }
 
+func implementationLifecycle(issue githubIssue) *workflow.LifecycleObservation {
+	observation := &workflow.LifecycleObservation{Open: issue.State == "open"}
+	for i := range issue.Labels {
+		state, claimed, _ := implementationLabels(githubIssue{Labels: issue.Labels[i : i+1]})
+		if state != "" {
+			observation.States = append(observation.States, state)
+		}
+		observation.Claimed = observation.Claimed || claimed
+	}
+	return observation
+}
+
 func (b *GitHubBackend) implementationComments(ctx context.Context, repository github.RepositoryID, stream string) ([]skilldist.ReviewComment, error) {
 	var comments []skilldist.ReviewComment
 	for page := 1; ; page++ {
@@ -764,14 +694,18 @@ func (b *GitHubBackend) ImplementationHead(ctx context.Context, branch string) (
 	return ref.Object.SHA, nil
 }
 
+func (b *GitHubBackend) SubmissionBodyMatches(id workflow.WorkItemID, actual, supplied string) (bool, error) {
+	number, err := githubIssueNumber(id)
+	if err != nil {
+		return false, err
+	}
+	return actual == withClosingReference(supplied, number), nil
+}
+
 func withClosingReference(body string, number int) string {
 	footer := fmt.Sprintf("\n\nCloses #%d\n", number)
 	if !strings.HasSuffix(body, footer) {
 		body += footer
 	}
 	return body
-}
-
-func withoutClosingReference(body string, number int) string {
-	return strings.TrimSuffix(body, fmt.Sprintf("\n\nCloses #%d\n", number))
 }

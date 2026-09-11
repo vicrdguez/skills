@@ -82,7 +82,7 @@ func presentItem(item workflow.ImplementationItem) (implementationItemOutput, er
 		output.Submission = &submissionOutput{
 			PendingReview: s.PendingReview, Merged: s.Merged, Mergeability: s.Mergeability, Bounces: s.Bounces,
 			CreatedAt: s.CreatedAt, ReviewedHead: s.ReviewedHead, State: s.State, Claimed: s.Claimed,
-			Head: s.Head, Base: s.Base, Body: withClosingReference(s.Body, output.Number), Draft: s.Draft, PreviousReviewedHead: s.PreviousReviewedHead, Comments: s.Comments,
+			Head: s.Head, Base: s.Base, Body: s.Body, Draft: s.Draft, PreviousReviewedHead: s.PreviousReviewedHead, Comments: s.Comments,
 		}
 		if item.Submission.ID != "" {
 			output.Submission.Number, err = githubIssueNumber(workflow.WorkItemID(item.Submission.ID))

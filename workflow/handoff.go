@@ -180,12 +180,7 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 	if err := guard(); err != nil {
 		return ImplementationOutcome{}, err
 	}
-	var writeErr error
-	if target == AwaitingReview {
-		writeErr = backend.AwaitImplementationReview(ctx, item, guard)
-	} else {
-		writeErr = backend.PauseImplementation(ctx, item, string(decision), guard)
-	}
+	writeErr := projectImplementation(ctx, backend, item, target, string(decision), guard)
 	if err := guard(); err != nil {
 		return ImplementationOutcome{}, err
 	}
@@ -219,6 +214,20 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 		return ImplementationOutcome{}, writeErr
 	}
 	return ImplementationOutcome{}, Refuse("handoff projection is incomplete; retry the same semantic command with retained Result Documents")
+}
+
+func projectImplementation(ctx context.Context, backend ImplementationBackend, item ImplementationItem, target State, decision string, guard func() error) error {
+	var err error
+	if target == AwaitingReview {
+		err = backend.AwaitImplementationReview(ctx, item, guard)
+	} else {
+		err = backend.PauseImplementation(ctx, item, decision, guard)
+	}
+	if err != nil {
+		// Restore the Claim before read-back can mistake a failed write for completion.
+		err = errors.Join(err, backend.RetainImplementationClaim(ctx, item))
+	}
+	return err
 }
 
 func removeResultDirectory(bodyPath string) error {

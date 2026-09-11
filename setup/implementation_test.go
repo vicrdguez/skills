@@ -429,3 +429,89 @@ func TestGitHubImplementationRejectsForeignAttachmentsAndConflictingMetadata(t *
 		})
 	}
 }
+
+func TestGitHubImplementationPreservesPendingLifecycleObservations(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("observation mutated backend: %s %s", r.Method, r.URL)
+			http.Error(w, "unexpected mutation", http.StatusInternalServerError)
+			return
+		}
+		switch r.URL.Path {
+		case "/repos/acme/widgets/issues":
+			fmt.Fprint(w, `[{"number":7,"title":"widget","state":"open","labels":[{"name":"ready"},{"name":"needs-human"},{"name":"wip"},{"name":"external"}]}]`)
+		case "/repos/acme/widgets/pulls":
+			fmt.Fprint(w, `[{"number":11,"state":"open","labels":[{"name":"needs-human"}],"head":{"ref":"widget","sha":"fixed","repo":{"full_name":"acme/widgets"}},"base":{"ref":"main"}}]`)
+		case "/repos/acme/widgets/issues/7/comments":
+			fmt.Fprint(w, `[{"author_association":"OWNER","body":"<!-- skl.implement/v1\n{\"target_snapshot\":\"pinned\",\"transition\":{\"from\":\"ready_for_implementation\",\"target\":\"needs_human\",\"head\":\"fixed\",\"directory\":\"original-operation\"}}\n-->"}]`)
+		default:
+			fmt.Fprint(w, `[]`)
+		}
+	}))
+	defer server.Close()
+	b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
+	items, err := b.ImplementationItems(context.Background())
+	if err != nil || len(items) != 1 {
+		t.Fatalf("observations: %#v, %v", items, err)
+	}
+	item := items[0]
+	if item.Source == nil || !item.Source.Open || !item.Source.Claimed || !slices.Equal(item.Source.States, []workflow.State{workflow.Ready, workflow.NeedsHuman}) || item.Submission.Lifecycle == nil || !slices.Equal(item.Submission.Lifecycle.States, []workflow.State{workflow.NeedsHuman}) {
+		t.Fatalf("lost normalized partial progress: %#v, %#v", item, item.Submission)
+	}
+	if item.State != workflow.Ready || item.ResumeState != workflow.Ready || item.Problem != "" || !item.Claimed || item.TargetSnapshot != "pinned" || item.Transition.Head != "fixed" || item.Transition.Directory != "original-operation" || item.Transition.Completed {
+		t.Fatalf("changed persisted obligations: %#v", item)
+	}
+}
+
+func TestGitHubImplementationStatusRestoresFailedClaim(t *testing.T) {
+	labels := []string{"ready"}
+	interrupt := true
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets")
+		ls := []map[string]string{}
+		for _, label := range labels {
+			ls = append(ls, map[string]string{"name": label})
+		}
+		source := map[string]any{"number": 7, "title": "widget", "state": "open", "labels": ls}
+		pull := map[string]any{"number": 11, "state": "open", "labels": []map[string]string{{"name": "review"}}, "head": map[string]any{"ref": "widget", "sha": "fixed", "repo": map[string]string{"full_name": "acme/widgets"}}}
+		var result any = []any{}
+		switch {
+		case path == "/issues" && r.Method == http.MethodGet:
+			result = []any{source}
+		case path == "/pulls" && r.Method == http.MethodGet:
+			result = []any{pull}
+		case path == "/issues/11" && r.Method == http.MethodGet:
+			result = pull
+		case path == "/issues/7" && r.Method == http.MethodGet:
+			result = source
+		case path == "/issues/7/labels" && r.Method == http.MethodPost:
+			var payload struct{ Labels []string }
+			json.NewDecoder(r.Body).Decode(&payload)
+			labels = append(labels, payload.Labels...)
+		case strings.HasPrefix(path, "/issues/7/labels/") && r.Method == http.MethodDelete:
+			if interrupt {
+				http.Error(w, "interrupted source cleanup", http.StatusBadRequest)
+				return
+			}
+			label := strings.TrimPrefix(path, "/issues/7/labels/")
+			labels = slices.DeleteFunc(labels, func(value string) bool { return value == label })
+		case r.Method == http.MethodGet && (strings.HasSuffix(path, "/comments") || strings.HasSuffix(path, "/reviews") || strings.HasSuffix(path, "/dependencies/blocked_by")):
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL)
+			http.NotFound(w, r)
+			return
+		}
+		json.NewEncoder(w).Encode(result)
+	}))
+	defer server.Close()
+	b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
+	_, err := workflow.ObserveStatus(context.Background(), b)
+	if err == nil || !strings.Contains(err.Error(), "interrupted source cleanup") || !slices.Equal(labels, []string{"ready", "wip"}) {
+		t.Fatalf("status lost recovery Claim: %v, labels=%v", err, labels)
+	}
+	interrupt = false
+	got, err := workflow.ObserveStatus(context.Background(), b)
+	if err != nil || len(got.Items) != 1 || got.Items[0].State != workflow.AwaitingReview || got.Items[0].Claimed || len(labels) != 0 {
+		t.Fatalf("status retry: %#v, %v, labels=%v", got, err, labels)
+	}
+}

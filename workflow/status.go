@@ -97,7 +97,7 @@ func ObserveStatus(ctx context.Context, backend ImplementationBackend) (StatusOu
 				}
 				return Refuse("partial Submission changed; inspect before reconciling")
 			}
-			if err := backend.AwaitImplementationReview(ctx, item, guard); err != nil {
+			if err := projectImplementation(ctx, backend, item, AwaitingReview, "", guard); err != nil {
 				return StatusOutcome{}, err
 			}
 			current, err := backend.ImplementationItems(ctx)
