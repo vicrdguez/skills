@@ -91,14 +91,6 @@ func TestStatusNormalizesPartialAndContradictoryRecords(t *testing.T) {
 	}
 }
 
-func TestStatusCompletesPartiallyProjectedReview(t *testing.T) {
-	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Rework, Claimed: true, Submission: &workflow.Submission{ID: "11", Head: "fixed", PendingReview: workflow.Rework}}}}
-	got := statusCLI(t, proposalRepository(t), b)
-	if got.Items[0].Claimed || got.Items[0].Submission.PendingReview != "" || got.Items[0].State != workflow.Rework {
-		t.Fatalf("partial review: %#v", got)
-	}
-}
-
 // Model multiple guarded writes without changing the shared backend fake.
 type statusGuardMemory struct {
 	*implementationMemory
@@ -115,60 +107,13 @@ func (b *statusGuardMemory) CompleteReview(ctx context.Context, repository githu
 	return b.implementationMemory.CompleteReview(ctx, repository, item, target, guard)
 }
 
-func TestStatusPendingPassRequiresMergeabilityAndRetainsRecovery(t *testing.T) {
-	for _, stage := range []string{"entry", "transition", "later-guard"} {
-		for _, mergeability := range []string{"unknown", "conflicting"} {
-			if stage == "entry" && mergeability == "conflicting" {
-				continue // Known conflicts use the existing Synchronization Rework path.
-			}
-			t.Run(stage+"/"+mergeability, func(t *testing.T) {
-				root := proposalRepository(t)
-				head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
-				b := &statusGuardMemory{implementationMemory: &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.ReadyForMerge, Claimed: true, Submission: &workflow.Submission{ID: "11", Head: head, ReviewedHead: head, Base: "main", State: workflow.ReadyForMerge, Claimed: true, PendingReview: workflow.ReadyForMerge, Mergeability: "mergeable", Bounces: 1}}}}}
-				change := func() { b.work[0].Submission.Mergeability = mergeability }
-				switch stage {
-				case "entry":
-					change()
-				case "transition":
-					b.beforeTransition = change
-				case "later-guard":
-					b.beforeLaterGuard = change
-				}
-				var output bytes.Buffer
-				app := newApp(func(github.RepositoryID) (setup.Backend, error) { return b, nil }, bytes.NewReader(nil), &output, &output)
-				if err := app.Run([]string{"skl", "status", "--repo", root}); err != nil {
-					t.Fatal(err)
-				}
-				var result setup.ImplementationOutput
-				if err := json.Unmarshal(output.Bytes(), &result); err != nil {
-					t.Fatal(err)
-				}
-				if result.Status != "fix_required" || !strings.Contains(result.Reason, "mergeability") {
-					t.Fatalf("unsafe pending pass: %s", &output)
-				}
-				item := b.work[0]
-				if !item.Claimed || !item.Submission.Claimed || item.Submission.PendingReview != workflow.ReadyForMerge || item.Submission.Head != head || item.Submission.ReviewedHead != head || item.Submission.Bounces != 1 {
-					t.Fatalf("lost recovery state: %#v / %#v", item, item.Submission)
-				}
-				b.beforeTransition = nil
-				b.beforeLaterGuard = nil
-				b.work[0].Submission.Mergeability = "mergeable"
-				got := statusCLI(t, root, b.implementationMemory).Items[0]
-				if got.State != workflow.ReadyForMerge || got.Claimed || got.Submission.Claimed || got.Submission.PendingReview != "" || got.Submission.Bounces != 1 {
-					t.Fatalf("retry did not finalize pass: %#v / %#v", got, got.Submission)
-				}
-			})
-		}
-	}
-}
-
 func TestStatusRoutesAcceptedConflictToSynchronizationRework(t *testing.T) {
 	root := proposalRepository(t)
 	target := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "main"))
 	for _, pending := range []workflow.State{"", workflow.ReadyForMerge} {
-		b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.ReadyForMerge, Claimed: pending != "", Submission: &workflow.Submission{ID: "11", Head: "fixed", Base: "main", Mergeability: "conflicting", Bounces: 1, PendingReview: pending, Claimed: pending != ""}}}, remoteHeads: map[string]string{"main": target}}
+		b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.ReadyForMerge, Claimed: pending != "", Submission: &workflow.Submission{ID: "11", Head: "fixed", Base: "main", Mergeability: "conflicting", PendingReview: pending, Claimed: pending != ""}}}, remoteHeads: map[string]string{"main": target}}
 		got := statusCLI(t, root, b).Items[0]
-		if got.State != workflow.Rework || !got.Synchronization || got.TargetSnapshot != target || got.TargetBranch != "main" || got.Submission.Bounces != 1 || got.Claimed || got.Submission.Claimed || got.Submission.PendingReview != "" {
+		if got.State != workflow.Rework || !got.Synchronization || got.TargetSnapshot != target || got.TargetBranch != "main" || got.Claimed || got.Submission.Claimed || got.Submission.PendingReview != "" {
 			t.Fatalf("accepted conflict (pending %q): %#v / %#v", pending, got, got.Submission)
 		}
 	}

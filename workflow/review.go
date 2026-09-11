@@ -20,8 +20,15 @@ type ReviewBackend interface {
 	CompleteReview(context.Context, github.RepositoryID, ImplementationItem, State, func() error) error
 }
 
-func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, reviewed, head, verdict, summaryPath, findingsPath, bodyPath string, backend ReviewBackend) (outcome ImplementationOutcome, err error) {
+func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, reviewNumber uint64, reviewed, head, verdict, summaryPath, findingsPath, bodyPath string, backend ReviewBackend) (outcome ImplementationOutcome, err error) {
 	defer func() {
+		warn := func(message string) {
+			if outcome.Reason == "" {
+				outcome.Reason = message
+			} else {
+				outcome.Reason += "; " + message
+			}
+		}
 		if err != nil || outcome.Item == nil || outcome.Item.Claimed {
 			return
 		}
@@ -44,22 +51,24 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 		}
 		entries, e := os.ReadDir(dir)
 		if e != nil {
-			err = e
+			warn("handoff completed but private Result Document directory cleanup failed: " + e.Error())
 			return
 		}
 		for _, entry := range entries {
 			if !entry.Type().IsRegular() || entry.Name() != ".skl-result" && filepath.Ext(entry.Name()) != ".md" && filepath.Ext(entry.Name()) != ".json" {
-				err = fmt.Errorf("handoff completed but private directory has unexpected files; preserve it for explicit cleanup")
+				warn("handoff completed but private directory has unexpected files; preserve it for explicit cleanup")
 				return
 			}
 		}
-		err = os.RemoveAll(dir)
+		if e := os.RemoveAll(dir); e != nil {
+			warn("handoff completed but private Result Document directory cleanup failed: " + e.Error())
+		}
 	}()
 	if head == "" {
 		head = reviewed
 	}
-	if id == "" || reviewed == "" || verdict != "rework" && verdict != "pass" && verdict != "needs-human" || summaryPath == "" || verdict == "pass" && bodyPath == "" {
-		return ImplementationOutcome{}, fmt.Errorf("submit requires --item, --reviewed-head, --verdict rework|pass|needs-human and --summary; pass also requires --body")
+	if id == "" || reviewNumber == 0 || reviewed == "" || verdict != "rework" && verdict != "pass" && verdict != "needs-human" || summaryPath == "" || verdict == "pass" && bodyPath == "" {
+		return ImplementationOutcome{}, fmt.Errorf("submit requires --item, positive --review-number, --reviewed-head, --verdict rework|pass|needs-human and --summary; pass also requires --body")
 	}
 	remote, err = github.ResolveGitHubRemote(root, remote)
 	if err != nil {
@@ -78,8 +87,29 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 			item = candidate
 		}
 	}
-	if item.Problem != "" || item.Submission == nil || item.State == AwaitingReview && !item.Claimed || item.Submission.ReviewedHead != reviewed {
-		return ImplementationOutcome{}, Refuse("verdict requires the fixed Awaiting Review Claim")
+	if item.Problem != "" || item.Submission == nil || item.State == AwaitingReview && !item.Claimed {
+		return ImplementationOutcome{}, Refuse("verdict requires the selected review Claim or an exactly observable fixed-number retry")
+	}
+	checkpoint, err := loadReviewCheckpoint(root, item.Branch)
+	if err != nil {
+		return ImplementationOutcome{}, Refuse(err.Error())
+	}
+	if err := validateReviewHead(root, item.Branch, reviewed); err != nil {
+		return ImplementationOutcome{}, err
+	}
+	if err := validateReviewHead(root, item.Branch, head); err != nil && head != "" {
+		return ImplementationOutcome{}, err
+	}
+	retry := reviewNumber == checkpoint.Count && checkpoint.Count > 0
+	completedDone := checkpoint.Count == 0 && item.State == ReadyForMerge && !item.Claimed
+	if retry && checkpoint.Head != reviewed {
+		return ImplementationOutcome{}, Refuse("review-number names a recorded round at a different reviewed head; inspect and replay the original fixed-number command")
+	}
+	if !retry && !completedDone && (checkpoint.Count == ^uint64(0) || reviewNumber != checkpoint.Count+1) {
+		return ImplementationOutcome{}, Refuse("review-number must equal the retained completed count or exactly the next round; inspect and replay the original fixed-number command")
+	}
+	if !retry && !completedDone && item.State != AwaitingReview {
+		return ImplementationOutcome{}, Refuse("a new review completion requires the selected Awaiting Review Claim")
 	}
 	if head != reviewed && (verdict != "pass" || gitOK(root, "merge-base", "--is-ancestor", reviewed, head) != nil) {
 		return ImplementationOutcome{}, Refuse("post-marker head must descend from the fixed reviewed head on pass")
@@ -154,7 +184,7 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 		return ImplementationOutcome{}, err
 	}
 	target := Rework
-	if submission.Bounces > 0 {
+	if reviewNumber >= 2 {
 		target = NeedsHuman
 		item.ResumeState = Rework
 	}
@@ -184,6 +214,9 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 		requireMergeable = target == ReadyForMerge
 	}
 	if item.State != AwaitingReview {
+		if item.Claimed && item.Submission.PendingReview == "" {
+			return ImplementationOutcome{}, Refuse("target-only Claim cannot prove it belongs to this review handoff; inspect before replaying the original fixed-number command")
+		}
 		compatible := verdict == "rework" && (item.State == Rework || item.State == NeedsHuman) || verdict == "needs-human" && item.State == NeedsHuman || verdict == "pass" && (item.State == ReadyForMerge || item.State == Rework && item.Synchronization)
 		for _, wanted := range comments {
 			found := false
@@ -205,8 +238,14 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 		if !compatible {
 			return ImplementationOutcome{}, Refuse("completed or partial review differs from supplied verdict; restore its exact Result Documents")
 		}
+		if completedDone {
+			return ImplementationOutcome{Status: string(item.State), Item: &item, Head: head}, guard()
+		}
 		if verdict != "pass" {
 			target = item.State
+		}
+		if !retry {
+			return ImplementationOutcome{}, Refuse("completed review is missing its matching Review Checkpoint; inspect before changing the handoff")
 		}
 		if item.Claimed || target != item.State {
 			if err := backend.CompleteReview(ctx, repository, item, target, guard); err != nil {
@@ -218,12 +257,20 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 			}
 			for _, c := range current {
 				if c.ID == item.ID && c.Problem == "" && !c.Claimed && c.State == target {
-					return ImplementationOutcome{Status: string(c.State), Item: &c, Head: head}, guard()
+					result := ImplementationOutcome{Status: string(c.State), Item: &c, Head: head}
+					if c.State == ReadyForMerge {
+						result.Reason = cleanupReviewCheckpoint(checkpoint)
+					}
+					return result, guard()
 				}
 			}
 			return ImplementationOutcome{}, Refuse("review handoff still incomplete; retain Claim and retry")
 		}
-		return ImplementationOutcome{Status: string(item.State), Item: &item, Head: head}, guard()
+		result := ImplementationOutcome{Status: string(item.State), Item: &item, Head: head}
+		if item.State == ReadyForMerge {
+			result.Reason = cleanupReviewCheckpoint(checkpoint)
+		}
+		return result, guard()
 	}
 	if verdict == "pass" {
 		body, err := os.ReadFile(bodyPath)
@@ -243,6 +290,9 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	if err := backend.PublishReview(ctx, repository, item, comments, guard); err != nil {
 		return ImplementationOutcome{}, err
 	}
+	if err := checkpoint.replace(reviewNumber, reviewed); err != nil {
+		return ImplementationOutcome{}, Refuse(err.Error())
+	}
 	if err := backend.CompleteReview(ctx, repository, item, target, guard); err != nil {
 		return ImplementationOutcome{}, err
 	}
@@ -255,8 +305,19 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	}
 	for _, current := range observed {
 		if current.ID == id && current.Problem == "" && current.State == target && !current.Claimed {
-			return ImplementationOutcome{Status: string(target), Item: &current, Head: head}, nil
+			result := ImplementationOutcome{Status: string(target), Item: &current, Head: head}
+			if target == ReadyForMerge {
+				result.Reason = cleanupReviewCheckpoint(checkpoint)
+			}
+			return result, nil
 		}
 	}
 	return ImplementationOutcome{}, Refuse("review handoff incomplete; retry the same verdict and Result Documents")
+}
+
+func cleanupReviewCheckpoint(checkpoint reviewCheckpoint) string {
+	if err := checkpoint.remove(); err != nil {
+		return err.Error()
+	}
+	return ""
 }

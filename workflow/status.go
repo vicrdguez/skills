@@ -29,6 +29,7 @@ func ObserveStatus(ctx context.Context, root, remote string, backend Implementat
 	}
 	outcome := StatusOutcome{Status: "observed", Items: items}
 	for i, item := range items {
+		conflictDiversion := false
 		if item.Problem != "" {
 			outcome.Items[i].State = NeedsHuman
 			continue
@@ -57,10 +58,20 @@ func ObserveStatus(ctx context.Context, root, remote string, backend Implementat
 					submission := *item.Submission
 					submission.PendingReview = Rework
 					item.Submission = &submission
+					conflictDiversion = true
 				}
 			}
 		}
 		if item.Submission != nil && item.Submission.PendingReview != "" {
+			if !conflictDiversion {
+				checkpoint, checkpointErr := loadReviewCheckpoint(root, item.Branch)
+				if checkpointErr != nil {
+					return StatusOutcome{}, Refuse(checkpointErr.Error())
+				}
+				if checkpoint.Count == 0 {
+					return StatusOutcome{}, Refuse("partial review has no recorded Review Checkpoint; retry its original fixed-number watchdog submit command")
+				}
+			}
 			port, ok := backend.(ReviewBackend)
 			if !ok {
 				return StatusOutcome{}, Refuse("backend cannot reconcile partial review")

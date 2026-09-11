@@ -17,7 +17,7 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 	var commands []*cli.Command
 	for _, name := range []string{"next", "resume", "inspect", "submit", "needs-human"} {
 		commands = append(commands, &cli.Command{Name: name,
-			Flags: []cli.Flag{&cli.PathFlag{Name: "repo", Value: "."}, &cli.StringFlag{Name: "remote"}, &cli.IntFlag{Name: "item"}, &cli.PathFlag{Name: "body"}, &cli.PathFlag{Name: "decision"}, &cli.StringFlag{Name: "reason"}, &cli.StringFlag{Name: "target-snapshot"}, &cli.StringFlag{Name: "reviewed-head"}},
+			Flags: []cli.Flag{&cli.PathFlag{Name: "repo", Value: "."}, &cli.StringFlag{Name: "remote"}, &cli.IntFlag{Name: "item"}, &cli.PathFlag{Name: "body"}, &cli.PathFlag{Name: "decision"}, &cli.StringFlag{Name: "reason"}, &cli.StringFlag{Name: "target-snapshot"}},
 			Action: func(command *cli.Context) error {
 				if command.Int("item") < 0 || command.NArg() != 0 {
 					return fmt.Errorf("invalid implementation invocation: use flags and a positive Work Item identity")
@@ -45,7 +45,7 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 					if name == "resume" && id == "" {
 						id = workflow.CurrentWorktree
 					}
-					outcome, err = workflow.StartImplementation(command.Context, command.Path("repo"), command.String("remote"), id, command.String("target-snapshot"), command.String("reviewed-head"), port)
+					outcome, err = workflow.StartImplementation(command.Context, command.Path("repo"), command.String("remote"), id, command.String("target-snapshot"), "", port)
 				}
 				if err != nil {
 					var violation *workflow.InvariantError

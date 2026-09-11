@@ -260,7 +260,7 @@ func TestImplementClaimsOldestEligibleWork(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			item.Submission = &workflow.Submission{ID: workflow.SubmissionID(strconv.Itoa(number + 100)), Head: head, PreviousReviewedHead: head, Base: "main"}
+			item.Submission = &workflow.Submission{ID: workflow.SubmissionID(strconv.Itoa(number + 100)), Head: head, Base: "main"}
 		}
 	}
 	for _, want := range []int{4, 5, 3, 2} {
@@ -346,6 +346,10 @@ func TestImplementLifecycleOrdersOpaqueIDsByBackendFact(t *testing.T) {
 		runGit(t, root, "commit", "-m", "retire")
 		item.State, item.Claimed = workflow.AwaitingReview, false
 		item.Submission = &workflow.Submission{ID: workflow.SubmissionID("review-" + item.ID), Head: strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD")), CreatedAt: "2026"}
+	}
+	runGit(t, root, "switch", "main")
+	for _, item := range b.work {
+		runGit(t, root, "worktree", "add", filepath.Join(root, ".worktrees", item.Branch), item.Branch)
 	}
 	for _, want := range []workflow.WorkItemID{"zulu", "alpha"} {
 		got, err := workflow.StartWatchdog(context.Background(), root, "origin", "", b)
@@ -602,17 +606,17 @@ func TestImplementStartsFindingDrivenRework(t *testing.T) {
 	runGit(t, root, "commit", "-m", "retire")
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	comments := []skilldist.ReviewComment{{Body: "W1 BLOCK evidence", Author: "reviewer"}, {Body: "W1 NOTE reason", Author: "owner", Association: "OWNER"}}
-	backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Rework, Submission: &workflow.Submission{ID: "11", Head: head, PreviousReviewedHead: head, Comments: comments}}}}
+	backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Rework, Submission: &workflow.Submission{ID: "11", Head: head, Comments: comments}}}}
 	got := implementCLI(t, root, backend, "next")
 	if got.Status != "work_available" || got.Packet == nil {
 		t.Fatalf("rework = %#v", got)
 	}
 	facts := got.Packet.Facts.Implementation
-	if facts.Submission != 11 || facts.PreviousReviewedHead != head || !reflect.DeepEqual(facts.Comments, comments) || facts.TargetSnapshot != "" {
+	if facts.Submission != 11 || !reflect.DeepEqual(facts.Comments, comments) || facts.TargetSnapshot != "" {
 		t.Fatalf("facts = %#v", facts)
 	}
-	if !strings.Contains(got.Packet.Markdown(), head+"...HEAD") || strings.Contains(got.Packet.Markdown(), "git merge ") {
-		t.Fatal("rework packet synchronizes target or lacks review fixed point")
+	if !strings.Contains(got.Packet.Markdown(), "current PR comparison") || strings.Contains(got.Packet.Markdown(), "git merge ") || strings.Contains(got.Packet.Markdown(), head+"...HEAD") {
+		t.Fatal("rework packet synchronizes target or requires a previous review cache")
 	}
 }
 
@@ -631,7 +635,7 @@ func TestImplementResubmitsExistingRework(t *testing.T) {
 		head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 		backend.work[0].State, backend.work[0].TargetSnapshot = workflow.Rework, ""
 		if hasSubmission {
-			backend.work[0].Submission = &workflow.Submission{ID: "42", Head: head, PreviousReviewedHead: head}
+			backend.work[0].Submission = &workflow.Submission{ID: "42", Head: head}
 		}
 		backend.remoteHeads["widget"] = head
 		got := implementCLI(t, root, backend, "submit", "--item", "7", "--body", body)

@@ -24,18 +24,15 @@ Use the supplied Work Item and Submission facts for originating context. This sk
 
 ### 1. Pin the fixed point
 
-The goal is to review the work done for the single claimed unit of work. Which point that is depends on the round:
-
-- **First review of a change** — the PR base merge-base, or the parent of the implementor's first commit. Never that first commit itself: `git diff <it>...HEAD` would omit everything it introduced.
-- **Repeat review after a bounce** — the `Reviewed head` recorded in the previous reviewer's summary, so the round reads only what changed since.
+Review the single claimed unit of work against the PR base merge-base, or the parent of the implementor's first commit when no PR comparison exists. Never use that first commit itself: `git diff <it>...HEAD` would omit everything it introduced.
 
 Artifact integrity uses its own, unmoving Artifact Baseline from the engine's ledger inspection. It never advances with review rounds. Refresh fixed Git facts with the packet's `inspect_command`, or `skl implement inspect --remote <name> --item <number>` when invoked independently; the engine inspects history, while you read and judge the historical contract.
 
-If the user provides the fixed point — a commit SHA, branch name, tag, `main`, `HEAD~5`, etc. — use that instead. If this skill was invoked independently of a claimed unit of work and no fixed point was given, ask for one.
+If the user provides a fixed point — a commit SHA, branch name, tag, `main`, `HEAD~5`, etc. — use that instead. If no PR comparison or fixed point can be resolved, ask for one.
 
 Capture the diff command once: `git diff <fixed-point>...HEAD` (three-dot, so the comparison is against the merge-base). Also note the list of commits via `git log <fixed-point>..HEAD --oneline`.
 
-Before going further, confirm the fixed point resolves (`git rev-parse <fixed-point>`) and the diff is non-empty. A bad ref or empty diff should fail here, not inside two parallel sub-agents. An empty diff is legal in one case: a repeat review the caller says resolved by human disposition alone. Nothing was supposed to change so run the deterministic checks, judge the final state, report no new findings.
+Before going further, confirm the fixed point resolves (`git rev-parse <fixed-point>`). A bad ref should fail here, not inside two parallel sub-agents. An empty diff is legal when human disposition alone resolved a review: run the deterministic checks, judge the final state, and report no new findings.
 
 ### 2. Identify the artifacts source
 
