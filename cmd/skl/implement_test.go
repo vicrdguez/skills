@@ -655,6 +655,61 @@ func TestB7AcceptRestoredIntermediateArtifactEdits(t *testing.T) {
 	}
 }
 
+func TestB8InspectAndStartBaselineOnlyImplementation(t *testing.T) {
+	for _, progress := range []string{"published baseline", "claimed partial ticks", "claimed restored provisional contract"} {
+		t.Run(progress, func(t *testing.T) {
+			root := proposalRepository(t)
+			runGit(t, root, "switch", "-c", "ship-widget", "main")
+			writeLedger(t, root, "ship-widget", true)
+			if progress != "published baseline" {
+				if err := os.WriteFile(filepath.Join(root, ".changes/ship-widget/intent.md"), []byte("- [ ] First\n- [ ] Second\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			runGit(t, root, "add", ".changes/ship-widget")
+			runGit(t, root, "commit", "-m", "[baseline] ship-widget")
+			baseline := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+			claimed := progress != "published baseline"
+			if claimed {
+				if progress == "claimed restored provisional contract" {
+					if err := os.WriteFile(filepath.Join(root, ".changes/ship-widget/intent.md"), []byte("temporary prose\n"), 0o644); err != nil {
+						t.Fatal(err)
+					}
+					runGit(t, root, "commit", "-am", "temporary edit")
+				}
+				if err := os.WriteFile(filepath.Join(root, ".changes/ship-widget/intent.md"), []byte("- [x] First\n- [ ] Second\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				runGit(t, root, "commit", "-am", "provisional progress")
+			}
+			head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+			target := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "refs/remotes/origin/main"))
+			item := workflow.ImplementationItem{ID: "7", Branch: "ship-widget", State: workflow.Ready, Claimed: claimed}
+			if claimed {
+				item.TargetBranch, item.TargetSnapshot = "main", target
+			}
+			backend := &implementationMemory{work: []workflow.ImplementationItem{item}, remoteHeads: map[string]string{"main": target}}
+
+			inspected := implementCLI(t, root, backend, "inspect", "--item", "7")
+			if inspected.Ledger == nil || inspected.Ledger.Baseline != baseline || inspected.Ledger.Completion != "" || inspected.Ledger.Phase != "present" || len(inspected.Ledger.Violations) != 0 {
+				t.Fatalf("inspection = %#v", inspected)
+			}
+			operation := "next"
+			args := []string{operation}
+			if claimed {
+				args = []string{"resume", "--item", "7"}
+			}
+			started := implementCLI(t, root, backend, args...)
+			if started.Status != "work_available" || started.Packet == nil || started.Packet.Facts.Implementation.ArtifactBaseline != baseline || started.Packet.Facts.Implementation.ArtifactCompletion != "" {
+				t.Fatalf("startup = %#v", started)
+			}
+			if !strings.Contains(started.Packet.Instructions, "Audit") || strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD")) != head {
+				t.Fatalf("startup discarded progress or instructions: %s", started.Packet.Instructions)
+			}
+		})
+	}
+}
+
 func TestImplementSubmitsCompletedFirstImplementation(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")

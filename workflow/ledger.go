@@ -70,13 +70,20 @@ func InspectLedger(root, ref, slug string, explicit ArtifactEndpoints, policy Le
 			if err != nil {
 				return endpointViolation(result, err)
 			}
-			result.Violations = append(result.Violations, compareEndpoints(baseline, completion, result.Baseline, result.Completion)...)
+			result.Violations = append(result.Violations, compareEndpoints(baseline, completion, result.Baseline, result.Completion, true)...)
 		}
 	}
 
 	present := gitOK(root, "cat-file", "-e", ref+":.changes/"+slug) == nil
 	if present {
 		result.Phase = "present"
+		if result.Completion == "" && ref != result.Baseline {
+			provisional, err := endpointFiles(root, ref, slug)
+			if err != nil {
+				return endpointViolation(result, err)
+			}
+			result.Violations = append(result.Violations, compareEndpoints(baseline, provisional, result.Baseline, ref, false)...)
+		}
 	} else if result.Completion != "" {
 		result.Phase = "retired"
 	}
@@ -169,7 +176,7 @@ func requiredArtifacts(files map[string]string, endpoint, slug string) []string 
 	return violations
 }
 
-func compareEndpoints(baseline, completion map[string]string, baselineSHA, completionSHA string) []string {
+func compareEndpoints(baseline, completion map[string]string, baselineSHA, completionSHA string, complete bool) []string {
 	if len(baseline) != len(completion) {
 		return []string{"artifact path set differs between Baseline " + baselineSHA + " and Completion " + completionSHA}
 	}
@@ -182,7 +189,7 @@ func compareEndpoints(baseline, completion map[string]string, baselineSHA, compl
 		if !permittedTicks(before, after) {
 			violations = append(violations, "artifact content changed outside permitted completion ticks at "+completionSHA+":"+name)
 		}
-		violations = append(violations, ledgerBoxes(after, true, completionSHA+":"+name)...)
+		violations = append(violations, ledgerBoxes(after, complete, completionSHA+":"+name)...)
 	}
 	return violations
 }
