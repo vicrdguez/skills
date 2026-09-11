@@ -22,6 +22,7 @@ import (
 type reviewForge struct {
 	mu             sync.Mutex
 	head           string
+	branch         string
 	remoteHead     string
 	pullHead       string
 	body           string
@@ -37,6 +38,8 @@ type reviewForge struct {
 	failInline     bool
 	failBody       bool
 	failReadback   bool
+	duplicateRead  bool
+	reviewReads    int
 	failPostRead   bool
 	failDelete     string
 	loseDelete     string
@@ -46,12 +49,22 @@ type reviewForge struct {
 	mergeable      bool
 	checkpointPath string
 	atWipRelease   string
+	clock          int
+}
+
+func (f *reviewForge) timestamp() string {
+	f.clock++
+	return time.Date(2026, 1, 1, 0, 0, f.clock, 0, time.UTC).Format(time.RFC3339Nano)
 }
 
 func (f *reviewForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	path := strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets")
+	branch := f.branch
+	if branch == "" {
+		branch = "widget"
+	}
 	write := func(value any) { _ = json.NewEncoder(w).Encode(value) }
 	issue := func(number int, title string, labels []string, pull bool) map[string]any {
 		result := map[string]any{"id": number, "number": number, "title": title, "body": "", "state": "open", "created_at": "2026", "labels": labelObjects(labels), "sub_issues_summary": map[string]int{"total": 0}}
@@ -65,9 +78,9 @@ func (f *reviewForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if f.pullHead != "" {
 			head = f.pullHead
 		}
-		result := issue(11, "widget", f.labels, true)
+		result := issue(11, branch, f.labels, true)
 		result["body"], result["draft"], result["merged"], result["mergeable"] = f.body, false, false, f.mergeable
-		result["head"] = map[string]any{"ref": "widget", "sha": head, "repo": map[string]string{"full_name": "acme/widgets"}}
+		result["head"] = map[string]any{"ref": branch, "sha": head, "repo": map[string]string{"full_name": "acme/widgets"}}
 		result["base"] = map[string]string{"ref": "main"}
 		return result
 	}
@@ -78,7 +91,7 @@ func (f *reviewForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "readback unavailable", http.StatusInternalServerError)
 			return
 		}
-		write([]any{issue(7, "widget", nil, false), issue(8, "other", []string{"ready"}, false), issue(11, "widget", f.labels, true)})
+		write([]any{issue(7, branch, nil, false), issue(8, "other", []string{"ready"}, false), issue(11, branch, f.labels, true)})
 	case r.Method == http.MethodGet && path == "/pulls":
 		write([]any{pull()})
 	case r.Method == http.MethodGet && path == "/pulls/11":
@@ -94,6 +107,10 @@ func (f *reviewForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodGet && path == "/issues/11/timeline":
 		write(f.timeline)
 	case r.Method == http.MethodGet && path == "/pulls/11/reviews":
+		f.reviewReads++
+		if f.duplicateRead && f.reviewReads == 2 {
+			f.summaries = []map[string]any{{"body": "round 1", "commit_id": f.head, "state": "CHANGES_REQUESTED", "submitted_at": f.timestamp()}, {"body": "round 1", "commit_id": f.head, "state": "CHANGES_REQUESTED", "submitted_at": f.timestamp()}}
+		}
 		if f.failReadback {
 			f.failReadback = false
 			http.Error(w, "review readback unavailable", http.StatusInternalServerError)
@@ -116,6 +133,7 @@ func (f *reviewForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var value map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&value)
 		value["state"] = map[string]string{"REQUEST_CHANGES": "CHANGES_REQUESTED", "APPROVE": "APPROVED", "COMMENT": "COMMENTED"}[value["event"].(string)]
+		value["submitted_at"] = f.timestamp()
 		f.summaries = append(f.summaries, value)
 		if f.failPostRead {
 			f.failPostRead = false
@@ -152,9 +170,9 @@ func (f *reviewForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	case r.Method == http.MethodGet && (path == "/issues/7" || path == "/issues/11"):
 		if path == "/issues/7" {
-			write(issue(7, "widget", nil, false))
+			write(issue(7, branch, nil, false))
 		} else {
-			write(issue(11, "widget", f.labels, true))
+			write(issue(11, branch, f.labels, true))
 		}
 	case r.Method == http.MethodPost && strings.HasSuffix(path, "/labels"):
 		if f.failHandoff && slices.Contains(f.labels, "review") {
@@ -169,7 +187,7 @@ func (f *reviewForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		for _, label := range value.Labels {
 			if !slices.Contains(f.labels, label) {
 				f.labels = append(f.labels, label)
-				f.timeline = append(f.timeline, map[string]any{"event": "labeled", "label": map[string]string{"name": label}})
+				f.timeline = append(f.timeline, map[string]any{"event": "labeled", "created_at": f.timestamp(), "label": map[string]string{"name": label}})
 			}
 		}
 	case r.Method == http.MethodDelete && strings.Contains(path, "/labels/"):
@@ -183,7 +201,7 @@ func (f *reviewForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		f.labels = slices.DeleteFunc(f.labels, func(current string) bool { return current == label })
-		f.timeline = append(f.timeline, map[string]any{"event": "unlabeled", "label": map[string]string{"name": label}})
+		f.timeline = append(f.timeline, map[string]any{"event": "unlabeled", "created_at": f.timestamp(), "label": map[string]string{"name": label}})
 		if label == "wip" && f.failFinalRead {
 			f.failItemsRead = true
 		}
@@ -225,7 +243,7 @@ func newReviewFixture(t *testing.T) *reviewFixture {
 	worktree := filepath.Join(root, ".worktrees", "widget")
 	runGit(t, root, "worktree", "add", worktree, "widget")
 	gitDir := strings.TrimSpace(runGitOutput(t, worktree, "rev-parse", "--absolute-git-dir"))
-	forge := &reviewForge{head: head, labels: []string{"review"}, mergeable: true}
+	forge := &reviewForge{head: head, labels: []string{"review"}, mergeable: true, clock: 1, timeline: []map[string]any{{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": "review"}}}}
 	server := httptest.NewServer(forge)
 	t.Cleanup(server.Close)
 	checkpoint := filepath.Join(gitDir, ".watchdog")
@@ -296,6 +314,9 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 		for _, caller := range []string{"primary", "selected", "other"} {
 			t.Run(caller, func(t *testing.T) {
 				f := newReviewFixture(t)
+				if err := os.WriteFile(f.checkpoint, []byte("2:"+f.head+"\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
 				other := filepath.Join(f.root, ".worktrees", "other")
 				runGit(t, f.root, "worktree", "add", "-b", "other", other, "main")
 				otherGitDir := strings.TrimSpace(runGitOutput(t, other, "rev-parse", "--absolute-git-dir"))
@@ -310,11 +331,11 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 					location = other
 				}
 				start := f.start(t, location)
-				if start.Packet.Facts.Watchdog.ReviewNumber != 1 || strings.Contains(start.Packet.Instructions, ".watchdog") {
+				if start.Packet.Facts.Watchdog.ReviewCount != 2 || start.Packet.Facts.Watchdog.ReviewNumber != 3 || strings.Contains(start.Packet.Instructions, ".watchdog") {
 					t.Fatalf("encapsulation: %#v", start.Packet.Facts.Watchdog)
 				}
-				f.submitAt(t, location, 1, f.head, "rework")
-				if got := strings.TrimSpace(readFile(t, f.checkpoint)); got != "1:"+f.head {
+				f.submitAt(t, location, 3, f.head, "rework")
+				if got := strings.TrimSpace(readFile(t, f.checkpoint)); got != "3:"+f.head {
 					t.Fatalf("checkpoint = %q", got)
 				}
 				if got := readFile(t, otherCheckpoint); got != "9:"+mainHead+"\n" {
@@ -441,6 +462,19 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 				t.Fatalf("missing selected worktree accepted: %#v", got)
 			}
 		})
+		for _, branch := range []string{"team/widget", "../outside"} {
+			t.Run("invalid checkpoint branch "+branch, func(t *testing.T) {
+				f := newReviewFixture(t)
+				f.forge.branch = branch
+				outside := filepath.Join(f.root, "outside", ".watchdog")
+				_ = os.MkdirAll(filepath.Dir(outside), 0700)
+				_ = os.WriteFile(outside, []byte("sentinel"), 0600)
+				got := f.start(t, f.root)
+				if got.Status != "fix_required" || !strings.Contains(got.Reason, "invalid conventional branch") || readFile(t, outside) != "sentinel" || slices.Contains(f.forge.labels, "wip") {
+					t.Fatalf("unsafe branch reached checkpoint storage: %#v", got)
+				}
+			})
+		}
 		for _, number := range []string{"0", "-1", "18446744073709551616"} {
 			t.Run("submit number "+number, func(t *testing.T) {
 				f := newReviewFixture(t)
@@ -544,6 +578,15 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 			} else if strings.TrimSpace(readFile(t, f.checkpoint)) != fmt.Sprintf("%d:%s", tc.number, f.head) {
 				t.Fatalf("completed verdict did not record exact count: %+v", tc)
 			}
+			if got.Status == "needs_human" {
+				want := "awaiting_review"
+				if tc.verdict == "rework" {
+					want = "rework"
+				}
+				if got.Item == nil || string(got.Item.ResumeState) != want {
+					t.Fatalf("Needs Human ResumeState = %#v, want %s", got.Item, want)
+				}
+			}
 		}
 	})
 
@@ -556,7 +599,7 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 			t.Fatalf("retry: %#v", retry)
 		}
 		f.forge.labels = []string{"review"} // Explicit human requeue.
-		f.forge.timeline = append(f.forge.timeline, map[string]any{"event": "labeled", "label": map[string]string{"name": "review"}})
+		f.forge.timeline = append(f.forge.timeline, map[string]any{"event": "labeled", "created_at": f.forge.timestamp(), "label": map[string]string{"name": "review"}})
 		if next := f.start(t, f.root).Packet.Facts.Watchdog; next.ReviewNumber != 2 || next.ReviewCount != 1 {
 			t.Fatalf("requeue did not start a new round: %#v", next)
 		}
@@ -699,6 +742,7 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 			gitDir := filepath.Dir(f.checkpoint)
 			changed := make(chan struct{})
 			stop := make(chan struct{})
+			// No portable filesystem setup denies rename while retaining C:P and still permits temp cleanup.
 			go func() {
 				for {
 					entries, _ := os.ReadDir(gitDir)
@@ -745,22 +789,35 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 			{"during claim release", func(f *reviewForge) { f.loseDelete, f.failFinalRead = "wip", true }},
 			{"after verified nonterminal state before caller success", func(f *reviewForge) { f.failFinalRead = true }},
 		} {
-			t.Run(tc.name, func(t *testing.T) {
-				f := newReviewFixture(t)
-				f.start(t, f.root)
-				tc.configure(f.forge)
-				dir := t.TempDir()
-				summary := filepath.Join(dir, "summary.md")
-				_ = os.WriteFile(summary, []byte("round 1"), 0600)
-				args := []string{"watchdog", "submit", "--item", "7", "--review-number", "1", "--reviewed-head", f.head, "--verdict", "rework", "--summary", summary}
-				_, err := f.runResult(f.worktree, args...)
-				if err == nil || strings.TrimSpace(readFile(t, f.checkpoint)) != "1:"+f.head {
-					t.Fatalf("checkpoint ordering: %v", err)
-				}
-				if retry := f.run(t, f.worktree, args...); retry.Status != "rework" || len(f.forge.summaries) != 1 || f.forge.summaries[0]["body"] != "round 1" || !slices.Equal(f.forge.labels, []string{"rework"}) {
-					t.Fatalf("fixed retry: %#v labels=%v", retry, f.forge.labels)
-				}
-			})
+			for _, round := range []uint64{1, 2} {
+				t.Run(tc.name+" round "+strconv.FormatUint(round, 10), func(t *testing.T) {
+					f := newReviewFixture(t)
+					if round == 2 {
+						f.start(t, f.root)
+						f.submit(t, 1, f.head, "needs-human")
+						f.forge.labels = []string{"review"}
+						f.forge.timeline = append(f.forge.timeline, map[string]any{"event": "labeled", "created_at": f.forge.timestamp(), "label": map[string]string{"name": "review"}})
+					}
+					f.start(t, f.root)
+					tc.configure(f.forge)
+					dir := t.TempDir()
+					summary := filepath.Join(dir, "summary.md")
+					body := "round " + strconv.FormatUint(round, 10)
+					_ = os.WriteFile(summary, []byte(body), 0600)
+					args := []string{"watchdog", "submit", "--item", "7", "--review-number", strconv.FormatUint(round, 10), "--reviewed-head", f.head, "--verdict", "rework", "--summary", summary}
+					_, err := f.runResult(f.worktree, args...)
+					if err == nil || strings.TrimSpace(readFile(t, f.checkpoint)) != strconv.FormatUint(round, 10)+":"+f.head {
+						t.Fatalf("checkpoint ordering: %v", err)
+					}
+					wantStatus, wantLabel := "rework", "rework"
+					if round == 2 {
+						wantStatus, wantLabel = "needs_human", "needs-human"
+					}
+					if retry := f.run(t, f.worktree, args...); retry.Status != wantStatus || len(f.forge.summaries) != int(round) || f.forge.summaries[round-1]["body"] != body || !slices.Equal(f.forge.labels, []string{wantLabel}) {
+						t.Fatalf("fixed retry: %#v labels=%v", retry, f.forge.labels)
+					}
+				})
+			}
 		}
 	})
 
@@ -772,7 +829,7 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 			checkpoint := readFile(t, f.checkpoint)
 			summaries := len(f.forge.summaries)
 			f.forge.labels = []string{"review"} // Human requeue.
-			f.forge.timeline = append(f.forge.timeline, map[string]any{"event": "labeled", "label": map[string]string{"name": "review"}})
+			f.forge.timeline = append(f.forge.timeline, map[string]any{"event": "labeled", "created_at": f.forge.timestamp(), "label": map[string]string{"name": "review"}})
 			if facts := f.start(t, f.root).Packet.Facts.Watchdog; facts.ReviewNumber != 2 {
 				t.Fatalf("fresh review number = %d", facts.ReviewNumber)
 			}
@@ -782,6 +839,64 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 				t.Fatalf("old command consumed fresh Claim: %#v labels=%v", got, f.forge.labels)
 			}
 		})
+		t.Run("old round 2 command cannot consume a round 3 Claim", func(t *testing.T) {
+			f := newReviewFixture(t)
+			f.start(t, f.root)
+			f.submit(t, 1, f.head, "needs-human")
+			f.forge.labels = []string{"review"}
+			f.forge.timeline = append(f.forge.timeline, map[string]any{"event": "labeled", "created_at": f.forge.timestamp(), "label": map[string]string{"name": "review"}})
+			f.start(t, f.root)
+			f.submit(t, 2, f.head, "needs-human")
+			checkpoint, summaries := checkpointSnapshot(f.checkpoint), len(f.forge.summaries)
+			f.forge.labels = []string{"review"}
+			f.forge.timeline = append(f.forge.timeline, map[string]any{"event": "labeled", "created_at": f.forge.timestamp(), "label": map[string]string{"name": "review"}})
+			if facts := f.start(t, f.root).Packet.Facts.Watchdog; facts.ReviewNumber != 3 {
+				t.Fatalf("fresh review number = %d", facts.ReviewNumber)
+			}
+			labels := append([]string(nil), f.forge.labels...)
+			if got := f.submit(t, 2, f.head, "needs-human"); got.Status != "fix_required" {
+				t.Fatalf("old round 2 consumed round 3 Claim: %#v", got)
+			}
+			assertReviewUnchanged(t, f, checkpoint, labels, summaries, 0, "")
+		})
+		t.Run("fresh round cannot reuse identical historical receipt", func(t *testing.T) {
+			f := newReviewFixture(t)
+			f.start(t, f.root)
+			f.submit(t, 1, f.head, "needs-human")
+			checkpoint, summaries := checkpointSnapshot(f.checkpoint), len(f.forge.summaries)
+			f.forge.labels = []string{"review"}
+			f.forge.timeline = append(f.forge.timeline, map[string]any{"event": "labeled", "created_at": f.forge.timestamp(), "label": map[string]string{"name": "review"}})
+			if facts := f.start(t, f.root).Packet.Facts.Watchdog; facts.ReviewNumber != 2 {
+				t.Fatalf("fresh review number = %d", facts.ReviewNumber)
+			}
+			dir := t.TempDir()
+			summary := filepath.Join(dir, "summary.md")
+			_ = os.WriteFile(summary, []byte("round 1"), 0600)
+			labels := append([]string(nil), f.forge.labels...)
+			got := f.run(t, f.worktree, "watchdog", "submit", "--item", "7", "--review-number", "2", "--reviewed-head", f.head, "--verdict", "needs-human", "--summary", summary)
+			if got.Status != "fix_required" {
+				t.Fatalf("fresh round reused historical receipt: %#v", got)
+			}
+			assertReviewUnchanged(t, f, checkpoint, labels, summaries, 0, "")
+		})
+		for _, tc := range []struct{ name, claim, receipt string }{
+			{"missing receipt ordering", "", "2026-01-01T00:00:02Z"},
+			{"equal receipt ordering", "2026-01-01T00:00:02Z", "2026-01-01T00:00:02Z"},
+			{"invalid receipt ordering", "not-a-time", "2026-01-01T00:00:02Z"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				f := newReviewFixture(t)
+				_ = os.WriteFile(f.checkpoint, []byte("1:"+f.head+"\n"), 0600)
+				f.forge.labels = []string{"review", "wip"}
+				f.forge.timeline = []map[string]any{{"event": "labeled", "created_at": tc.claim, "label": map[string]string{"name": "review"}}}
+				f.forge.summaries = []map[string]any{{"body": "round 1", "commit_id": f.head, "state": "CHANGES_REQUESTED", "submitted_at": tc.receipt}}
+				checkpoint, labels := checkpointSnapshot(f.checkpoint), append([]string(nil), f.forge.labels...)
+				if got := f.submit(t, 1, f.head, "rework"); got.Status != "fix_required" {
+					t.Fatalf("ambiguous receipt ordering accepted: %#v", got)
+				}
+				assertReviewUnchanged(t, f, checkpoint, labels, 1, 0, "")
+			})
+		}
 		t.Run("recorded rework cannot be replayed as pass", func(t *testing.T) {
 			f := newReviewFixture(t)
 			f.start(t, f.root)
@@ -858,6 +973,19 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 			got := f.submit(t, 1, f.head, "rework")
 			if got.Status != "fix_required" {
 				t.Fatalf("duplicate exact receipts accepted: %#v", got)
+			}
+			assertReviewUnchanged(t, f, checkpoint, labels, 2, 0, "")
+		})
+		t.Run("duplicate receipts observed immediately before publication", func(t *testing.T) {
+			f := newReviewFixture(t)
+			f.start(t, f.root)
+			f.forge.reviewReads, f.forge.duplicateRead = 0, true
+			checkpoint, labels := checkpointSnapshot(f.checkpoint), append([]string(nil), f.forge.labels...)
+			dir := t.TempDir()
+			summary := filepath.Join(dir, "summary.md")
+			_ = os.WriteFile(summary, []byte("round 1"), 0600)
+			if _, err := f.runResult(f.worktree, "watchdog", "submit", "--item", "7", "--review-number", "1", "--reviewed-head", f.head, "--verdict", "rework", "--summary", summary); err == nil {
+				t.Fatal("publication reused duplicate exact receipts")
 			}
 			assertReviewUnchanged(t, f, checkpoint, labels, 2, 0, "")
 		})
@@ -1086,15 +1214,15 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 	})
 
 	t.Run("B13 nonterminal work retains checkpoint", func(t *testing.T) {
-		assertRetained := func(t *testing.T, f *reviewFixture) {
+		assertRetained := func(t *testing.T, f *reviewFixture, prior string) {
 			t.Helper()
 			before := checkpointSnapshot(f.checkpoint)
-			if before != "1:"+f.head+"\n" {
+			if before != "1:"+prior+"\n" {
 				t.Fatal("nonterminal operation removed checkpoint")
 			}
 			for _, result := range []setup.ImplementationOutput{f.start(t, f.root), f.run(t, f.root, "watchdog", "resume", "--item", "7")} {
 				facts := result.Packet.Facts.Watchdog
-				if facts.ReviewCount != 1 || facts.ReviewNumber != 2 || facts.ReviewScope != "incremental" || facts.PreviousReviewedHead != f.head || checkpointSnapshot(f.checkpoint) != before {
+				if facts.ReviewCount != 1 || facts.ReviewNumber != 2 || facts.ReviewScope != "incremental" || facts.PreviousReviewedHead != prior || checkpointSnapshot(f.checkpoint) != before {
 					t.Fatalf("retained review facts: %#v checkpoint=%q", facts, checkpointSnapshot(f.checkpoint))
 				}
 			}
@@ -1104,8 +1232,8 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 			f.start(t, f.root)
 			f.submit(t, 1, f.head, "needs-human")
 			f.forge.labels = []string{"review"}
-			f.forge.timeline = append(f.forge.timeline, map[string]any{"event": "labeled", "label": map[string]string{"name": "review"}})
-			assertRetained(t, f)
+			f.forge.timeline = append(f.forge.timeline, map[string]any{"event": "labeled", "created_at": f.forge.timestamp(), "label": map[string]string{"name": "review"}})
+			assertRetained(t, f, f.head)
 		})
 		t.Run("finding implementation and resubmission", func(t *testing.T) {
 			f := newReviewFixture(t)
@@ -1117,22 +1245,28 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 			if got := f.run(t, f.worktree, "implement", "submit", "--item", "7", "--body", body); got.Status != "awaiting_review" {
 				t.Fatalf("resubmission: %#v", got)
 			}
-			assertRetained(t, f)
+			assertRetained(t, f, f.head)
 		})
 		t.Run("Implementation Ledger retirement", func(t *testing.T) {
 			f := newReviewFixture(t)
-			_ = os.WriteFile(f.checkpoint, []byte("1:"+f.head+"\n"), 0600)
+			prior := strings.TrimSpace(runGitOutput(t, f.worktree, "rev-parse", "HEAD^"))
+			runGit(t, f.worktree, "reset", "--hard", prior)
+			_ = os.WriteFile(f.checkpoint, []byte("1:"+prior+"\n"), 0600)
+			runGit(t, f.worktree, "rm", "-r", ".changes/widget")
+			runGit(t, f.worktree, "commit", "-m", "retire with retained checkpoint")
+			f.head = strings.TrimSpace(runGitOutput(t, f.worktree, "rev-parse", "HEAD"))
+			f.forge.head = f.head
 			if fileExists(filepath.Join(f.worktree, ".changes", "widget")) {
 				t.Fatal("fixture did not retire Implementation Ledger")
 			}
-			assertRetained(t, f)
+			assertRetained(t, f, prior)
 		})
 		t.Run("ordinary git clean", func(t *testing.T) {
 			f := newReviewFixture(t)
 			_ = os.WriteFile(f.checkpoint, []byte("1:"+f.head+"\n"), 0600)
 			_ = os.WriteFile(filepath.Join(f.worktree, "untracked"), []byte("x"), 0600)
 			runGit(t, f.worktree, "clean", "-fd")
-			assertRetained(t, f)
+			assertRetained(t, f, f.head)
 		})
 	})
 

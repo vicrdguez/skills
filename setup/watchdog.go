@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"slices"
 	"strconv"
 
 	skilldist "github.com/vicrdguez/skills"
@@ -76,12 +75,12 @@ func (b *GitHubBackend) ReviewSubmission(ctx context.Context, repository github.
 	labels := map[string]bool{}
 	latest := ""
 	synchronizing := false
-	seenDisposition := false
-	reviewRequeued := false
+	reviewClaimedAt := ""
 	for page := 1; ; page++ {
 		var events []struct {
-			Event string `json:"event"`
-			Label struct {
+			Event     string `json:"event"`
+			CreatedAt string `json:"created_at"`
+			Label     struct {
 				Name string `json:"name"`
 			} `json:"label"`
 		}
@@ -93,13 +92,14 @@ func (b *GitHubBackend) ReviewSubmission(ctx context.Context, repository github.
 				continue
 			}
 			labels[event.Label.Name] = event.Event == "labeled"
+			if event.Label.Name == "review" {
+				if event.Event == "labeled" {
+					reviewClaimedAt = event.CreatedAt
+				} else {
+					reviewClaimedAt = ""
+				}
+			}
 			if event.Event == "labeled" && (event.Label.Name == "review" || event.Label.Name == "rework" || event.Label.Name == "done" || event.Label.Name == "needs-human") {
-				if event.Label.Name == "review" && seenDisposition {
-					reviewRequeued = true
-				}
-				if event.Label.Name != "review" {
-					seenDisposition = true
-				}
 				// A conflicting pass retry can add rework before its claimed review is removed.
 				synchronizing = event.Label.Name == "rework" && latest == "done" && labels["done"] && labels["sync"] && (!labels["review"] || labels["wip"]) && !labels["needs-human"] && !labels["ready"]
 				latest = event.Label.Name
@@ -121,7 +121,9 @@ func (b *GitHubBackend) ReviewSubmission(ctx context.Context, repository github.
 		result.PendingReview = map[string]workflow.State{"rework": workflow.Rework, "done": workflow.ReadyForMerge, "needs-human": workflow.NeedsHuman}[latest]
 		result.State = result.PendingReview
 	}
-	result.ReviewRequeued = current["review"] && claimed && states == 1 && reviewRequeued
+	if current["review"] && claimed && states == 1 {
+		result.ReviewClaimedAt = reviewClaimedAt
+	}
 	if (states == 2 && !current["review"] || states == 3 && current["review"] && claimed && labels["wip"]) && current["review"] == labels["review"] && current["done"] && current["rework"] && current["sync"] && labels["done"] && labels["rework"] && labels["sync"] && synchronizing {
 		result.PendingReview = workflow.Rework
 		result.State = workflow.Rework
@@ -189,35 +191,40 @@ func (b *GitHubBackend) publishReviewSummary(ctx context.Context, repository git
 		return fmt.Errorf("invalid review verdict %q", wanted.Verdict)
 	}
 	path := b.repositoryPath(repository) + fmt.Sprintf("/pulls/%d/reviews", number)
-	published := func() (bool, error) {
+	published := func() (int, error) {
 		type review struct {
 			Body   string `json:"body"`
 			Commit string `json:"commit_id"`
 			State  string `json:"state"`
 		}
+		matches := 0
 		for page := 1; ; page++ {
 			var reviews []review
 			if err := b.request(ctx, http.MethodGet, path+fmt.Sprintf("?per_page=100&page=%d", page), nil, &reviews); err != nil {
-				return false, err
+				return 0, err
 			}
-			if slices.ContainsFunc(reviews, func(review review) bool {
-				return review.Body == wanted.Body && review.Commit == wanted.Commit && review.State == state
-			}) {
-				return true, nil
+			for _, review := range reviews {
+				if review.Body == wanted.Body && review.Commit == wanted.Commit && review.State == state {
+					matches++
+				}
 			}
 			if len(reviews) < 100 {
-				return false, nil
+				return matches, nil
 			}
 		}
 	}
-	if found, err := published(); err != nil || found {
+	if found, err := published(); err != nil || found == 1 {
 		return err
+	} else if found > 1 {
+		return fmt.Errorf("multiple exact review summary receipts observed; inspect before retrying")
 	}
 	writeErr := b.request(ctx, http.MethodPost, path, map[string]string{"body": wanted.Body, "commit_id": wanted.Commit, "event": event}, nil)
 	if found, err := published(); err != nil {
 		return err
-	} else if found {
+	} else if found == 1 {
 		return nil
+	} else if found > 1 {
+		return fmt.Errorf("multiple exact review summary receipts observed after publication; inspect before retrying")
 	}
 	if writeErr != nil {
 		return writeErr

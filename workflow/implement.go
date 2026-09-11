@@ -47,19 +47,19 @@ type ImplementationItem struct {
 }
 
 type Submission struct {
-	PendingReview  State
-	ReviewRequeued bool
-	Merged         bool
-	Mergeability   string
-	CreatedAt      string
-	State          State
-	Claimed        bool
-	ID             SubmissionID
-	Head           string
-	Base           string
-	Body           string
-	Draft          bool
-	Comments       []skilldist.ReviewComment
+	PendingReview   State
+	ReviewClaimedAt string
+	Merged          bool
+	Mergeability    string
+	CreatedAt       string
+	State           State
+	Claimed         bool
+	ID              SubmissionID
+	Head            string
+	Base            string
+	Body            string
+	Draft           bool
+	Comments        []skilldist.ReviewComment
 }
 
 type ImplementationBackend interface {
@@ -237,6 +237,10 @@ func StartImplementation(ctx context.Context, root, remote string, id WorkItemID
 	return ImplementationOutcome{Status: "no_work"}, nil
 }
 
+func validConventionalBranch(root, branch string) bool {
+	return branch != "" && gitOK(root, "check-ref-format", "--branch", branch) == nil && !strings.Contains(branch, "/")
+}
+
 func prepareImplementationStart(ctx context.Context, root, remote string, repository github.RepositoryID, item ImplementationItem, snapshot string, backend ImplementationBackend) (ImplementationItem, ImplementationOutcome, error) {
 	refuse := func(reason string) (ImplementationItem, ImplementationOutcome, error) {
 		return item, ImplementationOutcome{Status: "fix_required", Reason: reason, Item: &item}, nil
@@ -244,7 +248,7 @@ func prepareImplementationStart(ctx context.Context, root, remote string, reposi
 	if item.Problem != "" {
 		return refuse(item.Problem + "; repair contradictory projections before resuming")
 	}
-	if item.Branch == "" || gitOK(root, "check-ref-format", "--branch", item.Branch) != nil || strings.Contains(item.Branch, "/") {
+	if !validConventionalBranch(root, item.Branch) {
 		return refuse("invalid conventional branch identity; repair the Work Item attachment")
 	}
 	head, err := git(root, "rev-parse", "--verify", "refs/heads/"+item.Branch+"^{commit}")

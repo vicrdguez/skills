@@ -19,6 +19,9 @@ type reviewCheckpoint struct {
 }
 
 func loadReviewCheckpoint(root, branch string) (reviewCheckpoint, error) {
+	if !validConventionalBranch(root, branch) {
+		return reviewCheckpoint{}, fmt.Errorf("invalid conventional branch identity; repair the Work Item attachment")
+	}
 	main, err := primaryWorktree(root)
 	if err != nil {
 		return reviewCheckpoint{}, fmt.Errorf("resolve selected Work Item worktree: %w", err)
@@ -88,6 +91,16 @@ func (c reviewCheckpoint) replace(count uint64, head string) error {
 	}
 	if err != nil {
 		return fmt.Errorf("atomically replace Review Checkpoint: %w; repair private Git-directory access and retry the same fixed-number command", err)
+	}
+	directory, err := os.Open(filepath.Dir(c.Path))
+	if err == nil {
+		err = directory.Sync()
+		if closeErr := directory.Close(); err == nil {
+			err = closeErr
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("sync Review Checkpoint directory after atomic replacement: %w; retain the Claim and retry the same fixed-number command", err)
 	}
 	return nil
 }

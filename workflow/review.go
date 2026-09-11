@@ -8,6 +8,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	skilldist "github.com/vicrdguez/skills"
 	"github.com/vicrdguez/skills/github"
@@ -191,8 +192,13 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
-	if retry && submission.ReviewRequeued {
-		return ImplementationOutcome{}, Refuse("recorded review command predates the current Awaiting Review Claim; submit the fresh review as the next round")
+	receipt, receiptCount := matchingSummaryReceipt(*item.Submission, comments[0])
+	evidenceMatches := reviewEvidenceMatches(item, comments, finalBody)
+	if retry && (!evidenceMatches || receiptCount != 1) {
+		return ImplementationOutcome{}, Refuse("recorded review differs from the supplied summary, verdict, body, or inline evidence; replay the original fixed-number command and Result Documents")
+	}
+	if receiptCount > 0 && item.State == AwaitingReview && (receiptCount != 1 || !evidenceMatches || !claimPrecedesReceipt(submission.ReviewClaimedAt, receipt.CreatedAt)) {
+		return ImplementationOutcome{}, Refuse("exact review receipt cannot be assigned unambiguously to the current Awaiting Review Claim; replay its original fixed-number command or submit a fresh next round")
 	}
 	target := Rework
 	if reviewNumber >= 2 {
@@ -223,11 +229,6 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 			}
 		}
 		requireMergeable = target == ReadyForMerge
-	}
-	if retry {
-		if !reviewEvidenceMatches(item, comments, finalBody) {
-			return ImplementationOutcome{}, Refuse("recorded review differs from the supplied summary, verdict, body, or inline evidence; replay the original fixed-number command and Result Documents")
-		}
 	}
 	if item.State != AwaitingReview {
 		if item.Claimed && item.Submission.PendingReview == "" {
@@ -315,6 +316,23 @@ func reviewEvidenceMatches(item ImplementationItem, wanted []skilldist.ReviewCom
 		}
 	}
 	return finalBody == "" || finalBody == item.Submission.Body
+}
+
+func matchingSummaryReceipt(submission Submission, wanted skilldist.ReviewComment) (skilldist.ReviewComment, int) {
+	var receipt skilldist.ReviewComment
+	count := 0
+	for _, existing := range submission.Comments {
+		if existing.Path == "" && existing.Body == wanted.Body && existing.Verdict == wanted.Verdict && existing.Commit == wanted.Commit {
+			receipt, count = existing, count+1
+		}
+	}
+	return receipt, count
+}
+
+func claimPrecedesReceipt(claimedAt, submittedAt string) bool {
+	claim, claimErr := time.Parse(time.RFC3339Nano, claimedAt)
+	receipt, receiptErr := time.Parse(time.RFC3339Nano, submittedAt)
+	return claimErr == nil && receiptErr == nil && claim.Before(receipt)
 }
 
 func cleanupReviewCheckpoint(checkpoint reviewCheckpoint) string {
