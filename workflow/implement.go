@@ -285,7 +285,7 @@ func prepareImplementationStart(ctx context.Context, root, remote string, reposi
 		}
 		if item.TargetSnapshot == "" {
 			if item.Claimed && head != history.Baseline {
-				return refuse("Target Snapshot is unknown after history changed; read the original packet and resume with --target-snapshot <sha>")
+				return item, implementationRecovery(item, remote, endpoints, "Target Snapshot is unknown after history changed; read the original packet"), nil
 			}
 			item.TargetSnapshot, err = backend.ImplementationHead(ctx, repository, item.TargetBranch)
 			if err != nil {
@@ -325,9 +325,14 @@ func prepareImplementationStart(ctx context.Context, root, remote string, reposi
 	return item, ImplementationOutcome{}, nil
 }
 
+func implementationRecovery(item ImplementationItem, remote string, endpoints ArtifactEndpoints, reason string) ImplementationOutcome {
+	facts := skilldist.ImplementationFacts{Remote: remote, TargetSnapshot: item.TargetSnapshot, SuppliedArtifactBaseline: endpoints.Baseline, SuppliedArtifactCompletion: endpoints.Completion}
+	return ImplementationOutcome{Status: "fix_required", Item: &item, Reason: reason, Facts: &skilldist.InvocationFacts{Implementation: &facts}}
+}
+
 func implementationPacket(root, remote string, item ImplementationItem, endpoints ArtifactEndpoints) (ImplementationOutcome, error) {
 	if item.State == Rework && !item.Synchronization && (item.Submission == nil || item.Submission.PreviousReviewedHead == "") {
-		return ImplementationOutcome{Status: "fix_required", Item: &item, Reason: "previous reviewed head needs agent extraction from the supplied watchdog summary; resume --reviewed-head <full-sha> without rewriting history"}, nil
+		return implementationRecovery(item, remote, endpoints, "previous reviewed head needs agent extraction from the supplied watchdog summary without rewriting history"), nil
 	}
 	main, err := primaryWorktree(root)
 	if err != nil {

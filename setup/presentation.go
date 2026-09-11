@@ -127,16 +127,26 @@ func PresentImplementation(outcome workflow.ImplementationOutcome) (Implementati
 		if output.Item.Submission != nil {
 			f.Submission = output.Item.Submission.Number
 		}
+		if outcome.Status == "fix_required" && f.TargetSnapshot == "" {
+			f.TargetSnapshot = "<sha>"
+		}
 		f.ResumeCommand = fmt.Sprintf("skl implement resume --item %d --target-snapshot %s", f.WorkItem, f.TargetSnapshot)
 		if outcome.Item.State == workflow.Rework && !outcome.Item.Synchronization {
 			f.ResumeCommand = fmt.Sprintf("skl implement resume --item %d", f.WorkItem)
+			if outcome.Status == "fix_required" {
+				f.ResumeCommand += " --reviewed-head <full-sha>"
+			}
 		}
 		f.ResumeCommand += " --remote " + quote(f.Remote)
+		flags := endpointFlags(f.SuppliedArtifactBaseline, f.SuppliedArtifactCompletion)
+		f.ResumeCommand += flags
+		if outcome.Status == "fix_required" {
+			output.Reason += "; resume with `" + f.ResumeCommand + "`"
+			return output, nil
+		}
 		f.InspectCommand = fmt.Sprintf("skl implement inspect --repo %s --remote %s --item %d", quote(f.Worktree), quote(f.Remote), f.WorkItem)
 		f.SubmitCommand = fmt.Sprintf("skl implement submit --repo %s --remote %s --item %d --body %s", quote(f.Worktree), quote(f.Remote), f.WorkItem, quote(filepath.Join(directory, "submission.md")))
 		f.NeedsHumanCommand = fmt.Sprintf("skl implement needs-human --repo %s --remote %s --item %d --reason <permitted-reason> --decision %s", quote(f.Worktree), quote(f.Remote), f.WorkItem, quote(filepath.Join(directory, "decision.md")))
-		flags := endpointFlags(f.SuppliedArtifactBaseline, f.SuppliedArtifactCompletion)
-		f.ResumeCommand += flags
 		f.InspectCommand += flags
 		f.SubmitCommand += flags
 		f.NeedsHumanCommand += flags
