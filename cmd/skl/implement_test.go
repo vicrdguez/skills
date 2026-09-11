@@ -214,6 +214,64 @@ func implementCLI(t *testing.T, root string, backend *implementationMemory, args
 	return result
 }
 
+func TestB2ResolveMarkersOnlyInSelectedSliceHistory(t *testing.T) {
+	for _, other := range []string{
+		"other slices",
+		"unreachable markers",
+		"non-subject markers",
+		"merge-parent markers",
+		"explanatory subjects",
+	} {
+		t.Run(other, func(t *testing.T) {
+			root := proposalRepository(t)
+			baselineSubject, completionSubject := "[baseline] ship-widget", "[completion] ship-widget"
+			if other == "explanatory subjects" {
+				baselineSubject += " accepted contract"
+				completionSubject += " finished contract"
+			}
+			runGit(t, root, "switch", "-c", "ship-widget", "main")
+			writeLedger(t, root, "ship-widget", true)
+			runGit(t, root, "add", ".changes/ship-widget")
+			runGit(t, root, "commit", "-m", baselineSubject)
+			baseline := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+
+			switch other {
+			case "other slices":
+				runGit(t, root, "commit", "--allow-empty", "-m", "[baseline] ship-widget-extra")
+				runGit(t, root, "commit", "--allow-empty", "-m", "[completion] another-slice")
+			case "unreachable markers":
+				runGit(t, root, "branch", "unreachable", "main")
+				runGit(t, root, "switch", "unreachable")
+				runGit(t, root, "commit", "--allow-empty", "-m", "[baseline] ship-widget")
+				runGit(t, root, "commit", "--allow-empty", "-m", "[completion] ship-widget")
+				runGit(t, root, "switch", "ship-widget")
+			case "non-subject markers":
+				runGit(t, root, "commit", "--allow-empty", "-m", "note", "-m", "[baseline] ship-widget")
+				runGit(t, root, "commit", "--allow-empty", "-m", "prefix [completion] ship-widget")
+				runGit(t, root, "commit", "--allow-empty", "-m", "[Completion] ship-widget")
+			}
+			runGit(t, root, "commit", "--allow-empty", "-m", completionSubject)
+			completion := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+			runGit(t, root, "rm", "-r", ".changes/ship-widget")
+			runGit(t, root, "commit", "-m", "retire")
+			if other == "merge-parent markers" {
+				evidence := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+				runGit(t, root, "switch", "-C", "ship-widget", "main")
+				runGit(t, root, "merge", "--no-ff", evidence, "-m", "merge evidence")
+			}
+
+			backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "ship-widget", State: workflow.AwaitingReview}}}
+			got := implementCLI(t, root, backend, "inspect", "--item", "7")
+			if got.Status != "inspected" || got.Ledger == nil || got.Ledger.Baseline != baseline || got.Ledger.Completion != completion || len(got.Ledger.Violations) != 0 {
+				t.Fatalf("inspection = %#v", got)
+			}
+			if backend.work[0].Claimed {
+				t.Fatal("inspection mutated Work Item")
+			}
+		})
+	}
+}
+
 func TestImplementSubmitsCompletedFirstImplementation(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
