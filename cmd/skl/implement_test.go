@@ -553,6 +553,108 @@ func TestB6RequireEndpointAncestryAndLaterLedgerRetirement(t *testing.T) {
 	}
 }
 
+func TestB7AcceptRestoredIntermediateArtifactEdits(t *testing.T) {
+	type temporaryChange struct {
+		name             string
+		beforeCompletion func(*testing.T, string)
+		afterRetirement  func(*testing.T, string)
+	}
+	write := func(t *testing.T, root, name, contents string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(root, ".changes/ship-widget", name), []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	commit := func(t *testing.T, root, message string) {
+		t.Helper()
+		runGit(t, root, "add", "-A")
+		runGit(t, root, "commit", "-m", message)
+	}
+	for _, test := range []temporaryChange{
+		{"edit and restore prose", func(t *testing.T, root string) {
+			write(t, root, "behavior.md", "temporary\n")
+			commit(t, root, "temporary prose")
+			write(t, root, "behavior.md", "behavior.md\n")
+			commit(t, root, "restore prose")
+		}, nil},
+		{"change paths and modes then restore", func(t *testing.T, root string) {
+			write(t, root, "extra.md", "temporary\n")
+			if err := os.Chmod(filepath.Join(root, ".changes/ship-widget/behavior.md"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			commit(t, root, "temporary tree")
+			if err := os.Remove(filepath.Join(root, ".changes/ship-widget/extra.md")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(filepath.Join(root, ".changes/ship-widget/behavior.md"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			commit(t, root, "restore tree")
+		}, nil},
+		{"tick and untick", func(t *testing.T, root string) {
+			write(t, root, "intent.md", "- [x] Ship\n")
+			commit(t, root, "temporary tick")
+			write(t, root, "intent.md", "- [ ] Ship\n")
+			commit(t, root, "restore tick")
+		}, nil},
+		{"delete and restore", func(t *testing.T, root string) {
+			if err := os.RemoveAll(filepath.Join(root, ".changes/ship-widget")); err != nil {
+				t.Fatal(err)
+			}
+			commit(t, root, "temporary deletion")
+			writeLedger(t, root, "ship-widget", true)
+			write(t, root, "intent.md", "- [ ] Ship\n")
+			commit(t, root, "restore ledger")
+		}, nil},
+		{"merge change and restore", func(t *testing.T, root string) {
+			runGit(t, root, "switch", "-c", "temporary-merge")
+			write(t, root, "behavior.md", "merged temporary change\n")
+			commit(t, root, "change in merge parent")
+			runGit(t, root, "switch", "ship-widget")
+			runGit(t, root, "merge", "--no-ff", "temporary-merge", "-m", "merge temporary change")
+			write(t, root, "behavior.md", "behavior.md\n")
+			commit(t, root, "restore merge change")
+		}, nil},
+		{"restore after retirement", nil, func(t *testing.T, root string) {
+			writeLedger(t, root, "ship-widget", true)
+			write(t, root, "intent.md", "- [x] Ship\n")
+			commit(t, root, "temporary restoration")
+			if err := os.RemoveAll(filepath.Join(root, ".changes/ship-widget")); err != nil {
+				t.Fatal(err)
+			}
+			commit(t, root, "retire again")
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := proposalRepository(t)
+			runGit(t, root, "switch", "-c", "ship-widget", "main")
+			writeLedger(t, root, "ship-widget", true)
+			write(t, root, "intent.md", "- [ ] Ship\n")
+			commit(t, root, "[baseline] ship-widget")
+			baseline := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+			if test.beforeCompletion != nil {
+				test.beforeCompletion(t, root)
+			}
+			write(t, root, "intent.md", "- [x] Ship\n")
+			commit(t, root, "[completion] ship-widget")
+			completion := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+			if err := os.RemoveAll(filepath.Join(root, ".changes/ship-widget")); err != nil {
+				t.Fatal(err)
+			}
+			commit(t, root, "retire")
+			if test.afterRetirement != nil {
+				test.afterRetirement(t, root)
+			}
+
+			backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "ship-widget", State: workflow.AwaitingReview}}}
+			got := implementCLI(t, root, backend, "inspect", "--item", "7")
+			if got.Ledger.Baseline != baseline || got.Ledger.Completion != completion || got.Ledger.Phase != "retired" || len(got.Ledger.Violations) != 0 {
+				t.Fatalf("restored history rejected: %#v", got.Ledger)
+			}
+		})
+	}
+}
+
 func TestImplementSubmitsCompletedFirstImplementation(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
