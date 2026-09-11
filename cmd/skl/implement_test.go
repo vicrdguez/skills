@@ -495,6 +495,64 @@ func TestB5EnforcePhaseAppropriateCompletionTicks(t *testing.T) {
 	}
 }
 
+func TestB6RequireEndpointAncestryAndLaterLedgerRetirement(t *testing.T) {
+	for _, test := range []struct {
+		name, want string
+		arrange    func(*testing.T, string)
+	}{
+		{"valid retired contract", "", func(t *testing.T, root string) {
+			prepareSlice(t, root, "ship-widget")
+			runGit(t, root, "commit", "--allow-empty", "-m", "[completion] ship-widget")
+			runGit(t, root, "rm", "-r", ".changes/ship-widget")
+			runGit(t, root, "commit", "-m", "retire")
+		}},
+		{"unrelated commits before deletion", "", func(t *testing.T, root string) {
+			prepareSlice(t, root, "ship-widget")
+			runGit(t, root, "commit", "--allow-empty", "-m", "[completion] ship-widget")
+			runGit(t, root, "commit", "--allow-empty", "-m", "unrelated one")
+			runGit(t, root, "commit", "--allow-empty", "-m", "unrelated two")
+			runGit(t, root, "rm", "-r", ".changes/ship-widget")
+			runGit(t, root, "commit", "-m", "retire later")
+		}},
+		{"baseline not ancestor of completion", "not an ancestor", func(t *testing.T, root string) {
+			runGit(t, root, "switch", "-c", "baseline-side", "main")
+			writeLedger(t, root, "ship-widget", true)
+			runGit(t, root, "add", ".changes/ship-widget")
+			runGit(t, root, "commit", "-m", "[baseline] ship-widget")
+			runGit(t, root, "switch", "-c", "ship-widget", "main")
+			writeLedger(t, root, "ship-widget", true)
+			runGit(t, root, "add", ".changes/ship-widget")
+			runGit(t, root, "commit", "-m", "[completion] ship-widget")
+			runGit(t, root, "rm", "-r", ".changes/ship-widget")
+			runGit(t, root, "commit", "-m", "retire")
+			runGit(t, root, "merge", "--no-ff", "-s", "ours", "baseline-side", "-m", "include baseline evidence")
+		}},
+		{"completion marker lacks artifacts", "missing ledger directory", func(t *testing.T, root string) {
+			prepareSlice(t, root, "ship-widget")
+			runGit(t, root, "rm", "-r", ".changes/ship-widget")
+			runGit(t, root, "commit", "-m", "[completion] ship-widget")
+		}},
+		{"review head retains ledger", "must be absent at review head", func(t *testing.T, root string) {
+			prepareSlice(t, root, "ship-widget")
+			runGit(t, root, "commit", "--allow-empty", "-m", "[completion] ship-widget")
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := proposalRepository(t)
+			test.arrange(t, root)
+			backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "ship-widget", State: workflow.AwaitingReview}}}
+			got := implementCLI(t, root, backend, "inspect", "--item", "7")
+			violations := strings.Join(got.Ledger.Violations, "\n")
+			if test.want == "" && violations != "" || test.want != "" && !strings.Contains(violations, test.want) {
+				t.Fatalf("violations = %q, want %q", violations, test.want)
+			}
+			if test.want == "" && (got.Ledger.Phase != "retired" || got.Ledger.Deletion != "") {
+				t.Fatalf("retirement evidence = %#v", got.Ledger)
+			}
+		})
+	}
+}
+
 func TestImplementSubmitsCompletedFirstImplementation(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
