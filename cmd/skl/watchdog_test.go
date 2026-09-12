@@ -253,6 +253,7 @@ func TestWatchdogHumanDirectionRequiresExplicitRequeue(t *testing.T) {
 			t.Fatalf("prose requeued: %#v", got)
 		}
 		b.work[0].State = resume
+		b.work[0].Submission.Lifecycle.States = []workflow.State{resume}
 		var comments []skilldist.ReviewComment
 		if resume == workflow.Rework {
 			got = implementCLI(t, root, b, "next")
@@ -308,8 +309,9 @@ func TestWatchdogPassRetryChecksMergeability(t *testing.T) {
 					continue
 				}
 				t.Run(fmt.Sprintf("claimed=%t/%s/%s", claimed, mergeability, phase), func(t *testing.T) {
-					body := "opaque final\n\nCloses #7\n"
-					b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.ReadyForMerge, Claimed: claimed, Submission: &workflow.Submission{ID: "11", Head: head, ReviewedHead: head, Base: "main", State: workflow.ReadyForMerge, Claimed: claimed, Body: body, Mergeability: "mergeable", Bounces: 1, Comments: []skilldist.ReviewComment{{Body: "pass", Commit: head}}}}}, remoteHeads: map[string]string{"widget": head, "main": target}}
+					body := "opaque final"
+					storedBody := body + "\n\nCloses #7\n"
+					b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.ReadyForMerge, Claimed: claimed, Submission: &workflow.Submission{ID: "11", Head: head, ReviewedHead: head, Base: "main", State: workflow.ReadyForMerge, Claimed: claimed, Body: storedBody, Mergeability: "mergeable", Bounces: 1, Comments: []skilldist.ReviewComment{{Body: "pass", Commit: head}}}}}, remoteHeads: map[string]string{"widget": head, "main": target}}
 					change := func() { b.work[0].Submission.Mergeability = mergeability }
 					switch phase {
 					case "entry":
@@ -343,7 +345,7 @@ func TestWatchdogPassRetryChecksMergeability(t *testing.T) {
 					} else if got.Status != "fix_required" || !strings.Contains(got.Reason, "mergeability") || phase != "readback" && b.work[0].Claimed != claimed {
 						t.Fatalf("unsafe retry accepted or Claim released: %#v; item: %#v", got, b.work[0])
 					}
-					if b.work[0].Submission.Bounces != 1 || len(b.work[0].Submission.Comments) != 1 || b.work[0].Submission.Body != body {
+					if b.work[0].Submission.Bounces != 1 || len(b.work[0].Submission.Comments) != 1 || b.work[0].Submission.Body != storedBody {
 						t.Fatalf("retry changed review evidence: %#v", b.work[0].Submission)
 					}
 				})
@@ -352,16 +354,24 @@ func TestWatchdogPassRetryChecksMergeability(t *testing.T) {
 	}
 }
 
-func (b *implementationMemory) ReviewSubmission(_ context.Context, _ github.RepositoryID, id workflow.SubmissionID) (workflow.Submission, error) {
+func (b *implementationMemory) SubmissionBodyMatches(id workflow.WorkItemID, actual, supplied string) (bool, error) {
+	if _, err := strconv.Atoi(string(id)); err == nil {
+		return (&setup.GitHubBackend{}).SubmissionBodyMatches(id, actual, supplied)
+	}
+	return actual == supplied, nil
+}
+
+func (b *implementationMemory) ReviewSubmission(_ context.Context, id workflow.SubmissionID) (workflow.Submission, error) {
 	for _, item := range b.work {
 		if item.Submission != nil && item.Submission.ID == id {
+			item = workflow.ReconcileImplementation(implementationFixture(item))
 			return *item.Submission, nil
 		}
 	}
 	return workflow.Submission{}, fmt.Errorf("missing Submission")
 }
 
-func (b *implementationMemory) PublishReview(_ context.Context, _ github.RepositoryID, item workflow.ImplementationItem, comments []skilldist.ReviewComment, guard func() error) error {
+func (b *implementationMemory) PublishReview(_ context.Context, item workflow.ImplementationItem, comments []skilldist.ReviewComment, guard func() error) error {
 	if err := guard(); err != nil {
 		return err
 	}
@@ -377,7 +387,7 @@ func (b *implementationMemory) PublishReview(_ context.Context, _ github.Reposit
 	return nil
 }
 
-func (b *implementationMemory) CompleteReview(_ context.Context, _ github.RepositoryID, item workflow.ImplementationItem, target workflow.State, guard func() error) error {
+func (b *implementationMemory) CompleteReview(_ context.Context, item workflow.ImplementationItem, target workflow.State, guard func() error) error {
 	if b.beforeTransition != nil {
 		b.beforeTransition()
 	}
@@ -386,18 +396,21 @@ func (b *implementationMemory) CompleteReview(_ context.Context, _ github.Reposi
 	}
 	for i := range b.work {
 		if b.work[i].ID == item.ID {
-			b.work[i].State = target
+			b.work[i] = implementationFixture(b.work[i])
 			b.work[i].ResumeState = item.ResumeState
 			b.work[i].Synchronization = item.Synchronization
 			b.work[i].TargetSnapshot = item.TargetSnapshot
 			b.work[i].TargetBranch = item.TargetBranch
-			b.work[i].Claimed = false
-			b.work[i].Submission.State = target
-			b.work[i].Submission.Claimed = false
+			if target != workflow.NeedsHuman {
+				b.work[i].Source.States = slices.DeleteFunc(b.work[i].Source.States, func(state workflow.State) bool { return state == workflow.NeedsHuman })
+			}
+			b.work[i].Submission.Lifecycle.States = []workflow.State{target}
+			b.work[i].Submission.Lifecycle.Claimed = false
 			b.work[i].Submission.PendingReview = ""
 			if target == workflow.Rework && !item.Synchronization {
 				b.work[i].Submission.Bounces++
 			}
+			b.work[i] = workflow.ReconcileImplementation(b.work[i])
 		}
 	}
 	if b.afterCompletion != nil {

@@ -98,6 +98,22 @@ For a permitted human decision, use `skl implement needs-human --item <number> -
 
 Existing in-flight work stays on its former CLI unless an operator explicitly hands it to this endpoint contract with full SHAs. The handoff is per invocation: it writes no Adoption record, never overrides a unique marker, and never resolves ambiguous markers by choosing one.
 
+### Wait for claimable work
+
+Both `skl implement next` and `skl watchdog next` check once and return `work_available` with a claimed item and packet, or `no_work`, by default. Add bounded waiting when another lane or a human merge may make work eligible:
+
+```sh
+skl implement next --wait --repo <path> --remote upstream
+skl watchdog next --wait=2m --poll 5s --repo <path> --remote upstream
+skl implement next --wait 2m --poll=5s
+```
+
+Bare `--wait` means up to 15 minutes; `--wait=2m` and `--wait 2m` override that idle window. `--poll` defaults to 30 seconds. Durations must be positive Go durations with units; invalid values fail before Backend effects. A valid `--poll` without `--wait` is accepted but does not enable waiting.
+
+Selection runs immediately, then waits between completed empty observations for the smaller of the poll interval and remaining idle window. Each invocation starts a new window, including Backend operation time. It emits only one final JSON outcome: a Claim and packet, an existing refusal, or successful `idle_timeout`. The timeout means only local queue inactivity, not global completion; it creates no Claim, private Result Document directory, or persistent run record. Waiting does not launch an Agent Worker or change eligibility, ordering, Dependencies, or handoffs.
+
+The idle deadline prevents new polls but does not cancel an in-flight Claim: a late successful Claim, refusal, or operational error is returned as-is; a late empty observation becomes `idle_timeout`. Operational errors and refusals stop waiting without added retries. SIGINT/SIGTERM or caller cancellation interrupts waiting with a nonzero error, not `no_work` or `idle_timeout`, unless the in-flight selection successfully returns its Claim and packet. No Claim is automatically released or retried. If selection was interrupted and a Claim may have been acquired, inspect the Work Item and explicitly resume it rather than blindly running `next` again.
+
 ### Install skills
 
 ```sh
