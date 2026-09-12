@@ -586,7 +586,7 @@ func TestGitHubReviewRecoveryConflictingPartialPass(t *testing.T) {
 				}
 			}
 			items, err = b.ImplementationItems(ctx)
-			if err != nil || len(items) != 1 || items[0].Problem != "" || items[0].State != workflow.Rework || items[0].Claimed || !slices.Equal(labels, []string{"sync", "rework"}) || len(metadata) != 1 {
+			if err != nil || len(items) != 1 || items[0].Problem != "" || items[0].State != workflow.Rework || items[0].Claimed || !slices.Equal(labels, []string{"sync", "rework"}) || len(metadata) != 2 {
 				t.Fatalf("retry incomplete: %#v %v labels=%v metadata=%v", items, err, labels, metadata)
 			}
 			observed, err := b.ReviewSubmission(ctx, "11")
@@ -601,6 +601,7 @@ func TestGitHubReviewRecoverySourceDeletionFailsUnapplied(t *testing.T) {
 	labels := []string{"review", "wip"}
 	sourcePaused, failDelete := true, true
 	deletes := 0
+	var metadata []map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets")
 		ls := []map[string]string{}
@@ -622,6 +623,14 @@ func TestGitHubReviewRecoverySourceDeletionFailsUnapplied(t *testing.T) {
 			result = pull
 		case path == "/issues/7":
 			result = source
+		case path == "/issues/7/comments":
+			if r.Method == "POST" {
+				var p map[string]any
+				json.NewDecoder(r.Body).Decode(&p)
+				p["author_association"] = "OWNER"
+				metadata = append(metadata, p)
+			}
+			result = metadata
 		case path == "/issues/11/timeline":
 			for _, label := range []string{"review", "wip", "done"} {
 				result = append(result.([]any), map[string]any{"event": "labeled", "label": map[string]string{"name": label}})
@@ -664,6 +673,14 @@ func TestGitHubReviewRecoverySourceDeletionFailsUnapplied(t *testing.T) {
 	items, err = b.ImplementationItems(ctx)
 	if err != nil || len(items) != 1 || items[0].Problem != "" || items[0].Claimed || items[0].State != workflow.ReadyForMerge || sourcePaused || deletes != 2 || !slices.Equal(labels, []string{"done"}) {
 		t.Fatalf("retry incomplete: %#v %v labels=%v paused=%t deletes=%d", items, err, labels, sourcePaused, deletes)
+	}
+}
+
+func TestGitHubBackendAnchorSideAcceptsNativeSides(t *testing.T) {
+	for side, accepted := range map[string]bool{"LEFT": true, "RIGHT": true, "MIDDLE": false, "": false, "left": false, "right": false} {
+		if got := (&GitHubBackend{}).AnchorSide(side); got != accepted {
+			t.Errorf("AnchorSide(%q) = %t, want %t", side, got, accepted)
+		}
 	}
 }
 
