@@ -393,6 +393,7 @@ func trustedMetadata(comment skilldist.ReviewComment) bool {
 type implementationMetadata struct {
 	SynchronizationTarget string                             `json:"synchronization_target,omitempty"`
 	WatchdogHead          string                             `json:"watchdog_head,omitempty"`
+	VerdictHead           string                             `json:"verdict_head,omitempty"`
 	Transition            *workflow.ImplementationTransition `json:"transition,omitempty"`
 	TargetSnapshot        string                             `json:"target_snapshot,omitempty"`
 	TargetBranch          string                             `json:"target_branch,omitempty"`
@@ -568,6 +569,9 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 				}
 				if metadata.WatchdogHead != "" && item.Submission != nil {
 					item.Submission.ReviewedHead = metadata.WatchdogHead
+				}
+				if metadata.VerdictHead != "" && item.Submission != nil {
+					item.Submission.VerdictHead = metadata.VerdictHead
 				}
 				if metadata.Transition != nil {
 					item.Transition = metadata.Transition

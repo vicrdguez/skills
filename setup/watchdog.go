@@ -26,6 +26,13 @@ func (b *GitHubBackend) CompleteReview(ctx context.Context, item workflow.Implem
 	if err := guard(); err != nil {
 		return err
 	}
+	// Record the final head the pass verdict accepted before any overlap label
+	// is written, so interrupted recovery can bind completion to it.
+	if target == workflow.ReadyForMerge && item.Submission.Head != "" {
+		if err := b.publishImplementationMetadata(ctx, repository, itemNumber, implementationMetadata{VerdictHead: item.Submission.Head}); err != nil {
+			return err
+		}
+	}
 	if item.Synchronization && target == workflow.Rework {
 		if err := b.publishImplementationMetadata(ctx, repository, itemNumber, implementationMetadata{SynchronizationTarget: item.TargetSnapshot, TargetBranch: item.TargetBranch}); err != nil {
 			return err

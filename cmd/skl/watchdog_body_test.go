@@ -17,6 +17,103 @@ import (
 	"github.com/vicrdguez/skills/workflow"
 )
 
+func TestGitHubStatusRefusesPendingPassAtReplacedHead(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		verdict string
+		head    string
+		refused bool
+	}{
+		{"replaced after post-marker pass", "marker", "replacement", true},
+		{"replaced without verdict record", "", "replacement", true},
+		{"post-marker head recovers", "marker", "marker", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			labels := []string{"review", "wip", "done"}
+			events := []map[string]any{}
+			record := func(event, label string) {
+				events = append(events, map[string]any{"event": event, "label": map[string]string{"name": label}})
+			}
+			for _, label := range labels {
+				record("labeled", label)
+			}
+			metadata := []map[string]string{{"author_association": "OWNER", "body": "<!-- skl.implement/v1\n{\"watchdog_head\":\"reviewed\"}\n-->"}}
+			if tc.verdict != "" {
+				metadata = append(metadata, map[string]string{"author_association": "OWNER", "body": "<!-- skl.implement/v1\n{\"verdict_head\":\"" + tc.verdict + "\"}\n-->"})
+			}
+			writes := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				path := strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets")
+				if r.Method != http.MethodGet {
+					writes++
+				}
+				ls := []map[string]string{}
+				for _, label := range labels {
+					ls = append(ls, map[string]string{"name": label})
+				}
+				pull := map[string]any{"number": 11, "state": "open", "mergeable": true, "labels": ls, "head": map[string]any{"ref": "widget", "sha": tc.head, "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": "main"}}
+				var result any = []any{}
+				switch {
+				case path == "/issues" && r.Method == http.MethodGet:
+					result = []any{map[string]any{"number": 7, "title": "widget", "state": "open"}}
+				case path == "/pulls" && r.Method == http.MethodGet:
+					result = []any{pull}
+				case (path == "/pulls/11" || path == "/issues/11") && r.Method == http.MethodGet:
+					result = pull
+				case path == "/issues/7" && r.Method == http.MethodGet:
+					result = map[string]any{"number": 7, "state": "open"}
+				case path == "/issues/7/comments":
+					if r.Method == http.MethodPost {
+						var payload map[string]string
+						json.NewDecoder(r.Body).Decode(&payload)
+						payload["author_association"] = "OWNER"
+						metadata = append(metadata, payload)
+					}
+					result = metadata
+				case path == "/issues/11/timeline" && r.Method == http.MethodGet:
+					result = events
+				case path == "/issues/11/labels" && r.Method == http.MethodPost:
+					var payload struct{ Labels []string }
+					json.NewDecoder(r.Body).Decode(&payload)
+					for _, label := range payload.Labels {
+						if !slices.Contains(labels, label) {
+							labels = append(labels, label)
+							record("labeled", label)
+						}
+					}
+				case strings.HasPrefix(path, "/issues/11/labels/") && r.Method == http.MethodDelete:
+					label := strings.TrimPrefix(path, "/issues/11/labels/")
+					labels = slices.DeleteFunc(labels, func(v string) bool { return v == label })
+					record("unlabeled", label)
+				case strings.HasSuffix(path, "/comments"), strings.HasSuffix(path, "/reviews"):
+				default:
+					t.Errorf("unexpected %s %s", r.Method, path)
+					http.NotFound(w, r)
+					return
+				}
+				json.NewEncoder(w).Encode(result)
+			}))
+			defer server.Close()
+			backend := setup.NewGitHubBackend(server.URL, "token", server.Client())
+			backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
+			outcome, err := workflow.ObserveStatus(context.Background(), backend)
+			if tc.refused {
+				if err == nil || !strings.Contains(err.Error(), "verdict-accepted head") || writes != 0 || !slices.Equal(labels, []string{"review", "wip", "done"}) {
+					t.Fatalf("replaced pending pass: outcome=%#v err=%v writes=%d labels=%v", outcome, err, writes, labels)
+				}
+				return
+			}
+			if err != nil || len(outcome.Items) != 1 {
+				t.Fatalf("recovery: %#v %v", outcome, err)
+			}
+			item := outcome.Items[0]
+			if item.State != workflow.ReadyForMerge || item.Claimed || item.Submission == nil || item.Submission.PendingReview != "" || item.Submission.Claimed || !slices.Equal(labels, []string{"done"}) {
+				t.Fatalf("post-marker recovery: %#v labels=%v", item, labels)
+			}
+		})
+	}
+}
+
 func TestGitHubWatchdogBodyPassRetry(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
@@ -33,6 +130,7 @@ func TestGitHubWatchdogBodyPassRetry(t *testing.T) {
 				actualBody := "original"
 				labels := []string{"review", "wip"}
 				var comments []map[string]string
+				metadata := []map[string]string{{"author_association": "OWNER", "body": "<!-- skl.implement/v1\n{\"watchdog_head\":\"" + head + "\"}\n-->"}}
 				events := []map[string]any{{"event": "labeled", "label": map[string]string{"name": "review"}}, {"event": "labeled", "label": map[string]string{"name": "wip"}}}
 				writes, patches := 0, 0
 				interrupt := partial
@@ -62,8 +160,14 @@ func TestGitHubWatchdogBodyPassRetry(t *testing.T) {
 						result = pull
 					case path == "/issues/7" && r.Method == http.MethodGet:
 						result = source
-					case path == "/issues/7/comments" && r.Method == http.MethodGet:
-						result = []map[string]string{{"author_association": "OWNER", "body": "<!-- skl.implement/v1\n{\"watchdog_head\":\"" + head + "\"}\n-->"}}
+					case path == "/issues/7/comments":
+						if r.Method == http.MethodPost {
+							var payload map[string]string
+							json.NewDecoder(r.Body).Decode(&payload)
+							payload["author_association"] = "OWNER"
+							metadata = append(metadata, payload)
+						}
+						result = metadata
 					case path == "/issues/11/comments":
 						if r.Method == http.MethodPost {
 							var payload map[string]string
@@ -122,6 +226,9 @@ func TestGitHubWatchdogBodyPassRetry(t *testing.T) {
 				interrupt = false
 				if actualBody != publishedBody || patches != 1 || len(comments) != 1 {
 					t.Fatalf("publication: body=%q, patches=%d, comments=%v", actualBody, patches, comments)
+				}
+				if len(metadata) != 2 || !strings.Contains(metadata[1]["body"], `"verdict_head":"`+head+`"`) {
+					t.Fatalf("verdict head not recorded: %v", metadata)
 				}
 				before := writes
 				if err := os.WriteFile(bodyPath, []byte("changed "+body), 0600); err != nil {

@@ -53,6 +53,7 @@ type Submission struct {
 	Bounces              int
 	CreatedAt            string
 	ReviewedHead         string
+	VerdictHead          string
 	State                State
 	Claimed              bool
 	ID                   SubmissionID

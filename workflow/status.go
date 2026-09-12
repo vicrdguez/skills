@@ -65,6 +65,18 @@ func ObserveStatus(ctx context.Context, backend ImplementationBackend) (StatusOu
 				if current.Head != item.Submission.Head || current.Merged {
 					return Refuse("Submission changed during status reconciliation")
 				}
+				if item.Submission.PendingReview == ReadyForMerge {
+					accepted := item.Submission.VerdictHead
+					if accepted == "" {
+						accepted = item.Submission.ReviewedHead
+					}
+					if accepted == "" {
+						return Refuse("pending pass cannot establish the verdict-accepted head; rerun the review before completing")
+					}
+					if current.Head != accepted {
+						return Refuse("Submission head differs from the verdict-accepted head; restore the fixed head or rerun the review")
+					}
+				}
 				if item.Submission.PendingReview == ReadyForMerge && current.Mergeability != "mergeable" {
 					return Refuse("mergeability unavailable or changed during status reconciliation; retry to observe the current target")
 				}

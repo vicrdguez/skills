@@ -162,6 +162,52 @@ func TestStatusPendingPassRequiresMergeabilityAndRetainsRecovery(t *testing.T) {
 	}
 }
 
+func TestStatusRefusesPendingPassAtReplacedHead(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		verdict  string
+		reviewed string
+	}{
+		{"no verdict record", "", "reviewed"},
+		{"verdict record", "marker", "reviewed"},
+		{"missing identity", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := proposalRepository(t)
+			replacement := "replacement"
+			b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.ReadyForMerge, Claimed: true, Submission: &workflow.Submission{ID: "11", Head: replacement, ReviewedHead: tc.reviewed, VerdictHead: tc.verdict, Base: "main", State: workflow.ReadyForMerge, Claimed: true, PendingReview: workflow.ReadyForMerge, Mergeability: "mergeable", Bounces: 1}}}}
+			var output bytes.Buffer
+			app := newApp(func(github.RepositoryID) (setup.Backend, error) { return b, nil }, bytes.NewReader(nil), &output, &output)
+			if err := app.Run([]string{"skl", "status", "--repo", root}); err != nil {
+				t.Fatal(err)
+			}
+			var result setup.ImplementationOutput
+			if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			if result.Status != "fix_required" || !strings.Contains(result.Reason, "verdict-accepted head") {
+				t.Fatalf("replaced head finalized pass: %s", &output)
+			}
+			item := b.work[0]
+			if !item.Claimed || !item.Submission.Claimed || item.Submission.PendingReview != workflow.ReadyForMerge || item.Submission.Head != replacement || item.Submission.ReviewedHead != tc.reviewed || item.Submission.VerdictHead != tc.verdict || item.Submission.Bounces != 1 {
+				t.Fatalf("lost recovery evidence: %#v / %#v", item, item.Submission)
+			}
+			accepted := tc.verdict
+			if accepted == "" {
+				accepted = tc.reviewed
+			}
+			if accepted == "" {
+				return // Identity cannot be restored by fixing the head; the review must rerun.
+			}
+			b.work[0].Submission.Head = accepted
+			got := statusCLI(t, root, b).Items[0]
+			if got.State != workflow.ReadyForMerge || got.Claimed || got.Submission.Claimed || got.Submission.PendingReview != "" || got.Submission.Bounces != 1 {
+				t.Fatalf("restored head did not finalize pass: %#v / %#v", got, got.Submission)
+			}
+		})
+	}
+}
+
 func TestStatusRoutesAcceptedConflictToSynchronizationRework(t *testing.T) {
 	root := proposalRepository(t)
 	target := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "main"))
