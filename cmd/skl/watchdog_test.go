@@ -233,9 +233,12 @@ func TestWatchdogRetriesCompletedVerdictWithoutAnotherBounce(t *testing.T) {
 }
 
 func (b *implementationMemory) ReviewSubmission(_ context.Context, _ github.RepositoryID, id workflow.SubmissionID) (workflow.Submission, error) {
-	for _, item := range b.work {
-		if item.Submission != nil && item.Submission.ID == id {
-			return *item.Submission, nil
+	for i := range b.work {
+		if submission := b.work[i].Submission; submission != nil && submission.ID == id {
+			if b.work[i].Claimed && submission.ClaimAcquiredAt == "" {
+				submission.ClaimAcquiredAt = b.reviewTime()
+			}
+			return *submission, nil
 		}
 	}
 	return workflow.Submission{}, fmt.Errorf("missing Submission")
