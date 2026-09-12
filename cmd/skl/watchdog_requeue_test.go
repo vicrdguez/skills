@@ -58,7 +58,8 @@ func TestWatchdogHumanRequeuePreservesFirstFailureBounce(t *testing.T) {
 			}))
 			defer server.Close()
 			adapter := setup.NewGitHubBackend(server.URL, "token", server.Client())
-			submission, err := adapter.ReviewSubmission(context.Background(), github.RepositoryID{Owner: "acme", Name: "widgets"}, "11")
+			adapter.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
+			submission, err := adapter.ReviewSubmission(context.Background(), "11")
 			if err != nil {
 				t.Fatal(err)
 			}

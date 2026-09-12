@@ -40,10 +40,10 @@ func TestStatusCompletesCoordinationOnlyWhenEveryChildMerged(t *testing.T) {
 	}
 }
 
-func (b *implementationMemory) CoordinationItems(context.Context, github.RepositoryID) ([]workflow.CoordinationItem, error) {
+func (b *implementationMemory) CoordinationItems(context.Context) ([]workflow.CoordinationItem, error) {
 	return b.coordination, nil
 }
-func (b *implementationMemory) CloseCoordination(_ context.Context, _ github.RepositoryID, id workflow.WorkItemID) error {
+func (b *implementationMemory) CloseCoordination(_ context.Context, id workflow.WorkItemID) error {
 	for i := range b.coordination {
 		if b.coordination[i].ID == id {
 			b.coordination[i].Closed = true
@@ -105,14 +105,14 @@ type statusGuardMemory struct {
 	beforeLaterGuard func()
 }
 
-func (b *statusGuardMemory) CompleteReview(ctx context.Context, repository github.RepositoryID, item workflow.ImplementationItem, target workflow.State, guard func() error) error {
+func (b *statusGuardMemory) CompleteReview(ctx context.Context, item workflow.ImplementationItem, target workflow.State, guard func() error) error {
 	if err := guard(); err != nil {
 		return err
 	}
 	if b.beforeLaterGuard != nil {
 		b.beforeLaterGuard()
 	}
-	return b.implementationMemory.CompleteReview(ctx, repository, item, target, guard)
+	return b.implementationMemory.CompleteReview(ctx, item, target, guard)
 }
 
 func TestStatusPendingPassRequiresMergeabilityAndRetainsRecovery(t *testing.T) {

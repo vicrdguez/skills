@@ -9,7 +9,7 @@
 - Publishes one Work Item for a single slice. Multi-slice Proposals add one Coordination Item, native sub-issue relationships, and explicit Dependencies in blocker-first order.
 - Treats supplied parent and child Markdown as opaque transport. Each child receives `ready` only after its body and relationships are durable.
 - Repeats publication forward after operational failure by reusing unambiguous records and relationships. Contradictory or ambiguous records enter Needs Human rather than being guessed, deleted, or rolled back.
-- `skl implement next` selects the oldest eligible Rework before Ready Work Items, breaking age ties by stable identity. It skips Claims and Needs Human, reads back its additive `wip` Claim, and supplies one packet bundling Implement, TDD, Audit, Design, and Domain.
+- `skl implement next` selects the oldest eligible Rework before Ready Work Items, breaking age ties by the Backend's stable ordering fact. It skips Claims and Needs Human, reads back its additive `wip` Claim, and supplies one packet bundling Implement, TDD, Audit, Design, and Domain.
 - `skl implement resume --item <number>` resumes only that Claim; from its conventional worktree, `skl implement resume` resolves the unambiguous identity without selecting other work.
 - Requires every Dependency to be Merged before its dependent Work Item becomes eligible.
 - Pins a Target Snapshot for new implementation and Synchronization Rework without chasing later target movement.
@@ -35,11 +35,11 @@
 - Uses the idle deadline only to stop new polls, not to cancel an in-flight Claim. A late Claim and packet, operational error, or deterministic refusal is retained; a late empty observation becomes `idle_timeout`. Errors and refusals stop waiting after existing Backend retry handling, without a new waiting-loop retry policy or substitute selection.
 - Interrupts waiting on SIGINT/SIGTERM or caller cancellation with an actionable nonzero interruption error, not an empty-queue outcome. A successful in-flight Claim and packet is still returned. Uncertain Claims are neither released nor retried; recovery requires inspection and explicit resume.
 
-## Publication ownership
+## Backend ownership
 
-The command integration binds the publication Backend and selects the Git remote together, using a GitHub `origin`, the sole GitHub remote, or an explicit `--remote` when needed. Ambiguous selection is refused before mutation. Publication Mechanics use that explicit remote for Git evidence and opaque Work Item and Coordination Item references for Backend operations. The GitHub integration retains native issue numbers, relationship syntax, and the supplied artifact-reference Markdown without migrating existing records.
+The command integration binds the Backend and selects the Git remote together, using a GitHub `origin`, the sole GitHub remote, or an explicit `--remote` when needed. Ambiguous selection is refused before mutation. Workflow Mechanics use that explicit remote for Git evidence and opaque Work Item, Submission, and Coordination Item references for Backend operations. The GitHub integration retains native issue numbers, relationship and closing syntax, and supplied opaque Markdown without migrating existing records.
 
-The Workflow Engine owns graph validation, blocker-first publication, Git preflight, Ready timing, and interrupted-publication recovery. The Backend observes durable records and materializes the requested effects. Shared Work Item, Submission, and relationship identities are opaque; the integration preserves numeric GitHub CLI and packet representations and supplies the existing numeric ordering fact separately. Implementation, review, and status retain their existing decisions; their remaining backend-independence migration is separate from this correction.
+The Workflow Engine owns eligibility, ordering, canonical transitions, Git evidence requirements, and interrupted-operation recovery. The Backend observes normalized durable records and materializes requested effects. Shared Work Item, Submission, and relationship identities are opaque; the integration preserves numeric GitHub CLI and packet representations, renders native references and closing footers, and supplies the existing numeric ordering fact separately.
 
 ## Proposal decomposition
 

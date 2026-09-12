@@ -27,19 +27,19 @@ type waitingMemory struct {
 	claim         func(context.Context) error
 }
 
-func (b *waitingMemory) ImplementationItems(ctx context.Context, repo github.RepositoryID) ([]workflow.ImplementationItem, error) {
+func (b *waitingMemory) ImplementationItems(ctx context.Context) ([]workflow.ImplementationItem, error) {
 	b.reads++
 	if b.observe != nil {
 		if err := b.observe(ctx); err != nil {
 			return nil, err
 		}
 	}
-	return b.implementationMemory.ImplementationItems(ctx, repo)
+	return b.implementationMemory.ImplementationItems(ctx)
 }
 
-func (b *waitingMemory) ClaimImplementation(ctx context.Context, repo github.RepositoryID, item workflow.ImplementationItem) error {
+func (b *waitingMemory) ClaimImplementation(ctx context.Context, item workflow.ImplementationItem) error {
 	b.claims++
-	if err := b.implementationMemory.ClaimImplementation(ctx, repo, item); err != nil {
+	if err := b.implementationMemory.ClaimImplementation(ctx, item); err != nil {
 		return err
 	}
 	if b.claim != nil {
@@ -67,7 +67,10 @@ func waitFixture(t *testing.T, lane string) (string, *waitingMemory) {
 func waitingCLI(t *testing.T, ctx context.Context, root, lane string, b *waitingMemory, options ...string) (setup.ImplementationOutput, error) {
 	t.Helper()
 	var out, stderr bytes.Buffer
-	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return b, nil }, nil, &out, &stderr)
+	app := newApp(func(repository github.RepositoryID) (setup.Backend, error) {
+		b.repository = repository
+		return b, nil
+	}, nil, &out, &stderr)
 	args := append([]string{"skl", lane, "next", "--repo", root, "--remote", "upstream"}, options...)
 	err := app.RunContext(ctx, args)
 	var got setup.ImplementationOutput
