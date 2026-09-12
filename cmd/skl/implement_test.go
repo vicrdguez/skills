@@ -870,25 +870,44 @@ func TestContinuationReferencesFailBeforeSelection(t *testing.T) {
 
 func TestContinuationUsesFreshGitHubRoundEvidence(t *testing.T) {
 	comments := make(map[int][]map[string]any)
+	active := make(map[int]bool)
+	pages := make(map[int]int)
+	writes := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets")
 		var number int
 		if _, err := fmt.Sscanf(path, "/issues/%d/comments", &number); err == nil {
 			if r.Method == http.MethodPost {
+				writes++
 				var payload map[string]any
 				json.NewDecoder(r.Body).Decode(&payload)
 				payload["author_association"] = "OWNER"
 				comments[number] = append(comments[number], payload)
 			}
-			json.NewEncoder(w).Encode(comments[number])
+			page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+			if page < 1 {
+				page = 1
+			}
+			pages[page]++
+			start := min((page-1)*100, len(comments[number]))
+			end := min(start+100, len(comments[number]))
+			json.NewEncoder(w).Encode(comments[number][start:end])
 			return
 		}
 		switch path {
 		case "/issues":
-			fmt.Fprint(w, `[{"number":7,"title":"first","state":"open","labels":[{"name":"needs-human"}]},{"number":8,"title":"second","state":"open","labels":[]}]`)
+			labels := `[{"name":"needs-human"}]`
+			if active[7] {
+				labels = `[{"name":"ready"},{"name":"wip"}]`
+			}
+			fmt.Fprintf(w, `[{"number":7,"title":"first","state":"open","labels":%s},{"number":8,"title":"second","state":"open","labels":[]}]`, labels)
 		case "/pulls":
-			fmt.Fprint(w, `[{"number":11,"state":"open","labels":[{"name":"done"}],"head":{"ref":"second","sha":"head","repo":{"full_name":"acme/widgets"}},"base":{"ref":"main"}}]`)
-		case "/pulls/11/comments", "/pulls/11/reviews", "/issues/11/timeline":
+			labels := `[{"name":"done"}]`
+			if active[8] {
+				labels = `[{"name":"review"},{"name":"wip"}]`
+			}
+			fmt.Fprintf(w, `[{"number":11,"state":"open","labels":%s,"head":{"ref":"second","sha":"head","repo":{"full_name":"acme/widgets"}},"base":{"ref":"main"}}]`, labels)
+		case "/issues/7/dependencies/blocked_by", "/pulls/11/comments", "/pulls/11/reviews", "/issues/11/timeline":
 			fmt.Fprint(w, `[]`)
 		case "/pulls/11":
 			fmt.Fprint(w, `{"number":11,"state":"open","head":{"sha":"head"},"base":{"ref":"main"}}`)
@@ -906,14 +925,30 @@ func TestContinuationUsesFreshGitHubRoundEvidence(t *testing.T) {
 		outcome    workflow.State
 	}{{"implement", "7", "", workflow.NeedsHuman}, {"watchdog", "8", "11", workflow.ReadyForMerge}} {
 		backend := setup.NewGitHubBackend(server.URL, "token", server.Client())
-		round := workflow.DispatchRound{ID: "durable-" + tc.lane, Lane: workflow.DispatchLane(tc.lane), Item: tc.item, Submission: tc.submission, Obligation: "fixed", Directory: "skl-" + tc.lane + "-fixed"}
+		round := workflow.DispatchRound{ID: "durable-" + tc.lane, Lane: workflow.DispatchLane(tc.lane), Item: tc.item, Submission: tc.submission, Obligation: "head", Directory: "skl-" + tc.lane + "-fixed"}
 		if err := backend.RecordDispatchRound(t.Context(), repo, round); err != nil {
 			t.Fatal(err)
+		}
+		number, _ := strconv.Atoi(string(tc.item))
+		for range 105 {
+			comments[number] = append(comments[number], map[string]any{"body": "unrelated human comment", "author_association": "OWNER"})
 		}
 		round.Outcome, round.Head, round.Released = tc.outcome, "head", true
 		if err := backend.RecordDispatchRound(t.Context(), repo, round); err != nil {
 			t.Fatal(err)
 		}
+		comments[number] = append(comments[number], map[string]any{"body": "<!-- skl.implement/v1\n{\"target_branch\":\"main\"}\n-->", "author_association": "OWNER"})
+		later := round
+		later.ID += "-later"
+		later.Directory += "-later"
+		later.Outcome, later.Head, later.Released = "", "", false
+		if err := backend.RecordDispatchRound(t.Context(), repo, later); err != nil {
+			t.Fatal(err)
+		}
+		active[number] = true
+		beforeWrites := writes
+		before, _ := json.Marshal(comments)
+		pages = make(map[int]int)
 		referenceJSON, _ := json.Marshal(map[string]any{"v": 1, "owner": "acme", "repository": "widgets", "lane": tc.lane, "item": tc.item, "round": round.ID, "submission": tc.submission})
 		reference := base64.RawURLEncoding.EncodeToString(referenceJSON)
 		var output bytes.Buffer
@@ -928,6 +963,18 @@ func TestContinuationUsesFreshGitHubRoundEvidence(t *testing.T) {
 		if err := json.Unmarshal(output.Bytes(), &got); err != nil || got.Status != "no_work" || got.PreviousHandoff == nil || got.PreviousHandoff.Number != want || got.PreviousHandoff.Outcome != tc.outcome {
 			t.Fatalf("fresh %s HTTP continuation = %#v, %v", tc.lane, got, err)
 		}
+		if pages[2] == 0 || writes != beforeWrites {
+			t.Fatalf("historical continuation did not read pagination without mutation: pages=%v writes=%d/%d", pages, beforeWrites, writes)
+		}
+		laterJSON, _ := json.Marshal(map[string]any{"v": 1, "owner": "acme", "repository": "widgets", "lane": tc.lane, "item": tc.item, "round": later.ID, "submission": tc.submission})
+		pages = make(map[int]int)
+		fresh := setup.NewGitHubBackend(server.URL, "token", server.Client())
+		refused := returnedCLI(t, fresh, "skl "+tc.lane+" next --repo '"+root+"' --after '"+base64.RawURLEncoding.EncodeToString(laterJSON)+"' --wait=1ms")
+		after, _ := json.Marshal(comments)
+		if refused.Status != "fix_required" || refused.Item == nil || refused.Item.Number != number || refused.PreviousHandoff != nil || pages[2] == 0 || writes != beforeWrites || !bytes.Equal(before, after) || !active[number] {
+			t.Fatalf("earlier equal-head receipt authorized later round or mutated history: %+v pages=%v", refused, pages)
+		}
+
 	}
 }
 
