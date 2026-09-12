@@ -126,6 +126,9 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 	if from == Ready && bodyPath != "" && item.Submission != nil && item.Submission.Head == head && !implementationBodyMatches(item.ID, item.Submission.Body, string(body)) {
 		return outcome, Refuse("published Submission differs from the supplied Result Document; restore the original body before retrying")
 	}
+	if from == Rework && bodyPath != "" && item.Submission != nil && item.Submission.Lifecycle != nil && slices.Contains(item.Submission.Lifecycle.States, target) && !implementationBodyMatches(item.ID, item.Submission.Body, string(body)) {
+		return outcome, Refuse("published Rework Submission differs from the supplied Result Document; restore the original body before retrying")
+	}
 	if decisionPath != "" && implementationDecisionConflicts(item, string(decision)) {
 		return outcome, Refuse("published decision differs from the supplied Result Document; restore the original decision before retrying")
 	}
@@ -268,10 +271,11 @@ func implementationBodyMatches(id WorkItemID, actual, supplied string) bool {
 	if _, err := strconv.Atoi(string(id)); err != nil {
 		return actual == supplied
 	}
-	if actual == supplied+"\n\nCloses #"+string(id)+"\n" {
-		return true
+	footer := "\n\nCloses #" + string(id) + "\n"
+	if strings.HasSuffix(supplied, footer) {
+		return actual == supplied
 	}
-	return false
+	return actual == supplied+footer
 }
 
 func cleanupImplementationResult(outcome *ImplementationOutcome, resultPath string) {
