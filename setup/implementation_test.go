@@ -434,7 +434,7 @@ func TestGitHubImplementationIgnoresRetiredTransitionMetadata(t *testing.T) {
 	if item.Source == nil || !item.Source.Open || !item.Source.Claimed || !slices.Equal(item.Source.States, []workflow.State{workflow.Ready, workflow.NeedsHuman}) || item.Submission.Lifecycle == nil || !slices.Equal(item.Submission.Lifecycle.States, []workflow.State{workflow.NeedsHuman}) {
 		t.Fatalf("lost normalized partial progress: %#v, %#v", item, item.Submission)
 	}
-	if item.Problem == "" || !item.Claimed || item.TargetSnapshot != "pinned" || item.Transition != nil || item.ResumeState != "" {
+	if item.Problem == "" || !item.Claimed || item.TargetSnapshot != "pinned" {
 		t.Fatalf("retired transition metadata became authoritative: %#v", item)
 	}
 }

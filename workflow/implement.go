@@ -31,7 +31,6 @@ type ImplementationItem struct {
 	Source          *LifecycleObservation
 	Synchronization bool
 	Problem         string
-	ResumeState     State // Legacy fixture field; the Workflow Engine does not persist or consume it.
 	Submission      *Submission
 	Feedback        []skilldist.ReviewComment
 	Branch          string
@@ -43,12 +42,10 @@ type ImplementationItem struct {
 	CreatedAt       string
 	Claimed         bool
 	Blockers        []WorkItemID
-	Transition      *ImplementationTransition // Legacy fixture field; never authoritative.
 }
 
 type Submission struct {
 	Lifecycle       *LifecycleObservation
-	PendingReview   State // Legacy fixture field; timeline direction is not consumed.
 	ClaimAcquiredAt string
 	Merged          bool
 	Mergeability    string
@@ -61,18 +58,6 @@ type Submission struct {
 	Body            string
 	Draft           bool
 	Comments        []skilldist.ReviewComment
-}
-
-// ImplementationTransition remains only so historical feedback and downstream
-// fixtures can be decoded as opaque data. No Workflow Backend reads or writes it.
-type ImplementationTransition struct {
-	From           State
-	Target         State
-	Head           string
-	BodyDigest     string
-	DecisionDigest string
-	Directory      string
-	Completed      bool
 }
 
 // LifecycleObservation retains overlaps while a multi-record transition is in flight.

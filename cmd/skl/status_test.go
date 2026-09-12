@@ -76,7 +76,7 @@ func TestStatusRefusesPartialAndPreservesRecords(t *testing.T) {
 	b := &implementationMemory{work: []workflow.ImplementationItem{
 		{ID: "1", State: workflow.Ready}, {ID: "2", State: workflow.Ready, Claimed: true},
 		{ID: "3", State: workflow.AwaitingReview}, {ID: "4", State: workflow.Rework},
-		{ID: "5", State: workflow.NeedsHuman, ResumeState: workflow.Rework}, {ID: "6", State: workflow.ReadyForMerge},
+		{ID: "5", State: workflow.NeedsHuman}, {ID: "6", State: workflow.ReadyForMerge},
 		{ID: "7", State: workflow.Merged}, {ID: "8", State: workflow.Superseded, Branch: "retained-reference"},
 		{ID: "9", State: workflow.Ready, Claimed: true, Submission: &workflow.Submission{ID: "19", State: workflow.AwaitingReview, Head: "fixed"}},
 		{ID: "10", State: workflow.Rework, Problem: "contradictory lifecycle projections"},
@@ -106,14 +106,14 @@ func (b *statusGuardMemory) CompleteReview(ctx context.Context, item workflow.Im
 
 func TestStatusRoutesAcceptedConflictToSynchronizationRework(t *testing.T) {
 	target := strings.Repeat("a", 40)
-	for _, pending := range []workflow.State{"", workflow.ReadyForMerge} {
-		b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.ReadyForMerge, Claimed: pending != "", Submission: &workflow.Submission{ID: "11", Head: "fixed", Base: "main", Mergeability: "conflicting", PendingReview: pending, Claimed: pending != ""}}}, remoteHeads: map[string]string{"main": target}}
+	for _, claimed := range []bool{false, true} {
+		b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.ReadyForMerge, Claimed: claimed, Submission: &workflow.Submission{ID: "11", Head: "fixed", Base: "main", Mergeability: "conflicting", Claimed: claimed}}}, remoteHeads: map[string]string{"main": target}}
 		got, err := workflow.ObserveStatus(context.Background(), b)
-		if pending == "" && (err != nil || got.Items[0].State != workflow.Rework || got.Items[0].Claimed) {
+		if !claimed && (err != nil || got.Items[0].State != workflow.Rework || got.Items[0].Claimed) {
 			t.Fatalf("unclaimed conflict was not diverted safely: %#v, %v", got, err)
 		}
-		if pending != "" && (err == nil || !strings.Contains(err.Error(), "cannot prove status owns")) {
-			t.Fatalf("status released a claimed conflict (pending %q): %#v, %v", pending, got, err)
+		if claimed && (err == nil || !strings.Contains(err.Error(), "cannot prove status owns")) {
+			t.Fatalf("status released a claimed conflict: %#v, %v", got, err)
 		}
 	}
 }

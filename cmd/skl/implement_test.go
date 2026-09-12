@@ -73,18 +73,6 @@ func implementationFixture(item workflow.ImplementationItem) workflow.Implementa
 	return item
 }
 
-func (b *implementationMemory) RecordImplementationTransition(_ context.Context, item workflow.ImplementationItem, transition workflow.ImplementationTransition) error {
-	for i := range b.work {
-		if b.work[i].ID == item.ID {
-			b.work[i].Transition = &transition
-		}
-	}
-	if transition.Completed && b.afterCompletion != nil {
-		b.afterCompletion()
-	}
-	return nil
-}
-
 func (b *implementationMemory) RetainImplementationClaim(_ context.Context, item workflow.ImplementationItem) error {
 	for i := range b.work {
 		if b.work[i].ID == item.ID {
@@ -1949,7 +1937,6 @@ func TestImplementInspectsCanonicalAttachments(t *testing.T) {
 		name            string
 		source          workflow.State
 		submission      []workflow.State
-		pending         workflow.State
 		want            workflow.State
 		problem         string
 		observedProblem string
@@ -1959,7 +1946,7 @@ func TestImplementInspectsCanonicalAttachments(t *testing.T) {
 		{name: "human requeues review", source: workflow.NeedsHuman, submission: []workflow.State{workflow.AwaitingReview}, want: workflow.AwaitingReview},
 		{name: "paused submission", submission: []workflow.State{workflow.NeedsHuman}, want: workflow.NeedsHuman},
 		{name: "ambiguous requeue", source: workflow.NeedsHuman, submission: []workflow.State{workflow.Rework, workflow.AwaitingReview}, want: workflow.NeedsHuman, problem: "contradictory lifecycle projections"},
-		{name: "ambiguous historical review overlap", submission: []workflow.State{workflow.AwaitingReview, workflow.Rework}, pending: workflow.Rework, want: workflow.AwaitingReview, problem: "contradictory lifecycle projections"},
+		{name: "ambiguous historical review overlap", submission: []workflow.State{workflow.AwaitingReview, workflow.Rework}, want: workflow.AwaitingReview, problem: "contradictory lifecycle projections"},
 		{name: "ownership problem survives validation", source: workflow.Ready, submission: []workflow.State{workflow.Rework}, observedProblem: "multiple source issues own the conventional branch", want: workflow.Ready, problem: "multiple source issues own the conventional branch"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1969,7 +1956,7 @@ func TestImplementInspectsCanonicalAttachments(t *testing.T) {
 			}
 			b := &implementationMemory{work: []workflow.ImplementationItem{{
 				ID: "7", Branch: "widget", Source: source, Problem: tt.observedProblem,
-				Submission: &workflow.Submission{ID: "11", Lifecycle: &workflow.LifecycleObservation{Open: true, States: tt.submission}, PendingReview: tt.pending},
+				Submission: &workflow.Submission{ID: "11", Lifecycle: &workflow.LifecycleObservation{Open: true, States: tt.submission}},
 			}}}
 			got := implementCLI(t, root, b, "inspect", "--item", "7")
 			if got.Status != "inspected" || got.Item.State != tt.want || got.Item.Problem != tt.problem {
@@ -1979,64 +1966,13 @@ func TestImplementInspectsCanonicalAttachments(t *testing.T) {
 	}
 }
 
-func TestImplementInspectsPendingLifecycleProgress(t *testing.T) {
+func TestImplementInspectionUsesCurrentLifecycleWithoutResumeCursor(t *testing.T) {
 	root := proposalRepository(t)
-	baseline := prepareSlice(t, root, "widget")
-	legacy := &workflow.ImplementationTransition{From: workflow.Ready, Target: workflow.NeedsHuman, Head: baseline, Directory: "old-operation"}
-	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", Source: &workflow.LifecycleObservation{Open: true, States: []workflow.State{workflow.Ready}}, Transition: legacy}}}
+	prepareSlice(t, root, "widget")
+	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", Source: &workflow.LifecycleObservation{Open: true, States: []workflow.State{workflow.Ready}}}}}
 	got, err := workflow.InspectImplementation(context.Background(), root, "7", workflow.ArtifactEndpoints{}, b)
-	if err != nil || got.Item.State != workflow.Ready || got.Item.ResumeState != "" {
-		t.Fatalf("historical cursor changed current evidence: %#v, %v", got, err)
-	}
-	return
-	for _, tt := range []struct {
-		name         string
-		from, target workflow.State
-		source       workflow.LifecycleObservation
-		submission   *workflow.LifecycleObservation
-		problem      string
-		want         workflow.State
-		resume       workflow.State
-		wantProblem  string
-	}{
-		{name: "pause overlap", from: workflow.Ready, target: workflow.NeedsHuman, source: workflow.LifecycleObservation{Open: true, States: []workflow.State{workflow.Ready, workflow.NeedsHuman}}, submission: &workflow.LifecycleObservation{Open: true, States: []workflow.State{workflow.NeedsHuman}}, want: workflow.Ready, resume: workflow.Ready},
-		{name: "pause source claim", from: workflow.Ready, target: workflow.NeedsHuman, source: workflow.LifecycleObservation{Open: true, States: []workflow.State{workflow.NeedsHuman}, Claimed: true}, want: workflow.Ready, resume: workflow.Ready},
-		{name: "pause issue only complete", from: workflow.Ready, target: workflow.NeedsHuman, source: workflow.LifecycleObservation{Open: true, States: []workflow.State{workflow.NeedsHuman}}, want: workflow.NeedsHuman},
-		{name: "rework pause overlap", from: workflow.Rework, target: workflow.NeedsHuman, source: workflow.LifecycleObservation{Open: true}, submission: &workflow.LifecycleObservation{Open: true, States: []workflow.State{workflow.Rework, workflow.NeedsHuman}, Claimed: true}, want: workflow.Rework, resume: workflow.Rework},
-		{name: "rework pause complete", from: workflow.Rework, target: workflow.NeedsHuman, source: workflow.LifecycleObservation{Open: true, States: []workflow.State{workflow.NeedsHuman}}, submission: &workflow.LifecycleObservation{Open: true, States: []workflow.State{workflow.NeedsHuman}}, want: workflow.NeedsHuman},
-		{name: "review overlap", from: workflow.Rework, target: workflow.AwaitingReview, source: workflow.LifecycleObservation{Open: true}, submission: &workflow.LifecycleObservation{Open: true, States: []workflow.State{workflow.Rework, workflow.AwaitingReview}, Claimed: true}, want: workflow.Rework, resume: workflow.Rework},
-		{name: "review submission claim", from: workflow.Rework, target: workflow.AwaitingReview, source: workflow.LifecycleObservation{Open: true}, submission: &workflow.LifecycleObservation{Open: true, States: []workflow.State{workflow.AwaitingReview}, Claimed: true}, want: workflow.Rework, resume: workflow.Rework},
-		{name: "review source cleanup", from: workflow.Ready, target: workflow.AwaitingReview, source: workflow.LifecycleObservation{Open: true, States: []workflow.State{workflow.Ready}}, submission: &workflow.LifecycleObservation{Open: true, States: []workflow.State{workflow.AwaitingReview}}, want: workflow.Ready, resume: workflow.Ready},
-		{name: "review complete", from: workflow.Ready, target: workflow.AwaitingReview, source: workflow.LifecycleObservation{Open: true}, submission: &workflow.LifecycleObservation{Open: true, States: []workflow.State{workflow.AwaitingReview}}, want: workflow.AwaitingReview},
-		{name: "review missing submission", from: workflow.Ready, target: workflow.AwaitingReview, source: workflow.LifecycleObservation{Open: true}, want: workflow.Ready, resume: workflow.Ready},
-		{name: "unrelated metadata problem", from: workflow.Ready, target: workflow.NeedsHuman, source: workflow.LifecycleObservation{Open: true, States: []workflow.State{workflow.Ready}}, submission: &workflow.LifecycleObservation{Open: true, States: []workflow.State{workflow.NeedsHuman}}, problem: "conflicting Target Snapshot metadata", wantProblem: "conflicting Target Snapshot metadata"},
-		{name: "source drift", from: workflow.Rework, target: workflow.NeedsHuman, source: workflow.LifecycleObservation{Open: true, States: []workflow.State{workflow.ReadyForMerge}}, wantProblem: "projections contradict the pending implementation transition"},
-		{name: "submission drift", from: workflow.Rework, target: workflow.AwaitingReview, source: workflow.LifecycleObservation{Open: true}, submission: &workflow.LifecycleObservation{Open: true, States: []workflow.State{workflow.Ready}}, wantProblem: "projections contradict the pending implementation transition"},
-		{name: "closed source", from: workflow.Ready, target: workflow.NeedsHuman, source: workflow.LifecycleObservation{States: []workflow.State{workflow.Ready}, Claimed: true}, wantProblem: "projections contradict the pending implementation transition"},
-		{name: "closed submission", from: workflow.Rework, target: workflow.AwaitingReview, source: workflow.LifecycleObservation{Open: true}, submission: &workflow.LifecycleObservation{States: []workflow.State{workflow.Rework}, Claimed: true}, wantProblem: "projections contradict the pending implementation transition"},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			transition := workflow.ImplementationTransition{From: tt.from, Target: tt.target, Head: baseline, Directory: "original-operation"}
-			item := workflow.ImplementationItem{ID: "opaque-work", Branch: "widget", Source: &tt.source, Problem: tt.problem, TargetSnapshot: baseline, Transition: &transition}
-			if tt.submission != nil {
-				item.Submission = &workflow.Submission{ID: "opaque-submission", Head: baseline, Lifecycle: tt.submission}
-			}
-			b := &implementationMemory{work: []workflow.ImplementationItem{item}}
-			got, err := workflow.InspectImplementation(context.Background(), root, item.ID, workflow.ArtifactEndpoints{}, b)
-			if err != nil || got.Status != "inspected" || got.Item.Problem != tt.wantProblem {
-				t.Fatalf("inspection: %#v, %v; item=%#v", got, err, got.Item)
-			}
-			if tt.wantProblem == "" && (got.Item.State != tt.want || got.Item.ResumeState != tt.resume) {
-				t.Fatalf("wrong completion/resume: %#v", got.Item)
-			}
-			claimed := tt.source.Claimed || tt.submission != nil && tt.submission.Claimed
-			if got.Item.Claimed != claimed || got.Head != baseline || got.Item.TargetSnapshot != baseline || *got.Item.Transition != transition || !reflect.DeepEqual(b.work[0], item) {
-				t.Fatalf("inspection changed obligations: %#v", got.Item)
-			}
-			if got.Item.Submission != nil && (got.Item.Submission.ID != "opaque-submission" || got.Item.Submission.Head != baseline) {
-				t.Fatalf("inspection lost Submission identity or head: %#v", got.Item.Submission)
-			}
-		})
+	if err != nil || got.Item.State != workflow.Ready {
+		t.Fatalf("inspection changed current lifecycle evidence: %#v, %v", got, err)
 	}
 }
 
