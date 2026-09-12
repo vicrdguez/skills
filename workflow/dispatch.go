@@ -244,7 +244,7 @@ func permitsDispatchOutcome(lane DispatchLane, outcome State) bool {
 	return lane == ImplementLane && slices.Contains([]State{AwaitingReview, NeedsHuman}, outcome) || lane == WatchdogLane && slices.Contains([]State{ReadyForMerge, Rework, NeedsHuman}, outcome)
 }
 
-func VerifyDispatch(ctx context.Context, root, remote string, lane DispatchLane, reference string, backend DispatchBackend) (CompletedHandoff, error) {
+func VerifyDispatch(ctx context.Context, root, remote string, lane DispatchLane, reference string, backend ImplementationBackend) (CompletedHandoff, error) {
 	data, err := base64.RawURLEncoding.DecodeString(reference)
 	if err != nil {
 		return CompletedHandoff{}, errors.New("--after requires a supported opaque dispatch reference")
@@ -294,6 +294,40 @@ func VerifyDispatch(ctx context.Context, root, remote string, lane DispatchLane,
 	handoff.Outcome = found.Outcome
 	if !permitsDispatchOutcome(lane, found.Outcome) || found.Head == "" || !found.Released {
 		return handoff, Refuse("dispatch handoff is incomplete or has the wrong stage; explicitly inspect and resume the Work Item")
+	}
+	// Observe identity and contradictions, not historical state/head equality.
+	items, err := backend.ImplementationItems(ctx, repository)
+	if err != nil {
+		return handoff, err
+	}
+	var item *ImplementationItem
+	for i := range items {
+		if items[i].ID != decoded.Item {
+			continue
+		}
+		if item != nil {
+			return handoff, Refuse("ambiguous Work Item attachment; inspect and explicitly resume")
+		}
+		item = &items[i]
+	}
+	if item == nil || item.Problem != "" {
+		return handoff, Refuse("Work Item attachment is missing or contradictory; inspect and explicitly resume")
+	}
+	if (found.Submission != "" || found.Outcome == AwaitingReview) && (item.Submission == nil || found.Submission != "" && item.Submission.ID != found.Submission) {
+		return handoff, Refuse("Submission attachment needed for handoff proof is missing or contradictory; inspect and explicitly resume")
+	}
+	if lane == ImplementLane && item.Transition != nil && item.Transition.Directory == found.Directory && !item.Transition.Completed {
+		return handoff, Refuse("this dispatch has a pending implementation handoff; inspect and explicitly resume")
+	}
+	latest := ""
+	for _, round := range rounds {
+		if round.Lane == lane {
+			latest = round.ID
+		}
+	}
+	sameLaneClaim := lane == ImplementLane && (item.State == Ready || item.State == Rework) || lane == WatchdogLane && item.State == AwaitingReview
+	if item.Claimed && sameLaneClaim && latest == found.ID {
+		return handoff, Refuse("this dispatch still has a retained Claim; inspect and explicitly resume")
 	}
 	return handoff, nil
 }

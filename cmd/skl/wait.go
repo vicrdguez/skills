@@ -116,7 +116,7 @@ func nextWork(ctx context.Context, wait, poll time.Duration, selectWork func() (
 	}
 }
 
-func continuedWork(ctx context.Context, root, remote, reference string, lane workflow.DispatchLane, wait, poll time.Duration, pollSet bool, backend workflow.DispatchBackend, selectWork func() (workflow.ImplementationOutcome, error)) (workflow.ImplementationOutcome, error) {
+func continuedWork(ctx context.Context, root, remote, reference string, lane workflow.DispatchLane, wait, poll time.Duration, pollSet bool, backend workflow.ImplementationBackend, selectWork func() (workflow.ImplementationOutcome, error)) (workflow.ImplementationOutcome, error) {
 	var previous workflow.CompletedHandoff
 	if reference != "" {
 		var err error

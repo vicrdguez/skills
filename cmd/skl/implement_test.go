@@ -26,6 +26,7 @@ import (
 )
 
 type implementationMemory struct {
+	itemReads, roundReads int
 	memoryBackend
 	coordination     []workflow.CoordinationItem
 	work             []workflow.ImplementationItem
@@ -41,6 +42,7 @@ type implementationMemory struct {
 }
 
 func (b *implementationMemory) DispatchRounds(_ context.Context, _ github.RepositoryID, item workflow.WorkItemID) ([]workflow.DispatchRound, error) {
+	b.roundReads++
 	return append([]workflow.DispatchRound(nil), b.rounds[item]...), b.roundReadError
 }
 
@@ -200,6 +202,7 @@ func (b *implementationMemory) AwaitImplementationReview(_ context.Context, _ gi
 
 func (b *implementationMemory) ImplementationItems(_ context.Context, repository github.RepositoryID) ([]workflow.ImplementationItem, error) {
 	b.repository = repository
+	b.itemReads++
 	items := append([]workflow.ImplementationItem(nil), b.work...)
 	for i := range items {
 		if number, err := strconv.Atoi(string(items[i].ID)); err == nil {
@@ -821,7 +824,7 @@ func TestImplementationCompletionRejectsChangedRoundObligation(t *testing.T) {
 func TestContinuationReferencesFailBeforeSelection(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
-	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}}
+	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}, {ID: "8", Branch: "widget", State: workflow.Ready}}}
 	var output bytes.Buffer
 	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return b, nil }, bytes.NewReader(nil), &output, &output)
 	if err := app.Run([]string{"skl", "implement", "next", "--repo", root, "--after", "not-a-reference"}); err == nil || b.work[0].Claimed {
@@ -829,6 +832,13 @@ func TestContinuationReferencesFailBeforeSelection(t *testing.T) {
 	}
 
 	start := implementCLI(t, root, b, "next")
+	before, _ := json.Marshal([]any{b.work, b.rounds})
+	defer func() {
+		after, _ := json.Marshal([]any{b.work, b.rounds})
+		if !bytes.Equal(before, after) {
+			t.Fatalf("invalid references mutated work: %s", after)
+		}
+	}()
 	reference := strings.Trim(strings.Fields(start.ContinuationCommand)[4], "'")
 	round := b.rounds["7"][0]
 	b.rounds["7"] = nil
@@ -870,8 +880,14 @@ func TestContinuationUsesFreshGitHubRoundEvidence(t *testing.T) {
 			return
 		}
 		switch path {
-		case "/issues", "/pulls":
-			json.NewEncoder(w).Encode([]any{})
+		case "/issues":
+			fmt.Fprint(w, `[{"number":7,"title":"first","state":"open","labels":[{"name":"needs-human"}]},{"number":8,"title":"second","state":"open","labels":[]}]`)
+		case "/pulls":
+			fmt.Fprint(w, `[{"number":11,"state":"open","labels":[{"name":"done"}],"head":{"ref":"second","sha":"head","repo":{"full_name":"acme/widgets"}},"base":{"ref":"main"}}]`)
+		case "/pulls/11/comments", "/pulls/11/reviews", "/issues/11/timeline":
+			fmt.Fprint(w, `[]`)
+		case "/pulls/11":
+			fmt.Fprint(w, `{"number":11,"state":"open","head":{"sha":"head"},"base":{"ref":"main"}}`)
 		default:
 			http.NotFound(w, r)
 		}
@@ -884,7 +900,7 @@ func TestContinuationUsesFreshGitHubRoundEvidence(t *testing.T) {
 		item       workflow.WorkItemID
 		submission workflow.SubmissionID
 		outcome    workflow.State
-	}{{"implement", "7", "", workflow.AwaitingReview}, {"watchdog", "8", "11", workflow.ReadyForMerge}} {
+	}{{"implement", "7", "", workflow.NeedsHuman}, {"watchdog", "8", "11", workflow.ReadyForMerge}} {
 		backend := setup.NewGitHubBackend(server.URL, "token", server.Client())
 		round := workflow.DispatchRound{ID: "durable-" + tc.lane, Lane: workflow.DispatchLane(tc.lane), Item: tc.item, Submission: tc.submission, Obligation: "fixed", Directory: "skl-" + tc.lane + "-fixed"}
 		if err := backend.RecordDispatchRound(t.Context(), repo, round); err != nil {
@@ -1542,6 +1558,101 @@ func TestReturnedCommandHandoffLifecycle(t *testing.T) {
 				got = returnedCLI(t, b, start.ContinuationCommand)
 				if got.Status != "no_work" || got.PreviousHandoff == nil || string(got.PreviousHandoff.Outcome) != tc.want || got.PreviousHandoff.Number != 7 {
 					t.Fatalf("handoff continuation: %+v", got)
+				}
+			})
+		}
+	}
+}
+
+func TestContinuationRefusalMatrixHasNoEffects(t *testing.T) {
+	for _, lane := range []string{"implement", "watchdog"} {
+		for _, problem := range []string{"held Claim", "missing publication", "missing release", "missing proof", "contradictory proof", "missing item", "ambiguous item", "ambiguous attachment", "missing attachment", "wrong stage", "documents disappeared"} {
+			t.Run(lane+"/"+problem, func(t *testing.T) {
+				root := proposalRepository(t)
+				prepareSlice(t, root, "widget")
+				runGit(t, root, "rm", "-r", ".changes/widget")
+				runGit(t, root, "commit", "-m", "retire")
+				head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+				b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{"main": strings.TrimSpace(runGitOutput(t, root, "rev-parse", "main")), "widget": head}}
+				if lane == "watchdog" {
+					b.work[0].State = workflow.AwaitingReview
+					b.work[0].Submission = &workflow.Submission{ID: "11", Head: head, Base: "main", Mergeability: "mergeable"}
+				}
+				start := returnedCLI(t, b, "skl "+lane+" next --repo '"+root+"'")
+				directory, command := "", ""
+				if lane == "implement" {
+					directory = start.Packet.Facts.Implementation.ResultDirectory
+					os.WriteFile(filepath.Join(directory, "submission.md"), []byte("valid publication"), 0600)
+					command = "skl implement submit --repo '" + root + "' --item 7 --body '" + filepath.Join(directory, "submission.md") + "'"
+				} else {
+					directory = start.Packet.Facts.Watchdog.ResultDirectory
+					os.WriteFile(filepath.Join(directory, "summary.md"), []byte("valid review"), 0600)
+					command = "skl watchdog submit --repo '" + root + "' --item 7 --reviewed-head " + head + " --verdict pass --summary '" + filepath.Join(directory, "summary.md") + "' --body '" + filepath.Join(directory, "summary.md") + "'"
+				}
+				got := returnedCLI(t, b, command)
+				if got.Status != "awaiting_review" && got.Status != "ready_for_merge" {
+					t.Fatalf("invalid positive control: %+v", got)
+				}
+				// A completed semantic handoff is the otherwise-valid control for each single defect.
+				successor := workflow.ImplementationItem{ID: "8", Branch: "widget", State: workflow.Ready}
+				if lane == "watchdog" {
+					successor.State = workflow.AwaitingReview
+					successor.Submission = &workflow.Submission{ID: "12", Head: head, Base: "main", Mergeability: "mergeable"}
+				}
+				b.work = append(b.work, successor)
+				os.Mkdir(directory, 0700)
+				defer os.RemoveAll(directory)
+				document := filepath.Join(directory, "repair.md")
+				os.WriteFile(document, []byte("retain recovery document"), 0600)
+				switch problem {
+				case "held Claim":
+					b.work[0].Claimed = true
+					if lane == "implement" {
+						b.work[0].State = workflow.Ready
+						b.work[0].Transition.Completed = false
+					} else {
+						b.work[0].State = workflow.AwaitingReview
+						b.work[0].Submission.PendingReview = "pass"
+					}
+				case "missing publication":
+					b.rounds["7"][0].Head = ""
+				case "missing attachment":
+					b.work[0].Submission = nil
+				case "ambiguous attachment":
+					b.work[0].Problem = "multiple Submissions share the conventional branch"
+				case "missing release":
+					b.rounds["7"][0].Released = false
+				case "missing proof":
+					b.rounds["7"] = nil
+				case "contradictory proof":
+					conflict := b.rounds["7"][0]
+					conflict.Head = "contradictory"
+					b.rounds["7"] = append(b.rounds["7"], conflict)
+				case "missing item":
+					b.work = b.work[1:]
+				case "ambiguous item":
+					b.work = append(b.work, b.work[0])
+				case "wrong stage":
+					if lane == "implement" {
+						b.rounds["7"][0].Outcome = workflow.ReadyForMerge
+					} else {
+						b.rounds["7"][0].Outcome = workflow.AwaitingReview
+					}
+				case "documents disappeared":
+					b.rounds["7"] = nil
+					os.RemoveAll(directory)
+				}
+				before, _ := json.Marshal([]any{b.work, b.rounds, b.decisions})
+				b.itemReads, b.roundReads = 0, 0
+				got = returnedCLI(t, b, start.ContinuationCommand+" --wait=2ms --poll=1ms")
+				after, _ := json.Marshal([]any{b.work, b.rounds, b.decisions})
+				if got.Status != "fix_required" || got.Item == nil || got.Item.Number != 7 || got.Reason == "" || !bytes.Equal(before, after) || b.itemReads > 1 || b.roundReads != 1 {
+					t.Fatalf("refusal effects: %+v reads=%d/%d before=%s after=%s", got, b.itemReads, b.roundReads, before, after)
+				}
+				if problem != "documents disappeared" {
+					if content, err := os.ReadFile(document); err != nil || string(content) != "retain recovery document" {
+						t.Fatalf("refusal removed document: %q %v", content, err)
+					}
 				}
 			})
 		}
