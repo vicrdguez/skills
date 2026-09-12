@@ -21,15 +21,15 @@ Carry review and terminal lifecycle operations through the repository-bound Back
 - Product changes unrelated to the corrected seam, agent gate execution inside the CLI, and a standalone portability test suite.
 
 ## Definition of Done
-- [ ] B1 Review selection and resume preserve engine-owned order, Claim semantics, and fixed review evidence.
-- [ ] B2 Pass, first failure, and subsequent failure preserve their established canonical outcomes and native publication effects.
-- [ ] B3 Needs Human observation and explicit requeue preserve resume semantics without interpreting opaque findings or directives.
-- [ ] B4 Synchronization Rework retains its fresh Target Snapshot and remains separate from the finding-driven bounce allowance.
-- [ ] B5 Status observes actual human merge, Dependency satisfaction, Coordination Item completion, and supersession with existing semantics.
-- [ ] B6 Cleanup preserves the established local-state safety policy using normalized merge observations and independent Git evidence.
-- [ ] B7 Interrupted review/completion operations reconcile forward from existing records without duplicate findings or premature terminal state.
-- [ ] No Workflow Mechanics delivered under #3 depend on a provider's repository syntax, labels, native identifiers, presentation, or adapter-owned workflow decisions; Audit traces all command paths and shared callers.
-- [ ] Existing lifecycle, GitHub adapter, Repository, and Catalog regression checks remain green, and capability documentation accurately describes ownership without changing advertised behavior.
+- [x] B1 Review selection and resume preserve engine-owned order, Claim semantics, and fixed review evidence.
+- [x] B2 Pass, first failure, and subsequent failure preserve their established canonical outcomes and native publication effects.
+- [x] B3 Needs Human observation and explicit requeue preserve resume semantics without interpreting opaque findings or directives.
+- [x] B4 Synchronization Rework retains its fresh Target Snapshot and remains separate from the finding-driven bounce allowance.
+- [x] B5 Status observes actual human merge, Dependency satisfaction, Coordination Item completion, and supersession with existing semantics.
+- [x] B6 Cleanup preserves the established local-state safety policy using normalized merge observations and independent Git evidence.
+- [x] B7 Interrupted review/completion operations reconcile forward from existing records without duplicate findings or premature terminal state.
+- [x] No Workflow Mechanics delivered under #3 depend on a provider's repository syntax, labels, native identifiers, presentation, or adapter-owned workflow decisions; Audit traces all command paths and shared callers.
+- [x] Existing lifecycle, GitHub adapter, Repository, and Catalog regression checks remain green, and capability documentation accurately describes ownership without changing advertised behavior.
 
 ## Manual verification
 None.
