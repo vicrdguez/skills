@@ -1310,7 +1310,7 @@ func TestContinuationRejectsOpaquePauseReceipt(t *testing.T) {
 	}
 	if err := b.PauseImplementation(t.Context(), repo, item, decision, func() error {
 		for _, comment := range comments {
-			if comment["body"] == decision {
+			if comment["body"] == "<!-- skl.decision/v1 -->\n"+decision {
 				return errors.New("interrupted with Claim held")
 			}
 		}

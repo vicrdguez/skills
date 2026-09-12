@@ -108,15 +108,21 @@ func (b *GitHubBackend) publishImplementationMetadata(ctx context.Context, repos
 	if err != nil {
 		return err
 	}
-	return b.implementationComment(ctx, repository, number, "<!-- skl.implement/v1\n"+string(payload)+"\n-->", true)
+	return b.implementationComment(ctx, repository, number, "<!-- skl.implement/v2\n"+string(payload)+"\n-->", true)
 }
 
 func (b *GitHubBackend) implementationComment(ctx context.Context, repository github.RepositoryID, number int, body string, metadata bool) error {
+	if !metadata {
+		body = "<!-- skl.decision/v1 -->\n" + body
+	}
 	published := func(comments []skilldist.ReviewComment) bool {
+		if metadata {
+			comments = implementationEvidence(comments)
+		}
 		latest := ""
 		for _, comment := range comments {
 			if metadata {
-				if strings.HasPrefix(comment.Body, "<!-- skl.implement/v1\n") && trustedMetadata(comment) {
+				if _, ok := implementationPayload(comment.Body); ok {
 					latest = comment.Body
 				}
 			} else if comment.Body == body {
@@ -385,38 +391,43 @@ func trustedMetadata(comment skilldist.ReviewComment) bool {
 	return slices.Contains([]string{"OWNER", "MEMBER", "COLLABORATOR"}, comment.Association)
 }
 
-// implementationEvidence excludes decision occurrences during their pending handoff.
-// Completion closes every decision window for that handoff's directory, including
-// superseded prose. An identical later engine receipt is independent evidence,
-// while earlier opaque occurrences stay excluded.
+func implementationPayload(body string) (string, bool) {
+	if payload, ok := strings.CutPrefix(body, "<!-- skl.implement/v2\n"); ok {
+		return payload, true
+	}
+	return strings.CutPrefix(body, "<!-- skl.implement/v1\n")
+}
+
+// New decisions always have a non-metadata outer prefix, even when their opaque
+// contents are an entire metadata publication. Only legacy v1 transitions need
+// digest-based exclusion. A metadata-shaped unframed decision makes that legacy
+// stream ambiguous: retain its safe prefix, never reinterpret later publications
+// (including apparent v2 upgrades) as proof. Such history needs human resolution.
 func implementationEvidence(comments []skilldist.ReviewComment) []skilldist.ReviewComment {
 	var evidence []skilldist.ReviewComment
-	decisions := make(map[string]map[string]bool)
+	legacyDecisions := make(map[string]bool)
 	for _, comment := range comments {
-		if !trustedMetadata(comment) || len(decisions[fmt.Sprintf("%x", sha256.Sum256([]byte(comment.Body)))]) > 0 {
+		if !trustedMetadata(comment) {
+			continue
+		}
+		if legacyDecisions[fmt.Sprintf("%x", sha256.Sum256([]byte(comment.Body)))] {
+			if _, metadata := implementationPayload(comment.Body); metadata {
+				break
+			}
+			continue
+		}
+		if strings.HasPrefix(comment.Body, "<!-- skl.implement/v2\n") {
+			evidence = append(evidence, comment)
+			continue
+		}
+		body, ok := strings.CutPrefix(comment.Body, "<!-- skl.implement/v1\n")
+		if !ok {
 			continue
 		}
 		evidence = append(evidence, comment)
-		body, ok := strings.CutPrefix(comment.Body, "<!-- skl.implement/v1\n")
-		if !ok || !strings.HasSuffix(body, "\n-->") {
-			continue
-		}
 		var metadata implementationMetadata
-		if json.Unmarshal([]byte(strings.TrimSuffix(body, "\n-->")), &metadata) == nil && metadata.Transition != nil {
-			transition := metadata.Transition
-			if transition.Completed {
-				for digest, directories := range decisions {
-					delete(directories, transition.Directory)
-					if len(directories) == 0 {
-						delete(decisions, digest)
-					}
-				}
-			} else {
-				if decisions[transition.DecisionDigest] == nil {
-					decisions[transition.DecisionDigest] = make(map[string]bool)
-				}
-				decisions[transition.DecisionDigest][transition.Directory] = true
-			}
+		if json.Unmarshal([]byte(strings.TrimSuffix(body, "\n-->")), &metadata) == nil && metadata.Transition != nil && metadata.Transition.DecisionDigest != "" && !metadata.Transition.Completed {
+			legacyDecisions[metadata.Transition.DecisionDigest] = true
 		}
 	}
 	return evidence
@@ -450,10 +461,11 @@ func (b *GitHubBackend) RecordDispatchRound(ctx context.Context, repository gith
 	if err != nil {
 		return err
 	}
-	body := "<!-- skl.implement/v1\n" + string(payload) + "\n-->"
+	body := "<!-- skl.implement/v2\n" + string(payload) + "\n-->"
 	published := func(comments []skilldist.ReviewComment) bool {
 		for _, comment := range implementationEvidence(comments) {
-			if comment.Body == body && trustedMetadata(comment) {
+			observed, ok := implementationPayload(comment.Body)
+			if ok && observed == string(payload)+"\n-->" {
 				return true
 			}
 		}
@@ -463,6 +475,19 @@ func (b *GitHubBackend) RecordDispatchRound(ctx context.Context, repository gith
 	comments, err := b.implementationComments(ctx, repository, stream)
 	if err != nil || published(comments) {
 		return err
+	}
+	if round.Outcome != "" && round.Lane == workflow.ImplementLane {
+		var pending bool
+		for _, comment := range implementationEvidence(comments) {
+			payload, _ := implementationPayload(comment.Body)
+			var metadata implementationMetadata
+			if json.Unmarshal([]byte(strings.TrimSuffix(payload, "\n-->")), &metadata) == nil && metadata.Transition != nil && metadata.Transition.Directory == round.Directory {
+				pending = !metadata.Transition.Completed
+			}
+		}
+		if pending {
+			return workflow.Refuse("dispatch receipt requires a completed implementation transition")
+		}
 	}
 	writeErr := b.request(ctx, http.MethodPost, b.repositoryPath(repository)+stream, map[string]string{"body": body}, nil)
 	comments, err = b.implementationComments(ctx, repository, stream)
@@ -494,7 +519,7 @@ func dispatchRoundsFromComments(comments []skilldist.ReviewComment, item workflo
 	positions := make(map[string]int)
 	var rounds []workflow.DispatchRound
 	for _, comment := range implementationEvidence(comments) {
-		body, ok := strings.CutPrefix(comment.Body, "<!-- skl.implement/v1\n")
+		body, ok := implementationPayload(comment.Body)
 		if !ok {
 			continue
 		}
@@ -674,12 +699,12 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository gith
 			return nil, err
 		}
 		for _, comment := range comments {
-			if item.Submission != nil && !strings.HasPrefix(comment.Body, "<!-- skl.implement/v1\n") {
+			if _, metadata := implementationPayload(comment.Body); item.Submission != nil && !metadata {
 				item.Submission.Comments = append(item.Submission.Comments, comment)
 			}
 		}
 		for _, comment := range implementationEvidence(comments) {
-			if body, ok := strings.CutPrefix(comment.Body, "<!-- skl.implement/v1\n"); ok && strings.HasSuffix(body, "\n-->") {
+			if body, ok := implementationPayload(comment.Body); ok && strings.HasSuffix(body, "\n-->") {
 				if !trustedMetadata(comment) {
 					continue
 				}
