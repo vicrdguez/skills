@@ -28,17 +28,17 @@ Deliver approved candidate-first slice 2 as a standalone change with no blocking
 - Redesigning independent review, Audit judgment, the Full Gate, Debt Markers, Manual Verification, queue adapters, or backend identity/binding contracts already landed in #32.
 
 ## Definition of Done
-- [ ] D1 Implementation next and resume succeed after main advances without resolving, persisting, restoring, or requiring an implementation target pin, while preserving existing work and unrelated startup checks.
-- [ ] D2 A pushed candidate with valid retired artifacts can be submitted without the current or formerly pinned target commit being locally available or an ancestor of its head.
-- [ ] D3 A valid fresh Watchdog pass publishes Ready for Merge for mergeable, conflicting, or unknown mergeability, without synchronization side effects or closing the source issue.
-- [ ] D4 Retrying the same valid pass completes or confirms Ready for Merge despite changed mergeability, retaining existing review evidence and head safeguards and never rerouting to synchronization.
-- [ ] D5 Status preserves done and reconciles an unambiguous partial pass forward despite conflicting or unknown mergeability, without target lookups or automatic Rework.
-- [ ] D6 Existing sync-labeled Rework remains governed by its ordinary Rework state, Claim, and retained review-evidence rules, ignores obsolete target metadata, and only loses stale sync at its normal authorized review handoff.
-- [ ] D7 New and updated Submissions use main as their sole destination, including draft preservation, without a target-selection lookup or new target configuration.
-- [ ] D8 An existing non-main PR causes an actionable command-scoped refusal before a workflow handoff or PR edit; its base, body, labels, and existing Claim remain intact for explicit human repair.
-- [ ] D9 Removing target pins and mergeability gates preserves fixed reviewed revision, pushed-head, post-marker ancestry, artifact, Claim, and publication-validity checks and the current failure-count policy.
-- [ ] D10 Public CLI help and rendered Implement, Watchdog, and Audit guidance contain no --target-snapshot or forced integration obligation; they identify main-based first-review scope and human integration ownership without moving ordinary Git work into the CLI.
-- [ ] D11 README, lifecycle capability, and ADR notes accurately describe only the delivered integration-policy correction and leave unimplemented sibling decisions planned.
+- [x] D1 Implementation next and resume succeed after main advances without resolving, persisting, restoring, or requiring an implementation target pin, while preserving existing work and unrelated startup checks.
+- [x] D2 A pushed candidate with valid retired artifacts can be submitted without the current or formerly pinned target commit being locally available or an ancestor of its head.
+- [x] D3 A valid fresh Watchdog pass publishes Ready for Merge for mergeable, conflicting, or unknown mergeability, without synchronization side effects or closing the source issue.
+- [x] D4 Retrying the same valid pass completes or confirms Ready for Merge despite changed mergeability, retaining existing review evidence and head safeguards and never rerouting to synchronization.
+- [x] D5 Status preserves done and reconciles an unambiguous partial pass forward despite conflicting or unknown mergeability, without target lookups or automatic Rework.
+- [x] D6 Existing sync-labeled Rework remains governed by its ordinary Rework state, Claim, and retained review-evidence rules, ignores obsolete target metadata, and only loses stale sync at its normal authorized review handoff.
+- [x] D7 New and updated Submissions use main as their sole destination, including draft preservation, without a target-selection lookup or new target configuration.
+- [x] D8 An existing non-main PR causes an actionable command-scoped refusal before a workflow handoff or PR edit; its base, body, labels, and existing Claim remain intact for explicit human repair.
+- [x] D9 Removing target pins and mergeability gates preserves fixed reviewed revision, pushed-head, post-marker ancestry, artifact, Claim, and publication-validity checks and the current failure-count policy.
+- [x] D10 Public CLI help and rendered Implement, Watchdog, and Audit guidance contain no --target-snapshot or forced integration obligation; they identify main-based first-review scope and human integration ownership without moving ordinary Git work into the CLI.
+- [x] D11 README, lifecycle capability, and ADR notes accurately describe only the delivered integration-policy correction and leave unimplemented sibling decisions planned.
 
 ## Manual verification
 None
