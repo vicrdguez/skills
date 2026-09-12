@@ -697,3 +697,50 @@ func TestGitHubIdenticalDecisionAndReceiptRemainDistinctOccurrences(t *testing.T
 		})
 	}
 }
+
+func TestGitHubDispatchRoundsRefuseMalformedAndWrongItemHistory(t *testing.T) {
+	for _, lane := range []workflow.DispatchLane{workflow.ImplementLane, workflow.WatchdogLane} {
+		for _, defect := range []string{"invalid JSON", "missing ID", "missing item", "unknown lane", "missing directory", "missing obligation", "wrong item"} {
+			t.Run(string(lane)+"/"+defect, func(t *testing.T) {
+				round := workflow.DispatchRound{ID: "round", Lane: lane, Item: "7", Submission: "11", Obligation: "head", Directory: "skl-result-round", Head: "head", Released: true, Outcome: workflow.NeedsHuman}
+				valid, _ := json.Marshal(implementationMetadata{Round: &round})
+				malformed := round
+				switch defect {
+				case "missing ID":
+					malformed.ID = ""
+				case "missing item":
+					malformed.Item = ""
+				case "unknown lane":
+					malformed.Lane = "unknown"
+				case "missing directory":
+					malformed.Directory = ""
+				case "missing obligation":
+					malformed.Obligation = ""
+				case "wrong item":
+					malformed.Item = "8"
+				}
+				payload, _ := json.Marshal(implementationMetadata{Round: &malformed})
+				if defect == "invalid JSON" {
+					payload = []byte(`{"round":`)
+				}
+				comments := []map[string]string{{"body": "<!-- skl.implement/v1\n" + string(valid) + "\n-->", "author_association": "OWNER"}, {"body": "<!-- skl.implement/v1\n" + string(payload) + "\n-->", "author_association": "OWNER"}}
+				reads, writes := 0, 0
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.Method != http.MethodGet {
+						writes++
+					} else {
+						reads++
+					}
+					json.NewEncoder(w).Encode(comments)
+				}))
+				defer server.Close()
+				b := NewGitHubBackend(server.URL, "token", server.Client())
+				_, err := b.DispatchRounds(t.Context(), github.RepositoryID{Owner: "acme", Name: "widgets"}, "7")
+				var refusal *workflow.InvariantError
+				if !errors.As(err, &refusal) || reads != 1 || writes != 0 {
+					t.Fatalf("hostile persisted history accepted or repaired: %v reads=%d writes=%d", err, reads, writes)
+				}
+			})
+		}
+	}
+}

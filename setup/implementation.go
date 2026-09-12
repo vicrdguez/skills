@@ -420,8 +420,12 @@ type implementationMetadata struct {
 	Round                 *workflow.DispatchRound            `json:"round,omitempty"`
 }
 
+func validDispatchRound(round workflow.DispatchRound) bool {
+	return round.ID != "" && round.Item != "" && (round.Lane == workflow.ImplementLane || round.Lane == workflow.WatchdogLane) && round.Directory != "" && round.Obligation != ""
+}
+
 func (b *GitHubBackend) RecordDispatchRound(ctx context.Context, repository github.RepositoryID, round workflow.DispatchRound) error {
-	if round.ID == "" || round.Item == "" || round.Lane != workflow.ImplementLane && round.Lane != workflow.WatchdogLane || round.Directory == "" || round.Obligation == "" {
+	if !validDispatchRound(round) {
 		return workflow.Refuse("dispatch evidence has invalid or contradictory bindings")
 	}
 	number, err := githubIssueNumber(round.Item)
@@ -488,7 +492,7 @@ func dispatchRoundsFromComments(comments []skilldist.ReviewComment, item workflo
 			continue
 		}
 		round := *metadata.Round
-		if round.ID == "" || round.Item != item || round.Lane != workflow.ImplementLane && round.Lane != workflow.WatchdogLane || round.Directory == "" || round.Obligation == "" {
+		if !validDispatchRound(round) || round.Item != item {
 			return nil, workflow.Refuse("dispatch evidence has invalid or contradictory bindings")
 		}
 		index, exists := positions[round.ID]
