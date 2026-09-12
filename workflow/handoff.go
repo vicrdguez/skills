@@ -11,21 +11,21 @@ import (
 	"strings"
 )
 
-func SubmitImplementation(ctx context.Context, root, remote string, id WorkItemID, bodyPath string, backend ImplementationBackend) (ImplementationOutcome, error) {
+func SubmitImplementation(ctx context.Context, root, remote string, id WorkItemID, bodyPath string, endpoints ArtifactEndpoints, backend ImplementationBackend) (ImplementationOutcome, error) {
 	if id == "" || bodyPath == "" {
 		return ImplementationOutcome{}, errors.New("submit requires --item and --body")
 	}
-	return handoffImplementation(ctx, root, remote, id, AwaitingReview, "", bodyPath, backend)
+	return handoffImplementation(ctx, root, remote, id, AwaitingReview, "", bodyPath, endpoints, backend)
 }
 
-func PauseImplementation(ctx context.Context, root, remote string, id WorkItemID, reason, decisionPath, bodyPath string, backend ImplementationBackend) (ImplementationOutcome, error) {
+func PauseImplementation(ctx context.Context, root, remote string, id WorkItemID, reason, decisionPath, bodyPath string, endpoints ArtifactEndpoints, backend ImplementationBackend) (ImplementationOutcome, error) {
 	if id == "" || decisionPath == "" || !slices.Contains([]string{"contradictory_artifacts", "mandatory_rule", "frozen_interface", "disputed_blocker", "bounce_cap"}, reason) {
 		return ImplementationOutcome{}, errors.New("Needs Human requires --item, --decision and a permitted --reason")
 	}
-	return handoffImplementation(ctx, root, remote, id, NeedsHuman, decisionPath, bodyPath, backend)
+	return handoffImplementation(ctx, root, remote, id, NeedsHuman, decisionPath, bodyPath, endpoints, backend)
 }
 
-func handoffImplementation(ctx context.Context, root, remote string, id WorkItemID, target State, decisionPath, bodyPath string, backend ImplementationBackend) (outcome ImplementationOutcome, err error) {
+func handoffImplementation(ctx context.Context, root, remote string, id WorkItemID, target State, decisionPath, bodyPath string, endpoints ArtifactEndpoints, backend ImplementationBackend) (outcome ImplementationOutcome, err error) {
 	items, err := loadImplementation(ctx, backend)
 	if err != nil {
 		return ImplementationOutcome{}, err
@@ -115,7 +115,11 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 			return ImplementationOutcome{}, err
 		}
 	}
-	history, err := InspectLedger(root, head, item.Branch)
+	policy := RequireRetiredArtifacts
+	if target == NeedsHuman {
+		policy = PreserveIncompleteArtifacts
+	}
+	history, err := InspectLedger(root, head, item.Branch, endpoints, policy)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
@@ -126,10 +130,9 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 		if history.Phase != "retired" || len(history.Violations) > 0 {
 			return ImplementationOutcome{}, Refuse(fmt.Sprint(history.Violations) + "; complete permitted ticks, commit Completion, then delete the entire ledger in a child commit and push")
 		}
+	} else if len(history.endpointIdentityViolations) != 0 || len(history.acceptedBaselineViolations) != 0 {
+		return ImplementationOutcome{}, Refuse(fmt.Sprint(append(history.endpointIdentityViolations, history.acceptedBaselineViolations...)) + "; repair endpoint identity or the accepted baseline before pausing")
 	} else if bodyPath == "" {
-		if history.Baseline == "" {
-			return ImplementationOutcome{}, Refuse("ledger baseline missing; repair history before pausing")
-		}
 		changed, err := git(root, "diff", "--name-only", history.Baseline, head, "--", ".", ":(exclude).changes/"+item.Branch)
 		if err != nil {
 			return ImplementationOutcome{}, err

@@ -51,11 +51,95 @@ func watchdogCLI(t *testing.T, root string, backend *implementationMemory, args 
 	return result
 }
 
+func TestB11ValidateWatchdogAgainstTheSameArtifactEndpoints(t *testing.T) {
+	for _, test := range []struct {
+		name, evidence, operation, want string
+	}{
+		{"marked first review", "valid", "next", "work_available"},
+		{"unchanged endpoints after Rework", "rework", "next", "work_available"},
+		{"Debt Marker descendant", "debt", "submit", "ready_for_merge"},
+		{"final head reintroduces ledger", "reintroduced", "submit", "fix_required"},
+		{"invalid Completion", "invalid", "next", "fix_required"},
+		{"ambiguous Completion", "ambiguous", "next", "fix_required"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := proposalRepository(t)
+			prepareSlice(t, root, "widget")
+			if test.evidence == "invalid" {
+				if err := os.WriteFile(filepath.Join(root, ".changes/widget/behavior.md"), []byte("changed contract\n"), 0644); err != nil {
+					t.Fatal(err)
+				}
+				runGit(t, root, "commit", "-am", "[completion] widget")
+				runGit(t, root, "rm", "-r", ".changes/widget")
+				runGit(t, root, "commit", "-m", "retire widget")
+			} else {
+				if test.evidence == "ambiguous" {
+					runGit(t, root, "commit", "--allow-empty", "-m", "[completion] widget first")
+				}
+				completeAndRetireSlice(t, root, "widget")
+			}
+			reviewed := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+			if test.evidence == "rework" {
+				runGit(t, root, "commit", "--allow-empty", "-m", "finding-driven rework")
+				reviewed = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+			}
+			final := reviewed
+			if test.evidence == "debt" {
+				if err := os.WriteFile(filepath.Join(root, "debt.go"), []byte("package widget\n// DEBT(#11/W1): deferred\n"), 0644); err != nil {
+					t.Fatal(err)
+				}
+				runGit(t, root, "add", "debt.go")
+				runGit(t, root, "commit", "-m", "record debt")
+				final = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+			}
+			if test.evidence == "reintroduced" {
+				writeLedger(t, root, "widget", true)
+				runGit(t, root, "add", ".changes/widget")
+				runGit(t, root, "commit", "-m", "reintroduce ledger")
+				final = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+			}
+			claimed := test.operation == "submit"
+			submission := &workflow.Submission{ID: "11", Head: final, Base: "main", Mergeability: "mergeable"}
+			backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Claimed: claimed, Submission: submission}}, remoteHeads: map[string]string{"widget": final}}
+			var got setup.ImplementationOutput
+			if test.operation == "next" {
+				got = watchdogCLI(t, root, backend, "next")
+			} else {
+				directory := t.TempDir()
+				summary, body := filepath.Join(directory, "summary.md"), filepath.Join(directory, "body.md")
+				if err := os.WriteFile(summary, []byte("independent review\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(body, []byte("approved\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				got = watchdogCLI(t, root, backend, "submit", "--item", "7", "--reviewed-head", reviewed, "--head", final, "--verdict", "pass", "--summary", summary, "--body", body)
+				if test.want == "fix_required" {
+					if _, err := os.Stat(summary); err != nil {
+						t.Fatalf("refusal removed review prose: %v", err)
+					}
+				}
+			}
+			if got.Status != test.want {
+				t.Fatalf("watchdog = %#v, want %s", got, test.want)
+			}
+			if test.want == "work_available" {
+				facts := got.Packet.Facts.Watchdog
+				if facts.BaselineFiles[".changes/widget/intent.md"] == "" || facts.CompletionFiles[".changes/widget/intent.md"] == "" || !strings.Contains(got.Packet.Instructions, "endpoint") {
+					t.Fatalf("historical contract or independent guidance missing: %#v", facts)
+				}
+			}
+			if test.want == "fix_required" && backend.work[0].Claimed != claimed {
+				t.Fatalf("refusal mutated Claim: %#v", backend.work[0])
+			}
+		})
+	}
+}
+
 func TestWatchdogRoutesFirstFailureWithOpaqueFindings(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
-	runGit(t, root, "rm", "-r", ".changes/widget")
-	runGit(t, root, "commit", "-m", "retire")
+	completeAndRetireSlice(t, root, "widget")
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Claimed: true, Submission: &workflow.Submission{ID: "11", Head: head}}}, remoteHeads: map[string]string{"widget": head}}
 	dir := t.TempDir()
@@ -80,8 +164,7 @@ func TestWatchdogRoutesFirstFailureWithOpaqueFindings(t *testing.T) {
 func TestWatchdogPausesSecondFailure(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
-	runGit(t, root, "rm", "-r", ".changes/widget")
-	runGit(t, root, "commit", "-m", "retire")
+	completeAndRetireSlice(t, root, "widget")
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Claimed: true, Submission: &workflow.Submission{ID: "11", Head: head}}}, remoteHeads: map[string]string{"widget": head}}
 	watchdogCLI(t, root, b, "next")
@@ -102,8 +185,7 @@ func TestWatchdogPausesSecondFailure(t *testing.T) {
 func TestWatchdogPassReachesHumanMergeBoundary(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
-	runGit(t, root, "rm", "-r", ".changes/widget")
-	runGit(t, root, "commit", "-m", "retire")
+	completeAndRetireSlice(t, root, "widget")
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Claimed: true, Submission: &workflow.Submission{ID: "11", Head: head, Base: "main", Mergeability: "mergeable"}}}, remoteHeads: map[string]string{"widget": head}}
 	dir := t.TempDir()
@@ -126,8 +208,7 @@ func TestWatchdogPassReachesHumanMergeBoundary(t *testing.T) {
 func TestWatchdogConflictPinsSynchronizationReworkWithoutBounce(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
-	runGit(t, root, "rm", "-r", ".changes/widget")
-	runGit(t, root, "commit", "-m", "retire")
+	completeAndRetireSlice(t, root, "widget")
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	runGit(t, root, "switch", "main")
 	runGit(t, root, "commit", "--allow-empty", "-m", "target moved")
@@ -149,8 +230,7 @@ func TestWatchdogConflictPinsSynchronizationReworkWithoutBounce(t *testing.T) {
 func TestWatchdogPassAcceptsPushedDebtMarkerHead(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
-	runGit(t, root, "rm", "-r", ".changes/widget")
-	runGit(t, root, "commit", "-m", "retire")
+	completeAndRetireSlice(t, root, "widget")
 	reviewed := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	if err := os.WriteFile(filepath.Join(root, "debt.go"), []byte("package widget\n// DEBT(#11/W1): retained note\n"), 0600); err != nil {
 		t.Fatal(err)
@@ -176,8 +256,7 @@ func TestWatchdogHumanDirectionRequiresExplicitRequeue(t *testing.T) {
 	for _, resume := range []workflow.State{workflow.Rework, workflow.AwaitingReview} {
 		root := proposalRepository(t)
 		prepareSlice(t, root, "widget")
-		runGit(t, root, "rm", "-r", ".changes/widget")
-		runGit(t, root, "commit", "-m", "retire")
+		completeAndRetireSlice(t, root, "widget")
 		head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 		b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Claimed: true, Submission: &workflow.Submission{ID: "11", Head: head}}}, remoteHeads: map[string]string{"widget": head}}
 		summary := filepath.Join(t.TempDir(), "summary.md")
@@ -214,8 +293,7 @@ func TestWatchdogHumanDirectionRequiresExplicitRequeue(t *testing.T) {
 func TestWatchdogRetriesCompletedVerdictWithoutAnotherBounce(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
-	runGit(t, root, "rm", "-r", ".changes/widget")
-	runGit(t, root, "commit", "-m", "retire")
+	completeAndRetireSlice(t, root, "widget")
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Claimed: true, Submission: &workflow.Submission{ID: "11", Head: head}}}, remoteHeads: map[string]string{"widget": head}}
 	summary := filepath.Join(t.TempDir(), "summary.md")
@@ -236,8 +314,7 @@ func TestWatchdogRetriesCompletedVerdictWithoutAnotherBounce(t *testing.T) {
 func TestWatchdogPassRetryChecksMergeability(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
-	runGit(t, root, "rm", "-r", ".changes/widget")
-	runGit(t, root, "commit", "-m", "retire")
+	completeAndRetireSlice(t, root, "widget")
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	runGit(t, root, "switch", "main")
 	runGit(t, root, "commit", "--allow-empty", "-m", "target moved")
@@ -381,8 +458,7 @@ func TestWatchdogClaimsOldestSubmissionAndPinsPacket(t *testing.T) {
 	for _, number := range []int{9, 7, 8} {
 		branch := fmt.Sprintf("slice-%d", number)
 		prepareSlice(t, root, branch)
-		runGit(t, root, "rm", "-r", ".changes/"+branch)
-		runGit(t, root, "commit", "-m", "retire")
+		completeAndRetireSlice(t, root, branch)
 		head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 		b.work = append(b.work, workflow.ImplementationItem{ID: workflow.WorkItemID(strconv.Itoa(number)), Order: number, Branch: branch, State: workflow.AwaitingReview, CreatedAt: "2000", Submission: &workflow.Submission{ID: workflow.SubmissionID(strconv.Itoa(number + 100)), Head: head, Body: "opaque audit", CreatedAt: "2026", Comments: []skilldist.ReviewComment{{Body: "W1 prior", Author: "reviewer"}, {Body: "raw human direction", Association: "OWNER"}}}})
 	}
@@ -402,8 +478,7 @@ func TestWatchdogClaimsOldestSubmissionAndPinsPacket(t *testing.T) {
 func TestWatchdogReportsNoEligibleWork(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
-	runGit(t, root, "rm", "-r", ".changes/widget")
-	runGit(t, root, "commit", "-m", "retire")
+	completeAndRetireSlice(t, root, "widget")
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	for _, work := range [][]workflow.ImplementationItem{nil, {
 		{ID: "1", Branch: "widget", State: workflow.AwaitingReview, Claimed: true, Submission: &workflow.Submission{ID: "11", State: workflow.AwaitingReview, Claimed: true, Head: head}},
@@ -435,8 +510,7 @@ func TestWatchdogReportsNoEligibleWork(t *testing.T) {
 func TestWatchdogResumesFixedClaim(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
-	runGit(t, root, "rm", "-r", ".changes/widget")
-	runGit(t, root, "commit", "-m", "retire")
+	completeAndRetireSlice(t, root, "widget")
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Claimed: true, Submission: &workflow.Submission{ID: "11", Head: head}}, {ID: "1", State: workflow.AwaitingReview}}}
 	got := watchdogCLI(t, root, b, "resume", "--item", "7")
@@ -456,8 +530,7 @@ func TestWatchdogResumesFixedClaim(t *testing.T) {
 func TestWatchdogPacketCarriesHistoricalContractAndSemanticHandoff(t *testing.T) {
 	root := proposalRepository(t)
 	baseline := prepareSlice(t, root, "widget")
-	runGit(t, root, "rm", "-r", ".changes/widget")
-	runGit(t, root, "commit", "-m", "retire")
+	completeAndRetireSlice(t, root, "widget")
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Submission: &workflow.Submission{ID: "11", Head: head, Body: "opaque audit", Comments: []skilldist.ReviewComment{{Body: "W1 prior", Commit: baseline}}}}}}
 	got := watchdogCLI(t, root, b, "next")
@@ -469,7 +542,7 @@ func TestWatchdogPacketCarriesHistoricalContractAndSemanticHandoff(t *testing.T)
 	if !ok {
 		t.Fatal("missing concrete review instructions")
 	}
-	normalized := strings.NewReplacer(f.Worktree, "<worktree>", f.ResultDirectory, "<result>", head, "<head>", baseline, "<baseline>").Replace("## Review Start\n" + body)
+	normalized := strings.NewReplacer(f.Worktree, "<worktree>", f.ResultDirectory, "<result>", head, "<head>", baseline, "<baseline>", f.ArtifactCompletion, "<completion>").Replace("## Review Start\n" + body)
 	if want := readRepositoryFile(t, "cmd/skl/testdata/watchdog-start.golden.md"); normalized != want {
 		t.Fatalf("packet golden mismatch:\n%s", normalized)
 	}
@@ -488,8 +561,7 @@ func TestWatchdogPacketCarriesHistoricalContractAndSemanticHandoff(t *testing.T)
 func TestWatchdogCleansPrivateResultsOnlyAfterVerifiedHandoff(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
-	runGit(t, root, "rm", "-r", ".changes/widget")
-	runGit(t, root, "commit", "-m", "retire")
+	completeAndRetireSlice(t, root, "widget")
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Submission: &workflow.Submission{ID: "11", Head: head}}}, remoteHeads: map[string]string{}}
 	start := watchdogCLI(t, root, b, "next")
@@ -517,8 +589,7 @@ func TestWatchdogCleansPrivateResultsOnlyAfterVerifiedHandoff(t *testing.T) {
 func TestWatchdogRefusesPassWhenMergeabilityChangesDuringPublication(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
-	runGit(t, root, "rm", "-r", ".changes/widget")
-	runGit(t, root, "commit", "-m", "retire")
+	completeAndRetireSlice(t, root, "widget")
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Claimed: true, Submission: &workflow.Submission{ID: "11", Head: head, Mergeability: "mergeable"}}}, remoteHeads: map[string]string{"widget": head}}
 	b.beforeTransition = func() { b.work[0].Submission.Mergeability = "conflicting" }
@@ -536,8 +607,7 @@ func TestWatchdogOrdersEligibleSubmissionsDespiteUnrelatedItems(t *testing.T) {
 	for _, index := range []int{0, 2} {
 		item := &b.work[index]
 		prepareSlice(t, root, item.Branch)
-		runGit(t, root, "rm", "-r", ".changes/"+item.Branch)
-		runGit(t, root, "commit", "-m", "retire")
+		completeAndRetireSlice(t, root, item.Branch)
 		head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 		date := "2026"
 		if index == 2 {

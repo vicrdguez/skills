@@ -22,7 +22,7 @@ type ReviewBackend interface {
 	CompleteReview(context.Context, ImplementationItem, State, func() error) error
 }
 
-func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, reviewNumber uint64, reviewed, head, verdict, summaryPath, findingsPath, bodyPath string, backend ReviewBackend) (outcome ImplementationOutcome, err error) {
+func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, reviewNumber uint64, reviewed, head, verdict, summaryPath, findingsPath, bodyPath string, endpoints ArtifactEndpoints, backend ReviewBackend) (outcome ImplementationOutcome, err error) {
 	defer func() {
 		warn := func(message string) {
 			if outcome.Reason == "" {
@@ -140,12 +140,21 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	if err := guard(); err != nil {
 		return ImplementationOutcome{}, err
 	}
-	history, err := InspectLedger(root, head, item.Branch)
+	history, err := InspectLedger(root, reviewed, item.Branch, endpoints, RequireRetiredArtifacts)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
 	if history.Phase != "retired" || len(history.Violations) > 0 {
-		return ImplementationOutcome{}, Refuse("restore valid retired ledger history")
+		return ImplementationOutcome{}, Refuse(fmt.Sprint(history.Violations) + "; restore valid retired ledger history at reviewed head " + reviewed)
+	}
+	if head != reviewed {
+		history, err = InspectLedger(root, head, item.Branch, endpoints, RequireRetiredArtifacts)
+		if err != nil {
+			return ImplementationOutcome{}, err
+		}
+		if history.Phase != "retired" || len(history.Violations) > 0 {
+			return ImplementationOutcome{}, Refuse(fmt.Sprint(history.Violations) + "; keep the ledger retired at final head " + head)
+		}
 	}
 	summary, err := os.ReadFile(summaryPath)
 	if err != nil {

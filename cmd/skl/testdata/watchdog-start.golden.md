@@ -5,7 +5,7 @@ Submission: #11
 Worktree: <worktree>
 Reviewed head: <head>
 Artifact Baseline: <baseline>
-Artifact Completion: <baseline>
+Artifact Completion: <completion>
 Completed reviews: 0
 Review number: 1
 Scope: full
