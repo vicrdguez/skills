@@ -385,8 +385,9 @@ func trustedMetadata(comment skilldist.ReviewComment) bool {
 	return slices.Contains([]string{"OWNER", "MEMBER", "COLLABORATOR"}, comment.Association)
 }
 
-// implementationEvidence excludes opaque decisions identified before publication.
-// Keep every prior digest: later operations must not reinterpret earlier prose.
+// implementationEvidence excludes decision occurrences during their pending handoff.
+// Completion closes that publication window; an identical later engine receipt is
+// independent evidence, while earlier opaque occurrences stay excluded.
 func implementationEvidence(comments []skilldist.ReviewComment) []skilldist.ReviewComment {
 	var evidence []skilldist.ReviewComment
 	decisions := make(map[string]bool)
@@ -401,7 +402,7 @@ func implementationEvidence(comments []skilldist.ReviewComment) []skilldist.Revi
 		}
 		var metadata implementationMetadata
 		if json.Unmarshal([]byte(strings.TrimSuffix(body, "\n-->")), &metadata) == nil && metadata.Transition != nil {
-			decisions[metadata.Transition.DecisionDigest] = true
+			decisions[metadata.Transition.DecisionDigest] = !metadata.Transition.Completed
 		}
 	}
 	return evidence
@@ -655,10 +656,8 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository gith
 			if item.Submission != nil && !strings.HasPrefix(comment.Body, "<!-- skl.implement/v1\n") {
 				item.Submission.Comments = append(item.Submission.Comments, comment)
 			}
-			// The operation identifies opaque prose before that prose is published.
-			if item.Transition != nil && fmt.Sprintf("%x", sha256.Sum256([]byte(comment.Body))) == item.Transition.DecisionDigest {
-				continue
-			}
+		}
+		for _, comment := range implementationEvidence(comments) {
 			if body, ok := strings.CutPrefix(comment.Body, "<!-- skl.implement/v1\n"); ok && strings.HasSuffix(body, "\n-->") {
 				if !trustedMetadata(comment) {
 					continue
