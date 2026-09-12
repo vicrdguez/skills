@@ -1298,3 +1298,21 @@ func TestCompletedImplementationSurvivesReceiptReadbackAndCleanupErrors(t *testi
 		})
 	}
 }
+
+func TestReworkMissingReviewedHeadRetainsRecoverableHistory(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "widget")
+	runGit(t, root, "rm", "-r", ".changes/widget")
+	runGit(t, root, "commit", "-m", "retire")
+	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	old := workflow.DispatchRound{ID: "historical", Lane: workflow.ImplementLane, Item: "7", Obligation: head, Directory: "skl-implement-old", Head: head, Outcome: workflow.AwaitingReview, Released: true}
+	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Rework, Submission: &workflow.Submission{ID: "11", Head: head}}}, rounds: map[workflow.WorkItemID][]workflow.DispatchRound{"7": {old}}}
+	got := implementCLI(t, root, b, "next")
+	if got.Status != "fix_required" || !b.work[0].Claimed || len(b.rounds["7"]) != 1 || b.rounds["7"][0] != old {
+		t.Fatalf("missing obligation poisoned history: %+v %+v", got, b.rounds)
+	}
+	got = implementCLI(t, root, b, "resume", "--item", "7", "--reviewed-head", head)
+	if got.Status != "work_available" || len(b.rounds["7"]) != 2 || b.rounds["7"][0] != old || b.rounds["7"][1].Obligation != head {
+		t.Fatalf("explicit recovery failed: %+v %+v", got, b.rounds)
+	}
+}

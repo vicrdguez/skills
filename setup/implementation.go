@@ -420,6 +420,9 @@ type implementationMetadata struct {
 }
 
 func (b *GitHubBackend) RecordDispatchRound(ctx context.Context, repository github.RepositoryID, round workflow.DispatchRound) error {
+	if round.ID == "" || round.Item == "" || round.Lane != workflow.ImplementLane && round.Lane != workflow.WatchdogLane || round.Directory == "" || round.Obligation == "" {
+		return workflow.Refuse("dispatch evidence has invalid or contradictory bindings")
+	}
 	number, err := githubIssueNumber(round.Item)
 	if err != nil {
 		return err
@@ -490,7 +493,7 @@ func (b *GitHubBackend) DispatchRounds(ctx context.Context, repository github.Re
 			continue
 		}
 		previous := rounds[index]
-		sameBinding := previous.ID == round.ID && previous.Lane == round.Lane && previous.Item == round.Item && previous.Submission == round.Submission && previous.Obligation == round.Obligation && previous.Directory == round.Directory
+		sameBinding := previous.ID == round.ID && previous.Lane == round.Lane && previous.Item == round.Item && previous.Submission == round.Submission && previous.Obligation == round.Obligation && previous.Directory == round.Directory && previous.Synchronization == round.Synchronization
 		if !sameBinding || previous.Outcome != "" && previous != round || previous.Outcome == "" && round.Outcome == "" && previous != round {
 			return nil, workflow.Refuse("conflicting trusted dispatch evidence")
 		}

@@ -24,15 +24,16 @@ const (
 )
 
 type DispatchRound struct {
-	ID         string       `json:"id"`
-	Lane       DispatchLane `json:"lane"`
-	Item       WorkItemID   `json:"item"`
-	Submission SubmissionID `json:"submission,omitempty"`
-	Obligation string       `json:"obligation"`
-	Directory  string       `json:"directory"`
-	Outcome    State        `json:"outcome,omitempty"`
-	Head       string       `json:"head,omitempty"`
-	Released   bool         `json:"released,omitempty"`
+	ID              string       `json:"id"`
+	Lane            DispatchLane `json:"lane"`
+	Item            WorkItemID   `json:"item"`
+	Submission      SubmissionID `json:"submission,omitempty"`
+	Obligation      string       `json:"obligation"`
+	Synchronization bool         `json:"synchronization,omitempty"`
+	Directory       string       `json:"directory"`
+	Outcome         State        `json:"outcome,omitempty"`
+	Head            string       `json:"head,omitempty"`
+	Released        bool         `json:"released,omitempty"`
 }
 
 type DispatchBackend interface {
@@ -130,7 +131,7 @@ func dispatchBinding(item ImplementationItem, lane DispatchLane) (SubmissionID, 
 		submission = item.Submission.ID
 	}
 	obligation := item.TargetSnapshot
-	if lane == ImplementLane && item.State == Rework && item.Submission != nil {
+	if lane == ImplementLane && item.State == Rework && !item.Synchronization && item.Submission != nil {
 		obligation = item.Submission.PreviousReviewedHead
 	} else if lane == WatchdogLane && item.Submission != nil {
 		obligation = item.Submission.ReviewedHead
@@ -143,7 +144,7 @@ func dispatchRound(item ImplementationItem, lane DispatchLane, directory string)
 	if err != nil {
 		return DispatchRound{}, err
 	}
-	round := DispatchRound{ID: id, Lane: lane, Item: item.ID, Directory: filepath.Base(directory)}
+	round := DispatchRound{ID: id, Lane: lane, Item: item.ID, Directory: filepath.Base(directory), Synchronization: lane == ImplementLane && item.Synchronization}
 	round.Submission, round.Obligation = dispatchBinding(item, lane)
 	return round, nil
 }
@@ -187,6 +188,9 @@ func RemoveMarkerOnlyResultDirectory(directory, marker string) error {
 }
 
 func prepareDispatch(ctx context.Context, repository github.RepositoryID, item ImplementationItem, lane DispatchLane, resume bool, backend DispatchBackend) (DispatchRound, string, error) {
+	if _, obligation := dispatchBinding(item, lane); obligation == "" {
+		return DispatchRound{}, "", Refuse("fixed dispatch obligation is missing; inspect the Work Item and resume --reviewed-head <full-sha> for finding-driven Rework")
+	}
 	rounds, err := backend.DispatchRounds(ctx, repository, item.ID)
 	if err != nil {
 		return DispatchRound{}, "", err
@@ -316,7 +320,10 @@ func completeDispatch(ctx context.Context, repository github.RepositoryID, item 
 	if lane == WatchdogLane && item.Submission != nil {
 		submission, obligation = item.Submission.ID, item.Submission.ReviewedHead
 	} else if lane == ImplementLane && active.Submission != "" && item.Submission != nil {
-		submission, obligation = item.Submission.ID, item.Submission.PreviousReviewedHead
+		submission = item.Submission.ID
+		if !active.Synchronization {
+			obligation = item.Submission.PreviousReviewedHead
+		}
 	}
 	if active.Item != item.ID || active.Submission != submission || active.Obligation != obligation {
 		return Refuse("active dispatch binding changed before completion proof")

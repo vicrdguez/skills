@@ -139,6 +139,17 @@ func TestWatchdogConflictPinsSynchronizationReworkWithoutBounce(t *testing.T) {
 	if start.Packet == nil || start.Packet.Facts.Implementation.TargetSnapshot != target || !strings.Contains(start.Packet.Markdown(), "git merge "+target) || strings.Contains(start.Packet.Markdown(), "Finding-driven Rework: sync nothing") {
 		t.Fatalf("synchronization packet: %#v", start)
 	}
+	if round := b.rounds["7"][1]; round.Obligation != target || !round.Synchronization {
+		t.Fatalf("sync bound reviewed head instead of target: %+v", round)
+	}
+	runGit(t, root, "merge", target, "--no-edit")
+	b.remoteHeads["widget"] = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	body := filepath.Join(start.Packet.Facts.Implementation.ResultDirectory, "submission.md")
+	os.WriteFile(body, []byte("sync fixes"), 0600)
+	b.afterPublish = func() { b.work[0].Synchronization = false }
+	if got := implementCLI(t, root, b, "submit", "--item", "7", "--body", body); got.Status != "awaiting_review" {
+		t.Fatalf("sync completion: %+v", got)
+	}
 	reference := strings.Trim(strings.Fields(dispatch.ContinuationCommand)[4], "'")
 	continued := watchdogCLI(t, root, b, "next", "--after", reference)
 	if continued.PreviousHandoff == nil || continued.PreviousHandoff.Outcome != workflow.Rework {
