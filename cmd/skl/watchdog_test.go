@@ -248,6 +248,9 @@ func (b *implementationMemory) PublishReview(_ context.Context, _ github.Reposit
 	for i := range b.work {
 		if b.work[i].ID == item.ID {
 			for _, c := range comments {
+				if c.CreatedAt == "" {
+					c.CreatedAt = b.reviewTime()
+				}
 				if !slices.Contains(b.work[i].Submission.Comments, c) {
 					b.work[i].Submission.Comments = append(b.work[i].Submission.Comments, c)
 				}
@@ -275,6 +278,7 @@ func (b *implementationMemory) CompleteReview(_ context.Context, _ github.Reposi
 			b.work[i].Submission.State = target
 			b.work[i].Submission.Claimed = false
 			b.work[i].Submission.PendingReview = ""
+			b.work[i].Submission.ClaimAcquiredAt = ""
 		}
 	}
 	if b.afterCompletion != nil {

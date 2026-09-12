@@ -29,6 +29,12 @@ type implementationMemory struct {
 	failTransition   bool
 	beforeTransition func()
 	afterCompletion  func()
+	reviewClock      int
+}
+
+func (b *implementationMemory) reviewTime() string {
+	b.reviewClock++
+	return fmt.Sprintf("2026-01-01T00:00:%02dZ", b.reviewClock)
 }
 
 func (b *implementationMemory) RecordImplementationTransition(_ context.Context, _ github.RepositoryID, item workflow.ImplementationItem, transition workflow.ImplementationTransition) error {
@@ -184,6 +190,9 @@ func (b *implementationMemory) ClaimImplementation(_ context.Context, _ github.R
 				b.work[i].Submission = item.Submission
 			}
 			b.work[i].Claimed = true
+			if b.work[i].Submission != nil {
+				b.work[i].Submission.ClaimAcquiredAt = b.reviewTime()
+			}
 		}
 	}
 	return nil
