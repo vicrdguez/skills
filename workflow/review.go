@@ -197,7 +197,7 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	}
 	receipt, receiptCount := matchingSummaryReceipt(*item.Submission, comments[0])
 	evidenceMatches := reviewEvidenceMatches(item, comments, finalBody)
-	if retry && item.State == AwaitingReview {
+	if retry && item.Claimed && submission.ClaimAcquiredAt != "" {
 		var unambiguous bool
 		receipt, receiptCount, unambiguous = matchingSummaryReceiptForClaim(*item.Submission, comments[0], submission.ClaimAcquiredAt)
 		evidenceMatches = unambiguous && reviewEvidenceMatchesForClaim(item, comments, finalBody, submission.ClaimAcquiredAt)
@@ -248,8 +248,12 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 		if item.Claimed && item.Submission.PendingReview == "" {
 			return ImplementationOutcome{}, Refuse("target-only Claim cannot prove it belongs to this review handoff; inspect before replaying the original fixed-number command")
 		}
+		completedEvidence := reviewEvidenceMatches(item, comments, finalBody)
+		if item.Claimed && submission.ClaimAcquiredAt != "" {
+			completedEvidence = reviewEvidenceMatchesForClaim(item, comments, finalBody, submission.ClaimAcquiredAt)
+		}
 		compatible := verdict == "rework" && (item.State == Rework || item.State == NeedsHuman) || verdict == "needs-human" && item.State == NeedsHuman || verdict == "pass" && (item.State == ReadyForMerge || item.State == Rework && item.Synchronization)
-		compatible = compatible && reviewEvidenceMatches(item, comments, finalBody)
+		compatible = compatible && completedEvidence
 		if !compatible {
 			return ImplementationOutcome{}, Refuse("completed or partial review differs from supplied verdict; restore its exact Result Documents")
 		}

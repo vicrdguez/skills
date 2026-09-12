@@ -161,7 +161,7 @@ func (b *GitHubBackend) ReviewSubmission(ctx context.Context, repository github.
 		result.PendingReview = map[string]workflow.State{"rework": workflow.Rework, "done": workflow.ReadyForMerge, "needs-human": workflow.NeedsHuman}[latest]
 		result.State = result.PendingReview
 	}
-	if current["review"] && claimed && states == 1 && labels["wip"] && !claimAmbiguous {
+	if current["review"] && claimed && labels["wip"] && !claimAmbiguous {
 		result.ClaimAcquiredAt = claimAcquiredAt
 	}
 	if (states == 2 && !current["review"] || states == 3 && current["review"] && claimed && labels["wip"]) && current["review"] == labels["review"] && current["done"] && current["rework"] && current["sync"] && labels["done"] && labels["rework"] && labels["sync"] && synchronizing {

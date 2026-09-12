@@ -1542,8 +1542,8 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 		summary := filepath.Join(dir, "summary.md")
 		_ = os.WriteFile(summary, []byte("round 1"), 0600)
 		args := []string{"watchdog", "submit", "--item", "7", "--review-number", "1", "--reviewed-head", f.head, "--verdict", "rework", "--summary", summary}
-		f.forge.failHandoff = true
-		if _, err := f.runResult(f.worktree, args...); err == nil || strings.TrimSpace(readFile(t, f.checkpoint)) != "1:"+f.head || len(f.forge.summaries) != 2 || !slices.Equal(f.forge.labels, []string{"review", "wip"}) {
+		f.forge.failDelete = "review"
+		if _, err := f.runResult(f.worktree, args...); err == nil || strings.TrimSpace(readFile(t, f.checkpoint)) != "1:"+f.head || len(f.forge.summaries) != 2 || len(f.forge.labels) != 3 || !slices.Contains(f.forge.labels, "review") || !slices.Contains(f.forge.labels, "rework") || !slices.Contains(f.forge.labels, "wip") {
 			t.Fatalf("fresh retained-worktree budget did not record interrupted round 1: %v", err)
 		}
 		if got := f.run(t, f.worktree, args...); got.Status != "rework" || strings.TrimSpace(readFile(t, f.checkpoint)) != "1:"+f.head || len(f.forge.summaries) != 2 {
