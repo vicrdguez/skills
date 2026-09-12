@@ -38,7 +38,9 @@ func watchdogCommands(newBackend backendFactory, stdout io.Writer) []*cli.Comman
 				}
 				outcome, err = workflow.SubmitWatchdog(c.Context, repository.Root, repository.Remote, workItemID(c.Int("item")), c.String("reviewed-head"), c.String("head"), c.String("verdict"), c.Path("summary"), c.Path("findings"), c.Path("body"), review)
 			} else {
-				outcome, err = workflow.StartWatchdog(c.Context, repository.Root, repository.Remote, workItemID(c.Int("item")), port)
+				outcome, err = nextWork(c.Context, c.Duration("wait"), c.Duration("poll"), func() (workflow.ImplementationOutcome, error) {
+					return workflow.StartWatchdog(c.Context, repository.Root, repository.Remote, workItemID(c.Int("item")), port)
+				})
 			}
 			if err != nil {
 				var violation *workflow.InvariantError
@@ -54,5 +56,6 @@ func watchdogCommands(newBackend backendFactory, stdout io.Writer) []*cli.Comman
 			return json.NewEncoder(stdout).Encode(output)
 		}})
 	}
+	commands[0].Flags = append(commands[0].Flags, waitFlags()...)
 	return commands
 }

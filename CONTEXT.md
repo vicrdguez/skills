@@ -35,7 +35,7 @@ The deterministic operation that validates a Consumer Repository, installs the m
 _Avoid_: Agent skill, workflow definition
 
 **Adoption**:
-Recognition of an existing Work Item created by the former prose-driven workflow without rewriting it first. Unambiguous projections continue normally; contradictions enter **Needs Human**.
+Explicit acceptance of an existing **Work Item** into the current **Workflow** without rewriting its implementation history. Missing or ambiguous contract evidence requires human resolution.
 _Avoid_: Bulk migration, new proposal
 
 **Workflow Definition Repository**:
@@ -87,7 +87,7 @@ One implementation slice whose identity remains stable from publication through 
 _Avoid_: Agent session, issue, pull request
 
 **Submission**:
-The proposed code changes attached to one **Work Item** for independent review and human merge.
+The proposed code changes explicitly attached to exactly one **Work Item** for independent review and human merge. A Work Item has at most one Submission; ownership is independent of names.
 _Avoid_: Work item, claim
 
 **Dependency**:
@@ -103,28 +103,20 @@ The optional durable identity of a future exclusive **Claim**. V1 does not requi
 _Avoid_: V1 `wip` projection, operation identifier
 
 **Transition Operation**:
-A durable attempt to move workflow state toward one valid target state. Repeating the same operation reconciles completed steps and safely resumes any remaining work.
+An attempt to move a **Work Item** toward a valid target **Workflow State**. Recovery observes already completed effects and stops for explicit inspection when safe continuation cannot be established.
 _Avoid_: Shell command, rollback transaction
 
 **Work Start**:
 A **Transition Operation** that selects and claims one eligible **Work Item** and returns an **Instruction Packet** describing the existing Git preparation the Agent Worker must perform.
 _Avoid_: Read-only queue lookup, instruction rendering
 
-**Target Snapshot**:
-The immutable target-branch commit observed when implementation or Synchronization Rework starts. The resulting Submission must contain it; later movement of the target branch does not silently change the active obligation.
-_Avoid_: Latest target branch, artifact baseline
-
 **Ready for Merge**:
-The **Workflow State** in which review has passed and only the human-owned merge remains. It is distinct from **Merged**.
+The **Workflow State** in which **Watchdog Review** has passed and integration and merge remain human-owned. It is distinct from **Merged** and does not assert that integration is conflict-free.
 _Avoid_: Done, merged
 
 **Needs Human**:
-The paused **Workflow State** for a decision automation cannot make. It retains the state to resume and any existing **Submission** so a human resolution returns it to the correct queue.
+The paused **Workflow State** for a decision automation cannot make. Any existing **Submission** remains attached while the human decides how the Workflow should continue.
 _Avoid_: Failed, abandoned
-
-**Synchronization Rework**:
-Repair required when a Submission no longer merges cleanly into its target branch. It requires fresh validation and Watchdog Review but does not consume the review-failure bounce allowance.
-_Avoid_: Review failure, human merge
 
 **Merged**:
 The terminal **Workflow State** reached when the accepted code change has actually entered its target branch.
@@ -135,7 +127,7 @@ The terminal **Workflow State** of an abandoned Work Item whose replacement requ
 _Avoid_: Needs human, merged
 
 **Merge Authority**:
-The human who decides and performs the merge outside the **Workflow Engine** after a change reaches **Ready for Merge**.
+The human who decides how to integrate an approved **Submission**, resolves integration conflicts, and performs the merge outside the **Workflow Engine**.
 _Avoid_: Reviewer, agent worker
 
 **Manual Verification**:
@@ -159,7 +151,7 @@ The immutable Git snapshot containing the initially accepted **Implementation Le
 _Avoid_: Review head, mutable plan
 
 **Artifact Completion**:
-The immutable Git snapshot recording permitted completion ticks immediately before the **Implementation Ledger** is removed.
+The immutable Git snapshot of the finished **Implementation Ledger**, before its removal. Its paths, modes, and contents match the **Artifact Baseline** except for permitted completion ticks.
 _Avoid_: Review head, artifact archive
 
 **Full Gate**:
@@ -177,6 +169,14 @@ _Avoid_: Validation gate, watchdog review
 **Watchdog Review**:
 Independent agent judgment performed in a fresh Worker Session after submission. It may change workflow disposition and may add only permitted **Debt Markers** to the Submission.
 _Avoid_: Audit, validation gate
+
+**Review Checkpoint**:
+A **Workflow Engine**-owned record of a **Work Item**'s **Review Count** and the revision examined by its latest completed **Watchdog Review**. It supports repeat-review scope and review-limit decisions without replacing findings or requiring the Agent Worker to maintain it.
+_Avoid_: Claim, in-progress review, review verdict
+
+**Review Count**:
+The number of completed **Watchdog Reviews** recorded in a **Work Item**'s retained **Review Checkpoint**, including reviews ending in **Needs Human**, but excluding interrupted attempts and repeated publication of the same review. Its limit restricts further automatic **Rework**, never approval of a passing review; losing the checkpoint starts a fresh count rather than preserving a lifetime cap.
+_Avoid_: Finding count, submission retry count, rework bounce count
 
 **Review Finding**:
 A watchdog observation with a stable identity, disposition, evidence, review round, and reviewed commit. Findings form the human-readable ledger that drives rework and human decisions.
@@ -215,6 +215,14 @@ _Avoid_: Local Git helper, GitHub cache
 > **Developer:** GitHub shows the `done` label. Is the Work Item Merged?
 >
 > **Domain expert:** Not necessarily. That label is a Workflow Projection of Ready for Merge; Merged is a separate terminal Workflow State.
+>
+> **Developer:** Does a merge conflict invalidate a successful Watchdog Review?
+>
+> **Domain expert:** No. Review approval and integration are separate decisions; the Merge Authority handles integration and merge.
+>
+> **Developer:** What does an unavailable previously reviewed revision mean for review scope?
+>
+> **Domain expert:** The worker performs a full review instead of focusing on changes since that revision and retains an available Review Count; a lost checkpoint starts at zero.
 >
 > **Developer:** Can I start a dependent Work Item because its blocker passed review?
 >
