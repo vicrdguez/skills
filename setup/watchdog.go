@@ -58,6 +58,10 @@ func (b *GitHubBackend) CompleteReview(ctx context.Context, item workflow.Implem
 	return b.implementationLabelMutation(ctx, repository, submissionNumber, nil, append(remove, "wip"), guard)
 }
 
+func (b *GitHubBackend) AnchorSide(side string) bool {
+	return side == "LEFT" || side == "RIGHT"
+}
+
 func (b *GitHubBackend) ReviewSubmission(ctx context.Context, id workflow.SubmissionID) (workflow.Submission, error) {
 	if err := b.requireRepository(); err != nil {
 		return workflow.Submission{}, err

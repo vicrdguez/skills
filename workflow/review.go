@@ -17,6 +17,8 @@ type ReviewBackend interface {
 	ReviewSubmission(context.Context, SubmissionID) (Submission, error)
 	// SubmissionBodyMatches compares an observation with the body publication would produce.
 	SubmissionBodyMatches(id WorkItemID, actual, supplied string) (bool, error)
+	// AnchorSide reports whether a supplied inline-anchor side is natively publishable.
+	AnchorSide(side string) bool
 	PublishReview(context.Context, ImplementationItem, []skilldist.ReviewComment, func() error) error
 	CompleteReview(context.Context, ImplementationItem, State, func() error) error
 }
@@ -145,7 +147,7 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 			return ImplementationOutcome{}, err
 		}
 		for _, a := range anchors {
-			if a.Path == "" || path.IsAbs(a.Path) || path.Clean(a.Path) != a.Path || strings.HasPrefix(a.Path, "../") || a.Line <= 0 || a.Side != "LEFT" && a.Side != "RIGHT" {
+			if a.Path == "" || path.IsAbs(a.Path) || path.Clean(a.Path) != a.Path || strings.HasPrefix(a.Path, "../") || a.Line <= 0 || !backend.AnchorSide(a.Side) {
 				return ImplementationOutcome{}, fmt.Errorf("invalid structured inline anchor")
 			}
 			body, err := os.ReadFile(a.BodyFile)

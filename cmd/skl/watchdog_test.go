@@ -148,6 +148,35 @@ func TestWatchdogBouncesFirstFailureWithOpaqueFindings(t *testing.T) {
 	}
 }
 
+func TestWatchdogRejectsUnpublishableAnchorSide(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "widget")
+	completeAndRetireSlice(t, root, "widget")
+	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Claimed: true, Submission: &workflow.Submission{ID: "11", Head: head, ReviewedHead: head}}}, remoteHeads: map[string]string{"widget": head}}
+	dir := t.TempDir()
+	summary := filepath.Join(dir, "summary.md")
+	inline := filepath.Join(dir, "inline.md")
+	anchors := filepath.Join(dir, "findings.json")
+	for path, body := range map[string]string{summary: "W1 BLOCK", inline: "opaque inline", anchors: fmt.Sprintf(`[{"path":"main.go","line":12,"side":"MIDDLE","body_file":%q}]`, inline)} {
+		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var output bytes.Buffer
+	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return b, nil }, bytes.NewReader(nil), &output, &output)
+	err := app.Run([]string{"skl", "watchdog", "submit", "--item", "7", "--reviewed-head", head, "--verdict", "rework", "--summary", summary, "--findings", anchors, "--repo", root})
+	if err == nil || !strings.Contains(err.Error(), "invalid structured inline anchor") {
+		t.Fatalf("unpublishable anchor side accepted: %v", err)
+	}
+	if !b.work[0].Claimed || len(b.work[0].Submission.Comments) != 0 {
+		t.Fatalf("anchor refusal mutated review state: %#v", b.work[0])
+	}
+	if _, err := os.Stat(inline); err != nil {
+		t.Fatal("anchor refusal removed finding prose")
+	}
+}
+
 func TestWatchdogPausesSecondFailure(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
@@ -359,6 +388,10 @@ func (b *implementationMemory) SubmissionBodyMatches(id workflow.WorkItemID, act
 		return (&setup.GitHubBackend{}).SubmissionBodyMatches(id, actual, supplied)
 	}
 	return actual == supplied, nil
+}
+
+func (b *implementationMemory) AnchorSide(side string) bool {
+	return side == "LEFT" || side == "RIGHT"
 }
 
 func (b *implementationMemory) ReviewSubmission(_ context.Context, id workflow.SubmissionID) (workflow.Submission, error) {
