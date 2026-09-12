@@ -700,7 +700,7 @@ func TestGitHubIdenticalDecisionAndReceiptRemainDistinctOccurrences(t *testing.T
 
 func TestGitHubDispatchRoundsRefuseMalformedAndWrongItemHistory(t *testing.T) {
 	for _, lane := range []workflow.DispatchLane{workflow.ImplementLane, workflow.WatchdogLane} {
-		for _, defect := range []string{"invalid JSON", "missing ID", "missing item", "unknown lane", "missing directory", "missing obligation", "wrong item"} {
+		for _, defect := range []string{"truncated envelope", "invalid JSON", "missing ID", "missing item", "unknown lane", "missing directory", "missing obligation", "wrong item"} {
 			t.Run(string(lane)+"/"+defect, func(t *testing.T) {
 				round := workflow.DispatchRound{ID: "round", Lane: lane, Item: "7", Submission: "11", Obligation: "head", Directory: "skl-result-round", Head: "head", Released: true, Outcome: workflow.NeedsHuman}
 				valid, _ := json.Marshal(implementationMetadata{Round: &round})
@@ -724,6 +724,9 @@ func TestGitHubDispatchRoundsRefuseMalformedAndWrongItemHistory(t *testing.T) {
 					payload = []byte(`{"round":`)
 				}
 				comments := []map[string]string{{"body": "<!-- skl.implement/v1\n" + string(valid) + "\n-->", "author_association": "OWNER"}, {"body": "<!-- skl.implement/v1\n" + string(payload) + "\n-->", "author_association": "OWNER"}}
+				if defect == "truncated envelope" {
+					comments[1]["body"] = strings.TrimSuffix(comments[1]["body"], "\n-->")
+				}
 				reads, writes := 0, 0
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					if r.Method != http.MethodGet {

@@ -481,8 +481,11 @@ func dispatchRoundsFromComments(comments []skilldist.ReviewComment, item workflo
 	var rounds []workflow.DispatchRound
 	for _, comment := range implementationEvidence(comments) {
 		body, ok := strings.CutPrefix(comment.Body, "<!-- skl.implement/v1\n")
-		if !ok || !strings.HasSuffix(body, "\n-->") || !trustedMetadata(comment) {
+		if !ok {
 			continue
+		}
+		if !strings.HasSuffix(body, "\n-->") {
+			return nil, workflow.Refuse("invalid trusted dispatch metadata")
 		}
 		var metadata implementationMetadata
 		if err := json.Unmarshal([]byte(strings.TrimSuffix(body, "\n-->")), &metadata); err != nil {
