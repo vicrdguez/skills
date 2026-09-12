@@ -80,6 +80,10 @@ func StartWatchdog(ctx context.Context, root, remote string, id WorkItemID, back
 				if observed.Head != current.Submission.Head {
 					return ImplementationOutcome{}, Refuse("Submission changed during packet construction")
 				}
+				summaries, unambiguous := reviewSummariesForClaim(current.Submission.Comments, observed.ClaimAcquiredAt)
+				if !unambiguous || len(summaries) != 0 {
+					return ImplementationOutcome{Status: "fix_required", Reason: "review publication already started under this Claim; replay the original fixed-number watchdog submit command and Result Documents"}, nil
+				}
 			}
 			main, err := primaryWorktree(root)
 			if err != nil {

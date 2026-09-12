@@ -36,6 +36,7 @@ type reviewForge struct {
 	failAfterWrite bool
 	failHandoff    bool
 	failInline     bool
+	failInlinePost bool
 	failBody       bool
 	failReadback   bool
 	duplicateRead  bool
@@ -155,6 +156,12 @@ func (f *reviewForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPost && path == "/pulls/11/comments":
 		var value map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&value)
+		if f.failInlinePost {
+			f.failInlinePost = false
+			http.Error(w, "inline unavailable", http.StatusInternalServerError)
+			return
+		}
+		value["created_at"] = f.timestamp()
 		f.inlines = append(f.inlines, value)
 		if f.failInline {
 			f.failInline = false
@@ -700,15 +707,34 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 			f.start(t, f.root)
 			f.forge.failPostRead = true
 			dir := t.TempDir()
-			summary := filepath.Join(dir, "summary.md")
+			summary, body, findings := filepath.Join(dir, "summary.md"), filepath.Join(dir, "inline.md"), filepath.Join(dir, "findings.json")
 			_ = os.WriteFile(summary, []byte("round 1"), 0600)
-			_, err := f.runResult(f.worktree, "watchdog", "submit", "--item", "7", "--review-number", "1", "--reviewed-head", f.head, "--verdict", "rework", "--summary", summary)
-			if err == nil || fileExists(f.checkpoint) || len(f.forge.summaries) != 1 {
+			_ = os.WriteFile(body, []byte("finding"), 0600)
+			_ = os.WriteFile(findings, []byte(fmt.Sprintf(`[{"path":"README.md","line":1,"side":"RIGHT","body_file":%q}]`, body)), 0600)
+			args := []string{"watchdog", "submit", "--item", "7", "--review-number", "1", "--reviewed-head", f.head, "--verdict", "rework", "--summary", summary, "--findings", findings}
+			_, err := f.runResult(f.worktree, args...)
+			if err == nil || fileExists(f.checkpoint) || len(f.forge.summaries) != 1 || len(f.forge.inlines) != 0 {
 				t.Fatalf("readback failure ordering: %v", err)
 			}
-			f.submit(t, 1, f.head, "rework")
-			if len(f.forge.summaries) != 1 {
-				t.Fatal("readback repair duplicated summary")
+			if got := f.run(t, f.worktree, args...); got.Status != "rework" || len(f.forge.summaries) != 1 || len(f.forge.inlines) != 1 {
+				t.Fatalf("readback repair did not finish missing inline: %#v", got)
+			}
+		})
+		t.Run("inline write unapplied", func(t *testing.T) {
+			f := newReviewFixture(t)
+			f.start(t, f.root)
+			f.forge.failInlinePost = true
+			dir := t.TempDir()
+			summary, body, findings := filepath.Join(dir, "summary.md"), filepath.Join(dir, "inline.md"), filepath.Join(dir, "findings.json")
+			_ = os.WriteFile(summary, []byte("round 1"), 0600)
+			_ = os.WriteFile(body, []byte("finding"), 0600)
+			_ = os.WriteFile(findings, []byte(fmt.Sprintf(`[{"path":"README.md","line":1,"side":"RIGHT","body_file":%q}]`, body)), 0600)
+			args := []string{"watchdog", "submit", "--item", "7", "--review-number", "1", "--reviewed-head", f.head, "--verdict", "rework", "--summary", summary, "--findings", findings}
+			if _, err := f.runResult(f.worktree, args...); err == nil || fileExists(f.checkpoint) || len(f.forge.summaries) != 1 || len(f.forge.inlines) != 0 {
+				t.Fatalf("unapplied inline advanced review: %v", err)
+			}
+			if got := f.run(t, f.worktree, args...); got.Status != "rework" || len(f.forge.summaries) != 1 || len(f.forge.inlines) != 1 {
+				t.Fatalf("unapplied inline retry: %#v", got)
 			}
 		})
 		t.Run("inline response lost", func(t *testing.T) {
@@ -752,7 +778,7 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 			if got := f.run(t, f.worktree, args...); got.Status != "ready_for_merge" {
 				t.Fatalf("exact retry: %#v", got)
 			}
-			if len(f.forge.summaries) != 1 || f.forge.summaries[0]["body"] != string(summaryBytes) || f.forge.summaries[0]["commit_id"] != f.head || f.forge.summaries[0]["state"] != "APPROVED" {
+			if len(f.forge.summaries) != 1 || reviewSummaryText(t, f.forge.summaries[0]) != string(summaryBytes) || f.forge.summaries[0]["commit_id"] != f.head || f.forge.summaries[0]["state"] != "COMMENTED" || f.forge.summaries[0]["event"] != "COMMENT" {
 				t.Fatalf("summary evidence = %#v", f.forge.summaries)
 			}
 			if len(f.forge.inlines) != 1 || f.forge.inlines[0]["body"] != string(inlineBytes) || f.forge.inlines[0]["commit_id"] != f.head || f.forge.inlines[0]["path"] != "README.md" || f.forge.inlines[0]["line"] != float64(1) || f.forge.inlines[0]["side"] != "RIGHT" {
@@ -874,11 +900,22 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 					if err == nil || strings.TrimSpace(readFile(t, f.checkpoint)) != strconv.FormatUint(round, 10)+":"+f.head {
 						t.Fatalf("checkpoint ordering: %v", err)
 					}
+					if tc.name == "after checkpoint before destination publication" {
+						resumed := f.run(t, f.root, "watchdog", "resume", "--item", "7")
+						if resumed.Status != "fix_required" || !strings.Contains(resumed.Reason, "original fixed-number") {
+							t.Fatalf("resume authorized another round: %#v", resumed)
+						}
+						checkpoint, labels, summaries := checkpointSnapshot(f.checkpoint), append([]string(nil), f.forge.labels...), len(f.forge.summaries)
+						if next := f.submit(t, round+1, f.head, "rework"); next.Status != "fix_required" {
+							t.Fatalf("direct submit authorized another round: %#v", next)
+						}
+						assertReviewUnchanged(t, f, checkpoint, labels, summaries, 0, "")
+					}
 					wantStatus, wantLabel := "rework", "rework"
 					if round == 2 {
 						wantStatus, wantLabel = "needs_human", "needs-human"
 					}
-					if retry := f.run(t, f.worktree, args...); retry.Status != wantStatus || len(f.forge.summaries) != int(round) || f.forge.summaries[round-1]["body"] != body || !slices.Equal(f.forge.labels, []string{wantLabel}) {
+					if retry := f.run(t, f.worktree, args...); retry.Status != wantStatus || len(f.forge.summaries) != int(round) || reviewSummaryText(t, f.forge.summaries[round-1]) != body || !slices.Equal(f.forge.labels, []string{wantLabel}) {
 						t.Fatalf("fixed retry: %#v labels=%v", retry, f.forge.labels)
 					}
 				})
@@ -1039,7 +1076,7 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 			f.forge.inlines = []map[string]any{{"body": "duplicate finding", "commit_id": f.head, "path": "README.md", "line": float64(1), "side": "RIGHT"}, {"body": "duplicate finding", "commit_id": f.head, "path": "README.md", "line": float64(1), "side": "RIGHT"}}
 			checkpoint, labels := checkpointSnapshot(f.checkpoint), append([]string(nil), f.forge.labels...)
 			got := f.run(t, f.worktree, "watchdog", "submit", "--item", "7", "--review-number", "2", "--reviewed-head", f.head, "--verdict", "rework", "--summary", summary, "--findings", findings)
-			if got.Status != "fix_required" || checkpointSnapshot(f.checkpoint) != checkpoint || !slices.Equal(f.forge.labels, labels) || len(f.forge.summaries) != 1 || f.forge.summaries[0]["body"] != "round 2" || len(f.forge.inlines) != 2 {
+			if got.Status != "fix_required" || checkpointSnapshot(f.checkpoint) != checkpoint || !slices.Equal(f.forge.labels, labels) || len(f.forge.summaries) != 1 || reviewSummaryText(t, f.forge.summaries[0]) != "round 2" || len(f.forge.inlines) != 2 {
 				t.Fatalf("duplicate inline advanced round: %#v checkpoint=%q labels=%v summaries=%#v", got, checkpointSnapshot(f.checkpoint), f.forge.labels, f.forge.summaries)
 			}
 		})
@@ -1521,6 +1558,15 @@ func checkpointSnapshot(path string) string {
 		return "<error: " + err.Error() + ">"
 	}
 	return string(data)
+}
+
+func reviewSummaryText(t *testing.T, summary map[string]any) string {
+	t.Helper()
+	_, body, ok := strings.Cut(summary["body"].(string), "\n-->\n")
+	if !ok {
+		t.Fatalf("summary lacks transport envelope: %#v", summary)
+	}
+	return body
 }
 
 func assertNoCheckpointTemps(t *testing.T, directory string) {

@@ -197,8 +197,14 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	if retry && (!evidenceMatches || receiptCount != 1) {
 		return ImplementationOutcome{}, Refuse("recorded review differs from the supplied summary, verdict, body, or inline evidence; replay the original fixed-number command and Result Documents")
 	}
-	if receiptCount > 0 && item.State == AwaitingReview && (receiptCount != 1 || !evidenceMatches || !claimPrecedesReceipt(submission.ClaimAcquiredAt, receipt.CreatedAt)) {
-		return ImplementationOutcome{}, Refuse("exact review receipt cannot be assigned unambiguously to the current Awaiting Review Claim; replay its original fixed-number command or submit a fresh next round")
+	if !retry && item.State == AwaitingReview {
+		currentSummaries, unambiguous := reviewSummariesForClaim(item.Submission.Comments, submission.ClaimAcquiredAt)
+		if !unambiguous || len(currentSummaries) > 0 && (len(currentSummaries) != 1 || !reviewCommentsMatch(currentSummaries[0], comments[0]) || !reviewEvidenceCompatible(item, comments, finalBody, submission.ClaimAcquiredAt)) {
+			return ImplementationOutcome{}, Refuse("review publication already started under this Claim; replay its original fixed-number command and Result Documents")
+		}
+		if receiptCount > 0 && (receiptCount != 1 || !claimPrecedesReceipt(submission.ClaimAcquiredAt, receipt.CreatedAt)) {
+			return ImplementationOutcome{}, Refuse("exact review receipt cannot be assigned unambiguously to the current Awaiting Review Claim; replay its original fixed-number command or submit a fresh next round")
+		}
 	}
 	target := Rework
 	if reviewNumber >= 2 {
@@ -322,7 +328,7 @@ func reviewEvidenceMatches(item ImplementationItem, wanted []skilldist.ReviewCom
 	for _, comment := range wanted {
 		matches := 0
 		for _, existing := range item.Submission.Comments {
-			if comment.Body == existing.Body && comment.Path == existing.Path && comment.Verdict == existing.Verdict && comment.Commit == existing.Commit && (comment.Path != "" || comment.ReviewNumber == existing.ReviewNumber) && (comment.Path == "" || comment.Line == existing.Line && comment.Side == existing.Side) {
+			if reviewCommentsMatch(comment, existing) {
 				matches++
 			}
 		}
@@ -331,6 +337,70 @@ func reviewEvidenceMatches(item ImplementationItem, wanted []skilldist.ReviewCom
 		}
 	}
 	return finalBody == "" || finalBody == item.Submission.Body
+}
+
+func reviewEvidenceCompatible(item ImplementationItem, wanted []skilldist.ReviewComment, finalBody, claimedAt string) bool {
+	if item.Submission == nil || finalBody != "" && finalBody != item.Submission.Body {
+		return false
+	}
+	claim, err := time.Parse(time.RFC3339Nano, claimedAt)
+	if err != nil {
+		return false
+	}
+	for _, existing := range item.Submission.Comments {
+		if existing.Path == "" || existing.Commit != wanted[0].Commit {
+			continue
+		}
+		created, err := time.Parse(time.RFC3339Nano, existing.CreatedAt)
+		if err != nil || created.Equal(claim) {
+			return false
+		}
+		if created.Before(claim) {
+			continue
+		}
+		matches := 0
+		for _, comment := range wanted[1:] {
+			if reviewCommentsMatch(comment, existing) {
+				matches++
+			}
+		}
+		if matches != 1 {
+			return false
+		}
+	}
+	return true
+}
+
+func reviewCommentsMatch(a, b skilldist.ReviewComment) bool {
+	return a.Body == b.Body && a.Path == b.Path && a.Verdict == b.Verdict && a.Commit == b.Commit && (a.Path != "" || a.ReviewNumber == b.ReviewNumber) && (a.Path == "" || a.Line == b.Line && a.Side == b.Side)
+}
+
+func reviewSummariesForClaim(comments []skilldist.ReviewComment, claimedAt string) ([]skilldist.ReviewComment, bool) {
+	hasSummary := false
+	for _, comment := range comments {
+		hasSummary = hasSummary || comment.Path == "" && comment.ReviewNumber != 0
+	}
+	if !hasSummary {
+		return nil, true
+	}
+	claim, err := time.Parse(time.RFC3339Nano, claimedAt)
+	if err != nil {
+		return nil, false
+	}
+	var current []skilldist.ReviewComment
+	for _, comment := range comments {
+		if comment.Path != "" || comment.ReviewNumber == 0 {
+			continue
+		}
+		created, err := time.Parse(time.RFC3339Nano, comment.CreatedAt)
+		if err != nil || created.Equal(claim) {
+			return nil, false
+		}
+		if claim.Before(created) {
+			current = append(current, comment)
+		}
+	}
+	return current, true
 }
 
 func matchingSummaryReceipt(submission Submission, wanted skilldist.ReviewComment) (skilldist.ReviewComment, int) {
