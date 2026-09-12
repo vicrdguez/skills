@@ -21,6 +21,7 @@ func ObserveStatus(ctx context.Context, backend ImplementationBackend) (StatusOu
 	}
 	outcome := StatusOutcome{Status: "observed", Items: items}
 	for i, item := range items {
+		conflictDiversion := false
 		if item.Problem != "" {
 			outcome.Items[i].State = NeedsHuman
 			continue
@@ -49,10 +50,14 @@ func ObserveStatus(ctx context.Context, backend ImplementationBackend) (StatusOu
 					submission := *item.Submission
 					submission.PendingReview = Rework
 					item.Submission = &submission
+					conflictDiversion = true
 				}
 			}
 		}
 		if item.Submission != nil && item.Submission.PendingReview != "" {
+			if !conflictDiversion {
+				return StatusOutcome{}, Refuse("partial review cannot prove its original submit context or evidence; retry its original fixed-number watchdog submit command")
+			}
 			port, ok := backend.(ReviewBackend)
 			if !ok {
 				return StatusOutcome{}, Refuse("backend cannot reconcile partial review")

@@ -27,11 +27,18 @@ func StartWatchdog(ctx context.Context, root, remote string, id WorkItemID, endp
 		if id != "" && item.ID != id {
 			continue
 		}
+		if id != "" && item.Submission.PendingReview != "" {
+			return ImplementationOutcome{Status: "fix_required", Reason: "partial review requires its original fixed-number watchdog submit command and Result Documents"}, nil
+		}
 		if item.State != AwaitingReview || id == "" && item.Claimed || id != "" && !item.Claimed || item.Problem != "" {
 			continue
 		}
-		if item.Submission.ReviewedHead != "" && item.Submission.ReviewedHead != item.Submission.Head && item.Claimed {
-			return ImplementationOutcome{Status: "fix_required", Reason: "Submission moved after Claim; restore the fixed reviewed head before resuming"}, nil
+		checkpoint, err := loadReviewCheckpoint(root, item.Branch)
+		if err != nil {
+			return ImplementationOutcome{}, Refuse(err.Error())
+		}
+		if checkpoint.Count == ^uint64(0) {
+			return ImplementationOutcome{}, Refuse("Review Count cannot be incremented; repair the checkpoint explicitly")
 		}
 		history, err := InspectLedger(root, item.Submission.Head, item.Branch, endpoints, RequireRetiredArtifacts)
 		if err != nil {
@@ -40,9 +47,6 @@ func StartWatchdog(ctx context.Context, root, remote string, id WorkItemID, endp
 		if history.Phase != "retired" || len(history.Violations) != 0 {
 			return ImplementationOutcome{Status: "fix_required", Reason: fmt.Sprint(history.Violations) + "; fetch and restore retired ledger history"}, nil
 		}
-		submission := *item.Submission
-		submission.ReviewedHead = submission.Head
-		item.Submission = &submission
 		if err := backend.ClaimImplementation(ctx, item); err != nil {
 			return ImplementationOutcome{}, err
 		}
@@ -51,10 +55,10 @@ func StartWatchdog(ctx context.Context, root, remote string, id WorkItemID, endp
 			return ImplementationOutcome{}, err
 		}
 		for _, current := range observed {
-			if current.ID != item.ID || !current.Claimed || current.State != AwaitingReview || current.Problem != "" || current.Submission == nil || current.Submission.Head != submission.Head || current.Submission.ReviewedHead != submission.Head {
+			if current.ID != item.ID || !current.Claimed || current.State != AwaitingReview || current.Problem != "" || current.Submission == nil || current.Submission.Head != item.Submission.Head {
 				continue
 			}
-			facts := skilldist.WatchdogFacts{Branch: item.Branch, ReviewedHead: submission.Head, ArtifactBaseline: history.Baseline, ArtifactCompletion: history.Completion, SuppliedArtifactBaseline: endpoints.Baseline, SuppliedArtifactCompletion: endpoints.Completion, AuditBody: submission.Body, Comments: submission.Comments}
+			facts := skilldist.WatchdogFacts{Branch: item.Branch, ReviewedHead: current.Submission.Head, ArtifactBaseline: history.Baseline, ArtifactCompletion: history.Completion, SuppliedArtifactBaseline: endpoints.Baseline, SuppliedArtifactCompletion: endpoints.Completion, AuditBody: current.Submission.Body, Comments: current.Submission.Comments, ReviewCount: checkpoint.Count, ReviewNumber: checkpoint.Count + 1, ReviewScope: skilldist.FullReview}
 			facts.BaselineFiles, err = endpointFiles(root, history.Baseline, item.Branch)
 			if err != nil {
 				return ImplementationOutcome{}, err
@@ -63,22 +67,28 @@ func StartWatchdog(ctx context.Context, root, remote string, id WorkItemID, endp
 			if err != nil {
 				return ImplementationOutcome{}, err
 			}
-			facts.Bounces = submission.Bounces
 			if port, ok := backend.(ReviewBackend); ok {
-				observed, err := port.ReviewSubmission(ctx, submission.ID)
+				observed, err := port.ReviewSubmission(ctx, current.Submission.ID)
 				if err != nil {
 					return ImplementationOutcome{}, err
 				}
-				if observed.Head != submission.Head {
+				if observed.Head != current.Submission.Head {
 					return ImplementationOutcome{}, Refuse("Submission changed during packet construction")
 				}
-				facts.Bounces = observed.Bounces
+				summaries, unambiguous := reviewSummariesForClaim(current.Submission.Comments, observed.ClaimAcquiredAt)
+				if !unambiguous || len(summaries) != 0 {
+					return ImplementationOutcome{Status: "fix_required", Reason: "review publication already started under this Claim; replay the original fixed-number watchdog submit command and Result Documents"}, nil
+				}
 			}
 			main, err := primaryWorktree(root)
 			if err != nil {
 				return ImplementationOutcome{}, err
 			}
 			facts.Worktree = filepath.Join(main, ".worktrees", item.Branch)
+			if checkpoint.Count > 0 && checkpoint.Head != "" && gitOK(facts.Worktree, "cat-file", "-e", checkpoint.Head+"^{commit}") == nil && gitOK(facts.Worktree, "merge-base", "--is-ancestor", checkpoint.Head, facts.ReviewedHead) == nil {
+				facts.ReviewScope = skilldist.IncrementalReview
+				facts.PreviousReviewedHead = checkpoint.Head
+			}
 			facts.Remote = remote
 			facts.ResultDirectory, err = os.MkdirTemp("", "skl-watchdog-")
 			if err != nil {

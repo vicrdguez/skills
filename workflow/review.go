@@ -8,6 +8,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	skilldist "github.com/vicrdguez/skills"
 )
@@ -21,8 +22,15 @@ type ReviewBackend interface {
 	CompleteReview(context.Context, ImplementationItem, State, func() error) error
 }
 
-func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, reviewed, head, verdict, summaryPath, findingsPath, bodyPath string, endpoints ArtifactEndpoints, backend ReviewBackend) (outcome ImplementationOutcome, err error) {
+func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, reviewNumber uint64, reviewed, head, verdict, summaryPath, findingsPath, bodyPath string, endpoints ArtifactEndpoints, backend ReviewBackend) (outcome ImplementationOutcome, err error) {
 	defer func() {
+		warn := func(message string) {
+			if outcome.Reason == "" {
+				outcome.Reason = message
+			} else {
+				outcome.Reason += "; " + message
+			}
+		}
 		if err != nil || outcome.Item == nil || outcome.Item.Claimed {
 			return
 		}
@@ -45,22 +53,24 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 		}
 		entries, e := os.ReadDir(dir)
 		if e != nil {
-			err = e
+			warn("handoff completed but private Result Document directory cleanup failed: " + e.Error())
 			return
 		}
 		for _, entry := range entries {
 			if !entry.Type().IsRegular() || entry.Name() != ".skl-result" && filepath.Ext(entry.Name()) != ".md" && filepath.Ext(entry.Name()) != ".json" {
-				err = fmt.Errorf("handoff completed but private directory has unexpected files; preserve it for explicit cleanup")
+				warn("handoff completed but private directory has unexpected files; preserve it for explicit cleanup")
 				return
 			}
 		}
-		err = os.RemoveAll(dir)
+		if e := os.RemoveAll(dir); e != nil {
+			warn("handoff completed but private Result Document directory cleanup failed: " + e.Error())
+		}
 	}()
 	if head == "" {
 		head = reviewed
 	}
-	if id == "" || reviewed == "" || verdict != "rework" && verdict != "pass" && verdict != "needs-human" || summaryPath == "" || verdict == "pass" && bodyPath == "" {
-		return ImplementationOutcome{}, fmt.Errorf("submit requires --item, --reviewed-head, --verdict rework|pass|needs-human and --summary; pass also requires --body")
+	if id == "" || reviewNumber == 0 || reviewed == "" || verdict != "rework" && verdict != "pass" && verdict != "needs-human" || summaryPath == "" || verdict == "pass" && bodyPath == "" {
+		return ImplementationOutcome{}, fmt.Errorf("submit requires --item, positive --review-number, --reviewed-head, --verdict rework|pass|needs-human and --summary; pass also requires --body")
 	}
 	items, err := loadImplementation(ctx, backend)
 	if err != nil {
@@ -75,8 +85,29 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 			item = candidate
 		}
 	}
-	if item.Problem != "" || item.Submission == nil || item.State == AwaitingReview && !item.Claimed || item.Submission.ReviewedHead != reviewed {
-		return ImplementationOutcome{}, Refuse("verdict requires the fixed Awaiting Review Claim")
+	if item.Problem != "" || item.Submission == nil || item.State == AwaitingReview && !item.Claimed {
+		return ImplementationOutcome{}, Refuse("verdict requires the selected review Claim or an exactly observable fixed-number retry")
+	}
+	checkpoint, err := loadReviewCheckpoint(root, item.Branch)
+	if err != nil {
+		return ImplementationOutcome{}, Refuse(err.Error())
+	}
+	if !checkpoint.validHead(reviewed) {
+		return ImplementationOutcome{}, Refuse(fmt.Sprintf("reviewed and final heads must be full %d-character hexadecimal object IDs", checkpoint.ObjectIDWidth))
+	}
+	if !checkpoint.validHead(head) {
+		return ImplementationOutcome{}, Refuse(fmt.Sprintf("reviewed and final heads must be full %d-character hexadecimal object IDs", checkpoint.ObjectIDWidth))
+	}
+	retry := reviewNumber == checkpoint.Count && checkpoint.Count > 0
+	completedDone := checkpoint.Count == 0 && item.State == ReadyForMerge && !item.Claimed
+	if retry && checkpoint.Head != reviewed {
+		return ImplementationOutcome{}, Refuse("review-number names a recorded round at a different reviewed head; inspect and replay the original fixed-number command")
+	}
+	if !retry && !completedDone && (checkpoint.Count == ^uint64(0) || reviewNumber != checkpoint.Count+1) {
+		return ImplementationOutcome{}, Refuse("review-number must equal the retained completed count or exactly the next round; inspect and replay the original fixed-number command")
+	}
+	if !retry && !completedDone && item.State != AwaitingReview {
+		return ImplementationOutcome{}, Refuse("a new review completion requires the selected Awaiting Review Claim")
 	}
 	if head != reviewed && (verdict != "pass" || gitOK(root, "merge-base", "--is-ancestor", reviewed, head) != nil) {
 		return ImplementationOutcome{}, Refuse("post-marker head must descend from the fixed reviewed head on pass")
@@ -129,7 +160,7 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
-	comments := []skilldist.ReviewComment{{Body: string(summary), Commit: head}}
+	comments := []skilldist.ReviewComment{{Body: string(summary), Commit: reviewed, Verdict: verdict, ReviewNumber: reviewNumber}}
 	if findingsPath != "" {
 		data, err := os.ReadFile(findingsPath)
 		if err != nil {
@@ -152,15 +183,52 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 			if err != nil {
 				return ImplementationOutcome{}, err
 			}
-			comments = append(comments, skilldist.ReviewComment{Body: string(body), Commit: head, Path: a.Path, Line: a.Line, Side: a.Side})
+			comments = append(comments, skilldist.ReviewComment{Body: string(body), Commit: reviewed, Path: a.Path, Line: a.Line, Side: a.Side})
 		}
+	}
+	finalBody := ""
+	if verdict == "pass" {
+		body, err := os.ReadFile(bodyPath)
+		if err != nil {
+			return ImplementationOutcome{}, err
+		}
+		finalBody = string(body)
 	}
 	submission, err := backend.ReviewSubmission(ctx, item.Submission.ID)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
+	for i := range comments {
+		comments[i].ClaimAcquiredAt = submission.ClaimAcquiredAt
+	}
+	receipt, receiptCount := matchingSummaryReceipt(*item.Submission, comments[0])
+	bodyMatches := true
+	if verdict == "pass" {
+		bodyMatches, err = backend.SubmissionBodyMatches(item.ID, item.Submission.Body, finalBody)
+		if err != nil {
+			return ImplementationOutcome{}, err
+		}
+	}
+	evidenceMatches := bodyMatches && reviewEvidenceMatches(item, comments)
+	if retry && item.Claimed && submission.ClaimAcquiredAt != "" {
+		var unambiguous bool
+		receipt, receiptCount, unambiguous = matchingSummaryReceiptForClaim(*item.Submission, comments[0], submission.ClaimAcquiredAt)
+		evidenceMatches = unambiguous && bodyMatches && reviewEvidenceMatchesForClaim(item, comments, submission.ClaimAcquiredAt)
+	}
+	if retry && (!evidenceMatches || receiptCount != 1) {
+		return ImplementationOutcome{}, Refuse("recorded review differs from the supplied summary, verdict, body, or inline evidence; replay the original fixed-number command and Result Documents")
+	}
+	if retry && item.State == AwaitingReview && !claimPrecedesReceipt(submission.ClaimAcquiredAt, receipt.CreatedAt) {
+		return ImplementationOutcome{}, Refuse("recorded review receipt does not belong to the current Awaiting Review Claim; replay the current round's original fixed-number command")
+	}
+	if !retry && item.State == AwaitingReview {
+		currentSummaries, unambiguous := reviewSummariesForClaim(item.Submission.Comments, submission.ClaimAcquiredAt)
+		if !unambiguous || len(currentSummaries) > 0 && (len(currentSummaries) != 1 || !reviewCommentsMatch(currentSummaries[0], comments[0]) || !reviewEvidenceCompatible(item, comments, submission.ClaimAcquiredAt)) {
+			return ImplementationOutcome{}, Refuse("review publication already started under this Claim; replay its original fixed-number command and Result Documents")
+		}
+	}
 	target := Rework
-	if submission.Bounces > 0 {
+	if reviewNumber >= 2 {
 		target = NeedsHuman
 		item.ResumeState = Rework
 	}
@@ -190,33 +258,26 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 		requireMergeable = target == ReadyForMerge
 	}
 	if item.State != AwaitingReview {
+		if item.Claimed && item.Submission.PendingReview == "" {
+			return ImplementationOutcome{}, Refuse("target-only Claim cannot prove it belongs to this review handoff; inspect before replaying the original fixed-number command")
+		}
+		completedEvidence := bodyMatches && reviewEvidenceMatches(item, comments)
+		if item.Claimed && submission.ClaimAcquiredAt != "" {
+			completedEvidence = bodyMatches && reviewEvidenceMatchesForClaim(item, comments, submission.ClaimAcquiredAt)
+		}
 		compatible := verdict == "rework" && (item.State == Rework || item.State == NeedsHuman) || verdict == "needs-human" && item.State == NeedsHuman || verdict == "pass" && (item.State == ReadyForMerge || item.State == Rework && item.Synchronization)
-		for _, wanted := range comments {
-			found := false
-			for _, existing := range item.Submission.Comments {
-				if wanted.Body == existing.Body && wanted.Path == existing.Path && (wanted.Path == "" || wanted.Commit == existing.Commit && wanted.Line == existing.Line && wanted.Side == existing.Side) {
-					found = true
-					break
-				}
-			}
-			compatible = compatible && found
-		}
-		if verdict == "pass" {
-			body, err := os.ReadFile(bodyPath)
-			if err != nil {
-				return ImplementationOutcome{}, err
-			}
-			matches, err := backend.SubmissionBodyMatches(item.ID, item.Submission.Body, string(body))
-			if err != nil {
-				return ImplementationOutcome{}, err
-			}
-			compatible = compatible && matches
-		}
+		compatible = compatible && completedEvidence
 		if !compatible {
 			return ImplementationOutcome{}, Refuse("completed or partial review differs from supplied verdict; restore its exact Result Documents")
 		}
+		if completedDone {
+			return ImplementationOutcome{Status: string(item.State), Item: &item, Head: head}, guard()
+		}
 		if verdict != "pass" {
 			target = item.State
+		}
+		if !retry {
+			return ImplementationOutcome{}, Refuse("completed review is missing its matching Review Checkpoint; inspect before changing the handoff")
 		}
 		if item.Claimed || target != item.State {
 			if err := backend.CompleteReview(ctx, item, target, guard); err != nil {
@@ -228,20 +289,21 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 			}
 			for _, c := range current {
 				if c.ID == item.ID && c.Problem == "" && !c.Claimed && c.State == target {
-					return ImplementationOutcome{Status: string(c.State), Item: &c, Head: head}, guard()
+					result := completedReviewOutcome(c, head, checkpoint)
+					return result, guard()
 				}
 			}
 			return ImplementationOutcome{}, Refuse("review handoff still incomplete; retain Claim and retry")
 		}
-		return ImplementationOutcome{Status: string(item.State), Item: &item, Head: head}, guard()
+		result := completedReviewOutcome(item, head, checkpoint)
+		return result, guard()
+	}
+	if err := backend.PublishReview(ctx, item, comments, guard); err != nil {
+		return ImplementationOutcome{}, err
 	}
 	if verdict == "pass" {
-		body, err := os.ReadFile(bodyPath)
-		if err != nil {
-			return ImplementationOutcome{}, err
-		}
 		wanted := *item.Submission
-		wanted.Body = string(body)
+		wanted.Body = finalBody
 		published, err := backend.PublishImplementation(ctx, item, wanted)
 		if err != nil {
 			return ImplementationOutcome{}, err
@@ -250,8 +312,33 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 			return ImplementationOutcome{}, Refuse("Submission head changed during final body publication")
 		}
 	}
-	if err := backend.PublishReview(ctx, item, comments, guard); err != nil {
+	published, err := backend.ImplementationItems(ctx)
+	if err != nil {
 		return ImplementationOutcome{}, err
+	}
+	matches := 0
+	var publishedItem ImplementationItem
+	for _, current := range published {
+		if current.ID == id {
+			matches++
+			publishedItem = current
+		}
+	}
+	if matches != 1 || publishedItem.Problem != "" || publishedItem.State != AwaitingReview || !publishedItem.Claimed || publishedItem.Submission == nil {
+		return ImplementationOutcome{}, Refuse("published review evidence is not exactly observable; retain the Claim and retry the same fixed-number command and Result Documents")
+	}
+	if verdict == "pass" {
+		bodyMatches, err = backend.SubmissionBodyMatches(item.ID, publishedItem.Submission.Body, finalBody)
+		if err != nil {
+			return ImplementationOutcome{}, err
+		}
+	}
+	observedEvidence := bodyMatches && reviewEvidenceMatchesForClaim(publishedItem, comments, submission.ClaimAcquiredAt)
+	if !observedEvidence {
+		return ImplementationOutcome{}, Refuse("published review evidence is not exactly observable; retain the Claim and retry the same fixed-number command and Result Documents")
+	}
+	if err := checkpoint.replace(reviewNumber, reviewed, guard); err != nil {
+		return ImplementationOutcome{}, Refuse(err.Error())
 	}
 	if err := backend.CompleteReview(ctx, item, target, guard); err != nil {
 		return ImplementationOutcome{}, err
@@ -265,8 +352,158 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	}
 	for _, current := range observed {
 		if current.ID == id && current.Problem == "" && current.State == target && !current.Claimed {
-			return ImplementationOutcome{Status: string(target), Item: &current, Head: head}, nil
+			result := completedReviewOutcome(current, head, checkpoint)
+			return result, nil
 		}
 	}
 	return ImplementationOutcome{}, Refuse("review handoff incomplete; retry the same verdict and Result Documents")
+}
+
+func reviewEvidenceMatches(item ImplementationItem, wanted []skilldist.ReviewComment) bool {
+	for _, comment := range wanted {
+		matches := 0
+		for _, existing := range item.Submission.Comments {
+			if reviewCommentsMatch(comment, existing) {
+				matches++
+			}
+		}
+		if matches != 1 {
+			return false
+		}
+	}
+	return true
+}
+
+func reviewEvidenceCompatible(item ImplementationItem, wanted []skilldist.ReviewComment, claimedAt string) bool {
+	if item.Submission == nil {
+		return false
+	}
+	for _, existing := range item.Submission.Comments {
+		if existing.Path == "" || existing.Commit != wanted[0].Commit {
+			continue
+		}
+		after, unambiguous := receiptAfterClaim(claimedAt, existing.CreatedAt)
+		if !unambiguous {
+			return false
+		}
+		if !after {
+			continue
+		}
+		matches := 0
+		for _, comment := range wanted[1:] {
+			if reviewCommentsMatch(comment, existing) {
+				matches++
+			}
+		}
+		if matches != 1 {
+			return false
+		}
+	}
+	return true
+}
+
+func reviewEvidenceMatchesForClaim(item ImplementationItem, wanted []skilldist.ReviewComment, claimedAt string) bool {
+	if !reviewEvidenceCompatible(item, wanted, claimedAt) {
+		return false
+	}
+	summaries, unambiguous := reviewSummariesForClaim(item.Submission.Comments, claimedAt)
+	if !unambiguous || len(summaries) != 1 || !reviewCommentsMatch(summaries[0], wanted[0]) {
+		return false
+	}
+	for _, comment := range wanted[1:] {
+		matches := 0
+		for _, existing := range item.Submission.Comments {
+			if existing.Path == "" || existing.Commit != comment.Commit {
+				continue
+			}
+			after, unambiguous := receiptAfterClaim(claimedAt, existing.CreatedAt)
+			if !unambiguous {
+				return false
+			}
+			if after && reviewCommentsMatch(comment, existing) {
+				matches++
+			}
+		}
+		if matches != 1 {
+			return false
+		}
+	}
+	return true
+}
+
+func reviewCommentsMatch(a, b skilldist.ReviewComment) bool {
+	return a.Body == b.Body && a.Path == b.Path && a.Verdict == b.Verdict && a.Commit == b.Commit && (a.Path != "" || a.ReviewNumber == b.ReviewNumber) && (a.Path == "" || a.Line == b.Line && a.Side == b.Side)
+}
+
+func reviewSummariesForClaim(comments []skilldist.ReviewComment, claimedAt string) ([]skilldist.ReviewComment, bool) {
+	hasSummary := false
+	for _, comment := range comments {
+		hasSummary = hasSummary || comment.Path == "" && comment.ReviewNumber != 0
+	}
+	if !hasSummary {
+		return nil, true
+	}
+	var current []skilldist.ReviewComment
+	for _, comment := range comments {
+		if comment.Path != "" || comment.ReviewNumber == 0 {
+			continue
+		}
+		after, unambiguous := receiptAfterClaim(claimedAt, comment.CreatedAt)
+		if !unambiguous {
+			return nil, false
+		}
+		if after {
+			current = append(current, comment)
+		}
+	}
+	return current, true
+}
+
+func matchingSummaryReceipt(submission Submission, wanted skilldist.ReviewComment) (skilldist.ReviewComment, int) {
+	var receipt skilldist.ReviewComment
+	count := 0
+	for _, existing := range submission.Comments {
+		if existing.Path == "" && reviewCommentsMatch(existing, wanted) {
+			receipt, count = existing, count+1
+		}
+	}
+	return receipt, count
+}
+
+func matchingSummaryReceiptForClaim(submission Submission, wanted skilldist.ReviewComment, claimedAt string) (skilldist.ReviewComment, int, bool) {
+	summaries, unambiguous := reviewSummariesForClaim(submission.Comments, claimedAt)
+	if !unambiguous {
+		return skilldist.ReviewComment{}, 0, false
+	}
+	receipt, count := matchingSummaryReceipt(Submission{Comments: summaries}, wanted)
+	return receipt, count, true
+}
+
+func claimPrecedesReceipt(claimedAt, submittedAt string) bool {
+	after, unambiguous := receiptAfterClaim(claimedAt, submittedAt)
+	return unambiguous && after
+}
+
+func receiptAfterClaim(claimedAt, submittedAt string) (bool, bool) {
+	claim, claimErr := time.Parse(time.RFC3339Nano, claimedAt)
+	receipt, receiptErr := time.Parse(time.RFC3339Nano, submittedAt)
+	if claimErr != nil || receiptErr != nil || claim.Equal(receipt) {
+		return false, false
+	}
+	return claim.Before(receipt), true
+}
+
+func cleanupReviewCheckpoint(checkpoint reviewCheckpoint) string {
+	if err := checkpoint.remove(); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+func completedReviewOutcome(item ImplementationItem, head string, checkpoint reviewCheckpoint) ImplementationOutcome {
+	result := ImplementationOutcome{Status: string(item.State), Item: &item, Head: head}
+	if item.State == ReadyForMerge {
+		result.Reason = cleanupReviewCheckpoint(checkpoint)
+	}
+	return result
 }

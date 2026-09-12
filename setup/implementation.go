@@ -79,17 +79,9 @@ func (b *GitHubBackend) ClaimImplementation(ctx context.Context, item workflow.I
 				return err
 			}
 		}
-		if item.Submission != nil && item.Submission.PreviousReviewedHead != "" {
-			if err := b.publishImplementationMetadata(ctx, repository, itemNumber, implementationMetadata{ReviewedHead: item.Submission.PreviousReviewedHead, ReviewRoundHead: item.Submission.Head}); err != nil {
-				return err
-			}
-		}
 		if item.State == workflow.AwaitingReview {
-			if item.Submission == nil || current.Submission == nil || current.Submission.Head != item.Submission.ReviewedHead || current.Submission.ID != item.Submission.ID || current.Claimed && current.Submission.ReviewedHead != "" && current.Submission.ReviewedHead != item.Submission.ReviewedHead {
-				return workflow.Refuse("Submission changed before Watchdog Claim; restore the fixed head")
-			}
-			if err := b.publishImplementationMetadata(ctx, repository, itemNumber, implementationMetadata{WatchdogHead: item.Submission.ReviewedHead}); err != nil {
-				return err
+			if item.Submission == nil || current.Submission == nil || current.Submission.Head != item.Submission.Head || current.Submission.ID != item.Submission.ID {
+				return workflow.Refuse("Submission changed before Watchdog Claim; retry with the current head")
 			}
 		}
 		if current.Claimed {
@@ -392,12 +384,9 @@ func trustedMetadata(comment skilldist.ReviewComment) bool {
 
 type implementationMetadata struct {
 	SynchronizationTarget string                             `json:"synchronization_target,omitempty"`
-	WatchdogHead          string                             `json:"watchdog_head,omitempty"`
 	Transition            *workflow.ImplementationTransition `json:"transition,omitempty"`
 	TargetSnapshot        string                             `json:"target_snapshot,omitempty"`
 	TargetBranch          string                             `json:"target_branch,omitempty"`
-	ReviewedHead          string                             `json:"reviewed_head,omitempty"`
-	ReviewRoundHead       string                             `json:"review_round_head,omitempty"`
 	ResumeState           workflow.State                     `json:"resume_state,omitempty"`
 }
 
@@ -489,7 +478,16 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 						return nil, err
 					}
 					for _, review := range reviews {
-						item.Submission.Comments = append(item.Submission.Comments, skilldist.ReviewComment{Body: review.Body, Author: review.User.Login, Association: review.Association, Commit: review.Commit, CreatedAt: review.SubmittedAt})
+						verdict := map[string]string{"CHANGES_REQUESTED": "rework", "APPROVED": "pass", "COMMENTED": "needs-human"}[review.State]
+						body := review.Body
+						reviewNumber := uint64(0)
+						if strings.HasPrefix(body, reviewSummaryPrefix) {
+							verdict = ""
+							if metadata, summary, ok := parseReviewSummary(body); ok && review.State == "COMMENTED" {
+								body, verdict, reviewNumber = summary, metadata.Verdict, metadata.ReviewNumber
+							}
+						}
+						item.Submission.Comments = append(item.Submission.Comments, skilldist.ReviewComment{Body: body, Author: review.User.Login, Association: review.Association, Commit: review.Commit, CreatedAt: review.SubmittedAt, Verdict: verdict, ReviewNumber: reviewNumber})
 					}
 					if len(reviews) < 100 {
 						break
@@ -560,14 +558,8 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 				if metadata.SynchronizationTarget != "" {
 					item.TargetSnapshot = metadata.SynchronizationTarget
 				}
-				if metadata.ReviewedHead != "" && item.Submission != nil && metadata.ReviewRoundHead == item.Submission.Head {
-					item.Submission.PreviousReviewedHead = metadata.ReviewedHead
-				}
 				if metadata.ResumeState != "" {
 					item.ResumeState = metadata.ResumeState
-				}
-				if metadata.WatchdogHead != "" && item.Submission != nil {
-					item.Submission.ReviewedHead = metadata.WatchdogHead
 				}
 				if metadata.Transition != nil {
 					item.Transition = metadata.Transition

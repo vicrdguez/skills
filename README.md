@@ -144,7 +144,7 @@ Write the summary and optional anchored findings in the packet's private tempora
 
 `ready_for_merge` projects `done` without closing the source issue. Only a human merges; GitHub then closes the issue through the PR's `Closes #N` footer. `skl status` observes Merged, releases Dependencies, closes Coordination Items whose children are all Merged, and safely reconciles partial projections. Contradictions are reported as Needs Human without overwriting them. An unmerged closed Submission is Superseded, preserving its branch reference for later Explore.
 
-A merge conflict routes a passing review to Synchronization Rework with a fresh Target Snapshot, without spending the finding-driven bounce. No review outcome restores or archives the retired ledger. Human comments are supplied verbatim; only explicit relabeling to Rework or Awaiting Review requeues paused work.
+A merge conflict routes a passing review to Synchronization Rework with a fresh Target Snapshot while retaining its completed Review Checkpoint. No review outcome restores or archives the retired ledger. Human comments are supplied verbatim; only explicit relabeling to Rework or Awaiting Review requeues paused work.
 
 ## Pi subagent loops
 

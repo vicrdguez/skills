@@ -42,7 +42,7 @@ func TestB13CarryExplicitEndpointsThroughGeneratedCommands(t *testing.T) {
 		}},
 		{"markerless implementation Rework", func(t *testing.T) *skilldist.Packet {
 			root, baseline, completion, head := markerless(t, true)
-			b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Rework, Submission: &workflow.Submission{ID: "11", Head: head, PreviousReviewedHead: head}}}}
+			b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Rework, Submission: &workflow.Submission{ID: "11", Head: head}}}}
 			got := implementCLI(t, root, b, "next", "--artifact-baseline", baseline, "--artifact-completion", completion)
 			if got.Packet == nil {
 				t.Fatalf("rework = %#v", got)
@@ -51,7 +51,7 @@ func TestB13CarryExplicitEndpointsThroughGeneratedCommands(t *testing.T) {
 		}},
 		{"markerless Watchdog resume", func(t *testing.T) *skilldist.Packet {
 			root, baseline, completion, head := markerless(t, true)
-			b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Claimed: true, Submission: &workflow.Submission{ID: "11", Head: head, ReviewedHead: head}}}}
+			b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Claimed: true, Submission: &workflow.Submission{ID: "11", Head: head}}}}
 			got := watchdogCLI(t, root, b, "resume", "--item", "7", "--artifact-baseline", baseline, "--artifact-completion", completion)
 			if got.Packet == nil {
 				t.Fatalf("watchdog = %#v", got)
@@ -92,65 +92,46 @@ func TestB13CarryExplicitEndpointsThroughGeneratedCommands(t *testing.T) {
 		})
 	}
 
-	for _, recovery := range []string{"reviewed head", "Target Snapshot"} {
-		for _, explicit := range []bool{true, false} {
-			name := recovery + " recovery with marked evidence"
-			if explicit {
-				name = recovery + " recovery with explicit evidence"
-			}
-			t.Run(name, func(t *testing.T) {
-				retired := recovery == "reviewed head"
-				var root, baseline, completion, head string
-				if explicit {
-					root, baseline, completion, head = markerless(t, retired)
-				} else {
-					root = proposalRepository(t)
-					baseline = prepareSlice(t, root, "widget")
-					if retired {
-						completeAndRetireSlice(t, root, "widget")
-					}
-					head = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
-				}
-				runGit(t, root, "remote", "rename", "origin", "upstream")
-				item := workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Ready, Claimed: true}
-				args := []string{"resume", "--item", "7", "--remote", "upstream"}
-				missing, value := "--target-snapshot <sha>", strings.TrimSpace(runGitOutput(t, root, "rev-parse", "main"))
-				if retired {
-					item.State, item.Claimed = workflow.Rework, false
-					item.Submission = &workflow.Submission{ID: "11", Head: head}
-					args = []string{"next", "--remote", "upstream"}
-					missing, value = "--reviewed-head <full-sha>", head
-				} else {
-					runGit(t, root, "commit", "--allow-empty", "-m", "implementation progress")
-				}
-				var flags []string
-				if explicit {
-					flags = []string{"--artifact-baseline", baseline}
-					if retired {
-						flags = append(flags, "--artifact-completion", completion)
-					}
-				}
-				backend := &implementationMemory{work: []workflow.ImplementationItem{item}}
-				got := implementCLI(t, root, backend, append(args, flags...)...)
-				command := "skl implement resume --item 7 " + missing + " --remote 'upstream'"
-				if len(flags) != 0 {
-					command += " " + strings.Join(flags, " ")
-				}
-				if got.Status != "fix_required" || got.Packet != nil || !strings.Contains(got.Reason, command) || !backend.work[0].Claimed {
-					t.Fatalf("recovery lost continuation %q: %#v", command, got)
-				}
-				if !explicit && strings.Contains(got.Reason, "--artifact-") {
-					t.Fatalf("marked recovery received synthetic overrides: %s", got.Reason)
-				}
-				// Follow the emitted command, supplying only the newly requested Git identity.
-				retry := strings.ReplaceAll(command, strings.Fields(missing)[1], value)
-				retry = strings.ReplaceAll(retry, "'upstream'", "upstream")
-				resumed := implementCLI(t, root, backend, strings.Fields(retry)[2:]...)
-				if resumed.Status != "work_available" || resumed.Packet == nil || resumed.Packet.Facts.Implementation.ArtifactBaseline != baseline {
-					t.Fatalf("continuation failed: %#v", resumed)
-				}
-			})
+	for _, explicit := range []bool{true, false} {
+		name := "Target Snapshot recovery with marked evidence"
+		if explicit {
+			name = "Target Snapshot recovery with explicit evidence"
 		}
+		t.Run(name, func(t *testing.T) {
+			var root, baseline string
+			if explicit {
+				root, baseline, _, _ = markerless(t, false)
+			} else {
+				root = proposalRepository(t)
+				baseline = prepareSlice(t, root, "widget")
+			}
+			runGit(t, root, "remote", "rename", "origin", "upstream")
+			runGit(t, root, "commit", "--allow-empty", "-m", "implementation progress")
+			item := workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Ready, Claimed: true}
+			flags := []string(nil)
+			if explicit {
+				flags = []string{"--artifact-baseline", baseline}
+			}
+			backend := &implementationMemory{work: []workflow.ImplementationItem{item}}
+			got := implementCLI(t, root, backend, append([]string{"resume", "--item", "7", "--remote", "upstream"}, flags...)...)
+			command := "skl implement resume --item 7 --target-snapshot <sha> --remote 'upstream'"
+			if len(flags) != 0 {
+				command += " " + strings.Join(flags, " ")
+			}
+			if got.Status != "fix_required" || got.Packet != nil || !strings.Contains(got.Reason, command) || !backend.work[0].Claimed {
+				t.Fatalf("recovery lost continuation %q: %#v", command, got)
+			}
+			if !explicit && strings.Contains(got.Reason, "--artifact-") {
+				t.Fatalf("marked recovery received synthetic overrides: %s", got.Reason)
+			}
+			snapshot := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "main"))
+			retry := strings.ReplaceAll(command, "<sha>", snapshot)
+			retry = strings.ReplaceAll(retry, "'upstream'", "upstream")
+			resumed := implementCLI(t, root, backend, strings.Fields(retry)[2:]...)
+			if resumed.Status != "work_available" || resumed.Packet == nil || resumed.Packet.Facts.Implementation.ArtifactBaseline != baseline {
+				t.Fatalf("continuation failed: %#v", resumed)
+			}
+		})
 	}
 
 	root := proposalRepository(t)

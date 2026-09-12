@@ -2,13 +2,51 @@ package setup
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	skilldist "github.com/vicrdguez/skills"
+	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/workflow"
 )
+
+const reviewSummaryPrefix = "<!-- skl.watchdog.review/v1\n"
+
+type reviewSummaryMetadata struct {
+	ReviewNumber uint64 `json:"review_number"`
+	Verdict      string `json:"verdict"`
+}
+
+func reviewSummaryBody(comment skilldist.ReviewComment) (string, error) {
+	if comment.ReviewNumber == 0 || comment.Verdict != "rework" && comment.Verdict != "pass" && comment.Verdict != "needs-human" {
+		return "", fmt.Errorf("invalid review number or verdict")
+	}
+	metadata, err := json.Marshal(reviewSummaryMetadata{ReviewNumber: comment.ReviewNumber, Verdict: comment.Verdict})
+	if err != nil {
+		return "", err
+	}
+	return reviewSummaryPrefix + string(metadata) + "\n-->\n" + comment.Body, nil
+}
+
+func parseReviewSummary(body string) (reviewSummaryMetadata, string, bool) {
+	body, ok := strings.CutPrefix(body, reviewSummaryPrefix)
+	if !ok {
+		return reviewSummaryMetadata{}, "", false
+	}
+	metadata, body, ok := strings.Cut(body, "\n-->\n")
+	if !ok {
+		return reviewSummaryMetadata{}, "", false
+	}
+	var parsed reviewSummaryMetadata
+	if json.Unmarshal([]byte(metadata), &parsed) != nil || parsed.ReviewNumber == 0 || parsed.Verdict != "rework" && parsed.Verdict != "pass" && parsed.Verdict != "needs-human" {
+		return reviewSummaryMetadata{}, "", false
+	}
+	return parsed, body, true
+}
 
 func (b *GitHubBackend) CompleteReview(ctx context.Context, item workflow.ImplementationItem, target workflow.State, guard func() error) error {
 	if err := b.requireRepository(); err != nil {
@@ -80,14 +118,15 @@ func (b *GitHubBackend) ReviewSubmission(ctx context.Context, id workflow.Submis
 		}
 	}
 	labels := map[string]bool{}
-	reviewing := false
 	latest := ""
-	reviewExited := false
 	synchronizing := false
+	claimAcquiredAt := ""
+	claimAmbiguous := false
 	for page := 1; ; page++ {
 		var events []struct {
-			Event string `json:"event"`
-			Label struct {
+			Event     string `json:"event"`
+			CreatedAt string `json:"created_at"`
+			Label     struct {
 				Name string `json:"name"`
 			} `json:"label"`
 		}
@@ -98,30 +137,20 @@ func (b *GitHubBackend) ReviewSubmission(ctx context.Context, id workflow.Submis
 			if event.Event != "labeled" && event.Event != "unlabeled" {
 				continue
 			}
+			if event.Label.Name == "wip" {
+				if event.Event == "labeled" {
+					claimAmbiguous = claimAmbiguous || labels["wip"]
+					claimAcquiredAt = event.CreatedAt
+				} else {
+					claimAcquiredAt = ""
+					claimAmbiguous = false
+				}
+			}
 			labels[event.Label.Name] = event.Event == "labeled"
-			if event.Event == "unlabeled" && event.Label.Name == "review" && labels["rework"] {
-				reviewExited = true
-			}
-			if event.Event == "labeled" && event.Label.Name == "wip" {
-				reviewExited = false
-			}
 			if event.Event == "labeled" && (event.Label.Name == "review" || event.Label.Name == "rework" || event.Label.Name == "done" || event.Label.Name == "needs-human") {
 				// A conflicting pass retry can add rework before its claimed review is removed.
 				synchronizing = event.Label.Name == "rework" && latest == "done" && labels["done"] && labels["sync"] && (!labels["review"] || labels["wip"]) && !labels["needs-human"] && !labels["ready"]
 				latest = event.Label.Name
-			}
-			if event.Event == "labeled" && event.Label.Name == "review" {
-				reviewing = true
-			}
-			// A completed pause ends this review; a later human requeue is not a bounce.
-			if labels["needs-human"] && !labels["review"] && !labels["wip"] {
-				reviewing = false
-			}
-			if reviewing && labels["rework"] && !labels["review"] && !labels["wip"] {
-				if !labels["sync"] {
-					result.Bounces++
-				}
-				reviewing = false
 			}
 		}
 		if len(events) < 100 {
@@ -140,15 +169,12 @@ func (b *GitHubBackend) ReviewSubmission(ctx context.Context, id workflow.Submis
 		result.PendingReview = map[string]workflow.State{"rework": workflow.Rework, "done": workflow.ReadyForMerge, "needs-human": workflow.NeedsHuman}[latest]
 		result.State = result.PendingReview
 	}
+	if current["review"] && claimed && labels["wip"] && !claimAmbiguous {
+		result.ClaimAcquiredAt = claimAcquiredAt
+	}
 	if (states == 2 && !current["review"] || states == 3 && current["review"] && claimed && labels["wip"]) && current["review"] == labels["review"] && current["done"] && current["rework"] && current["sync"] && labels["done"] && labels["rework"] && labels["sync"] && synchronizing {
 		result.PendingReview = workflow.Rework
 		result.State = workflow.Rework
-	}
-	if states == 1 && claimed && (state == workflow.ReadyForMerge || state == workflow.NeedsHuman) {
-		result.PendingReview = state
-	}
-	if states == 1 && claimed && state == workflow.Rework && reviewExited {
-		result.PendingReview = state
 	}
 	return result, nil
 }
@@ -170,6 +196,12 @@ func (b *GitHubBackend) PublishReview(ctx context.Context, item workflow.Impleme
 			return err
 		}
 		if comment.Path == "" {
+			if comment.Verdict != "" {
+				if err := b.publishReviewSummary(ctx, repository, number, comment); err != nil {
+					return err
+				}
+				continue
+			}
 			if err := b.implementationComment(ctx, repository, number, comment.Body, false); err != nil {
 				return err
 			}
@@ -179,7 +211,7 @@ func (b *GitHubBackend) PublishReview(ctx context.Context, item workflow.Impleme
 		published := func() (bool, error) {
 			current, err := b.implementationComments(ctx, repository, stream)
 			for _, c := range current {
-				if c.Body == comment.Body && c.Commit == comment.Commit && c.Path == comment.Path && c.Line == comment.Line && c.Side == comment.Side {
+				if c.Body == comment.Body && c.Commit == comment.Commit && c.Path == comment.Path && c.Line == comment.Line && c.Side == comment.Side && afterClaim(comment.ClaimAcquiredAt, c.CreatedAt) {
 					return true, err
 				}
 			}
@@ -201,4 +233,61 @@ func (b *GitHubBackend) PublishReview(ctx context.Context, item workflow.Impleme
 		}
 	}
 	return guard()
+}
+
+func (b *GitHubBackend) publishReviewSummary(ctx context.Context, repository github.RepositoryID, number int, wanted skilldist.ReviewComment) error {
+	body, err := reviewSummaryBody(wanted)
+	if err != nil {
+		return err
+	}
+	path := b.repositoryPath(repository) + fmt.Sprintf("/pulls/%d/reviews", number)
+	published := func() (int, error) {
+		type review struct {
+			Body        string `json:"body"`
+			Commit      string `json:"commit_id"`
+			State       string `json:"state"`
+			SubmittedAt string `json:"submitted_at"`
+		}
+		matches := 0
+		for page := 1; ; page++ {
+			var reviews []review
+			if err := b.request(ctx, http.MethodGet, path+fmt.Sprintf("?per_page=100&page=%d", page), nil, &reviews); err != nil {
+				return 0, err
+			}
+			for _, review := range reviews {
+				if review.Body == body && review.Commit == wanted.Commit && review.State == "COMMENTED" && afterClaim(wanted.ClaimAcquiredAt, review.SubmittedAt) {
+					matches++
+				}
+			}
+			if len(reviews) < 100 {
+				return matches, nil
+			}
+		}
+	}
+	if found, err := published(); err != nil || found == 1 {
+		return err
+	} else if found > 1 {
+		return fmt.Errorf("multiple exact review summary receipts observed; inspect before retrying")
+	}
+	writeErr := b.request(ctx, http.MethodPost, path, map[string]string{"body": body, "commit_id": wanted.Commit, "event": "COMMENT"}, nil)
+	if found, err := published(); err != nil {
+		return err
+	} else if found == 1 {
+		return nil
+	} else if found > 1 {
+		return fmt.Errorf("multiple exact review summary receipts observed after publication; inspect before retrying")
+	}
+	if writeErr != nil {
+		return writeErr
+	}
+	return fmt.Errorf("review summary publication not observed; retry the same fixed-number command")
+}
+
+func afterClaim(claimedAt, createdAt string) bool {
+	if claimedAt == "" {
+		return true
+	}
+	claim, claimErr := time.Parse(time.RFC3339Nano, claimedAt)
+	created, createdErr := time.Parse(time.RFC3339Nano, createdAt)
+	return claimErr == nil && createdErr == nil && claim.Before(created)
 }
