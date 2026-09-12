@@ -16,8 +16,11 @@ func watchdogCommands(newBackend backendFactory, stdout io.Writer) []*cli.Comman
 	var commands []*cli.Command
 	for _, name := range []string{"next", "resume", "submit"} {
 		commands = append(commands, &cli.Command{Name: name, Flags: []cli.Flag{&cli.PathFlag{Name: "repo", Value: "."}, &cli.StringFlag{Name: "remote"}, &cli.IntFlag{Name: "item"}, &cli.StringFlag{Name: "verdict"}, &cli.StringFlag{Name: "reviewed-head"}, &cli.PathFlag{Name: "summary"}, &cli.PathFlag{Name: "findings"}, &cli.PathFlag{Name: "body"}, &cli.StringFlag{Name: "head"}}, Action: func(c *cli.Context) error {
-			if c.NArg() != 0 || name == "resume" && c.Int("item") <= 0 || name == "next" && c.IsSet("item") || c.String("after") != "" && name != "next" {
+			if c.NArg() != 0 || name == "resume" && c.Int("item") <= 0 || name == "next" && c.IsSet("item") || c.IsSet("after") && (name != "next" || c.IsSet("reviewed-head") || c.IsSet("head") || c.IsSet("verdict") || c.IsSet("summary") || c.IsSet("findings") || c.IsSet("body")) {
 				return fmt.Errorf("resume requires --item; next selects its own Work Item")
+			}
+			if c.IsSet("after") && c.String("after") == "" {
+				return errors.New("--after requires a supported opaque dispatch reference")
 			}
 			backend, err := newBackend(github.RepositoryID{})
 			if err != nil {

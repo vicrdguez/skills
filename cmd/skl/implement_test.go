@@ -1158,3 +1158,19 @@ func TestImplementChecksContradictionsAndHeadDuringProjection(t *testing.T) {
 		})
 	}
 }
+
+func TestExplicitEmptyContinuationRefusesBeforeBackend(t *testing.T) {
+	for _, lane := range []string{"implement", "watchdog"} {
+		for _, flags := range [][]string{{"--after="}, {"--after", ""}, {"--after=", "--item=7"}, {"--after=", "--reviewed-head="}} {
+			t.Run(lane+strings.Join(flags, "/"), func(t *testing.T) {
+				backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", State: workflow.Ready}}}
+				calls := 0
+				app := newApp(func(github.RepositoryID) (setup.Backend, error) { calls++; return backend, nil }, nil, &bytes.Buffer{}, &bytes.Buffer{})
+				err := app.Run(append([]string{"skl", lane, "next", "--repo", "/nonexistent"}, flags...))
+				if err == nil || calls != 0 || backend.work[0].Claimed {
+					t.Fatalf("empty continuation reached backend: %v calls=%d work=%+v", err, calls, backend.work)
+				}
+			})
+		}
+	}
+}

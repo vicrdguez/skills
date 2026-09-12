@@ -19,8 +19,11 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 		commands = append(commands, &cli.Command{Name: name,
 			Flags: []cli.Flag{&cli.PathFlag{Name: "repo", Value: "."}, &cli.StringFlag{Name: "remote"}, &cli.IntFlag{Name: "item"}, &cli.PathFlag{Name: "body"}, &cli.PathFlag{Name: "decision"}, &cli.StringFlag{Name: "reason"}, &cli.StringFlag{Name: "target-snapshot"}, &cli.StringFlag{Name: "reviewed-head"}},
 			Action: func(command *cli.Context) error {
-				if command.Int("item") < 0 || command.NArg() != 0 || command.String("after") != "" && (name != "next" || command.IsSet("item") || command.String("target-snapshot") != "" || command.String("reviewed-head") != "") {
+				if command.Int("item") < 0 || command.NArg() != 0 || command.IsSet("after") && (name != "next" || command.IsSet("item") || command.IsSet("target-snapshot") || command.IsSet("reviewed-head")) {
 					return fmt.Errorf("invalid implementation invocation: use flags and a positive Work Item identity")
+				}
+				if command.IsSet("after") && command.String("after") == "" {
+					return errors.New("--after requires a supported opaque dispatch reference")
 				}
 				backend, err := newBackend(github.RepositoryID{})
 				if err != nil {
