@@ -165,7 +165,7 @@ func activeDispatch(rounds []DispatchRound, item ImplementationItem, lane Dispat
 		return nil, nil
 	}
 	wantedSubmission, wantedObligation := dispatchBinding(item, lane)
-	if active.Item != item.ID || active.Submission != wantedSubmission || active.Obligation != wantedObligation {
+	if active.Item != item.ID || active.Submission != wantedSubmission || active.Obligation != wantedObligation || active.Synchronization != (lane == ImplementLane && item.Synchronization) {
 		return nil, Refuse("active dispatch round contradicts the fixed worker obligation")
 	}
 	return active, nil

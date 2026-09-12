@@ -577,3 +577,14 @@ func TestGitHubImplementationRejectsForeignAttachmentsAndConflictingMetadata(t *
 		})
 	}
 }
+
+func TestGitHubDispatchWriterRejectsMissingObligationBeforePublication(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests++; fmt.Fprint(w, `[]`) }))
+	defer server.Close()
+	b := NewGitHubBackend(server.URL, "token", server.Client())
+	round := workflow.DispatchRound{ID: "unrecoverable", Lane: workflow.ImplementLane, Item: "7", Submission: "11", Directory: "skl-implement-invalid"}
+	if err := b.RecordDispatchRound(t.Context(), github.RepositoryID{Owner: "acme", Name: "widgets"}, round); err == nil || requests != 0 {
+		t.Fatalf("invalid obligation appended: %v requests=%d", err, requests)
+	}
+}

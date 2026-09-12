@@ -36,7 +36,7 @@ func writeWorkOutput(stdout io.Writer, outcome workflow.ImplementationOutcome, l
 		}
 		return selectionError(lane, item, err)
 	}
-	if err != nil && outcome.PreviousHandoff != nil {
+	if err != nil && (outcome.PreviousHandoff != nil || outcome.Status == "no_work" || outcome.Status == "idle_timeout") {
 		return selectionError(lane, "", err)
 	}
 	return err
