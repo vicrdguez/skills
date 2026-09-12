@@ -1197,12 +1197,17 @@ func TestExplicitEmptyContinuationRefusesBeforeBackend(t *testing.T) {
 	for _, lane := range []string{"implement", "watchdog"} {
 		for _, flags := range [][]string{{"--after="}, {"--after", ""}, {"--after=", "--item=7"}, {"--after=", "--reviewed-head="}} {
 			t.Run(lane+strings.Join(flags, "/"), func(t *testing.T) {
-				backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", State: workflow.Ready}}}
+				root, backend := waitFixture(t, lane)
 				calls := 0
 				app := newApp(func(github.RepositoryID) (setup.Backend, error) { calls++; return backend, nil }, nil, &bytes.Buffer{}, &bytes.Buffer{})
-				err := app.Run(append([]string{"skl", lane, "next", "--repo", "/nonexistent"}, flags...))
-				if err == nil || calls != 0 || backend.work[0].Claimed {
+				err := app.Run(append([]string{"skl", lane, "next", "--repo", root, "--remote", "upstream"}, flags...))
+				if err == nil || calls != 0 || backend.work[0].Claimed || backend.reads != 0 || backend.claims != 0 {
 					t.Fatalf("empty continuation reached backend: %v calls=%d work=%+v", err, calls, backend.work)
+				}
+				// Removing only the invalid continuation must expose genuinely claimable work.
+				control, err := waitingCLI(t, t.Context(), root, lane, backend)
+				if err != nil || control.Status != "work_available" || control.Item.Number != 7 || backend.claims != 1 {
+					t.Fatalf("negative fixture was not claimable: %+v %v", control, err)
 				}
 			})
 		}
@@ -1521,7 +1526,11 @@ func TestReturnedCommandHandoffLifecycle(t *testing.T) {
 						runGit(t, worktree, "commit", "-m", "retire")
 					}
 					if tc.kind == "draft" {
-						runGit(t, worktree, "commit", "--allow-empty", "-m", "implementation work")
+						if err := os.WriteFile(filepath.Join(worktree, "widget.go"), []byte("package widget\n\nfunc Value() int { return 1 }\n"), 0644); err != nil {
+							t.Fatal(err)
+						}
+						runGit(t, worktree, "add", "widget.go")
+						runGit(t, worktree, "commit", "-m", "implementation work")
 					}
 					b.remoteHeads["widget"] = strings.TrimSpace(runGitOutput(t, worktree, "rev-parse", "HEAD"))
 					os.WriteFile(filepath.Join(active, "submission.md"), []byte("opaque submission"), 0600)
@@ -1555,6 +1564,11 @@ func TestReturnedCommandHandoffLifecycle(t *testing.T) {
 				got := returnedCLI(t, b, command)
 				if got.Status != tc.want || b.work[0].Claimed {
 					t.Fatalf("packet handoff failed: %+v", got)
+				}
+				if tc.kind == "draft" {
+					if got.Item.Submission == nil || !got.Item.Submission.Draft || runGitOutput(t, worktree, "show", got.Item.Submission.Head+":widget.go") != "package widget\n\nfunc Value() int { return 1 }\n" {
+						t.Fatalf("draft did not preserve source work at its published head: %+v", got)
+					}
 				}
 				if _, err := os.Stat(active); !os.IsNotExist(err) {
 					t.Fatalf("active result directory remains: %v", err)
