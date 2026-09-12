@@ -53,10 +53,6 @@ func (b *implementationMemory) RetainImplementationClaim(_ context.Context, _ gi
 	return nil
 }
 
-func (b *implementationMemory) ImplementationTarget(context.Context, github.RepositoryID) (string, error) {
-	return "main", nil
-}
-
 func (b *implementationMemory) PauseImplementation(_ context.Context, _ github.RepositoryID, item workflow.ImplementationItem, decision string, guard func() error) error {
 	if b.beforeTransition != nil {
 		b.beforeTransition()
@@ -102,7 +98,7 @@ func (b *implementationMemory) PublishImplementation(_ context.Context, _ github
 }
 
 func TestImplementRefusesInvalidHandoff(t *testing.T) {
-	for _, invariant := range []string{"Target Snapshot", "heads differ", "ledger", "Workflow State", "head changed"} {
+	for _, invariant := range []string{"heads differ", "ledger", "Workflow State", "head changed"} {
 		t.Run(invariant, func(t *testing.T) {
 			root := proposalRepository(t)
 			prepareSlice(t, root, "widget")
@@ -118,8 +114,6 @@ func TestImplementRefusesInvalidHandoff(t *testing.T) {
 			}
 			backend.remoteHeads["widget"] = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 			switch invariant {
-			case "Target Snapshot":
-				backend.work[0].TargetSnapshot = "deadbeef"
 			case "heads differ":
 				backend.remoteHeads["widget"] = "deadbeef"
 			case "Workflow State":
@@ -178,8 +172,6 @@ func (b *implementationMemory) ImplementationItems(_ context.Context, repository
 func (b *implementationMemory) ClaimImplementation(_ context.Context, _ github.RepositoryID, item workflow.ImplementationItem) error {
 	for i := range b.work {
 		if b.work[i].ID == item.ID {
-			b.work[i].TargetSnapshot = item.TargetSnapshot
-			b.work[i].TargetBranch = item.TargetBranch
 			if item.Submission != nil {
 				b.work[i].Submission = item.Submission
 			}
@@ -231,7 +223,7 @@ func TestImplementSubmitsCompletedFirstImplementation(t *testing.T) {
 		t.Fatalf("submit: %#v %#v", got, backend.work)
 	}
 	submission := backend.work[0].Submission
-	if submission == nil || submission.ID != "11" || submission.Head != backend.remoteHeads["widget"] || submission.Body != "opaque audit [not even Markdown\n\n\nCloses #7\n" {
+	if submission == nil || submission.ID != "11" || submission.Head != backend.remoteHeads["widget"] || submission.Base != "main" || submission.Body != "opaque audit [not even Markdown\n\n\nCloses #7\n" {
 		t.Fatalf("submission = %#v", submission)
 	}
 }
@@ -333,7 +325,7 @@ func TestImplementLifecycleOrdersOpaqueIDsByBackendFact(t *testing.T) {
 		prepareSlice(t, root, item.Branch)
 	}
 	for _, want := range []workflow.WorkItemID{"zulu", "alpha"} {
-		got, err := workflow.StartImplementation(context.Background(), root, "origin", "", "", "", b)
+		got, err := workflow.StartImplementation(context.Background(), root, "origin", "", "", b)
 		if err != nil || got.Status != "work_available" || got.Item == nil || got.Item.ID != want || !got.Item.Claimed {
 			t.Fatalf("opaque implementation tie-break: %#v, %v; want %q", got, err, want)
 		}
@@ -369,33 +361,23 @@ func TestImplementResumesInterruptedClaim(t *testing.T) {
 	}
 }
 
-func TestImplementResumePreservesTargetAndRejectsAmbiguousHistory(t *testing.T) {
+func TestImplementStartAndResumePreserveProgressWithoutTargetPin(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
-	target := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "origin/main"))
 	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready, Claimed: true}}}
 	first := implementCLI(t, root, b, "resume", "--item", "7")
-	if first.Packet == nil || b.work[0].TargetSnapshot != target {
-		t.Fatalf("resume did not persist target: %#v", first)
+	if first.Packet == nil || strings.Contains(first.Packet.Markdown(), "target_snapshot") || strings.Contains(first.Packet.Markdown(), "git merge ") {
+		t.Fatalf("resume requested a target: %#v", first)
 	}
+	if err := os.WriteFile(filepath.Join(root, "progress.txt"), []byte("preserved\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", "progress.txt")
 	runGit(t, root, "commit", "--allow-empty", "-m", "implementation")
-	runGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
-	second := implementCLI(t, root, b, "resume", "--item", "7", "--target-snapshot", target)
-	if second.Packet == nil || second.Packet.Facts.Implementation.TargetSnapshot != target {
-		t.Fatalf("target moved: %#v", second)
-	}
-	wrong := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
-	if got := implementCLI(t, root, b, "resume", "--item", "7", "--target-snapshot", wrong); got.Status != "fix_required" {
-		t.Fatalf("accepted changed obligation: %#v", got)
-	}
-	b.work[0].TargetSnapshot = ""
-	if got := implementCLI(t, root, b, "resume", "--item", "7"); got.Status != "fix_required" {
-		t.Fatalf("guessed after history changed: %#v", got)
-	}
-	b.work[0].Submission = &workflow.Submission{ID: "11", Draft: true, Base: "main"}
-	got := implementCLI(t, root, b, "resume", "--item", "7", "--target-snapshot", target)
-	if got.Packet == nil || got.Packet.Facts.Implementation.TargetSnapshot != target {
-		t.Fatalf("draft suppressed target: %#v", got)
+	b.remoteHeads["main"] = strings.Repeat("f", 40)
+	second := implementCLI(t, root, b, "resume", "--item", "7")
+	if second.Packet == nil || strings.Contains(second.Packet.Markdown(), "target_snapshot") || strings.Contains(second.Packet.Markdown(), "git merge ") || readFile(t, filepath.Join(root, "progress.txt")) != "preserved\n" {
+		t.Fatalf("resume changed progress or requested a target: %#v", second)
 	}
 }
 
@@ -529,56 +511,19 @@ func TestImplementUsesSelectedGitHubRemoteThroughout(t *testing.T) {
 	}
 }
 
-func TestImplementObservesLiveTargetAndKeepsPersistedSnapshot(t *testing.T) {
-	for _, available := range []bool{true, false} {
-		t.Run(fmt.Sprint(available), func(t *testing.T) {
-			root := proposalRepository(t)
-			prepareSlice(t, root, "widget")
-			runGit(t, root, "switch", "main")
-			runGit(t, root, "commit", "--allow-empty", "-m", "new backend target")
-			target := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
-			runGit(t, root, "switch", "widget")
-			if !available {
-				target = strings.Repeat("f", 40)
-			}
-			b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{"main": target}}
-			cached := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "origin/main"))
-			if got := implementCLI(t, root, b, "next", "--target-snapshot", cached); got.Status != "fix_required" || b.work[0].Claimed {
-				t.Fatalf("new Claim accepted caller-selected target: %#v", got)
-			}
-			got := implementCLI(t, root, b, "next")
-			if !available {
-				if got.Status != "fix_required" || !strings.Contains(got.Reason, target) || !strings.Contains(got.Reason, "fetch") || b.work[0].Claimed {
-					t.Fatalf("unavailable live target: %#v", got)
-				}
-				return
-			}
-			if got.Packet == nil || got.Packet.Facts.Implementation.TargetSnapshot != target || b.work[0].TargetSnapshot != target {
-				t.Fatalf("pinned stale target: %#v", got)
-			}
-			b.remoteHeads["main"] = strings.Repeat("f", 40)
-			got = implementCLI(t, root, b, "resume", "--item", "7")
-			if got.Packet == nil || got.Packet.Facts.Implementation.TargetSnapshot != target {
-				t.Fatalf("persisted target moved: %#v", got)
-			}
-		})
-	}
-}
-
-func TestImplementPinsTargetAndBundlesInstructions(t *testing.T) {
+func TestImplementBundlesInstructionsWithoutTargetPin(t *testing.T) {
 	root := proposalRepository(t)
 	baseline := prepareSlice(t, root, "widget")
-	target := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "origin/main"))
 	backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}}
 	got := implementCLI(t, root, backend, "next")
-	if got.Packet == nil || got.Packet.Facts.Implementation.TargetSnapshot != target || got.Packet.Facts.Implementation.ArtifactBaseline != baseline {
+	if got.Packet == nil || got.Packet.Facts.Implementation.ArtifactBaseline != baseline {
 		t.Fatalf("packet = %#v", got)
 	}
 	if got.Packet.Skill != "implement" || !reflect.DeepEqual(got.Packet.IncludedSkills, []string{"tdd", "audit", "design", "domain"}) {
 		t.Fatalf("manifest = %#v", got.Packet)
 	}
-	if !strings.Contains(got.Packet.Markdown(), "git merge "+target) || !strings.Contains(got.Packet.Facts.Implementation.ResumeCommand, target) {
-		t.Fatalf("missing concrete Git/retry facts: %s", got.Packet.Markdown())
+	if strings.Contains(got.Packet.Markdown(), "git merge ") || strings.Contains(got.Packet.Facts.Implementation.ResumeCommand, "target-snapshot") {
+		t.Fatalf("packet retained target integration: %s", got.Packet.Markdown())
 	}
 	_, markdown, found := strings.Cut(got.Packet.Markdown(), "\n\n## Work Start\n")
 	if !found {
@@ -586,12 +531,17 @@ func TestImplementPinsTargetAndBundlesInstructions(t *testing.T) {
 	}
 	facts := got.Packet.Facts.Implementation
 	golden := readRepositoryFile(t, "cmd/skl/testdata/implement-start.golden.md")
-	normalized := strings.NewReplacer(facts.Worktree, "<worktree>", facts.ResultDirectory, "<result>", baseline, "<baseline>", target, "<target>").Replace("## Work Start\n" + markdown)
+	normalized := strings.NewReplacer(facts.Worktree, "<worktree>", facts.ResultDirectory, "<result>", baseline, "<baseline>").Replace("## Work Start\n" + markdown)
 	if normalized != golden {
 		t.Fatalf("Work Start Markdown differs from golden:\n%s", normalized)
 	}
 	if strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD")) != baseline {
 		t.Fatal("Work Start changed Git")
+	}
+	var output bytes.Buffer
+	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+	if err := app.Run([]string{"skl", "implement", "resume", "--target-snapshot", baseline}); err == nil || !strings.Contains(err.Error(), "flag provided but not defined") {
+		t.Fatalf("removed target flag accepted: %v", err)
 	}
 }
 
@@ -608,7 +558,7 @@ func TestImplementStartsFindingDrivenRework(t *testing.T) {
 		t.Fatalf("rework = %#v", got)
 	}
 	facts := got.Packet.Facts.Implementation
-	if facts.Submission != 11 || facts.PreviousReviewedHead != head || !reflect.DeepEqual(facts.Comments, comments) || facts.TargetSnapshot != "" {
+	if facts.Submission != 11 || facts.PreviousReviewedHead != head || !reflect.DeepEqual(facts.Comments, comments) {
 		t.Fatalf("facts = %#v", facts)
 	}
 	if !strings.Contains(got.Packet.Markdown(), head+"...HEAD") || strings.Contains(got.Packet.Markdown(), "git merge ") {
@@ -629,9 +579,9 @@ func TestImplementResubmitsExistingRework(t *testing.T) {
 		runGit(t, root, "rm", "-r", ".changes/widget")
 		runGit(t, root, "commit", "-m", "retire")
 		head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
-		backend.work[0].State, backend.work[0].TargetSnapshot = workflow.Rework, ""
+		backend.work[0].State = workflow.Rework
 		if hasSubmission {
-			backend.work[0].Submission = &workflow.Submission{ID: "42", Head: head, PreviousReviewedHead: head}
+			backend.work[0].Submission = &workflow.Submission{ID: "42", Head: head, Base: "main", PreviousReviewedHead: head}
 		}
 		backend.remoteHeads["widget"] = head
 		got := implementCLI(t, root, backend, "submit", "--item", "7", "--body", body)
@@ -681,11 +631,38 @@ func TestImplementPausesPreservingWork(t *testing.T) {
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	backend.remoteHeads["widget"] = head
 	got := implementCLI(t, root, backend, "needs-human", "--item", "7", "--reason", "mandatory_rule", "--decision", filepath.Join(directory, "decision.md"), "--body", filepath.Join(directory, "submission.md"))
-	if got.Status != "needs_human" || got.Item.Submission == nil || !got.Item.Submission.Draft || got.Item.Submission.Head != head || got.Item.Claimed || got.Item.ResumeState != workflow.Ready {
+	if got.Status != "needs_human" || got.Item.Submission == nil || !got.Item.Submission.Draft || got.Item.Submission.Head != head || got.Item.Submission.Base != "main" || got.Item.Claimed || got.Item.ResumeState != workflow.Ready {
 		t.Fatalf("draft pause: %#v", got)
 	}
 	if _, err := os.Stat(filepath.Join(root, ".changes/widget/intent.md")); err != nil {
 		t.Fatal("draft retired incomplete artifacts")
+	}
+}
+
+func TestImplementRefusesExistingNonMainSubmissionBeforeHandoff(t *testing.T) {
+	for _, operation := range []string{"submit", "needs-human"} {
+		t.Run(operation, func(t *testing.T) {
+			root := proposalRepository(t)
+			prepareSlice(t, root, "widget")
+			head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+			submission := &workflow.Submission{ID: "11", Head: head, Base: "release", Body: "existing", State: workflow.Rework, Claimed: true}
+			b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Rework, Claimed: true, Submission: submission}}, remoteHeads: map[string]string{"widget": head}}
+			dir := t.TempDir()
+			body, decision := filepath.Join(dir, "submission.md"), filepath.Join(dir, "decision.md")
+			for _, file := range []string{body, decision} {
+				if err := os.WriteFile(file, []byte("unchanged"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			args := []string{operation, "--item", "7", "--body", body}
+			if operation == "needs-human" {
+				args = append(args, "--reason", "mandatory_rule", "--decision", decision)
+			}
+			got := implementCLI(t, root, b, args...)
+			if got.Status != "fix_required" || !strings.Contains(got.Reason, "release") || !strings.Contains(got.Reason, "main") || !b.work[0].Claimed || b.work[0].Transition != nil || !reflect.DeepEqual(b.work[0].Submission, submission) {
+				t.Fatalf("non-main %s refusal: %#v, item=%#v", operation, got, b.work[0])
+			}
+		})
 	}
 }
 

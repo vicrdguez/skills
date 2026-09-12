@@ -49,7 +49,6 @@ type ImplementationFacts struct {
 	WorkItem             int             `json:"work_item"`
 	Branch               string          `json:"branch"`
 	Worktree             string          `json:"worktree"`
-	TargetSnapshot       string          `json:"target_snapshot,omitempty"`
 	ArtifactBaseline     string          `json:"artifact_baseline,omitempty"`
 	ArtifactCompletion   string          `json:"artifact_completion,omitempty"`
 	ResumeCommand        string          `json:"resume_command"`
@@ -123,9 +122,6 @@ func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
 	if facts.Implementation != nil {
 		f := facts.Implementation
 		instructions += fmt.Sprintf("\n\n## Work Start\n\nWork Item: #%d\nBranch: %s\nWorktree: %s\nArtifact Baseline: %s\nResume: `%s`\n", f.WorkItem, f.Branch, f.Worktree, f.ArtifactBaseline, f.ResumeCommand)
-		if f.TargetSnapshot != "" {
-			instructions += "\nBefore coding, use ordinary Git in the worktree: `git merge " + f.TargetSnapshot + "`. The engine has not merged or run project checks.\n"
-		}
 		if f.PreviousReviewedHead != "" {
 			instructions += "\nFinding-driven Rework: sync nothing; review only `" + f.PreviousReviewedHead + "...HEAD`. Read the supplied summary, inline evidence, and human comments. Keep the ledger retired.\n"
 		}

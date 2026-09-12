@@ -44,7 +44,7 @@ The first review of a PR is complete: read all of it, batch every finding, publi
 
 Assign a new ID only for a defect the rework introduced or a critical discovery of that last kind. A pre-existing, noncritical thing you merely noticed this round is a `NOTE`, not another bounce. A finding that was `NOTE` last round cannot become `BLOCK` this round without new material evidence or a human's `BLOCK`.
 
-**One finding-driven bounce.** Return the semantic `rework` verdict for a failing review; the engine counts completed bounces from backend history and routes a second failure to Needs Human. Synchronization Rework does not spend this allowance.
+**One finding-driven bounce.** Return the semantic `rework` verdict for a failing review; the engine counts completed bounces from backend history and routes a second failure to Needs Human.
 
 A repeat review with no new commits is legal: a human resolved everything by disposition. Tun the gate and the artifact check, honor the dispositions and pass or pause on what remains.
 
@@ -92,7 +92,7 @@ When verification passes **and** no `BLOCK` or `HUMAN` finding is still active, 
 - Read the historical `intent.md` with `git show <artifact-baseline>:.changes/<slug>/intent.md`. Copy its `Manual verification` section into the PR body verbatim, with every checkbox unchecked, as the human's checklist. You tick nothing in it: by definition those are the checks no agent can run.
 - Keep the retired Implementation Ledger absent; do not restore or archive it.
 
-Write the complete final PR body to the packet's `submission.md`, and submit the packet's semantic command with `--verdict pass --body <absolute-submission.md>`. The engine appends the issue-closing footer and reports `ready_for_merge`, or `rework` for a merge conflict with a fresh Target Snapshot. Ready for Merge leaves the source issue open until GitHub observes the merge. The change now awaits the **human's merge**. The watchdog does not merge.
+Write the complete final PR body to the packet's `submission.md`, and submit the packet's semantic command with `--verdict pass --body <absolute-submission.md>`. A valid pass reports `ready_for_merge` whether mergeability is mergeable, conflicting, or unknown; record conflicts as informational session context. Ready for Merge leaves integration and conflict resolution to the Merge Authority and leaves the source issue open until GitHub observes the merge. The change now awaits the **human's merge**. The watchdog does not merge.
 
 
 ## Pause → hand the decision to a human

@@ -297,12 +297,12 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 	b := NewGitHubBackend(server.URL, "token", server.Client())
 	ctx := context.Background()
 	repo := github.RepositoryID{Owner: "acme", Name: "widgets"}
-	item := workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Ready, TargetSnapshot: "snapshot"}
+	item := workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Ready}
 	if err := b.ClaimImplementation(ctx, repo, item); err != nil {
 		t.Fatal(err)
 	}
 	items, err := b.ImplementationItems(ctx, repo)
-	if err != nil || len(items) != 1 || !items[0].Claimed || items[0].TargetSnapshot != "snapshot" {
+	if err != nil || len(items) != 1 || !items[0].Claimed {
 		t.Fatalf("Claim: %#v %v", items, err)
 	}
 	item = items[0]
@@ -315,7 +315,7 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 		t.Fatal(err)
 	}
 	items, err = b.ImplementationItems(ctx, repo)
-	if err != nil || len(items) != 1 || items[0].Problem != "" || items[0].TargetSnapshot != "snapshot" || items[0].State != workflow.NeedsHuman {
+	if err != nil || len(items) != 1 || items[0].Problem != "" || items[0].State != workflow.NeedsHuman {
 		t.Fatalf("opaque decision parsed as metadata: %#v %v", items, err)
 	}
 	pause.Completed = true
@@ -383,7 +383,7 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 	}
 }
 
-func TestGitHubImplementationRejectsForeignAttachmentsAndConflictingMetadata(t *testing.T) {
+func TestGitHubImplementationRejectsForeignAttachmentsAndIgnoresObsoleteTargetMetadata(t *testing.T) {
 	for _, kind := range []string{"fork", "untrusted metadata", "conflicting metadata"} {
 		t.Run(kind, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -421,8 +421,59 @@ func TestGitHubImplementationRejectsForeignAttachmentsAndConflictingMetadata(t *
 				t.Fatalf("items = %#v %v", items, err)
 			}
 			item := items[0]
-			if kind == "fork" && (item.Submission != nil || item.State == workflow.Merged) || kind == "untrusted metadata" && item.TargetSnapshot != "original" || kind == "conflicting metadata" && item.Problem == "" {
+			if kind == "fork" && (item.Submission != nil || item.State == workflow.Merged) || kind != "fork" && item.Problem != "" {
 				t.Fatalf("unsafe adoption: %#v", item)
+			}
+		})
+	}
+}
+
+func TestGitHubImplementationUsesMainAndNeverRetargetsExistingSubmission(t *testing.T) {
+	for _, existingBase := range []string{"", "release"} {
+		t.Run(existingBase, func(t *testing.T) {
+			writes := 0
+			postedBase := ""
+			pull := map[string]any{"number": 11, "state": "open", "body": "wanted", "head": map[string]any{"ref": "widget", "sha": "fixed", "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": existingBase}}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet {
+					writes++
+				}
+				switch r.URL.Path {
+				case "/repos/acme/widgets/issues":
+					fmt.Fprint(w, `[{"number":7,"title":"widget","state":"open","labels":[{"name":"ready"}]}]`)
+				case "/repos/acme/widgets/pulls":
+					if r.Method == http.MethodPost {
+						var payload map[string]any
+						if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+							t.Fatal(err)
+						}
+						postedBase, _ = payload["base"].(string)
+						pull["base"] = map[string]string{"ref": postedBase}
+						json.NewEncoder(w).Encode(pull)
+					} else if existingBase == "" {
+						fmt.Fprint(w, `[]`)
+					} else {
+						json.NewEncoder(w).Encode([]any{pull})
+					}
+				case "/repos/acme/widgets/pulls/11":
+					json.NewEncoder(w).Encode(pull)
+				default:
+					t.Fatalf("unexpected %s %s", r.Method, r.URL)
+				}
+			}))
+			defer server.Close()
+			b := NewGitHubBackend(server.URL, "token", server.Client())
+			wanted := workflow.Submission{Head: "fixed", Base: "release", Body: "wanted"}
+			if existingBase != "" {
+				wanted.ID = "11"
+			}
+			got, err := b.PublishImplementation(context.Background(), github.RepositoryID{Owner: "acme", Name: "widgets"}, workflow.ImplementationItem{ID: "7", Branch: "widget"}, wanted)
+			if existingBase == "" {
+				if err != nil || got.Base != "main" || postedBase != "main" || writes != 1 {
+					t.Fatalf("creation = %#v, %v, base=%q writes=%d", got, err, postedBase, writes)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), "repair its base to main") || writes != 0 {
+				t.Fatalf("non-main update = %#v, %v, writes=%d", got, err, writes)
 			}
 		})
 	}

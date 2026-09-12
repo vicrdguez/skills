@@ -230,9 +230,8 @@ func TestGitHubWatchdogCompletesReviewWithoutClosingSource(t *testing.T) {
 	}
 }
 
-func TestGitHubWatchdogPersistsSynchronizationTarget(t *testing.T) {
-	labels := []string{"review", "wip"}
-	var comments []map[string]any
+func TestGitHubWatchdogLeavesStaleSyncUntilImplementationHandoff(t *testing.T) {
+	labels := []string{"rework", "sync", "wip"}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets")
 		ls := []map[string]string{}
@@ -246,18 +245,14 @@ func TestGitHubWatchdogPersistsSynchronizationTarget(t *testing.T) {
 			result = []any{map[string]any{"number": 7, "title": "widget", "state": "open"}}
 		case path == "/pulls":
 			result = []any{pull}
+		case path == "/pulls/11":
+			result = pull
+		case path == "/issues/11/timeline":
 		case path == "/issues/11":
 			result = pull
 		case path == "/issues/7":
 			result = map[string]any{"number": 7, "state": "open"}
 		case path == "/issues/7/comments":
-			if r.Method == "POST" {
-				var p map[string]any
-				json.NewDecoder(r.Body).Decode(&p)
-				p["author_association"] = "OWNER"
-				comments = append(comments, p)
-			}
-			result = comments
 		case path == "/issues/11/labels":
 			var p struct {
 				Labels []string `json:"labels"`
@@ -277,12 +272,8 @@ func TestGitHubWatchdogPersistsSynchronizationTarget(t *testing.T) {
 	defer server.Close()
 	b := NewGitHubBackend(server.URL, "token", server.Client())
 	repo := github.RepositoryID{Owner: "acme", Name: "widgets"}
-	item := workflow.ImplementationItem{ID: "7", State: workflow.AwaitingReview, Synchronization: true, TargetSnapshot: "new-target", TargetBranch: "main", Submission: &workflow.Submission{ID: "11", Head: "fixed"}}
-	if err := b.CompleteReview(context.Background(), repo, item, workflow.Rework, func() error { return nil }); err != nil {
-		t.Fatal(err)
-	}
 	items, err := b.ImplementationItems(context.Background(), repo)
-	if err != nil || len(items) != 1 || !items[0].Synchronization || items[0].TargetSnapshot != "new-target" || !slices.Contains(labels, "sync") {
+	if err != nil || len(items) != 1 || !items[0].Synchronization || !slices.Contains(labels, "sync") {
 		t.Fatalf("sync: %#v %v %v", items, err, labels)
 	}
 	if err := b.AwaitImplementationReview(context.Background(), repo, items[0], func() error { return nil }); err != nil {
@@ -415,7 +406,7 @@ func TestGitHubStatusAdoptsOnlyForwardReviewProjections(t *testing.T) {
 }
 
 func TestGitHubReviewRecoveryPreservesProblems(t *testing.T) {
-	for _, problem := range []string{"conflicting Target Snapshot metadata", "multiple source issues own the conventional branch"} {
+	for _, problem := range []string{"multiple source issues own the conventional branch"} {
 		t.Run(problem, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				pull := `{"number":11,"state":"open","labels":[{"name":"done"},{"name":"wip"}],"head":{"sha":"fixed","ref":"widget","repo":{"full_name":"acme/widgets"}}}`
@@ -490,11 +481,7 @@ func TestGitHubReviewRecoveryLateSynchronization(t *testing.T) {
 			if err != nil || len(items) != 1 {
 				t.Fatalf("items: %#v %v", items, err)
 			}
-			if slices.Equal(history, []string{"done", "sync", "rework"}) {
-				if items[0].Problem != "" || items[0].State != workflow.Rework || items[0].Submission.PendingReview != workflow.Rework {
-					t.Fatalf("forward synchronization not recovered: %#v", items[0])
-				}
-			} else if items[0].Problem == "" || items[0].Submission.PendingReview != "" {
+			if items[0].Problem == "" || items[0].Submission.PendingReview != "" {
 				t.Fatalf("contradiction guessed through: %#v", items[0])
 			}
 		})
@@ -576,14 +563,23 @@ func TestGitHubReviewRecoveryConflictingPartialPass(t *testing.T) {
 				t.Fatalf("partial pass: %#v %v labels=%v", items, err, labels)
 			}
 			item = items[0]
-			item.Synchronization, item.TargetSnapshot, item.TargetBranch = true, "target", "main"
+			item.Synchronization = true
 			failDelete = interrupted
 			if err := b.CompleteReview(ctx, repo, item, workflow.Rework, guard); err == nil || !slices.Contains(labels, interrupted) {
 				t.Fatalf("expected unapplied %s deletion: %v labels=%v", interrupted, err, labels)
 			}
 			items, err = b.ImplementationItems(ctx, repo)
-			if err != nil || len(items) != 1 || items[0].Problem != "" || items[0].State != workflow.Rework || !items[0].Claimed || !items[0].Synchronization || items[0].TargetSnapshot != "target" || items[0].Submission.PendingReview != workflow.Rework {
-				t.Fatalf("combined interruption not recoverable: %#v %v labels=%v", items, err, labels)
+			if err != nil || len(items) != 1 {
+				t.Fatalf("combined interruption: %#v %v labels=%v", items, err, labels)
+			}
+			if interrupted != "wip" {
+				if items[0].Problem == "" || items[0].Submission.PendingReview != "" {
+					t.Fatalf("obsolete synchronization overlap was recovered: %#v labels=%v", items[0], labels)
+				}
+				return
+			}
+			if items[0].Problem != "" || items[0].State != workflow.Rework || !items[0].Claimed || items[0].Synchronization || items[0].Submission.PendingReview != workflow.Rework {
+				t.Fatalf("ordinary Rework interruption not recoverable: %#v labels=%v", items[0], labels)
 			}
 			failDelete = ""
 			for range 2 {
@@ -592,12 +588,12 @@ func TestGitHubReviewRecoveryConflictingPartialPass(t *testing.T) {
 				}
 			}
 			items, err = b.ImplementationItems(ctx, repo)
-			if err != nil || len(items) != 1 || items[0].Problem != "" || items[0].State != workflow.Rework || items[0].Claimed || !slices.Equal(labels, []string{"sync", "rework"}) || len(metadata) != 1 {
+			if err != nil || len(items) != 1 || items[0].Problem != "" || items[0].State != workflow.Rework || items[0].Claimed || !slices.Equal(labels, []string{"rework"}) || len(metadata) != 0 {
 				t.Fatalf("retry incomplete: %#v %v labels=%v metadata=%v", items, err, labels, metadata)
 			}
 			observed, err := b.ReviewSubmission(ctx, repo, "11")
-			if err != nil || observed.Bounces != 0 || observed.PendingReview != "" {
-				t.Fatalf("synchronization counted as bounce or left pending: %#v %v", observed, err)
+			if err != nil || observed.Bounces != 1 || observed.PendingReview != "" {
+				t.Fatalf("ordinary Rework bounce not recorded: %#v %v", observed, err)
 			}
 		})
 	}

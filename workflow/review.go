@@ -81,6 +81,9 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	if item.Problem != "" || item.Submission == nil || item.State == AwaitingReview && !item.Claimed || item.Submission.ReviewedHead != reviewed {
 		return ImplementationOutcome{}, Refuse("verdict requires the fixed Awaiting Review Claim")
 	}
+	if item.Submission.Base != "" && item.Submission.Base != "main" {
+		return ImplementationOutcome{}, Refuse("existing Submission " + string(item.Submission.ID) + " targets " + item.Submission.Base + "; inspect it and explicitly repair its base to main before retrying")
+	}
 	if head != reviewed && (verdict != "pass" || gitOK(root, "merge-base", "--is-ancestor", reviewed, head) != nil) {
 		return ImplementationOutcome{}, Refuse("post-marker head must descend from the fixed reviewed head on pass")
 	}
@@ -102,6 +105,9 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 		}
 		if submission.Head != head || submission.Merged || submission.Draft {
 			return Refuse("Submission head changed during verdict")
+		}
+		if submission.Base != "" && submission.Base != "main" {
+			return Refuse("existing Submission " + string(item.Submission.ID) + " targets " + submission.Base + "; inspect it and explicitly repair its base to main before retrying")
 		}
 		return nil
 	}

@@ -23,14 +23,6 @@ func (b *GitHubBackend) CompleteReview(ctx context.Context, repository github.Re
 	if err := guard(); err != nil {
 		return err
 	}
-	if item.Synchronization && target == workflow.Rework {
-		if err := b.publishImplementationMetadata(ctx, repository, itemNumber, implementationMetadata{SynchronizationTarget: item.TargetSnapshot, TargetBranch: item.TargetBranch}); err != nil {
-			return err
-		}
-		if err := b.implementationLabelMutation(ctx, repository, submissionNumber, []string{"sync"}, nil, guard); err != nil {
-			return err
-		}
-	}
 	if target == workflow.NeedsHuman {
 		if err := b.publishImplementationMetadata(ctx, repository, itemNumber, implementationMetadata{ResumeState: item.ResumeState}); err != nil {
 			return err
@@ -76,7 +68,6 @@ func (b *GitHubBackend) ReviewSubmission(ctx context.Context, repository github.
 	reviewing := false
 	latest := ""
 	reviewExited := false
-	synchronizing := false
 	for page := 1; ; page++ {
 		var events []struct {
 			Event string `json:"event"`
@@ -99,8 +90,6 @@ func (b *GitHubBackend) ReviewSubmission(ctx context.Context, repository github.
 				reviewExited = false
 			}
 			if event.Event == "labeled" && (event.Label.Name == "review" || event.Label.Name == "rework" || event.Label.Name == "done" || event.Label.Name == "needs-human") {
-				// A conflicting pass retry can add rework before its claimed review is removed.
-				synchronizing = event.Label.Name == "rework" && latest == "done" && labels["done"] && labels["sync"] && (!labels["review"] || labels["wip"]) && !labels["needs-human"] && !labels["ready"]
 				latest = event.Label.Name
 			}
 			if event.Event == "labeled" && event.Label.Name == "review" {
@@ -132,10 +121,6 @@ func (b *GitHubBackend) ReviewSubmission(ctx context.Context, repository github.
 	if current["review"] && states == 2 && current[latest] && latest != "review" && latest != "ready" {
 		result.PendingReview = map[string]workflow.State{"rework": workflow.Rework, "done": workflow.ReadyForMerge, "needs-human": workflow.NeedsHuman}[latest]
 		result.State = result.PendingReview
-	}
-	if (states == 2 && !current["review"] || states == 3 && current["review"] && claimed && labels["wip"]) && current["review"] == labels["review"] && current["done"] && current["rework"] && current["sync"] && labels["done"] && labels["rework"] && labels["sync"] && synchronizing {
-		result.PendingReview = workflow.Rework
-		result.State = workflow.Rework
 	}
 	if states == 1 && claimed && (state == workflow.ReadyForMerge || state == workflow.NeedsHuman) {
 		result.PendingReview = state

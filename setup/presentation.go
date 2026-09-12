@@ -23,8 +23,6 @@ type implementationItemOutput struct {
 	ResumeState     workflow.State
 	Submission      *submissionOutput
 	Branch          string
-	TargetSnapshot  string
-	TargetBranch    string
 	Number          int
 	State           workflow.State
 	CreatedAt       string
@@ -60,8 +58,8 @@ type StatusOutput struct {
 func presentItem(item workflow.ImplementationItem) (implementationItemOutput, error) {
 	output := implementationItemOutput{
 		Synchronization: item.Synchronization, Problem: item.Problem, ResumeState: item.ResumeState,
-		Branch: item.Branch, TargetSnapshot: item.TargetSnapshot, TargetBranch: item.TargetBranch,
-		State: item.State, CreatedAt: item.CreatedAt, Claimed: item.Claimed, Transition: item.Transition,
+		Branch: item.Branch,
+		State:  item.State, CreatedAt: item.CreatedAt, Claimed: item.Claimed, Transition: item.Transition,
 	}
 	var err error
 	if item.ID != "" {
@@ -117,10 +115,7 @@ func PresentImplementation(outcome workflow.ImplementationOutcome) (Implementati
 		if output.Item.Submission != nil {
 			f.Submission = output.Item.Submission.Number
 		}
-		f.ResumeCommand = fmt.Sprintf("skl implement resume --item %d --target-snapshot %s", f.WorkItem, f.TargetSnapshot)
-		if outcome.Item.State == workflow.Rework && !outcome.Item.Synchronization {
-			f.ResumeCommand = fmt.Sprintf("skl implement resume --item %d", f.WorkItem)
-		}
+		f.ResumeCommand = fmt.Sprintf("skl implement resume --item %d", f.WorkItem)
 		f.ResumeCommand += " --remote " + quote(f.Remote)
 		f.InspectCommand = fmt.Sprintf("skl implement inspect --repo %s --remote %s --item %d", quote(f.Worktree), quote(f.Remote), f.WorkItem)
 		f.SubmitCommand = fmt.Sprintf("skl implement submit --repo %s --remote %s --item %d --body %s", quote(f.Worktree), quote(f.Remote), f.WorkItem, quote(filepath.Join(directory, "submission.md")))

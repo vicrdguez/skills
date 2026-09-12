@@ -48,6 +48,9 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 	if item.ID == "" || item.Problem != "" {
 		return ImplementationOutcome{}, Refuse("Workflow State contradicts handoff: " + item.Problem + "; repair projections before retrying")
 	}
+	if bodyPath != "" && item.Submission != nil && item.Submission.Base != "main" {
+		return ImplementationOutcome{}, Refuse("existing Submission " + string(item.Submission.ID) + " targets " + item.Submission.Base + "; inspect it and explicitly repair its base to main before retrying")
+	}
 	resultPath := bodyPath
 	if resultPath == "" {
 		resultPath = decisionPath
@@ -126,9 +129,6 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 		return ImplementationOutcome{}, err
 	}
 	if target == AwaitingReview {
-		if from == Ready && item.TargetSnapshot == "" || item.TargetSnapshot != "" && gitOK(root, "merge-base", "--is-ancestor", item.TargetSnapshot, head) != nil {
-			return ImplementationOutcome{}, Refuse("Target Snapshot is absent; merge the pinned snapshot, commit and push before retrying")
-		}
 		if history.Phase != "retired" || len(history.Violations) > 0 {
 			return ImplementationOutcome{}, Refuse(fmt.Sprint(history.Violations) + "; complete permitted ticks, commit Completion, then delete the entire ledger in a child commit and push")
 		}
@@ -160,17 +160,7 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 		}
 	}()
 	if bodyPath != "" {
-		base := item.TargetBranch
-		if item.Submission != nil && item.Submission.Base != "" {
-			base = item.Submission.Base
-		}
-		if base == "" {
-			base, err = backend.ImplementationTarget(ctx, repository)
-			if err != nil {
-				return ImplementationOutcome{}, err
-			}
-		}
-		submission := Submission{Head: head, Base: base, Body: withClosingReference(string(body), item.ClosingReference), Draft: target == NeedsHuman}
+		submission := Submission{Head: head, Base: "main", Body: withClosingReference(string(body), item.ClosingReference), Draft: target == NeedsHuman}
 		if item.Submission != nil {
 			submission.ID = item.Submission.ID
 		}

@@ -44,20 +44,6 @@ func ObserveStatus(ctx context.Context, root, remote string, backend Implementat
 					outcome.Items[i].Claimed = false
 					continue
 				}
-				if current.Head == item.Submission.Head && current.Mergeability == "conflicting" {
-					item.Synchronization = true
-					item.TargetBranch = current.Base
-					item.TargetSnapshot, err = backend.ImplementationHead(ctx, repository, current.Base)
-					if err != nil {
-						return StatusOutcome{}, err
-					}
-					if item.TargetSnapshot == "" {
-						return StatusOutcome{}, Refuse("current target unavailable; retry status after restoring the target")
-					}
-					submission := *item.Submission
-					submission.PendingReview = Rework
-					item.Submission = &submission
-				}
 			}
 		}
 		if item.Submission != nil && item.Submission.PendingReview != "" {
@@ -73,8 +59,8 @@ func ObserveStatus(ctx context.Context, root, remote string, backend Implementat
 				if current.Head != item.Submission.Head || current.Merged {
 					return Refuse("Submission changed during status reconciliation")
 				}
-				if item.Submission.PendingReview == ReadyForMerge && current.Mergeability != "mergeable" {
-					return Refuse("mergeability unavailable or changed during status reconciliation; retry to observe the current target")
+				if item.Submission.PendingReview == ReadyForMerge && current.Base != "main" {
+					return Refuse("existing Submission " + string(item.Submission.ID) + " targets " + current.Base + "; inspect it and explicitly repair its base to main before retrying status")
 				}
 				return nil
 			}
