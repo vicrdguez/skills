@@ -1672,6 +1672,11 @@ func TestContinuationRefusalMatrixHasNoEffects(t *testing.T) {
 				if got.Status != "fix_required" || got.Item == nil || got.Item.Number != 7 || got.Reason == "" || !bytes.Equal(before, after) || b.itemReads > 1 || b.roundReads != 1 {
 					t.Fatalf("refusal effects: %+v reads=%d/%d before=%s after=%s", got, b.itemReads, b.roundReads, before, after)
 				}
+				for _, guidance := range []string{"stop", "inspect", "resume", "--item 7", "do not replay next or next --after"} {
+					if !strings.Contains(got.Reason, guidance) {
+						t.Fatalf("refusal lacks %q recovery guidance: %s", guidance, got.Reason)
+					}
+				}
 				if problem != "documents disappeared" {
 					if content, err := os.ReadFile(document); err != nil || string(content) != "retain recovery document" {
 						t.Fatalf("refusal removed document: %q %v", content, err)

@@ -154,7 +154,8 @@ func continuedWork(ctx context.Context, root, remote, reference string, lane wor
 		previous, err = workflow.VerifyDispatch(ctx, root, remote, lane, reference, backend)
 		var violation *workflow.InvariantError
 		if errors.As(err, &violation) {
-			return workflow.ImplementationOutcome{Status: "fix_required", Reason: violation.Reason, Item: &workflow.ImplementationItem{ID: previous.Item}}, nil
+			reason := fmt.Sprintf("%s; stop; inspect the reference's repository, lane and Work Item --item %s, then explicitly resume the intended Claim after resolving the problem; do not replay next or next --after", violation.Reason, previous.Item)
+			return workflow.ImplementationOutcome{Status: "fix_required", Reason: reason, Item: &workflow.ImplementationItem{ID: previous.Item}}, nil
 		}
 		if err != nil {
 			return workflow.ImplementationOutcome{}, selectionError(lane, previous.Item, err)
