@@ -328,6 +328,7 @@ func TestImplementationHandoffProtectsDestinationThroughPublicHTTP(t *testing.T)
 func TestFirstImplementationHandoffProtectsDestinationThroughPublicHTTP(t *testing.T) {
 	f := newReviewFixture(t)
 	f.forge.noPull = true
+	f.forge.labels = nil
 	f.forge.sourceLabels = []string{"ready", "wip"}
 	f.forge.sourceComments = []map[string]any{{"author_association": "OWNER", "body": "<!-- skl.implement/v1\n{\"target_snapshot\":\"" + f.head + "\",\"target_branch\":\"main\"}\n-->"}}
 	start := f.run(t, f.worktree, "implement", "resume", "--item", "7")
@@ -335,7 +336,7 @@ func TestFirstImplementationHandoffProtectsDestinationThroughPublicHTTP(t *testi
 	if err := os.WriteFile(body, []byte("first\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	active, releaseObserved := false, false
+	active, releaseObserved, claimed := false, false, false
 	f.forge.afterMutation = func() {
 		if active {
 			return
@@ -346,12 +347,16 @@ func TestFirstImplementationHandoffProtectsDestinationThroughPublicHTTP(t *testi
 		got := f.run(t, f.root, "watchdog", "next")
 		if unprotectedReview {
 			releaseObserved = true
+			claimed = got.Status == "work_available" && got.Item != nil && got.Item.Number == 7
+			if !claimed {
+				t.Fatalf("released first Submission was not claimable: %#v source=%v destination=%v", got, f.forge.sourceLabels, f.forge.labels)
+			}
 		} else if got.Status != "no_work" {
 			t.Fatalf("first Submission became claimable before release: %#v labels=%v", got, f.forge.labels)
 		}
 	}
 	_, err := f.runResult(f.worktree, "implement", "submit", "--item", "7", "--body", body)
-	if !releaseObserved || len(f.forge.sourceLabels) != 0 || err != nil && !slices.Equal(f.forge.labels, []string{"review", "wip"}) {
+	if !releaseObserved || !claimed || len(f.forge.sourceLabels) != 0 || !slices.Equal(f.forge.labels, []string{"review", "wip"}) {
 		t.Fatalf("first handoff lost release ordering: err=%v released=%t source=%v destination=%v", err, releaseObserved, f.forge.sourceLabels, f.forge.labels)
 	}
 }
@@ -402,17 +407,27 @@ func TestImplementationPausePublishesBeforeReleaseThroughPublicHTTP(t *testing.T
 }
 
 func TestWatchdogVerdictsReleaseLastThroughPublicHTTP(t *testing.T) {
-	for _, verdict := range []string{"rework", "pass", "needs-human"} {
-		t.Run(verdict, func(t *testing.T) {
+	for _, mode := range []string{"rework", "pass", "needs-human", "conflicting-pass", "review-limit"} {
+		t.Run(mode, func(t *testing.T) {
 			f := newReviewFixture(t)
 			f.forge.noOther = true
+			verdict, number, want := mode, "1", map[string]string{"rework": "rework", "pass": "ready_for_merge", "needs-human": "needs_human", "conflicting-pass": "rework", "review-limit": "needs_human"}[mode]
+			if mode == "conflicting-pass" {
+				verdict, f.forge.mergeable = "pass", false
+			}
+			if mode == "review-limit" {
+				verdict, number = "rework", "2"
+				if err := os.WriteFile(f.checkpoint, []byte("1:"+f.head+"\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
 			start := f.start(t, f.root)
 			directory := start.Packet.Facts.Watchdog.ResultDirectory
 			summary := filepath.Join(directory, "summary.md")
 			if err := os.WriteFile(summary, []byte("verdict\n"), 0600); err != nil {
 				t.Fatal(err)
 			}
-			args := []string{"watchdog", "submit", "--item", "7", "--review-number", "1", "--reviewed-head", f.head, "--verdict", verdict, "--summary", summary}
+			args := []string{"watchdog", "submit", "--item", "7", "--review-number", number, "--reviewed-head", f.head, "--verdict", verdict, "--summary", summary}
 			if verdict == "pass" {
 				body := filepath.Join(directory, "submission.md")
 				if err := os.WriteFile(body, []byte("final\n"), 0600); err != nil {
@@ -440,8 +455,10 @@ func TestWatchdogVerdictsReleaseLastThroughPublicHTTP(t *testing.T) {
 				}
 			}
 			got, err := f.runResult(f.worktree, args...)
-			if !released || verdict == "rework" && (!claimedRework || err == nil || !slices.Equal(f.forge.labels, []string{"rework", "wip"})) || verdict != "rework" && (err != nil || got.Status == "") {
-				t.Fatalf("verdict release ordering: verdict=%s got=%#v err=%v released=%t claimed=%t labels=%v", verdict, got, err, released, claimedRework, f.forge.labels)
+			reworkTarget := want == "rework"
+			reworkLabels := slices.Contains(f.forge.labels, "rework") && slices.Contains(f.forge.labels, "wip")
+			if !released || reworkTarget && (!claimedRework || err == nil || !reworkLabels) || !reworkTarget && (err != nil || got.Status != want) {
+				t.Fatalf("verdict release ordering: mode=%s got=%#v err=%v released=%t claimed=%t labels=%v", mode, got, err, released, claimedRework, f.forge.labels)
 			}
 		})
 	}
@@ -474,6 +491,24 @@ func TestImplementationRetryRefusesChangedPublishedEvidenceThroughPublicHTTP(t *
 	got = f.run(t, f.worktree, "implement", "submit", "--item", "7", "--body", body)
 	if got.Status != "fix_required" || !strings.Contains(got.Reason, "published Rework Submission differs") || f.forge.body != "accepted\n\nCloses #7\n" || !slices.Equal(f.forge.labels, []string{"rework", "review", "wip"}) {
 		t.Fatalf("changed Rework recovery evidence mutated handoff: %#v body=%q labels=%v", got, f.forge.body, f.forge.labels)
+	}
+
+	f = newReviewFixture(t)
+	f.forge.noPull = true
+	f.forge.labels = nil
+	f.forge.sourceLabels = []string{"ready", "wip"}
+	f.forge.sourceComments = []map[string]any{
+		{"author_association": "OWNER", "body": "<!-- skl.implement/v1\n{\"target_snapshot\":\"" + f.head + "\",\"target_branch\":\"main\"}\n-->"},
+		{"author_association": "OWNER", "body": workflow.OpaqueImplementationDecision("original\n")},
+	}
+	directory = newImplementationResultDirectory(t)
+	decision := filepath.Join(directory, "decision.md")
+	if err := os.WriteFile(decision, []byte("changed\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got = f.run(t, f.worktree, "implement", "needs-human", "--item", "7", "--reason", "mandatory_rule", "--decision", decision)
+	if got.Status != "fix_required" || !strings.Contains(got.Reason, "published decision differs") || len(f.forge.sourceComments) != 2 || !slices.Equal(f.forge.sourceLabels, []string{"ready", "wip"}) {
+		t.Fatalf("changed decision mutated handoff: %#v comments=%v labels=%v", got, f.forge.sourceComments, f.forge.sourceLabels)
 	}
 }
 
