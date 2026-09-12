@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -99,7 +100,7 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 		return outcome, err
 	}
 
-	if implementationHandoffMatches(item, target, head, string(body), string(decision)) {
+	if implementationHandoffMatches(item, target, head, string(body), bodyPath != "", string(decision), decisionPath != "") {
 		outcome = ImplementationOutcome{Status: string(target), Item: &item}
 		cleanupImplementationResult(&outcome, resultPath)
 		return outcome, nil
@@ -121,6 +122,12 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 	}
 	if from == Rework && item.Submission == nil {
 		return outcome, Refuse("Rework has no existing Submission; repair its attachment before resubmitting")
+	}
+	if from == Ready && bodyPath != "" && item.Submission != nil && item.Submission.Head == head && !implementationBodyMatches(item.ID, item.Submission.Body, string(body)) {
+		return outcome, Refuse("published Submission differs from the supplied Result Document; restore the original body before retrying")
+	}
+	if decisionPath != "" && implementationDecisionConflicts(item, string(decision)) {
+		return outcome, Refuse("published decision differs from the supplied Result Document; restore the original decision before retrying")
 	}
 	if target == AwaitingReview && from == Rework && item.Submission != nil && implementationBodyMatches(item.ID, item.Submission.Body, string(body)) {
 		return outcome, Refuse("unchanged Rework Submission cannot distinguish a stale command from a new handoff; inspect and supply the current round's Result Document")
@@ -194,7 +201,7 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 		return outcome, observeErr
 	}
 	for _, current := range observed {
-		if current.ID == id && implementationHandoffMatches(current, target, head, string(body), string(decision)) {
+		if current.ID == id && implementationHandoffMatches(current, target, head, string(body), bodyPath != "", string(decision), decisionPath != "") {
 			outcome = ImplementationOutcome{Status: string(target), Item: &current}
 			cleanupImplementationResult(&outcome, resultPath)
 			return outcome, nil
@@ -210,14 +217,14 @@ func implementationSourceClaim(item ImplementationItem) bool {
 	return item.Source != nil && item.Source.Claimed && slices.Contains(item.Source.States, Ready) || item.Submission != nil && item.Submission.Lifecycle != nil && item.Submission.Lifecycle.Claimed && slices.Contains(item.Submission.Lifecycle.States, Rework)
 }
 
-func implementationHandoffMatches(item ImplementationItem, target State, head, body, decision string) bool {
+func implementationHandoffMatches(item ImplementationItem, target State, head, body string, bodySupplied bool, decision string, decisionSupplied bool) bool {
 	if item.Problem != "" || item.State != target || item.Claimed {
 		return false
 	}
-	if body != "" && (item.Submission == nil || item.Submission.Head != head || item.Submission.Draft != (target == NeedsHuman) || !implementationBodyMatches(item.ID, item.Submission.Body, body)) {
+	if bodySupplied && (item.Submission == nil || item.Submission.Head != head || item.Submission.Draft != (target == NeedsHuman) || !implementationBodyMatches(item.ID, item.Submission.Body, body)) {
 		return false
 	}
-	if decision == "" {
+	if !decisionSupplied {
 		return true
 	}
 	wanted := OpaqueImplementationDecision(decision)
@@ -236,11 +243,35 @@ func implementationHandoffMatches(item ImplementationItem, target State, head, b
 	return false
 }
 
+func implementationDecisionConflicts(item ImplementationItem, decision string) bool {
+	wanted := OpaqueImplementationDecision(decision)
+	for _, comment := range item.Feedback {
+		if strings.HasPrefix(comment.Body, implementationDecisionPrefix) {
+			if comment.Body != wanted {
+				return true
+			}
+		}
+	}
+	if item.Submission != nil {
+		for _, comment := range item.Submission.Comments {
+			if strings.HasPrefix(comment.Body, implementationDecisionPrefix) {
+				if comment.Body != wanted {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 func implementationBodyMatches(id WorkItemID, actual, supplied string) bool {
-	if actual == supplied {
+	if _, err := strconv.Atoi(string(id)); err != nil {
+		return actual == supplied
+	}
+	if actual == supplied+"\n\nCloses #"+string(id)+"\n" {
 		return true
 	}
-	return actual == supplied+"\n\nCloses #"+string(id)+"\n"
+	return false
 }
 
 func cleanupImplementationResult(outcome *ImplementationOutcome, resultPath string) {

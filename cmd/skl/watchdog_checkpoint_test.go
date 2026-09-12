@@ -17,6 +17,7 @@ import (
 
 	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/setup"
+	"github.com/vicrdguez/skills/workflow"
 )
 
 type reviewForge struct {
@@ -26,7 +27,9 @@ type reviewForge struct {
 	remoteHead     string
 	pullHead       string
 	body           string
+	draft          bool
 	labels         []string
+	sourceLabels   []string
 	summaries      []map[string]any
 	issueComments  []map[string]any
 	inlines        []map[string]any
@@ -52,6 +55,7 @@ type reviewForge struct {
 	atWipRelease   string
 	denyRename     string
 	renameDenied   bool
+	afterMutation  func()
 	clock          int
 }
 
@@ -61,6 +65,9 @@ func (f *reviewForge) timestamp() string {
 }
 
 func (f *reviewForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && f.afterMutation != nil {
+		defer f.afterMutation()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	path := strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets")
@@ -82,7 +89,7 @@ func (f *reviewForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			head = f.pullHead
 		}
 		result := issue(11, branch, f.labels, true)
-		result["body"], result["draft"], result["merged"], result["mergeable"] = f.body, false, false, f.mergeable
+		result["body"], result["draft"], result["merged"], result["mergeable"] = f.body, f.draft, false, f.mergeable
 		result["head"] = map[string]any{"ref": branch, "sha": head, "repo": map[string]string{"full_name": "acme/widgets"}}
 		result["base"] = map[string]string{"ref": "main"}
 		return result
@@ -94,7 +101,7 @@ func (f *reviewForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "readback unavailable", http.StatusInternalServerError)
 			return
 		}
-		write([]any{issue(7, branch, nil, false), issue(8, "other", []string{"ready"}, false), issue(11, branch, f.labels, true)})
+		write([]any{issue(7, branch, f.sourceLabels, false), issue(8, "other", []string{"ready"}, false), issue(11, branch, f.labels, true)})
 	case r.Method == http.MethodGet && path == "/pulls":
 		write([]any{pull()})
 	case r.Method == http.MethodGet && path == "/pulls/11":
@@ -239,6 +246,91 @@ func (f *reviewForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	default:
 		http.Error(w, fmt.Sprintf("unexpected %s %s", r.Method, path), http.StatusNotFound)
+	}
+}
+
+func TestImplementationHandoffProtectsDestinationThroughPublicHTTP(t *testing.T) {
+	f := newReviewFixture(t)
+	f.forge.labels = []string{"rework", "wip"}
+	start := f.run(t, f.worktree, "implement", "resume", "--item", "7")
+	if start.Status != "work_available" || start.Packet == nil || start.Packet.Facts.Implementation == nil {
+		t.Fatalf("resume: %#v", start)
+	}
+	body := filepath.Join(start.Packet.Facts.Implementation.ResultDirectory, "submission.md")
+	if err := os.WriteFile(body, []byte("reworked\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	active := false
+	checks := 0
+	claimedAfterRelease := false
+	f.forge.afterMutation = func() {
+		if active {
+			return
+		}
+		active = true
+		defer func() { active = false }()
+		checks++
+		unprotectedReview := slices.Contains(f.forge.labels, "review") && !slices.Contains(f.forge.labels, "wip")
+		got := f.run(t, f.root, "watchdog", "next")
+		if unprotectedReview {
+			if got.Status != "work_available" {
+				t.Fatalf("released review was not claimable: %#v labels=%v", got, f.forge.labels)
+			}
+			claimedAfterRelease = true
+			return
+		}
+		if got.Status != "no_work" {
+			t.Fatalf("destination became claimable before release: %#v labels=%v", got, f.forge.labels)
+		}
+	}
+
+	_, err := f.runResult(f.worktree, "implement", "submit", "--item", "7", "--body", body)
+	if err == nil || checks == 0 || !claimedAfterRelease || !slices.Equal(f.forge.labels, []string{"review", "wip"}) {
+		t.Fatalf("handoff did not preserve the later Watchdog Claim: err=%v checks=%d claimed=%t labels=%v", err, checks, claimedAfterRelease, f.forge.labels)
+	}
+}
+
+func TestImplementationRetryRefusesChangedPublishedEvidenceThroughPublicHTTP(t *testing.T) {
+	f := newReviewFixture(t)
+	f.forge.sourceLabels = []string{"ready", "wip"}
+	f.forge.labels = nil
+	f.forge.body = "original\n\nCloses #7\n"
+	f.forge.sourceComments = []map[string]any{{"author_association": "OWNER", "body": "<!-- skl.implement/v1\n{\"target_snapshot\":\"" + f.head + "\",\"target_branch\":\"main\"}\n-->"}}
+	directory := newImplementationResultDirectory(t)
+	body := filepath.Join(directory, "submission.md")
+	if err := os.WriteFile(body, []byte("changed\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got := f.run(t, f.worktree, "implement", "submit", "--item", "7", "--body", body)
+	if got.Status != "fix_required" || !strings.Contains(got.Reason, "published Submission differs") || f.forge.body != "original\n\nCloses #7\n" || !slices.Equal(f.forge.sourceLabels, []string{"ready", "wip"}) {
+		t.Fatalf("changed recovery evidence mutated handoff: %#v body=%q labels=%v", got, f.forge.body, f.forge.sourceLabels)
+	}
+}
+
+func TestImplementationCompletedHandoffVerifiesEmptyResultDocuments(t *testing.T) {
+	for _, decisionVisible := range []bool{false, true} {
+		t.Run(fmt.Sprintf("decision-visible=%t", decisionVisible), func(t *testing.T) {
+			f := newReviewFixture(t)
+			f.forge.sourceLabels = []string{"needs-human"}
+			f.forge.labels = []string{"needs-human"}
+			f.forge.body = "\n\nCloses #7\n"
+			f.forge.draft = true
+			if decisionVisible {
+				f.forge.issueComments = []map[string]any{{"body": workflow.OpaqueImplementationDecision("")}}
+			}
+			directory := newImplementationResultDirectory(t)
+			body, decision := filepath.Join(directory, "submission.md"), filepath.Join(directory, "decision.md")
+			for _, name := range []string{body, decision} {
+				if err := os.WriteFile(name, nil, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got := f.run(t, f.worktree, "implement", "needs-human", "--item", "7", "--reason", "mandatory_rule", "--decision", decision, "--body", body)
+			if decisionVisible && got.Status != "needs_human" || !decisionVisible && got.Status != "fix_required" {
+				t.Fatalf("empty evidence verification: %#v", got)
+			}
+		})
 	}
 }
 

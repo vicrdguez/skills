@@ -75,8 +75,6 @@ func (b *GitHubBackend) CompleteReview(ctx context.Context, item workflow.Implem
 			return err
 		}
 	}
-	if target == workflow.NeedsHuman {
-	}
 	if err := b.implementationLabelMutation(ctx, repository, submissionNumber, []string{label}, nil, guard); err != nil {
 		return err
 	}
