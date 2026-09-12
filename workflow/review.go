@@ -197,6 +197,11 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	}
 	receipt, receiptCount := matchingSummaryReceipt(*item.Submission, comments[0])
 	evidenceMatches := reviewEvidenceMatches(item, comments, finalBody)
+	if retry && item.State == AwaitingReview {
+		var unambiguous bool
+		receipt, receiptCount, unambiguous = matchingSummaryReceiptForClaim(*item.Submission, comments[0], submission.ClaimAcquiredAt)
+		evidenceMatches = unambiguous && reviewEvidenceMatchesForClaim(item, comments, finalBody, submission.ClaimAcquiredAt)
+	}
 	if retry && (!evidenceMatches || receiptCount != 1) {
 		return ImplementationOutcome{}, Refuse("recorded review differs from the supplied summary, verdict, body, or inline evidence; replay the original fixed-number command and Result Documents")
 	}
@@ -302,11 +307,11 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 			publishedItem = current
 		}
 	}
-	observedEvidence := reviewEvidenceMatches(publishedItem, comments, finalBody)
-	if !retry {
-		observedEvidence = reviewEvidenceMatchesForClaim(publishedItem, comments, finalBody, submission.ClaimAcquiredAt)
+	if matches != 1 || publishedItem.Problem != "" || publishedItem.State != AwaitingReview || !publishedItem.Claimed || publishedItem.Submission == nil {
+		return ImplementationOutcome{}, Refuse("published review evidence is not exactly observable; retain the Claim and retry the same fixed-number command and Result Documents")
 	}
-	if matches != 1 || publishedItem.Problem != "" || publishedItem.State != AwaitingReview || !publishedItem.Claimed || publishedItem.Submission == nil || !observedEvidence {
+	observedEvidence := reviewEvidenceMatchesForClaim(publishedItem, comments, finalBody, submission.ClaimAcquiredAt)
+	if !observedEvidence {
 		return ImplementationOutcome{}, Refuse("published review evidence is not exactly observable; retain the Claim and retry the same fixed-number command and Result Documents")
 	}
 	if err := checkpoint.replace(reviewNumber, reviewed, guard); err != nil {
@@ -440,6 +445,15 @@ func matchingSummaryReceipt(submission Submission, wanted skilldist.ReviewCommen
 		}
 	}
 	return receipt, count
+}
+
+func matchingSummaryReceiptForClaim(submission Submission, wanted skilldist.ReviewComment, claimedAt string) (skilldist.ReviewComment, int, bool) {
+	summaries, unambiguous := reviewSummariesForClaim(submission.Comments, claimedAt)
+	if !unambiguous {
+		return skilldist.ReviewComment{}, 0, false
+	}
+	receipt, count := matchingSummaryReceipt(Submission{Comments: summaries}, wanted)
+	return receipt, count, true
 }
 
 func claimPrecedesReceipt(claimedAt, submittedAt string) bool {
