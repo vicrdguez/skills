@@ -687,6 +687,7 @@ func TestImplementDispatchSuppliesRootBoundWorkerAndContinuationCommands(t *test
 	runGit(t, root, "switch", "main")
 	runGit(t, root, "commit", "--allow-empty", "-m", "target advanced after dispatch")
 	runGit(t, root, "update-ref", "refs/remotes/upstream/main", "HEAD")
+	b.remoteHeads["main"] = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	runGit(t, root, "switch", "widget")
 
 	resumed := returnedCLI(t, b, start.WorkerCommand)
@@ -1392,5 +1393,157 @@ func TestReworkPushSubmitsThroughGitHubProjection(t *testing.T) {
 	}
 	if got := returnedCLI(t, b, start.ContinuationCommand); got.Status != "no_work" || got.PreviousHandoff == nil {
 		t.Fatalf("Rework continuation: %+v", got)
+	}
+}
+
+func TestReturnedCommandHandoffLifecycle(t *testing.T) {
+	for _, tc := range []struct {
+		lane, kind, want string
+		existing         bool
+	}{
+		{"implement", "submission", "awaiting_review", false},
+		{"implement", "decision", "needs_human", true},
+		{"implement", "draft", "needs_human", false},
+		{"watchdog", "markers", "ready_for_merge", true},
+		{"watchdog", "rework", "rework", true},
+		{"watchdog", "conflict", "rework", true},
+		{"watchdog", "needs-human", "needs_human", true},
+		{"watchdog", "second failure", "needs_human", true},
+	} {
+		for _, documents := range []bool{false, true} {
+			t.Run(tc.kind+fmt.Sprint(documents), func(t *testing.T) {
+				root := proposalRepository(t)
+				root, _ = filepath.EvalSymlinks(root)
+				prepareSlice(t, root, "widget")
+				if tc.lane == "watchdog" {
+					runGit(t, root, "rm", "-r", ".changes/widget")
+					runGit(t, root, "commit", "-m", "retire")
+				}
+				head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+				target := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "main"))
+				runGit(t, root, "remote", "rename", "origin", "upstream")
+				b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{"main": target, "widget": head}}
+				if tc.lane == "watchdog" {
+					b.work[0].State = workflow.AwaitingReview
+					b.work[0].Submission = &workflow.Submission{ID: "11", Head: head, Base: "main", Mergeability: "mergeable"}
+					if tc.kind == "conflict" {
+						b.work[0].Submission.Mergeability = "conflicting"
+					}
+					if tc.kind == "second failure" {
+						b.work[0].Submission.Bounces = 1
+					}
+				}
+				runGit(t, root, "switch", "main")
+				worktree := filepath.Join(root, ".worktrees", "widget")
+				if tc.existing {
+					runGit(t, root, "worktree", "add", worktree, "widget")
+				}
+				start := returnedCLI(t, b, "skl "+tc.lane+" next --repo '"+root+"' --remote upstream")
+				directory := ""
+				if tc.lane == "implement" {
+					directory = start.Packet.Facts.Implementation.ResultDirectory
+				} else {
+					directory = start.Packet.Facts.Watchdog.ResultDirectory
+				}
+				t.Cleanup(func() { os.RemoveAll(directory) })
+				document := filepath.Join(directory, "submission.md")
+				if tc.lane == "watchdog" {
+					document = filepath.Join(directory, "repair.md")
+				}
+				if documents {
+					os.WriteFile(document, []byte("worker repair document"), 0600)
+				}
+				runGit(t, root, "commit", "--allow-empty", "-m", "target moves while worker is dispatched")
+				b.remoteHeads["main"] = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+				runGit(t, root, "update-ref", "refs/remotes/upstream/main", "HEAD")
+				resumed := returnedCLI(t, b, start.WorkerCommand)
+				if resumed.Status != "work_available" || resumed.ContinuationCommand != start.ContinuationCommand || len(b.rounds["7"]) != 1 {
+					t.Fatalf("startup changed round: %+v", resumed)
+				}
+				active, command := "", ""
+				if tc.lane == "implement" {
+					f := resumed.Packet.Facts.Implementation
+					active, command = f.ResultDirectory, f.SubmitCommand
+					if f.TargetSnapshot != target {
+						t.Fatalf("target repinned: %+v", f)
+					}
+				} else {
+					f := resumed.Packet.Facts.Watchdog
+					active, command = f.ResultDirectory, f.SubmitCommand
+					if f.ReviewedHead != head {
+						t.Fatalf("review repinned: %+v", f)
+					}
+				}
+				if !strings.Contains(command, "--repo '"+worktree+"'") || !strings.Contains(command, "--remote 'upstream'") {
+					t.Fatalf("handoff not worktree/remote bound: %s", command)
+				}
+				if documents {
+					if content, err := os.ReadFile(document); err != nil || string(content) != "worker repair document" {
+						t.Fatalf("startup discarded document: %q %v", content, err)
+					}
+				}
+				if active != directory {
+					if _, err := os.Stat(directory); !documents && !os.IsNotExist(err) {
+						t.Fatalf("orphaned discarded packet: %v", err)
+					}
+				}
+				if !tc.existing {
+					runGit(t, root, "worktree", "add", worktree, "widget")
+				}
+				if tc.lane == "implement" {
+					if tc.kind == "submission" {
+						runGit(t, worktree, "rm", "-r", ".changes/widget")
+						runGit(t, worktree, "commit", "-m", "retire")
+					}
+					if tc.kind == "draft" {
+						runGit(t, worktree, "commit", "--allow-empty", "-m", "implementation work")
+					}
+					b.remoteHeads["widget"] = strings.TrimSpace(runGitOutput(t, worktree, "rev-parse", "HEAD"))
+					os.WriteFile(filepath.Join(active, "submission.md"), []byte("opaque submission"), 0600)
+					if tc.kind != "submission" {
+						os.WriteFile(filepath.Join(active, "decision.md"), []byte("opaque decision"), 0600)
+						command = strings.Replace(command, "implement submit", "implement needs-human", 1) + " --reason mandatory_rule --decision '" + filepath.Join(active, "decision.md") + "'"
+						if tc.kind == "decision" {
+							command = strings.Replace(command, " --body '"+filepath.Join(active, "submission.md")+"'", "", 1)
+						}
+					}
+				} else {
+					os.WriteFile(filepath.Join(active, "summary.md"), []byte("opaque review"), 0600)
+					verdict := tc.kind
+					if tc.kind == "second failure" {
+						verdict = "rework"
+					}
+					if tc.kind == "markers" || tc.kind == "conflict" {
+						verdict = "pass"
+						os.WriteFile(filepath.Join(active, "body.md"), []byte("manual verification"), 0600)
+						command += " --body '" + filepath.Join(active, "body.md") + "'"
+					}
+					if tc.kind == "markers" {
+						runGit(t, worktree, "commit", "--allow-empty", "-m", "post-marker check head")
+						final := strings.TrimSpace(runGitOutput(t, worktree, "rev-parse", "HEAD"))
+						b.remoteHeads["widget"] = final
+						b.work[0].Submission.Head = final
+						command += " --head " + final
+					}
+					command += " --verdict " + verdict
+				}
+				got := returnedCLI(t, b, command)
+				if got.Status != tc.want || b.work[0].Claimed {
+					t.Fatalf("packet handoff failed: %+v", got)
+				}
+				if _, err := os.Stat(active); !os.IsNotExist(err) {
+					t.Fatalf("active result directory remains: %v", err)
+				}
+				if documents && active != directory {
+					if _, err := os.Stat(document); err != nil {
+						t.Fatalf("superseded worker document removed: %v", err)
+					}
+				}
+				got = returnedCLI(t, b, start.ContinuationCommand)
+				if got.Status != "no_work" || got.PreviousHandoff == nil || string(got.PreviousHandoff.Outcome) != tc.want || got.PreviousHandoff.Number != 7 {
+					t.Fatalf("handoff continuation: %+v", got)
+				}
+			})
+		}
 	}
 }
