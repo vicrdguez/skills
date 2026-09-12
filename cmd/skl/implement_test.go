@@ -1658,3 +1658,102 @@ func TestContinuationRefusalMatrixHasNoEffects(t *testing.T) {
 		}
 	}
 }
+
+func TestHistoricalContinuationAfterLaterActivity(t *testing.T) {
+	for _, activity := range []string{"Watchdog Claim", "bounce and implementation Claim", "implementation pushed head", "later Watchdog round", "human merge", "human requeue"} {
+		t.Run(activity, func(t *testing.T) {
+			root := proposalRepository(t)
+			prepareSlice(t, root, "widget")
+			runGit(t, root, "rm", "-r", ".changes/widget")
+			runGit(t, root, "commit", "-m", "retire")
+			head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+			b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{"widget": head, "main": strings.TrimSpace(runGitOutput(t, root, "rev-parse", "main"))}}
+			initial := implementCLI(t, root, b, "next")
+			directory := initial.Packet.Facts.Implementation.ResultDirectory
+			if activity == "human requeue" {
+				os.WriteFile(filepath.Join(directory, "decision.md"), []byte("pause"), 0600)
+				got := implementCLI(t, root, b, "needs-human", "--item", "7", "--reason", "mandatory_rule", "--decision", filepath.Join(directory, "decision.md"))
+				if got.Status != "needs_human" {
+					t.Fatalf("pause: %+v", got)
+				}
+			} else {
+				os.WriteFile(filepath.Join(directory, "submission.md"), []byte("publication"), 0600)
+				if got := implementCLI(t, root, b, "submit", "--item", "7", "--body", filepath.Join(directory, "submission.md")); got.Status != "awaiting_review" {
+					t.Fatalf("publication: %+v", got)
+				}
+				b.work[0].Submission.Mergeability = "mergeable"
+			}
+			original := initial
+			lane := "implement"
+			if activity == "human requeue" {
+				b.work[0].State = workflow.Ready
+			} else {
+				watch := watchdogCLI(t, root, b, "next")
+				if activity != "Watchdog Claim" {
+					summary := filepath.Join(watch.Packet.Facts.Watchdog.ResultDirectory, "summary.md")
+					os.WriteFile(summary, []byte("review"), 0600)
+					verdict := "rework"
+					if activity == "human merge" {
+						verdict = "pass"
+					}
+					got := watchdogCLI(t, root, b, "submit", "--item", "7", "--reviewed-head", head, "--verdict", verdict, "--summary", summary, "--body", summary)
+					if got.Status != "rework" && got.Status != "ready_for_merge" {
+						t.Fatalf("review: %+v", got)
+					}
+					if activity != "bounce and implementation Claim" {
+						original = watch
+						lane = "watchdog"
+					}
+					if activity == "human merge" {
+						b.work[0].State = workflow.Merged
+						b.work[0].Submission.Merged = true
+					} else {
+						rework := implementCLI(t, root, b, "next")
+						if rework.Status == "fix_required" {
+							rework = implementCLI(t, root, b, "resume", "--item", "7", "--reviewed-head", head)
+						}
+						if rework.Status != "work_available" {
+							t.Fatalf("rework: %+v", rework)
+						}
+						if activity != "bounce and implementation Claim" {
+							runGit(t, root, "commit", "--allow-empty", "-m", "pushed rework fixes")
+							pushed := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+							b.remoteHeads["widget"] = pushed
+							b.work[0].Submission.Head = pushed
+							if activity == "later Watchdog round" {
+								body := filepath.Join(rework.Packet.Facts.Implementation.ResultDirectory, "submission.md")
+								os.WriteFile(body, []byte("fixes"), 0600)
+								got := implementCLI(t, root, b, "submit", "--item", "7", "--body", body)
+								if got.Status != "awaiting_review" {
+									t.Fatalf("resubmit: %+v", got)
+								}
+								got = watchdogCLI(t, root, b, "next")
+								if got.Status != "work_available" {
+									t.Fatalf("later review: %+v", got)
+								}
+							}
+						}
+					}
+				}
+			}
+			prepareSlice(t, root, "second")
+			runGit(t, root, "rm", "-r", ".changes/second")
+			runGit(t, root, "commit", "-m", "retire second")
+			secondHead := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+			successor := workflow.ImplementationItem{ID: "8", Branch: "second", State: workflow.Ready, CreatedAt: "1900"}
+			if lane == "watchdog" {
+				successor.State = workflow.AwaitingReview
+				successor.Submission = &workflow.Submission{ID: "12", Head: secondHead, Base: "main", Mergeability: "mergeable", CreatedAt: "1900"}
+			}
+			b.work = append(b.work, successor)
+			// Keep the explicit human requeue eligible, but select the older successor.
+			b.work[0].CreatedAt = "2020"
+			before, _ := json.Marshal([]any{b.work[0], b.rounds["7"]})
+			got := returnedCLI(t, b, original.ContinuationCommand)
+			after, _ := json.Marshal([]any{b.work[0], b.rounds["7"]})
+			if got.Status != "work_available" || got.Item.Number != 8 || got.PreviousHandoff == nil || got.PreviousHandoff.Number != 7 || !bytes.Equal(before, after) {
+				t.Fatalf("historical proof disturbed later activity: %+v before=%s after=%s", got, before, after)
+			}
+		})
+	}
+}
