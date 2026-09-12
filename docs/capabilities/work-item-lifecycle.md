@@ -42,6 +42,8 @@ The command integration binds the Backend and selects the Git remote together, u
 
 The Workflow Engine owns eligibility, ordering, canonical transitions, Git evidence requirements, and interrupted-operation recovery. The Backend observes normalized durable records and materializes requested effects. Shared Work Item, Submission, and relationship identities are opaque; the integration preserves numeric GitHub CLI and packet representations, renders native references and closing footers, and supplies the existing numeric ordering fact separately.
 
+Review and completion keep the same split. The Workflow Engine owns Watchdog selection ordering, verdict permission, the finding-driven bounce allowance, Synchronization Rework targeting, human-merge and supersession observation, Dependency release, Coordination Item completion, and cleanup safety, with fixed reviewed heads, retired-ledger inspection, and local-state evidence taken from concrete Git operations rather than the Backend. The integration owns native labels, comments, inline anchors and their side syntax, observed bounce and merge evidence, and issue-closing footers; agent-authored findings and raw human comments cross the seam unchanged.
+
 ## Proposal decomposition
 
 - Prefers separate Work Items for behaviors that deliver safe, useful results independently. Independence is assessed after declared Dependencies are Merged, without requiring later Work Items; each delivery remains vertically complete.
