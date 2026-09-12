@@ -286,6 +286,49 @@ func TestSetupAndProposalResolveRepository(t *testing.T) {
 	}
 }
 
+func TestB1PublishAMarkedBaselineBeforeIssueCreation(t *testing.T) {
+	for _, test := range []struct {
+		name, subject, want string
+		extraHead, complete bool
+	}{
+		{"marked baseline", "[baseline] ship-widget", "completed\n", false, true},
+		{"missing marker", "Propose ship-widget", "missing [baseline] ship-widget marker", false, true},
+		{"marker before head", "[baseline] ship-widget", "Artifact Baseline must be the published branch head", true, true},
+		{"incomplete baseline", "[baseline] ship-widget", "ledger misses behavior.md", false, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := proposalRepository(t)
+			runGit(t, root, "switch", "-c", "ship-widget", "main")
+			writeLedger(t, root, "ship-widget", test.complete)
+			runGit(t, root, "add", ".changes/ship-widget")
+			runGit(t, root, "commit", "-m", test.subject)
+			baseline := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+			if test.extraHead {
+				runGit(t, root, "commit", "--allow-empty", "-m", "implementation")
+			}
+			runGit(t, root, "update-ref", "refs/remotes/origin/ship-widget", "HEAD")
+
+			backend := &memoryBackend{}
+			var output bytes.Buffer
+			app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+			err := app.Run([]string{"skl", "propose", "publish", "--repo", root, "--target", "main", "--slice", proposalSliceFlag(t, "ship-widget")})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(output.String(), test.want) {
+				t.Fatalf("output = %q, want %q", &output, test.want)
+			}
+			if test.want == "completed\n" {
+				if len(backend.items) != 1 || backend.items[0].ArtifactBaseline != baseline || backend.items[0].Body != "ship-widget body\n" || !backend.items[0].Ready {
+					t.Fatalf("publication = %#v", backend.items)
+				}
+			} else if len(backend.items) != 0 {
+				t.Fatalf("refusal mutated publication: %#v", backend.items)
+			}
+		})
+	}
+}
+
 func TestPublishExplicitRemoteChecksItsOwnGitEvidence(t *testing.T) {
 	for _, evidence := range []string{"missing target", "target ancestry", "pushed head", "artifact baseline"} {
 		t.Run(evidence, func(t *testing.T) {
@@ -310,7 +353,7 @@ func TestPublishExplicitRemoteChecksItsOwnGitEvidence(t *testing.T) {
 			case "artifact baseline":
 				runGit(t, root, "update-ref", "refs/heads/widget", "main")
 				runGit(t, root, "update-ref", "refs/remotes/upstream/widget", "main")
-				invariant, repair = "ledger is missing at .changes/widget", "commit the complete ledger once at the published branch head"
+				invariant, repair = "slice widget is missing [baseline] widget marker", "commit the complete ledger once at the published branch head"
 			}
 			backend := &memoryBackend{}
 			var output bytes.Buffer
@@ -957,8 +1000,8 @@ func TestRefuseInvalidProposalPreflight(t *testing.T) {
 		"missing target":                          {"target branch is unavailable", "fetch the target branch"},
 		"missing slice branch":                    {"slice branch missing is unavailable", "create the local slice branch"},
 		"unpushed slice":                          {"slice branch unpushed is not pushed at its local head", "push the slice branch"},
-		"missing ledger":                          {"ledger is missing", "commit the complete ledger once at the published branch head"},
-		"baseline not at head":                    {"Artifact Baseline is not the published branch head", "commit the complete ledger once at the published branch head"},
+		"missing ledger":                          {"missing [baseline] missing marker", "commit the complete ledger once at the published branch head"},
+		"baseline not at head":                    {"Artifact Baseline must be the published branch head", "commit the complete ledger once at the published branch head"},
 		"unknown dependency":                      {"Dependency graph contains an unknown or self-referencing edge", "correct the --depends values"},
 		"self dependency":                         {"Dependency graph contains an unknown or self-referencing edge", "correct the --depends values"},
 	}
@@ -1041,7 +1084,7 @@ func TestRefuseInvalidProposalPreflight(t *testing.T) {
 			runGit(t, root, "switch", "-c", "incomplete", "main")
 			writeLedger(t, root, "incomplete", false)
 			runGit(t, root, "add", ".changes/incomplete")
-			runGit(t, root, "commit", "-m", "incomplete")
+			runGit(t, root, "commit", "-m", "[baseline] incomplete")
 			runGit(t, root, "update-ref", "refs/remotes/origin/incomplete", "HEAD")
 			return root, []string{"--slice", proposalSliceFlag(t, "incomplete")}
 		},
@@ -1712,10 +1755,18 @@ func prepareSlice(t *testing.T, root, slug string) string {
 	runGit(t, root, "switch", "-c", slug, "main")
 	writeLedger(t, root, slug, true)
 	runGit(t, root, "add", filepath.Join(".changes", slug))
-	runGit(t, root, "commit", "-m", "Propose "+slug)
+	runGit(t, root, "commit", "-m", "[baseline] "+slug)
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	runGit(t, root, "update-ref", "refs/remotes/origin/"+slug, head)
 	return head
+}
+
+func completeAndRetireSlice(t *testing.T, root, slug string) string {
+	t.Helper()
+	runGit(t, root, "commit", "--allow-empty", "-m", "[completion] "+slug)
+	runGit(t, root, "rm", "-r", filepath.Join(".changes", slug))
+	runGit(t, root, "commit", "-m", "retire "+slug)
+	return strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 }
 
 func writeLedger(t *testing.T, root, slug string, complete bool) {
