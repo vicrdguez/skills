@@ -90,9 +90,9 @@ Run `skl implement next` for one claimed Work Item and its bundled Instruction P
 
 Implement uses Setup's remote inference: GitHub `origin`, otherwise the sole GitHub remote. Select explicitly with `--remote <name>` when ambiguous or overriding `origin`; all Implement operations accept it, and packet retry commands retain it. Use that same remote for ordinary Git fetch/push.
 
-The worker merges the pinned Target Snapshot, writes code and scenario tests in red-green commits, and runs focused checks. At the Audit gate the worker runs the Full Gate and both independent review axes, dispositions every finding, then commits final ticks and ledger retirement and pushes. `skl` runs none of those project checks or Git mutations.
+The worker preserves existing branch progress, writes code and scenario tests in red-green commits, and runs focused checks. At the Audit gate the worker uses the merge-base with `main`, runs the Full Gate and both independent review axes, dispositions every finding, then commits final ticks and ledger retirement and pushes. `skl` runs none of those project checks or Git mutations; integration with `main` remains human-owned after review.
 
-Write the Audit-bearing `submission.md` in the packet's private temporary directory, then run `skl implement submit --item <number> --body <absolute-file>`. A repairable refusal retains the Claim and prose. Successful publication reports `awaiting_review`, removes the temporary directory, and leaves the issue open until human merge. `skl implement inspect --item <number>` supplies current fixed Git and historical ledger evidence for Audit.
+Write the Audit-bearing `submission.md` in the packet's private temporary directory, then run `skl implement submit --item <number> --body <absolute-file>`. New and updated Submissions target `main`; an existing non-`main` PR is preserved and refused for explicit human base repair. A repairable refusal retains the Claim and prose. Successful publication reports `awaiting_review`, removes the temporary directory, and leaves the issue open until human merge. `skl implement inspect --item <number>` supplies current fixed Git and historical ledger evidence for Audit.
 
 For a permitted human decision, use `skl implement needs-human --item <number> --reason <reason> --decision <absolute-decision.md>`; also supply `--body` and push when a draft Submission must preserve implementation work. Retrieve both Result Document templates through `skl skill --resource reference/submission.md implement` or `skl skill --resource reference/decision.md implement`.
 
@@ -126,7 +126,9 @@ Write the summary and optional anchored findings in the packet's private tempora
 
 `ready_for_merge` projects `done` without closing the source issue. Only a human merges; GitHub then closes the issue through the PR's `Closes #N` footer. `skl status` observes Merged, releases Dependencies, closes Coordination Items whose children are all Merged, and safely reconciles partial projections. Contradictions are reported as Needs Human without overwriting them. An unmerged closed Submission is Superseded, preserving its branch reference for later Explore.
 
-A merge conflict routes a passing review to Synchronization Rework with a fresh Target Snapshot, without spending the finding-driven bounce. No review outcome restores or archives the retired ledger. Human comments are supplied verbatim; only explicit relabeling to Rework or Awaiting Review requeues paused work.
+A valid pass reaches `ready_for_merge` whether mergeability is mergeable, conflicting, or unknown; integration and conflict resolution belong to the human Merge Authority. Existing `sync` labels are inert during observation and startup and are removed only by the ordinary implementation-to-review handoff. No review outcome restores or archives the retired ledger. Human comments are supplied verbatim; only explicit relabeling to Rework or Awaiting Review requeues paused work.
+
+The removed `--target-snapshot` contract has no compatibility mode. An in-flight worker using the former contract must finish with its old binary or stop for a controlled cutover and retrieve fresh instructions.
 
 ## Pi subagent loops
 
