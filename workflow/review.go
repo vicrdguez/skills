@@ -11,14 +11,15 @@ import (
 	"time"
 
 	skilldist "github.com/vicrdguez/skills"
-	"github.com/vicrdguez/skills/github"
 )
 
 type ReviewBackend interface {
 	ImplementationBackend
-	ReviewSubmission(context.Context, github.RepositoryID, SubmissionID) (Submission, error)
-	PublishReview(context.Context, github.RepositoryID, ImplementationItem, []skilldist.ReviewComment, func() error) error
-	CompleteReview(context.Context, github.RepositoryID, ImplementationItem, State, func() error) error
+	ReviewSubmission(context.Context, SubmissionID) (Submission, error)
+	// SubmissionBodyMatches compares an observation with the body publication would produce.
+	SubmissionBodyMatches(id WorkItemID, actual, supplied string) (bool, error)
+	PublishReview(context.Context, ImplementationItem, []skilldist.ReviewComment, func() error) error
+	CompleteReview(context.Context, ImplementationItem, State, func() error) error
 }
 
 func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, reviewNumber uint64, reviewed, head, verdict, summaryPath, findingsPath, bodyPath string, backend ReviewBackend) (outcome ImplementationOutcome, err error) {
@@ -71,11 +72,7 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	if id == "" || reviewNumber == 0 || reviewed == "" || verdict != "rework" && verdict != "pass" && verdict != "needs-human" || summaryPath == "" || verdict == "pass" && bodyPath == "" {
 		return ImplementationOutcome{}, fmt.Errorf("submit requires --item, positive --review-number, --reviewed-head, --verdict rework|pass|needs-human and --summary; pass also requires --body")
 	}
-	remote, err = github.ResolveGitHubRemote(root, remote)
-	if err != nil {
-		return ImplementationOutcome{}, err
-	}
-	repository, items, err := loadImplementation(ctx, root, remote, backend)
+	items, err := loadImplementation(ctx, backend)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
@@ -121,14 +118,14 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 		if err != nil || local != head {
 			return Refuse("local reviewed head changed; restore the fixed head")
 		}
-		remote, err := backend.ImplementationHead(ctx, repository, item.Branch)
+		remote, err := backend.ImplementationHead(ctx, item.Branch)
 		if err != nil {
 			return err
 		}
 		if remote != head {
 			return Refuse("remote reviewed head changed; push the fixed head")
 		}
-		submission, err := backend.ReviewSubmission(ctx, repository, item.Submission.ID)
+		submission, err := backend.ReviewSubmission(ctx, item.Submission.ID)
 		if err != nil {
 			return err
 		}
@@ -186,9 +183,9 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 		if err != nil {
 			return ImplementationOutcome{}, err
 		}
-		finalBody = withClosingReference(string(body), item.ClosingReference)
+		finalBody = string(body)
 	}
-	submission, err := backend.ReviewSubmission(ctx, repository, item.Submission.ID)
+	submission, err := backend.ReviewSubmission(ctx, item.Submission.ID)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
@@ -196,11 +193,18 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 		comments[i].ClaimAcquiredAt = submission.ClaimAcquiredAt
 	}
 	receipt, receiptCount := matchingSummaryReceipt(*item.Submission, comments[0])
-	evidenceMatches := reviewEvidenceMatches(item, comments, finalBody)
+	bodyMatches := true
+	if verdict == "pass" {
+		bodyMatches, err = backend.SubmissionBodyMatches(item.ID, item.Submission.Body, finalBody)
+		if err != nil {
+			return ImplementationOutcome{}, err
+		}
+	}
+	evidenceMatches := bodyMatches && reviewEvidenceMatches(item, comments)
 	if retry && item.Claimed && submission.ClaimAcquiredAt != "" {
 		var unambiguous bool
 		receipt, receiptCount, unambiguous = matchingSummaryReceiptForClaim(*item.Submission, comments[0], submission.ClaimAcquiredAt)
-		evidenceMatches = unambiguous && reviewEvidenceMatchesForClaim(item, comments, finalBody, submission.ClaimAcquiredAt)
+		evidenceMatches = unambiguous && bodyMatches && reviewEvidenceMatchesForClaim(item, comments, submission.ClaimAcquiredAt)
 	}
 	if retry && (!evidenceMatches || receiptCount != 1) {
 		return ImplementationOutcome{}, Refuse("recorded review differs from the supplied summary, verdict, body, or inline evidence; replay the original fixed-number command and Result Documents")
@@ -234,7 +238,7 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 			target = Rework
 			item.Synchronization = true
 			item.TargetBranch = submission.Base
-			item.TargetSnapshot, err = backend.ImplementationHead(ctx, repository, submission.Base)
+			item.TargetSnapshot, err = backend.ImplementationHead(ctx, submission.Base)
 			if err != nil {
 				return ImplementationOutcome{}, err
 			}
@@ -248,9 +252,9 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 		if item.Claimed && item.Submission.PendingReview == "" {
 			return ImplementationOutcome{}, Refuse("target-only Claim cannot prove it belongs to this review handoff; inspect before replaying the original fixed-number command")
 		}
-		completedEvidence := reviewEvidenceMatches(item, comments, finalBody)
+		completedEvidence := bodyMatches && reviewEvidenceMatches(item, comments)
 		if item.Claimed && submission.ClaimAcquiredAt != "" {
-			completedEvidence = reviewEvidenceMatchesForClaim(item, comments, finalBody, submission.ClaimAcquiredAt)
+			completedEvidence = bodyMatches && reviewEvidenceMatchesForClaim(item, comments, submission.ClaimAcquiredAt)
 		}
 		compatible := verdict == "rework" && (item.State == Rework || item.State == NeedsHuman) || verdict == "needs-human" && item.State == NeedsHuman || verdict == "pass" && (item.State == ReadyForMerge || item.State == Rework && item.Synchronization)
 		compatible = compatible && completedEvidence
@@ -267,10 +271,10 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 			return ImplementationOutcome{}, Refuse("completed review is missing its matching Review Checkpoint; inspect before changing the handoff")
 		}
 		if item.Claimed || target != item.State {
-			if err := backend.CompleteReview(ctx, repository, item, target, guard); err != nil {
+			if err := backend.CompleteReview(ctx, item, target, guard); err != nil {
 				return ImplementationOutcome{}, err
 			}
-			current, err := backend.ImplementationItems(ctx, repository)
+			current, err := backend.ImplementationItems(ctx)
 			if err != nil {
 				return ImplementationOutcome{}, err
 			}
@@ -285,13 +289,13 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 		result := completedReviewOutcome(item, head, checkpoint)
 		return result, guard()
 	}
-	if err := backend.PublishReview(ctx, repository, item, comments, guard); err != nil {
+	if err := backend.PublishReview(ctx, item, comments, guard); err != nil {
 		return ImplementationOutcome{}, err
 	}
 	if verdict == "pass" {
 		wanted := *item.Submission
 		wanted.Body = finalBody
-		published, err := backend.PublishImplementation(ctx, repository, item, wanted)
+		published, err := backend.PublishImplementation(ctx, item, wanted)
 		if err != nil {
 			return ImplementationOutcome{}, err
 		}
@@ -299,7 +303,7 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 			return ImplementationOutcome{}, Refuse("Submission head changed during final body publication")
 		}
 	}
-	published, err := backend.ImplementationItems(ctx, repository)
+	published, err := backend.ImplementationItems(ctx)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
@@ -314,20 +318,26 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	if matches != 1 || publishedItem.Problem != "" || publishedItem.State != AwaitingReview || !publishedItem.Claimed || publishedItem.Submission == nil {
 		return ImplementationOutcome{}, Refuse("published review evidence is not exactly observable; retain the Claim and retry the same fixed-number command and Result Documents")
 	}
-	observedEvidence := reviewEvidenceMatchesForClaim(publishedItem, comments, finalBody, submission.ClaimAcquiredAt)
+	if verdict == "pass" {
+		bodyMatches, err = backend.SubmissionBodyMatches(item.ID, publishedItem.Submission.Body, finalBody)
+		if err != nil {
+			return ImplementationOutcome{}, err
+		}
+	}
+	observedEvidence := bodyMatches && reviewEvidenceMatchesForClaim(publishedItem, comments, submission.ClaimAcquiredAt)
 	if !observedEvidence {
 		return ImplementationOutcome{}, Refuse("published review evidence is not exactly observable; retain the Claim and retry the same fixed-number command and Result Documents")
 	}
 	if err := checkpoint.replace(reviewNumber, reviewed, guard); err != nil {
 		return ImplementationOutcome{}, Refuse(err.Error())
 	}
-	if err := backend.CompleteReview(ctx, repository, item, target, guard); err != nil {
+	if err := backend.CompleteReview(ctx, item, target, guard); err != nil {
 		return ImplementationOutcome{}, err
 	}
 	if err := guard(); err != nil {
 		return ImplementationOutcome{}, err
 	}
-	observed, err := backend.ImplementationItems(ctx, repository)
+	observed, err := backend.ImplementationItems(ctx)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
@@ -340,7 +350,7 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	return ImplementationOutcome{}, Refuse("review handoff incomplete; retry the same verdict and Result Documents")
 }
 
-func reviewEvidenceMatches(item ImplementationItem, wanted []skilldist.ReviewComment, finalBody string) bool {
+func reviewEvidenceMatches(item ImplementationItem, wanted []skilldist.ReviewComment) bool {
 	for _, comment := range wanted {
 		matches := 0
 		for _, existing := range item.Submission.Comments {
@@ -352,7 +362,7 @@ func reviewEvidenceMatches(item ImplementationItem, wanted []skilldist.ReviewCom
 			return false
 		}
 	}
-	return finalBody == "" || finalBody == item.Submission.Body
+	return true
 }
 
 func reviewEvidenceCompatible(item ImplementationItem, wanted []skilldist.ReviewComment, claimedAt string) bool {
@@ -383,8 +393,8 @@ func reviewEvidenceCompatible(item ImplementationItem, wanted []skilldist.Review
 	return true
 }
 
-func reviewEvidenceMatchesForClaim(item ImplementationItem, wanted []skilldist.ReviewComment, finalBody, claimedAt string) bool {
-	if !reviewEvidenceCompatible(item, wanted, claimedAt) || finalBody != "" && finalBody != item.Submission.Body {
+func reviewEvidenceMatchesForClaim(item ImplementationItem, wanted []skilldist.ReviewComment, claimedAt string) bool {
+	if !reviewEvidenceCompatible(item, wanted, claimedAt) {
 		return false
 	}
 	summaries, unambiguous := reviewSummariesForClaim(item.Submission.Comments, claimedAt)

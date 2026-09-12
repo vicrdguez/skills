@@ -9,15 +9,10 @@ import (
 	"slices"
 
 	skilldist "github.com/vicrdguez/skills"
-	"github.com/vicrdguez/skills/github"
 )
 
 func StartWatchdog(ctx context.Context, root, remote string, id WorkItemID, backend ImplementationBackend) (ImplementationOutcome, error) {
-	remote, err := github.ResolveGitHubRemote(root, remote)
-	if err != nil {
-		return ImplementationOutcome{}, err
-	}
-	repository, items, err := loadImplementation(ctx, root, remote, backend)
+	items, err := loadImplementation(ctx, backend)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
@@ -52,10 +47,10 @@ func StartWatchdog(ctx context.Context, root, remote string, id WorkItemID, back
 		if history.Phase != "retired" || len(history.Violations) != 0 {
 			return ImplementationOutcome{Status: "fix_required", Reason: fmt.Sprint(history.Violations) + "; fetch and restore retired ledger history"}, nil
 		}
-		if err := backend.ClaimImplementation(ctx, repository, item); err != nil {
+		if err := backend.ClaimImplementation(ctx, item); err != nil {
 			return ImplementationOutcome{}, err
 		}
-		observed, err := backend.ImplementationItems(ctx, repository)
+		observed, err := backend.ImplementationItems(ctx)
 		if err != nil {
 			return ImplementationOutcome{}, err
 		}
@@ -73,7 +68,7 @@ func StartWatchdog(ctx context.Context, root, remote string, id WorkItemID, back
 				return ImplementationOutcome{}, err
 			}
 			if port, ok := backend.(ReviewBackend); ok {
-				observed, err := port.ReviewSubmission(ctx, repository, current.Submission.ID)
+				observed, err := port.ReviewSubmission(ctx, current.Submission.ID)
 				if err != nil {
 					return ImplementationOutcome{}, err
 				}

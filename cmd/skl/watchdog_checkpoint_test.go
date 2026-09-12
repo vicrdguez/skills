@@ -292,8 +292,10 @@ func (f *reviewFixture) run(t *testing.T, caller string, args ...string) setup.I
 
 func (f *reviewFixture) runResult(caller string, args ...string) (setup.ImplementationOutput, error) {
 	var output bytes.Buffer
-	app := newApp(func(github.RepositoryID) (setup.Backend, error) {
-		return setup.NewGitHubBackend(f.server.URL, "token", f.server.Client()), nil
+	app := newApp(func(repository github.RepositoryID) (setup.Backend, error) {
+		backend := setup.NewGitHubBackend(f.server.URL, "token", f.server.Client())
+		backend.BindRepository(repository)
+		return backend, nil
 	}, bytes.NewReader(nil), &output, &output)
 	command := append([]string{"skl"}, args...)
 	command = append(command, "--repo", caller)

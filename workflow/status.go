@@ -1,10 +1,6 @@
 package workflow
 
-import (
-	"context"
-
-	"github.com/vicrdguez/skills/github"
-)
+import "context"
 
 type StatusOutcome struct {
 	CompleteProposals []WorkItemID         `json:"complete_proposals,omitempty"`
@@ -14,16 +10,12 @@ type StatusOutcome struct {
 
 type StatusBackend interface {
 	ImplementationBackend
-	CoordinationItems(context.Context, github.RepositoryID) ([]CoordinationItem, error)
-	CloseCoordination(context.Context, github.RepositoryID, WorkItemID) error
+	CoordinationItems(context.Context) ([]CoordinationItem, error)
+	CloseCoordination(context.Context, WorkItemID) error
 }
 
-func ObserveStatus(ctx context.Context, root, remote string, backend ImplementationBackend) (StatusOutcome, error) {
-	remote, err := github.ResolveGitHubRemote(root, remote)
-	if err != nil {
-		return StatusOutcome{}, err
-	}
-	repository, items, err := loadImplementation(ctx, root, remote, backend)
+func ObserveStatus(ctx context.Context, backend ImplementationBackend) (StatusOutcome, error) {
+	items, err := loadImplementation(ctx, backend)
 	if err != nil {
 		return StatusOutcome{}, err
 	}
@@ -36,7 +28,7 @@ func ObserveStatus(ctx context.Context, root, remote string, backend Implementat
 		}
 		if item.State == ReadyForMerge && item.Submission != nil {
 			if port, ok := backend.(ReviewBackend); ok {
-				current, err := port.ReviewSubmission(ctx, repository, item.Submission.ID)
+				current, err := port.ReviewSubmission(ctx, item.Submission.ID)
 				if err != nil {
 					return StatusOutcome{}, err
 				}
@@ -48,7 +40,7 @@ func ObserveStatus(ctx context.Context, root, remote string, backend Implementat
 				if current.Head == item.Submission.Head && current.Mergeability == "conflicting" {
 					item.Synchronization = true
 					item.TargetBranch = current.Base
-					item.TargetSnapshot, err = backend.ImplementationHead(ctx, repository, current.Base)
+					item.TargetSnapshot, err = backend.ImplementationHead(ctx, current.Base)
 					if err != nil {
 						return StatusOutcome{}, err
 					}
@@ -71,7 +63,7 @@ func ObserveStatus(ctx context.Context, root, remote string, backend Implementat
 				return StatusOutcome{}, Refuse("backend cannot reconcile partial review")
 			}
 			guard := func() error {
-				current, err := port.ReviewSubmission(ctx, repository, item.Submission.ID)
+				current, err := port.ReviewSubmission(ctx, item.Submission.ID)
 				if err != nil {
 					return err
 				}
@@ -83,10 +75,10 @@ func ObserveStatus(ctx context.Context, root, remote string, backend Implementat
 				}
 				return nil
 			}
-			if err := port.CompleteReview(ctx, repository, item, item.Submission.PendingReview, guard); err != nil {
+			if err := port.CompleteReview(ctx, item, item.Submission.PendingReview, guard); err != nil {
 				return StatusOutcome{}, err
 			}
-			current, err := backend.ImplementationItems(ctx, repository)
+			current, err := backend.ImplementationItems(ctx)
 			if err != nil {
 				return StatusOutcome{}, err
 			}
@@ -99,7 +91,7 @@ func ObserveStatus(ctx context.Context, root, remote string, backend Implementat
 		}
 		if item.State == Ready && item.Submission != nil && item.Submission.State == AwaitingReview && !item.Submission.Claimed {
 			guard := func() error {
-				current, err := backend.ImplementationItems(ctx, repository)
+				current, err := backend.ImplementationItems(ctx)
 				if err != nil {
 					return err
 				}
@@ -110,10 +102,10 @@ func ObserveStatus(ctx context.Context, root, remote string, backend Implementat
 				}
 				return Refuse("partial Submission changed; inspect before reconciling")
 			}
-			if err := backend.AwaitImplementationReview(ctx, repository, item, guard); err != nil {
+			if err := projectImplementation(ctx, backend, item, AwaitingReview, "", guard); err != nil {
 				return StatusOutcome{}, err
 			}
-			current, err := backend.ImplementationItems(ctx, repository)
+			current, err := backend.ImplementationItems(ctx)
 			if err != nil {
 				return StatusOutcome{}, err
 			}
@@ -125,7 +117,7 @@ func ObserveStatus(ctx context.Context, root, remote string, backend Implementat
 		}
 	}
 	if port, ok := backend.(StatusBackend); ok {
-		parents, err := port.CoordinationItems(ctx, repository)
+		parents, err := port.CoordinationItems(ctx)
 		if err != nil {
 			return StatusOutcome{}, err
 		}
@@ -140,7 +132,7 @@ func ObserveStatus(ctx context.Context, root, remote string, backend Implementat
 			}
 			if complete {
 				if !parent.Closed {
-					if err := port.CloseCoordination(ctx, repository, parent.ID); err != nil {
+					if err := port.CloseCoordination(ctx, parent.ID); err != nil {
 						return StatusOutcome{}, err
 					}
 				}

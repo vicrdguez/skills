@@ -192,6 +192,7 @@ func TestWatchdogHumanDirectionRequiresExplicitRequeue(t *testing.T) {
 			t.Fatalf("prose requeued: %#v", got)
 		}
 		b.work[0].State = resume
+		b.work[0].Submission.Lifecycle.States = []workflow.State{resume}
 		var comments []skilldist.ReviewComment
 		if resume == workflow.Rework {
 			got = implementCLI(t, root, b, "next")
@@ -232,9 +233,90 @@ func TestWatchdogRetriesCompletedVerdictWithoutAnotherBounce(t *testing.T) {
 	}
 }
 
-func (b *implementationMemory) ReviewSubmission(_ context.Context, _ github.RepositoryID, id workflow.SubmissionID) (workflow.Submission, error) {
+func TestWatchdogPassRetryChecksMergeability(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "widget")
+	runGit(t, root, "rm", "-r", ".changes/widget")
+	runGit(t, root, "commit", "-m", "retire")
+	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	runGit(t, root, "switch", "main")
+	runGit(t, root, "commit", "--allow-empty", "-m", "target moved")
+	target := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	runGit(t, root, "switch", "widget")
+	for _, claimed := range []bool{true, false} {
+		for _, mergeability := range []string{"mergeable", "conflicting", "unknown"} {
+			for _, phase := range []string{"entry", "mutation", "readback"} {
+				if !claimed && phase != "entry" {
+					continue
+				}
+				t.Run(fmt.Sprintf("claimed=%t/%s/%s", claimed, mergeability, phase), func(t *testing.T) {
+					body := "opaque final"
+					storedBody := body + "\n\nCloses #7\n"
+					b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.ReadyForMerge, Claimed: claimed, Submission: &workflow.Submission{ID: "11", Head: head, Base: "main", State: workflow.ReadyForMerge, Claimed: claimed, Body: storedBody, Mergeability: "mergeable", ClaimAcquiredAt: "2026-01-01T00:00:01Z", Comments: []skilldist.ReviewComment{{Body: "pass", Commit: head, Verdict: "pass", ReviewNumber: 1, CreatedAt: "2026-01-01T00:00:02Z"}}}}}, remoteHeads: map[string]string{"widget": head, "main": target}}
+					if claimed {
+						b.work[0].Submission.PendingReview = workflow.ReadyForMerge
+					}
+					watchdogCLI(t, root, b, "next")
+					gitDir := strings.TrimSpace(runGitOutput(t, filepath.Join(root, ".worktrees", "widget"), "rev-parse", "--absolute-git-dir"))
+					// Exercise recorded-round replay. A verified done whose checkpoint
+					// was already cleaned up is the no-op case covered by B14.
+					if err := os.WriteFile(filepath.Join(gitDir, ".watchdog"), []byte("1:"+head+"\n"), 0600); err != nil {
+						t.Fatal(err)
+					}
+					change := func() { b.work[0].Submission.Mergeability = mergeability }
+					switch phase {
+					case "entry":
+						change()
+					case "mutation":
+						b.beforeTransition = change
+					case "readback":
+						b.afterCompletion = change
+					}
+					dir := t.TempDir()
+					summary, bodyPath := filepath.Join(dir, "summary.md"), filepath.Join(dir, "body.md")
+					for path, content := range map[string]string{summary: "pass", bodyPath: body} {
+						if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+							t.Fatal(err)
+						}
+					}
+					args := []string{"submit", "--item", "7", "--reviewed-head", head, "--verdict", "pass", "--summary", summary, "--body", bodyPath}
+					got := watchdogCLI(t, root, b, args...)
+					if mergeability == "mergeable" {
+						if got.Status != "ready_for_merge" || got.Item.Claimed {
+							t.Fatalf("mergeable retry: %#v", got)
+						}
+					} else if mergeability == "conflicting" && phase == "entry" {
+						if got.Status != "rework" || got.Item.Claimed || !got.Item.Synchronization || got.Item.TargetBranch != "main" || got.Item.TargetSnapshot != target {
+							t.Fatalf("conflicting retry must pin synchronization rework: %#v; item: %#v", got, b.work[0])
+						}
+						b.remoteHeads["main"] = head
+						if retry := watchdogCLI(t, root, b, args...); retry.Status != "rework" || retry.Item.TargetSnapshot != target {
+							t.Fatalf("retry changed synchronization obligation: %#v", retry)
+						}
+					} else if got.Status != "fix_required" || !strings.Contains(got.Reason, "mergeability") || phase != "readback" && b.work[0].Claimed != claimed {
+						t.Fatalf("unsafe retry accepted or Claim released: %#v; item: %#v", got, b.work[0])
+					}
+					if len(b.work[0].Submission.Comments) != 1 || b.work[0].Submission.Body != storedBody {
+						t.Fatalf("retry changed review evidence: %#v", b.work[0].Submission)
+					}
+				})
+			}
+		}
+	}
+}
+
+func (b *implementationMemory) SubmissionBodyMatches(id workflow.WorkItemID, actual, supplied string) (bool, error) {
+	if _, err := strconv.Atoi(string(id)); err == nil {
+		return (&setup.GitHubBackend{}).SubmissionBodyMatches(id, actual, supplied)
+	}
+	return actual == supplied, nil
+}
+
+func (b *implementationMemory) ReviewSubmission(_ context.Context, id workflow.SubmissionID) (workflow.Submission, error) {
 	for i := range b.work {
-		if submission := b.work[i].Submission; submission != nil && submission.ID == id {
+		if b.work[i].Submission != nil && b.work[i].Submission.ID == id {
+			b.work[i] = workflow.ReconcileImplementation(implementationFixture(b.work[i]))
+			submission := b.work[i].Submission
 			if b.work[i].Claimed && submission.ClaimAcquiredAt == "" {
 				submission.ClaimAcquiredAt = b.reviewTime()
 			}
@@ -244,7 +326,7 @@ func (b *implementationMemory) ReviewSubmission(_ context.Context, _ github.Repo
 	return workflow.Submission{}, fmt.Errorf("missing Submission")
 }
 
-func (b *implementationMemory) PublishReview(_ context.Context, _ github.RepositoryID, item workflow.ImplementationItem, comments []skilldist.ReviewComment, guard func() error) error {
+func (b *implementationMemory) PublishReview(_ context.Context, item workflow.ImplementationItem, comments []skilldist.ReviewComment, guard func() error) error {
 	if err := guard(); err != nil {
 		return err
 	}
@@ -263,7 +345,7 @@ func (b *implementationMemory) PublishReview(_ context.Context, _ github.Reposit
 	return nil
 }
 
-func (b *implementationMemory) CompleteReview(_ context.Context, _ github.RepositoryID, item workflow.ImplementationItem, target workflow.State, guard func() error) error {
+func (b *implementationMemory) CompleteReview(_ context.Context, item workflow.ImplementationItem, target workflow.State, guard func() error) error {
 	if b.beforeTransition != nil {
 		b.beforeTransition()
 	}
@@ -272,16 +354,19 @@ func (b *implementationMemory) CompleteReview(_ context.Context, _ github.Reposi
 	}
 	for i := range b.work {
 		if b.work[i].ID == item.ID {
-			b.work[i].State = target
+			b.work[i] = implementationFixture(b.work[i])
 			b.work[i].ResumeState = item.ResumeState
 			b.work[i].Synchronization = item.Synchronization
 			b.work[i].TargetSnapshot = item.TargetSnapshot
 			b.work[i].TargetBranch = item.TargetBranch
-			b.work[i].Claimed = false
-			b.work[i].Submission.State = target
-			b.work[i].Submission.Claimed = false
+			if target != workflow.NeedsHuman {
+				b.work[i].Source.States = slices.DeleteFunc(b.work[i].Source.States, func(state workflow.State) bool { return state == workflow.NeedsHuman })
+			}
+			b.work[i].Submission.Lifecycle.States = []workflow.State{target}
+			b.work[i].Submission.Lifecycle.Claimed = false
 			b.work[i].Submission.PendingReview = ""
 			b.work[i].Submission.ClaimAcquiredAt = ""
+			b.work[i] = workflow.ReconcileImplementation(b.work[i])
 		}
 	}
 	if b.afterCompletion != nil {
