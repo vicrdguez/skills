@@ -433,6 +433,7 @@ func TestGitHubImplementationUsesMainAndNeverRetargetsExistingSubmission(t *test
 		t.Run(existingBase, func(t *testing.T) {
 			writes := 0
 			postedBase := ""
+			handlerErr := ""
 			pull := map[string]any{"number": 11, "state": "open", "body": "wanted", "head": map[string]any{"ref": "widget", "sha": "fixed", "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": existingBase}}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method != http.MethodGet {
@@ -445,7 +446,9 @@ func TestGitHubImplementationUsesMainAndNeverRetargetsExistingSubmission(t *test
 					if r.Method == http.MethodPost {
 						var payload map[string]any
 						if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-							t.Fatal(err)
+							handlerErr = err.Error()
+							http.Error(w, handlerErr, http.StatusBadRequest)
+							return
 						}
 						postedBase, _ = payload["base"].(string)
 						pull["base"] = map[string]string{"ref": postedBase}
@@ -458,7 +461,8 @@ func TestGitHubImplementationUsesMainAndNeverRetargetsExistingSubmission(t *test
 				case "/repos/acme/widgets/pulls/11":
 					json.NewEncoder(w).Encode(pull)
 				default:
-					t.Fatalf("unexpected %s %s", r.Method, r.URL)
+					handlerErr = fmt.Sprintf("unexpected %s %s", r.Method, r.URL)
+					http.Error(w, handlerErr, http.StatusNotFound)
 				}
 			}))
 			defer server.Close()
@@ -469,10 +473,10 @@ func TestGitHubImplementationUsesMainAndNeverRetargetsExistingSubmission(t *test
 			}
 			got, err := b.PublishImplementation(context.Background(), github.RepositoryID{Owner: "acme", Name: "widgets"}, workflow.ImplementationItem{ID: "7", Branch: "widget"}, wanted)
 			if existingBase == "" {
-				if err != nil || got.Base != "main" || postedBase != "main" || writes != 1 {
+				if err != nil || handlerErr != "" || got.Base != "main" || postedBase != "main" || writes != 1 {
 					t.Fatalf("creation = %#v, %v, base=%q writes=%d", got, err, postedBase, writes)
 				}
-			} else if err == nil || !strings.Contains(err.Error(), "repair its base to main") || writes != 0 {
+			} else if handlerErr != "" || err == nil || !strings.Contains(err.Error(), "repair its base to main") || writes != 0 {
 				t.Fatalf("non-main update = %#v, %v, writes=%d", got, err, writes)
 			}
 		})

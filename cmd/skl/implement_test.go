@@ -364,8 +364,8 @@ func TestImplementResumesInterruptedClaim(t *testing.T) {
 func TestImplementStartAndResumePreserveProgressWithoutTargetPin(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
-	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready, Claimed: true}}}
-	first := implementCLI(t, root, b, "resume", "--item", "7")
+	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}}
+	first := implementCLI(t, root, b, "next")
 	if first.Packet == nil || strings.Contains(first.Packet.Markdown(), "target_snapshot") || strings.Contains(first.Packet.Markdown(), "git merge ") {
 		t.Fatalf("resume requested a target: %#v", first)
 	}
@@ -542,6 +542,16 @@ func TestImplementBundlesInstructionsWithoutTargetPin(t *testing.T) {
 	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
 	if err := app.Run([]string{"skl", "implement", "resume", "--target-snapshot", baseline}); err == nil || !strings.Contains(err.Error(), "flag provided but not defined") {
 		t.Fatalf("removed target flag accepted: %v", err)
+	}
+	output.Reset()
+	if err := app.Run([]string{"skl", "implement", "resume", "--help"}); err != nil || strings.Contains(output.String(), "target-snapshot") {
+		t.Fatalf("implementation help retained target flag: %v\n%s", err, &output)
+	}
+	for _, skill := range []string{"implement", "watchdog", "audit"} {
+		output.Reset()
+		if err := app.Run([]string{"skl", "skill", skill}); err != nil || strings.Contains(output.String(), "--target-snapshot") || !strings.Contains(output.String(), "main") {
+			t.Fatalf("%s guidance retained integration obligation: %v\n%s", skill, err, &output)
+		}
 	}
 }
 

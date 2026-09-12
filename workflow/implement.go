@@ -316,9 +316,6 @@ func implementationPacket(root, remote string, item ImplementationItem) (Impleme
 	if item.Submission != nil {
 		facts.PreviousReviewedHead, facts.Comments = item.Submission.PreviousReviewedHead, item.Submission.Comments
 	}
-	if item.Synchronization {
-		facts.PreviousReviewedHead = ""
-	}
 	facts.ResultDirectory, err = os.MkdirTemp("", "skl-implement-")
 	if err != nil {
 		return ImplementationOutcome{}, err
