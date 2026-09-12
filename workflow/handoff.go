@@ -153,8 +153,9 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 		return ImplementationOutcome{}, err
 	}
 	item.Transition = &transition
+	handedOff := false
 	defer func() {
-		if err != nil {
+		if err != nil && !handedOff {
 			transition.Completed = false
 			err = errors.Join(err, backend.RecordImplementationTransition(ctx, repository, item, transition), backend.RetainImplementationClaim(ctx, repository, item))
 		}
@@ -207,14 +208,17 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 			continue
 		}
 		if current.Problem == "" && current.State == target && !current.Claimed && (bodyPath == "" || current.Submission != nil && current.Submission.Head == head && current.Submission.Draft == (target == NeedsHuman)) {
-			if err := completeDispatch(ctx, repository, current, ImplementLane, target, head, backend); err != nil {
-				return ImplementationOutcome{}, err
-			}
 			transition.Completed = true
 			if err := backend.RecordImplementationTransition(ctx, repository, current, transition); err != nil {
 				return ImplementationOutcome{}, err
 			}
 			if err := guard(); err != nil {
+				return ImplementationOutcome{}, err
+			}
+			// Publication, release readback, transition and every Git guard are final.
+			// Receipt observation or local cleanup failure must not restore this Claim.
+			handedOff = true
+			if err := completeDispatch(ctx, repository, current, ImplementLane, target, head, backend); err != nil {
 				return ImplementationOutcome{}, err
 			}
 			current.Transition = &transition

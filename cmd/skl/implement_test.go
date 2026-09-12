@@ -36,10 +36,12 @@ type implementationMemory struct {
 	beforeTransition func()
 	afterCompletion  func()
 	rounds           map[workflow.WorkItemID][]workflow.DispatchRound
+	afterRound       func(workflow.DispatchRound) error
+	roundReadError   error
 }
 
 func (b *implementationMemory) DispatchRounds(_ context.Context, _ github.RepositoryID, item workflow.WorkItemID) ([]workflow.DispatchRound, error) {
-	return append([]workflow.DispatchRound(nil), b.rounds[item]...), nil
+	return append([]workflow.DispatchRound(nil), b.rounds[item]...), b.roundReadError
 }
 
 func (b *implementationMemory) RecordDispatchRound(_ context.Context, _ github.RepositoryID, round workflow.DispatchRound) error {
@@ -49,11 +51,17 @@ func (b *implementationMemory) RecordDispatchRound(_ context.Context, _ github.R
 	for i := range b.rounds[round.Item] {
 		if b.rounds[round.Item][i].ID == round.ID {
 			b.rounds[round.Item][i] = round
+			if b.afterRound != nil {
+				return b.afterRound(round)
+			}
 			return nil
 		}
 	}
 	if !slices.Contains(b.rounds[round.Item], round) {
 		b.rounds[round.Item] = append(b.rounds[round.Item], round)
+	}
+	if b.afterRound != nil {
+		return b.afterRound(round)
 	}
 	return nil
 }
@@ -1156,6 +1164,10 @@ func TestImplementChecksContradictionsAndHeadDuringProjection(t *testing.T) {
 			if got.Status != "fix_required" || !b.work[0].Claimed || b.work[0].State != workflow.Ready {
 				t.Fatalf("unsafe projection: %#v %#v", got, b.work)
 			}
+			continued := returnedCLI(t, b, start.ContinuationCommand+" --wait=1ms")
+			if continued.Status != "fix_required" || !b.work[0].Claimed {
+				t.Fatalf("failed handoff authorized continuation: %+v", continued)
+			}
 		})
 	}
 }
@@ -1241,5 +1253,48 @@ func TestContinuationRejectsOpaquePauseReceipt(t *testing.T) {
 	json.Unmarshal(output.Bytes(), &got)
 	if got.Status != "fix_required" || got.Item == nil || got.Item.Number != 7 || reads != beforeReads+1 || writes != beforeWrites || len(labels) != 2 {
 		t.Fatalf("opaque receipt continued: %+v reads=%d writes=%d", got, reads-beforeReads, writes-beforeWrites)
+	}
+}
+
+func TestCompletedImplementationSurvivesReceiptReadbackAndCleanupErrors(t *testing.T) {
+	for _, fault := range []string{"applied receipt unreadable", "cleanup"} {
+		t.Run(fault, func(t *testing.T) {
+			root := proposalRepository(t)
+			prepareSlice(t, root, "widget")
+			b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{}}
+			start := implementCLI(t, root, b, "next")
+			body := filepath.Join(start.Packet.Facts.Implementation.ResultDirectory, "submission.md")
+			os.WriteFile(body, []byte("opaque"), 0600)
+			runGit(t, root, "rm", "-r", ".changes/widget")
+			runGit(t, root, "commit", "-m", "retire")
+			b.remoteHeads["widget"] = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+			b.afterRound = func(round workflow.DispatchRound) error {
+				if round.Outcome != "" {
+					if fault == "cleanup" {
+						return os.WriteFile(filepath.Join(filepath.Dir(body), "unexpected"), []byte("preserve"), 0600)
+					}
+					b.roundReadError = errors.New("receipt applied but readback unavailable")
+					return b.roundReadError
+				}
+				return nil
+			}
+			var output bytes.Buffer
+			app := newApp(func(github.RepositoryID) (setup.Backend, error) { return b, nil }, nil, &output, &output)
+			if err := app.Run([]string{"skl", "implement", "submit", "--repo", root, "--item", "7", "--body", body}); err == nil {
+				t.Fatal("fault not injected")
+			}
+			if b.work[0].Claimed || b.work[0].Transition == nil || !b.work[0].Transition.Completed {
+				t.Fatalf("completed handoff rolled back: %+v", b.work)
+			}
+			if _, err := os.Stat(body); err != nil {
+				t.Fatalf("failure removed worker prose: %v", err)
+			}
+			b.roundReadError = nil
+			b.afterRound = nil
+			got := returnedCLI(t, b, start.ContinuationCommand)
+			if got.Status != "no_work" || got.PreviousHandoff == nil || got.PreviousHandoff.Outcome != workflow.AwaitingReview {
+				t.Fatalf("post-proof error revoked handoff: %+v", got)
+			}
+		})
 	}
 }
