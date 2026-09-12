@@ -386,13 +386,14 @@ func trustedMetadata(comment skilldist.ReviewComment) bool {
 }
 
 // implementationEvidence excludes decision occurrences during their pending handoff.
-// Completion closes that publication window; an identical later engine receipt is
-// independent evidence, while earlier opaque occurrences stay excluded.
+// Completion closes every decision window for that handoff's directory, including
+// superseded prose. An identical later engine receipt is independent evidence,
+// while earlier opaque occurrences stay excluded.
 func implementationEvidence(comments []skilldist.ReviewComment) []skilldist.ReviewComment {
 	var evidence []skilldist.ReviewComment
-	decisions := make(map[string]bool)
+	decisions := make(map[string]map[string]bool)
 	for _, comment := range comments {
-		if !trustedMetadata(comment) || decisions[fmt.Sprintf("%x", sha256.Sum256([]byte(comment.Body)))] {
+		if !trustedMetadata(comment) || len(decisions[fmt.Sprintf("%x", sha256.Sum256([]byte(comment.Body)))]) > 0 {
 			continue
 		}
 		evidence = append(evidence, comment)
@@ -402,7 +403,20 @@ func implementationEvidence(comments []skilldist.ReviewComment) []skilldist.Revi
 		}
 		var metadata implementationMetadata
 		if json.Unmarshal([]byte(strings.TrimSuffix(body, "\n-->")), &metadata) == nil && metadata.Transition != nil {
-			decisions[metadata.Transition.DecisionDigest] = !metadata.Transition.Completed
+			transition := metadata.Transition
+			if transition.Completed {
+				for digest, directories := range decisions {
+					delete(directories, transition.Directory)
+					if len(directories) == 0 {
+						delete(decisions, digest)
+					}
+				}
+			} else {
+				if decisions[transition.DecisionDigest] == nil {
+					decisions[transition.DecisionDigest] = make(map[string]bool)
+				}
+				decisions[transition.DecisionDigest][transition.Directory] = true
+			}
 		}
 	}
 	return evidence

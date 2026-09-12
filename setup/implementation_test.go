@@ -590,111 +590,139 @@ func TestGitHubDispatchWriterRejectsMissingObligationBeforePublication(t *testin
 }
 
 func TestGitHubIdenticalDecisionAndReceiptRemainDistinctOccurrences(t *testing.T) {
-	for _, fault := range []string{"none", "lost response", "unreadable readback"} {
-		t.Run(fault, func(t *testing.T) {
-			comments := []map[string]any{}
-			labels := []string{"ready", "wip"}
-			receiptPhase, unreadable := false, false
-			writes := 0
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				switch {
-				case strings.HasSuffix(r.URL.Path, "/comments"):
-					if r.Method == http.MethodPost {
-						writes++
-						var p map[string]any
-						json.NewDecoder(r.Body).Decode(&p)
-						p["author_association"] = "OWNER"
-						comments = append(comments, p)
-						if receiptPhase && fault == "unreadable readback" {
-							unreadable = true
-						}
-						if receiptPhase && fault == "lost response" {
-							http.Error(w, "applied but response lost", 500)
+	for _, repaired := range []bool{false, true} {
+		for _, fault := range []string{"none", "lost response", "unreadable readback"} {
+			t.Run(fmt.Sprintf("repaired=%t/%s", repaired, fault), func(t *testing.T) {
+				comments := []map[string]any{}
+				labels := []string{"ready", "wip"}
+				receiptPhase, unreadable := false, false
+				writes := 0
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					switch {
+					case strings.HasSuffix(r.URL.Path, "/comments"):
+						if r.Method == http.MethodPost {
+							writes++
+							var p map[string]any
+							json.NewDecoder(r.Body).Decode(&p)
+							p["author_association"] = "OWNER"
+							comments = append(comments, p)
+							if receiptPhase && fault == "unreadable readback" {
+								unreadable = true
+							}
+							if receiptPhase && fault == "lost response" {
+								http.Error(w, "applied but response lost", 500)
+								return
+							}
+						} else if unreadable {
+							http.Error(w, "readback unavailable", 503)
 							return
 						}
-					} else if unreadable {
-						http.Error(w, "readback unavailable", 503)
-						return
+						json.NewEncoder(w).Encode(comments)
+					case r.Method == http.MethodGet:
+						ls := []map[string]string{}
+						for _, label := range labels {
+							ls = append(ls, map[string]string{"name": label})
+						}
+						json.NewEncoder(w).Encode(map[string]any{"number": 7, "state": "open", "labels": ls})
+					case r.Method == http.MethodPost:
+						var p struct {
+							Labels []string `json:"labels"`
+						}
+						json.NewDecoder(r.Body).Decode(&p)
+						labels = append(labels, p.Labels...)
+						fmt.Fprint(w, `[]`)
+					case r.Method == http.MethodDelete:
+						label := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+						labels = slices.DeleteFunc(labels, func(v string) bool { return v == label })
+						w.WriteHeader(204)
 					}
-					json.NewEncoder(w).Encode(comments)
-				case r.Method == http.MethodGet:
-					ls := []map[string]string{}
-					for _, label := range labels {
-						ls = append(ls, map[string]string{"name": label})
-					}
-					json.NewEncoder(w).Encode(map[string]any{"number": 7, "state": "open", "labels": ls})
-				case r.Method == http.MethodPost:
-					var p struct {
-						Labels []string `json:"labels"`
-					}
-					json.NewDecoder(r.Body).Decode(&p)
-					labels = append(labels, p.Labels...)
-					fmt.Fprint(w, `[]`)
-				case r.Method == http.MethodDelete:
-					label := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
-					labels = slices.DeleteFunc(labels, func(v string) bool { return v == label })
-					w.WriteHeader(204)
+				}))
+				defer server.Close()
+				ctx, repo := t.Context(), github.RepositoryID{Owner: "acme", Name: "widgets"}
+				b := NewGitHubBackend(server.URL, "token", server.Client())
+				round := workflow.DispatchRound{ID: "pause", Lane: workflow.ImplementLane, Item: "7", Obligation: "target", Directory: "skl-implement-pause"}
+				if err := b.RecordDispatchRound(ctx, repo, round); err != nil {
+					t.Fatal(err)
 				}
-			}))
-			defer server.Close()
-			ctx, repo := t.Context(), github.RepositoryID{Owner: "acme", Name: "widgets"}
-			b := NewGitHubBackend(server.URL, "token", server.Client())
-			round := workflow.DispatchRound{ID: "pause", Lane: workflow.ImplementLane, Item: "7", Obligation: "target", Directory: "skl-implement-pause"}
-			if err := b.RecordDispatchRound(ctx, repo, round); err != nil {
-				t.Fatal(err)
-			}
-			receipt := round
-			receipt.Outcome, receipt.Head, receipt.Released = workflow.NeedsHuman, "fixed", true
-			p, _ := json.Marshal(implementationMetadata{Round: &receipt})
-			decision := "<!-- skl.implement/v1\n" + string(p) + "\n-->"
-			item := workflow.ImplementationItem{ID: "7", State: workflow.Ready, Claimed: true}
-			transition := workflow.ImplementationTransition{From: workflow.Ready, Target: workflow.NeedsHuman, Head: "fixed", Directory: round.Directory, DecisionDigest: fmt.Sprintf("%x", sha256.Sum256([]byte(decision)))}
-			if err := b.RecordImplementationTransition(ctx, repo, item, transition); err != nil {
-				t.Fatal(err)
-			}
-			guard := func() error {
+				receipt := round
+				receipt.Outcome, receipt.Head, receipt.Released = workflow.NeedsHuman, "fixed", true
+				p, _ := json.Marshal(implementationMetadata{Round: &receipt})
+				decision := "<!-- skl.implement/v1\n" + string(p) + "\n-->"
+				item := workflow.ImplementationItem{ID: "7", State: workflow.Ready, Claimed: true}
+				transition := workflow.ImplementationTransition{From: workflow.Ready, Target: workflow.NeedsHuman, Head: "fixed", Directory: round.Directory, DecisionDigest: fmt.Sprintf("%x", sha256.Sum256([]byte(decision)))}
+				if err := b.RecordImplementationTransition(ctx, repo, item, transition); err != nil {
+					t.Fatal(err)
+				}
+				guard := func() error {
+					for _, comment := range comments {
+						if comment["body"] == decision {
+							return errors.New("interrupted after opaque publication")
+						}
+					}
+					return nil
+				}
+				if err := b.PauseImplementation(ctx, repo, item, decision, guard); err == nil {
+					t.Fatal("pause not interrupted")
+				}
+				if rounds, err := b.DispatchRounds(ctx, repo, "7"); err != nil || !slices.Equal(rounds, []workflow.DispatchRound{round}) || !slices.Contains(labels, "wip") {
+					t.Fatalf("opaque publication forged receipt: %+v %v labels=%v", rounds, err, labels)
+				}
+				originalDecision := decision
+				occurrencesBeforeReceipt := 1
+				if repaired {
+					decision = "Repaired decision after interrupted publication"
+					transition.DecisionDigest = fmt.Sprintf("%x", sha256.Sum256([]byte(decision)))
+					if err := b.RecordImplementationTransition(ctx, repo, item, transition); err != nil {
+						t.Fatal(err)
+					}
+					// Unrelated completed history must not close this pending handoff.
+					unrelated := transition
+					unrelated.Directory, unrelated.Head, unrelated.Completed = "skl-implement-earlier", "earlier", true
+					if err := b.RecordImplementationTransition(ctx, repo, item, unrelated); err != nil {
+						t.Fatal(err)
+					}
+					if err := b.RecordDispatchRound(ctx, repo, receipt); err == nil {
+						t.Fatal("superseded opaque bytes became proof before the repaired handoff completed")
+					}
+					occurrencesBeforeReceipt++
+					if err := b.RecordImplementationTransition(ctx, repo, item, transition); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := b.PauseImplementation(ctx, repo, item, decision, func() error { return nil }); err != nil {
+					t.Fatal(err)
+				}
+				transition.Completed = true
+				if err := b.RecordImplementationTransition(ctx, repo, item, transition); err != nil {
+					t.Fatal(err)
+				}
+				freshBeforeReceipt := NewGitHubBackend(server.URL, "token", server.Client())
+				if rounds, err := freshBeforeReceipt.DispatchRounds(ctx, repo, "7"); err != nil || !slices.Equal(rounds, []workflow.DispatchRound{round}) {
+					t.Fatalf("completion reinterpreted an earlier opaque occurrence: %+v %v", rounds, err)
+				}
+				receiptPhase = true
+				err := b.RecordDispatchRound(ctx, repo, receipt)
+				if (fault == "unreadable readback") != (err != nil) {
+					t.Fatalf("receipt result: %v", err)
+				}
+				unreadable = false
+				before := writes
+				fresh := NewGitHubBackend(server.URL, "token", server.Client())
+				if err := fresh.RecordDispatchRound(ctx, repo, receipt); err != nil {
+					t.Fatal(err)
+				}
+				rounds, err := fresh.DispatchRounds(ctx, repo, "7")
+				occurrences := 0
 				for _, comment := range comments {
-					if comment["body"] == decision {
-						return errors.New("interrupted after opaque publication")
+					if comment["body"] == originalDecision {
+						occurrences++
 					}
 				}
-				return nil
-			}
-			if err := b.PauseImplementation(ctx, repo, item, decision, guard); err == nil {
-				t.Fatal("pause not interrupted")
-			}
-			if rounds, err := b.DispatchRounds(ctx, repo, "7"); err != nil || !slices.Equal(rounds, []workflow.DispatchRound{round}) || !slices.Contains(labels, "wip") {
-				t.Fatalf("opaque publication forged receipt: %+v %v labels=%v", rounds, err, labels)
-			}
-			if err := b.PauseImplementation(ctx, repo, item, decision, func() error { return nil }); err != nil {
-				t.Fatal(err)
-			}
-			transition.Completed = true
-			if err := b.RecordImplementationTransition(ctx, repo, item, transition); err != nil {
-				t.Fatal(err)
-			}
-			receiptPhase = true
-			err := b.RecordDispatchRound(ctx, repo, receipt)
-			if (fault == "unreadable readback") != (err != nil) {
-				t.Fatalf("receipt result: %v", err)
-			}
-			unreadable = false
-			before := writes
-			fresh := NewGitHubBackend(server.URL, "token", server.Client())
-			if err := fresh.RecordDispatchRound(ctx, repo, receipt); err != nil {
-				t.Fatal(err)
-			}
-			rounds, err := fresh.DispatchRounds(ctx, repo, "7")
-			occurrences := 0
-			for _, comment := range comments {
-				if comment["body"] == decision {
-					occurrences++
+				if err != nil || !slices.Equal(rounds, []workflow.DispatchRound{receipt}) || writes != before || occurrences != occurrencesBeforeReceipt+1 || slices.Contains(labels, "wip") {
+					t.Fatalf("genuine receipt lost or duplicated: %+v %v writes=%d/%d identical=%d labels=%v", rounds, err, before, writes, occurrences, labels)
 				}
-			}
-			if err != nil || !slices.Equal(rounds, []workflow.DispatchRound{receipt}) || writes != before || occurrences != 2 || slices.Contains(labels, "wip") {
-				t.Fatalf("genuine receipt lost or duplicated: %+v %v writes=%d/%d identical=%d labels=%v", rounds, err, before, writes, occurrences, labels)
-			}
-		})
+			})
+		}
 	}
 }
 
