@@ -28,8 +28,8 @@ func statusCLI(t *testing.T, root string, b *implementationMemory) setup.StatusO
 }
 
 func TestStatusCompletesCoordinationOnlyWhenEveryChildMerged(t *testing.T) {
-	b := &implementationMemory{coordination: []workflow.CoordinationItem{{ID: "100", Children: []workflow.WorkItemID{"7", "8"}}}, work: []workflow.ImplementationItem{{ID: "7", State: workflow.Merged}, {ID: "8", State: workflow.ReadyForMerge}}}
 	root := proposalRepository(t)
+	b := &implementationMemory{coordination: []workflow.CoordinationItem{{ID: "100", Children: []workflow.WorkItemID{"7", "8"}}}, work: []workflow.ImplementationItem{{ID: "7", State: workflow.Merged}, {ID: "8", State: workflow.ReadyForMerge}}}
 	if got := statusCLI(t, root, b); b.coordination[0].Closed || len(got.CompleteProposals) != 0 {
 		t.Fatalf("premature completion: %#v", got)
 	}
@@ -72,7 +72,7 @@ func TestStatusObservesHumanMergeAndReleasesDependencies(t *testing.T) {
 	}
 }
 
-func TestStatusNormalizesPartialAndContradictoryRecords(t *testing.T) {
+func TestStatusRefusesPartialAndPreservesRecords(t *testing.T) {
 	b := &implementationMemory{work: []workflow.ImplementationItem{
 		{ID: "1", State: workflow.Ready}, {ID: "2", State: workflow.Ready, Claimed: true},
 		{ID: "3", State: workflow.AwaitingReview}, {ID: "4", State: workflow.Rework},
@@ -82,12 +82,9 @@ func TestStatusNormalizesPartialAndContradictoryRecords(t *testing.T) {
 		{ID: "10", State: workflow.Rework, Problem: "contradictory lifecycle projections"},
 	}}
 	before := append([]workflow.ImplementationItem(nil), b.work...)
-	got := statusCLI(t, proposalRepository(t), b)
-	if !reflect.DeepEqual(before[:8], b.work[:8]) || !reflect.DeepEqual(before[9], b.work[9]) {
-		t.Fatal("status mutated valid or contradictory state")
-	}
-	if got.Items[8].State != workflow.AwaitingReview || got.Items[8].Claimed || got.Items[9].State != workflow.NeedsHuman || got.Items[7].Branch != "retained-reference" {
-		t.Fatalf("normalized status: %#v", got)
+	_, err := workflow.ObserveStatus(context.Background(), b)
+	if err == nil || !strings.Contains(err.Error(), "original Result Document") || !reflect.DeepEqual(before, b.work) {
+		t.Fatalf("status changed an ambiguous partial handoff: %v, %#v", err, b.work)
 	}
 }
 
@@ -108,13 +105,15 @@ func (b *statusGuardMemory) CompleteReview(ctx context.Context, item workflow.Im
 }
 
 func TestStatusRoutesAcceptedConflictToSynchronizationRework(t *testing.T) {
-	root := proposalRepository(t)
-	target := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "main"))
+	target := strings.Repeat("a", 40)
 	for _, pending := range []workflow.State{"", workflow.ReadyForMerge} {
 		b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.ReadyForMerge, Claimed: pending != "", Submission: &workflow.Submission{ID: "11", Head: "fixed", Base: "main", Mergeability: "conflicting", PendingReview: pending, Claimed: pending != ""}}}, remoteHeads: map[string]string{"main": target}}
-		got := statusCLI(t, root, b).Items[0]
-		if got.State != workflow.Rework || !got.Synchronization || got.TargetSnapshot != target || got.TargetBranch != "main" || got.Claimed || got.Submission.Claimed || got.Submission.PendingReview != "" {
-			t.Fatalf("accepted conflict (pending %q): %#v / %#v", pending, got, got.Submission)
+		got, err := workflow.ObserveStatus(context.Background(), b)
+		if pending == "" && (err != nil || got.Items[0].State != workflow.Rework || got.Items[0].Claimed) {
+			t.Fatalf("unclaimed conflict was not diverted safely: %#v, %v", got, err)
+		}
+		if pending != "" && (err == nil || !strings.Contains(err.Error(), "cannot prove status owns")) {
+			t.Fatalf("status released a claimed conflict (pending %q): %#v, %v", pending, got, err)
 		}
 	}
 }

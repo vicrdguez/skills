@@ -2,7 +2,6 @@ package workflow
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +9,10 @@ import (
 	"slices"
 	"strings"
 )
+
+const implementationDecisionPrefix = "<!-- skl.implement.decision/v1 -->\n"
+
+func OpaqueImplementationDecision(body string) string { return implementationDecisionPrefix + body }
 
 func SubmitImplementation(ctx context.Context, root, remote string, id WorkItemID, bodyPath string, endpoints ArtifactEndpoints, backend ImplementationBackend) (ImplementationOutcome, error) {
 	if id == "" || bodyPath == "" {
@@ -28,134 +31,128 @@ func PauseImplementation(ctx context.Context, root, remote string, id WorkItemID
 func handoffImplementation(ctx context.Context, root, remote string, id WorkItemID, target State, decisionPath, bodyPath string, endpoints ArtifactEndpoints, backend ImplementationBackend) (outcome ImplementationOutcome, err error) {
 	items, err := loadImplementation(ctx, backend)
 	if err != nil {
-		return ImplementationOutcome{}, err
+		return outcome, err
 	}
 	var item ImplementationItem
 	for _, candidate := range items {
 		if candidate.ID == id {
 			if item.ID != "" {
-				return ImplementationOutcome{}, Refuse("ambiguous Work Item identity; repair duplicate attachments")
+				return outcome, Refuse("ambiguous Work Item identity; repair duplicate attachments")
 			}
 			item = candidate
 		}
 	}
-	if item.ID == "" || item.Problem != "" {
-		return ImplementationOutcome{}, Refuse("Workflow State contradicts handoff: " + item.Problem + "; repair projections before retrying")
+	if item.ID == "" {
+		return outcome, Refuse("Work Item unavailable; inspect its stable identity")
 	}
+
 	resultPath := bodyPath
 	if resultPath == "" {
 		resultPath = decisionPath
 	}
-	directory := filepath.Base(filepath.Dir(resultPath))
-	head, err := git(root, "rev-parse", "--verify", "refs/heads/"+item.Branch+"^{commit}")
-	if err != nil {
-		return ImplementationOutcome{}, Refuse("local branch unavailable; restore its conventional worktree")
-	}
-	guard := func() error {
-		local, err := git(root, "rev-parse", "--verify", "refs/heads/"+item.Branch+"^{commit}")
-		if err != nil || local != head {
-			return Refuse("local head changed during handoff; commit and push a fixed head, then retry")
-		}
-		if bodyPath != "" {
-			remote, err := backend.ImplementationHead(ctx, item.Branch)
-			if err != nil {
-				return err
-			}
-			if remote != head {
-				return Refuse("remote head changed or local and remote heads differ; push a fixed head and retry")
-			}
-		}
-		return nil
-	}
-	if err := guard(); err != nil {
-		return ImplementationOutcome{}, err
-	}
-	prior := item.Transition
-	if prior != nil && prior.Completed && prior.Target == target && prior.Directory == directory && prior.Head == head && item.State == target && !item.Claimed {
-		if _, err := os.Lstat(filepath.Dir(resultPath)); err == nil {
-			if err := removeResultDirectory(resultPath); err != nil {
-				return ImplementationOutcome{}, err
-			}
-		} else if !os.IsNotExist(err) {
-			return ImplementationOutcome{}, err
-		}
-		return ImplementationOutcome{Status: string(target), Item: &item}, nil
-	}
-	from := item.State
-	if prior != nil && !prior.Completed {
-		from = prior.From
-	}
-	if from != Ready && from != Rework || !item.Claimed && (prior == nil || prior.Completed) {
-		return ImplementationOutcome{}, Refuse("Workflow State contradicts submission; repair the claimed Ready or Rework projections and retry")
-	}
-	if from == Rework && item.Submission == nil {
-		return ImplementationOutcome{}, Refuse("Rework has no existing Submission; repair its attachment before resubmitting")
-	}
 	if err := validateResultDirectory(resultPath); err != nil {
-		return ImplementationOutcome{}, err
+		return outcome, err
 	}
 	if decisionPath != "" && bodyPath != "" {
 		if filepath.Dir(decisionPath) != filepath.Dir(bodyPath) {
-			return ImplementationOutcome{}, errors.New("decision and Submission must share one private operation directory")
+			return outcome, errors.New("decision and Submission must share one private operation directory")
 		}
 		if err := validateResultDirectory(decisionPath); err != nil {
-			return ImplementationOutcome{}, err
+			return outcome, err
 		}
 	}
 	var body, decision []byte
 	if bodyPath != "" {
 		body, err = os.ReadFile(bodyPath)
 		if err != nil {
-			return ImplementationOutcome{}, err
+			return outcome, err
 		}
 	}
 	if decisionPath != "" {
 		decision, err = os.ReadFile(decisionPath)
 		if err != nil {
-			return ImplementationOutcome{}, err
+			return outcome, err
 		}
 	}
+
+	head, err := git(root, "rev-parse", "--verify", "refs/heads/"+item.Branch+"^{commit}")
+	if err != nil {
+		return outcome, Refuse("local branch unavailable; restore its conventional worktree")
+	}
+	guard := func() error {
+		local, e := git(root, "rev-parse", "--verify", "refs/heads/"+item.Branch+"^{commit}")
+		if e != nil || local != head {
+			return Refuse("local head changed during handoff; commit and push a fixed head, then retry")
+		}
+		if bodyPath != "" {
+			pushed, e := backend.ImplementationHead(ctx, item.Branch)
+			if e != nil {
+				return e
+			}
+			if pushed != head {
+				return Refuse("remote head changed or local and remote heads differ; push a fixed head and retry")
+			}
+		}
+		return nil
+	}
+	if err := guard(); err != nil {
+		return outcome, err
+	}
+
+	if implementationHandoffMatches(item, target, head, string(body), string(decision)) {
+		outcome = ImplementationOutcome{Status: string(target), Item: &item}
+		cleanupImplementationResult(&outcome, resultPath)
+		return outcome, nil
+	}
+	if item.Claimed && item.State == target && !implementationSourceClaim(item) {
+		return outcome, Refuse("claimed destination may belong to a later worker; inspect it without releasing or replacing its Claim")
+	}
+	if item.Problem != "" && !(item.Problem == "contradictory lifecycle projections" && implementationSourceClaim(item)) {
+		return outcome, Refuse("Workflow State contradicts handoff: " + item.Problem + "; inspect projections before retrying")
+	}
+	from := item.State
+	if item.Source != nil && item.Source.Claimed && slices.Contains(item.Source.States, Ready) {
+		from = Ready
+	} else if item.Submission != nil && item.Submission.Lifecycle != nil && item.Submission.Lifecycle.Claimed && slices.Contains(item.Submission.Lifecycle.States, Rework) {
+		from = Rework
+	}
+	if (from != Ready && from != Rework) || !item.Claimed {
+		return outcome, Refuse("Workflow State cannot prove this command owns a claimed Ready or Rework source; inspect before retrying")
+	}
+	if from == Rework && item.Submission == nil {
+		return outcome, Refuse("Rework has no existing Submission; repair its attachment before resubmitting")
+	}
+	if target == AwaitingReview && from == Rework && item.Submission != nil && implementationBodyMatches(item.ID, item.Submission.Body, string(body)) {
+		return outcome, Refuse("unchanged Rework Submission cannot distinguish a stale command from a new handoff; inspect and supply the current round's Result Document")
+	}
+
 	policy := RequireRetiredArtifacts
 	if target == NeedsHuman {
 		policy = PreserveIncompleteArtifacts
 	}
 	history, err := InspectLedger(root, head, item.Branch, endpoints, policy)
 	if err != nil {
-		return ImplementationOutcome{}, err
+		return outcome, err
 	}
 	if target == AwaitingReview {
 		if from == Ready && item.TargetSnapshot == "" || item.TargetSnapshot != "" && gitOK(root, "merge-base", "--is-ancestor", item.TargetSnapshot, head) != nil {
-			return ImplementationOutcome{}, Refuse("Target Snapshot is absent; merge the pinned snapshot, commit and push before retrying")
+			return outcome, Refuse("Target Snapshot is absent; merge the pinned snapshot, commit and push before retrying")
 		}
 		if history.Phase != "retired" || len(history.Violations) > 0 {
-			return ImplementationOutcome{}, Refuse(fmt.Sprint(history.Violations) + "; complete permitted ticks, commit Completion, then delete the entire ledger in a child commit and push")
+			return outcome, Refuse(fmt.Sprint(history.Violations) + "; complete permitted ticks, commit Completion, then delete the entire ledger in a child commit and push")
 		}
 	} else if len(history.endpointIdentityViolations) != 0 || len(history.acceptedBaselineViolations) != 0 {
-		return ImplementationOutcome{}, Refuse(fmt.Sprint(append(history.endpointIdentityViolations, history.acceptedBaselineViolations...)) + "; repair endpoint identity or the accepted baseline before pausing")
+		return outcome, Refuse(fmt.Sprint(append(history.endpointIdentityViolations, history.acceptedBaselineViolations...)) + "; repair endpoint identity or the accepted baseline before pausing")
 	} else if bodyPath == "" {
-		changed, err := git(root, "diff", "--name-only", history.Baseline, head, "--", ".", ":(exclude).changes/"+item.Branch)
-		if err != nil {
-			return ImplementationOutcome{}, err
+		changed, e := git(root, "diff", "--name-only", history.Baseline, head, "--", ".", ":(exclude).changes/"+item.Branch)
+		if e != nil {
+			return outcome, e
 		}
 		if changed != "" || item.Submission != nil {
-			return ImplementationOutcome{}, Refuse("implementation work needs preservation; push and supply --body for a draft Submission")
+			return outcome, Refuse("implementation work needs preservation; push and supply --body for a draft Submission")
 		}
 	}
-	transition := ImplementationTransition{From: from, Target: target, Head: head, Directory: directory, BodyDigest: fmt.Sprintf("%x", sha256.Sum256(body)), DecisionDigest: fmt.Sprintf("%x", sha256.Sum256(decision))}
-	if prior != nil && !prior.Completed && *prior != transition && (item.State != from || !item.Claimed) {
-		return ImplementationOutcome{}, Refuse("pending handoff differs from supplied intent or head; restore its fixed Result Documents and resume")
-	}
-	item.State = from
-	if err := backend.RecordImplementationTransition(ctx, item, transition); err != nil {
-		return ImplementationOutcome{}, err
-	}
-	item.Transition = &transition
-	defer func() {
-		if err != nil {
-			transition.Completed = false
-			err = errors.Join(err, backend.RecordImplementationTransition(ctx, item, transition), backend.RetainImplementationClaim(ctx, item))
-		}
-	}()
+
 	if bodyPath != "" {
 		base := item.TargetBranch
 		if item.Submission != nil && item.Submission.Base != "" {
@@ -164,7 +161,7 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 		if base == "" {
 			base, err = backend.ImplementationTarget(ctx)
 			if err != nil {
-				return ImplementationOutcome{}, err
+				return outcome, err
 			}
 		}
 		submission := Submission{Head: head, Base: base, Body: string(body), Draft: target == NeedsHuman}
@@ -173,64 +170,83 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 		}
 		submission, err = backend.PublishImplementation(ctx, item, submission)
 		if err != nil {
-			return ImplementationOutcome{}, err
+			return outcome, err
 		}
 		if submission.Head != head || submission.Draft != (target == NeedsHuman) {
-			return ImplementationOutcome{}, Refuse("Submission head changed or draft state contradicts handoff; inspect and retry")
+			return outcome, Refuse("Submission head changed or draft state contradicts handoff; inspect and retry")
 		}
 		item.Submission = &submission
 	}
 	if err := guard(); err != nil {
-		return ImplementationOutcome{}, err
+		return outcome, err
 	}
-	writeErr := projectImplementation(ctx, backend, item, target, string(decision), guard)
-	if err := guard(); err != nil {
-		return ImplementationOutcome{}, err
-	}
-	observed, err := loadImplementation(ctx, backend)
-	if err != nil {
-		return ImplementationOutcome{}, err
+	var writeErr error
+	if target == AwaitingReview {
+		writeErr = backend.AwaitImplementationReview(ctx, item, guard)
+	} else {
+		writeErr = backend.PauseImplementation(ctx, item, string(decision), guard)
 	}
 	if err := guard(); err != nil {
-		return ImplementationOutcome{}, err
+		return outcome, err
+	}
+	observed, observeErr := loadImplementation(ctx, backend)
+	if observeErr != nil {
+		return outcome, observeErr
 	}
 	for _, current := range observed {
-		if current.ID != id {
-			continue
-		}
-		if current.Problem == "" && current.State == target && !current.Claimed && (bodyPath == "" || current.Submission != nil && current.Submission.Head == head && current.Submission.Draft == (target == NeedsHuman)) {
-			transition.Completed = true
-			if err := backend.RecordImplementationTransition(ctx, current, transition); err != nil {
-				return ImplementationOutcome{}, err
-			}
-			if err := guard(); err != nil {
-				return ImplementationOutcome{}, err
-			}
-			current.Transition = &transition
-			if err := removeResultDirectory(resultPath); err != nil {
-				return ImplementationOutcome{}, err
-			}
-			return ImplementationOutcome{Status: string(target), Item: &current}, nil
+		if current.ID == id && implementationHandoffMatches(current, target, head, string(body), string(decision)) {
+			outcome = ImplementationOutcome{Status: string(target), Item: &current}
+			cleanupImplementationResult(&outcome, resultPath)
+			return outcome, nil
 		}
 	}
 	if writeErr != nil {
-		return ImplementationOutcome{}, writeErr
+		return outcome, writeErr
 	}
-	return ImplementationOutcome{}, Refuse("handoff projection is incomplete; retry the same semantic command with retained Result Documents")
+	return outcome, Refuse("handoff observations cannot prove completion; retain Result Documents and inspect before retrying")
 }
 
-func projectImplementation(ctx context.Context, backend ImplementationBackend, item ImplementationItem, target State, decision string, guard func() error) error {
-	var err error
-	if target == AwaitingReview {
-		err = backend.AwaitImplementationReview(ctx, item, guard)
-	} else {
-		err = backend.PauseImplementation(ctx, item, decision, guard)
+func implementationSourceClaim(item ImplementationItem) bool {
+	return item.Source != nil && item.Source.Claimed && slices.Contains(item.Source.States, Ready) || item.Submission != nil && item.Submission.Lifecycle != nil && item.Submission.Lifecycle.Claimed && slices.Contains(item.Submission.Lifecycle.States, Rework)
+}
+
+func implementationHandoffMatches(item ImplementationItem, target State, head, body, decision string) bool {
+	if item.Problem != "" || item.State != target || item.Claimed {
+		return false
 	}
-	if err != nil {
-		// Restore the Claim before read-back can mistake a failed write for completion.
-		err = errors.Join(err, backend.RetainImplementationClaim(ctx, item))
+	if body != "" && (item.Submission == nil || item.Submission.Head != head || item.Submission.Draft != (target == NeedsHuman) || !implementationBodyMatches(item.ID, item.Submission.Body, body)) {
+		return false
 	}
-	return err
+	if decision == "" {
+		return true
+	}
+	wanted := OpaqueImplementationDecision(decision)
+	for _, comment := range item.Feedback {
+		if comment.Body == wanted {
+			return true
+		}
+	}
+	if item.Submission != nil {
+		for _, comment := range item.Submission.Comments {
+			if comment.Body == wanted {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func implementationBodyMatches(id WorkItemID, actual, supplied string) bool {
+	if actual == supplied {
+		return true
+	}
+	return actual == supplied+"\n\nCloses #"+string(id)+"\n"
+}
+
+func cleanupImplementationResult(outcome *ImplementationOutcome, resultPath string) {
+	if err := removeResultDirectory(resultPath); err != nil {
+		outcome.Reason = "handoff completed but private Result Document directory cleanup failed: " + err.Error()
+	}
 }
 
 func removeResultDirectory(bodyPath string) error {

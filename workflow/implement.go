@@ -31,8 +31,9 @@ type ImplementationItem struct {
 	Source          *LifecycleObservation
 	Synchronization bool
 	Problem         string
-	ResumeState     State
+	ResumeState     State // Legacy fixture field; the Workflow Engine does not persist or consume it.
 	Submission      *Submission
+	Feedback        []skilldist.ReviewComment
 	Branch          string
 	TargetSnapshot  string
 	TargetBranch    string
@@ -42,12 +43,12 @@ type ImplementationItem struct {
 	CreatedAt       string
 	Claimed         bool
 	Blockers        []WorkItemID
-	Transition      *ImplementationTransition
+	Transition      *ImplementationTransition // Legacy fixture field; never authoritative.
 }
 
 type Submission struct {
 	Lifecycle       *LifecycleObservation
-	PendingReview   State
+	PendingReview   State // Legacy fixture field; timeline direction is not consumed.
 	ClaimAcquiredAt string
 	Merged          bool
 	Mergeability    string
@@ -60,6 +61,18 @@ type Submission struct {
 	Body            string
 	Draft           bool
 	Comments        []skilldist.ReviewComment
+}
+
+// ImplementationTransition remains only so historical feedback and downstream
+// fixtures can be decoded as opaque data. No Workflow Backend reads or writes it.
+type ImplementationTransition struct {
+	From           State
+	Target         State
+	Head           string
+	BodyDigest     string
+	DecisionDigest string
+	Directory      string
+	Completed      bool
 }
 
 // LifecycleObservation retains overlaps while a multi-record transition is in flight.
@@ -79,20 +92,8 @@ type ImplementationBackend interface {
 	ClaimImplementation(context.Context, ImplementationItem) error
 	ImplementationHead(context.Context, string) (string, error)
 	PublishImplementation(context.Context, ImplementationItem, Submission) (Submission, error)
-	RecordImplementationTransition(context.Context, ImplementationItem, ImplementationTransition) error
-	RetainImplementationClaim(context.Context, ImplementationItem) error
 	AwaitImplementationReview(context.Context, ImplementationItem, func() error) error
 	PauseImplementation(context.Context, ImplementationItem, string, func() error) error
-}
-
-type ImplementationTransition struct {
-	From           State  `json:"from"`
-	Target         State  `json:"target"`
-	Head           string `json:"head"`
-	BodyDigest     string `json:"body_digest"`
-	DecisionDigest string `json:"decision_digest"`
-	Directory      string `json:"directory"`
-	Completed      bool   `json:"completed"`
 }
 
 type InvariantError struct{ Reason string }
@@ -164,52 +165,6 @@ func ReconcileImplementation(item ImplementationItem) ImplementationItem {
 	}
 	if !item.Source.Open && item.State != Merged && item.State != ReadyForMerge && item.State != Superseded && (item.Problem == "" || item.Problem == "contradictory lifecycle projections" || item.Problem == "source Ready contradicts Submission lifecycle") {
 		item.Problem = "source issue is closed without a merged Submission"
-	}
-	if transition := item.Transition; transition != nil && !transition.Completed {
-		allowed := func(observation *LifecycleObservation, states []State) bool {
-			if observation == nil || !observation.Open {
-				return false
-			}
-			for _, state := range observation.States {
-				if !slices.Contains(states, state) {
-					return false
-				}
-			}
-			return true
-		}
-		var sourceStates, submissionStates []State
-		if transition.From == Ready {
-			sourceStates = append(sourceStates, Ready)
-		} else if transition.From == Rework {
-			submissionStates = append(submissionStates, Rework)
-		}
-		submissionStates = append(submissionStates, transition.Target)
-		if transition.Target == NeedsHuman {
-			sourceStates = append(sourceStates, NeedsHuman)
-		}
-		valid := allowed(item.Source, sourceStates) && (item.Submission == nil || allowed(item.Submission.Lifecycle, submissionStates))
-		if !valid {
-			item.Problem = "projections contradict the pending implementation transition"
-		}
-		if valid && (item.Problem == "" || item.Problem == "contradictory lifecycle projections" || item.Problem == "source Ready contradicts Submission lifecycle") {
-			item.Problem = ""
-			final := !sourceClaimed && sourceProblem == ""
-			if transition.Target == AwaitingReview {
-				final = final && sourceState == "" && item.Submission != nil && item.Submission.State == AwaitingReview && !item.Submission.Claimed
-			} else {
-				final = final && sourceState == NeedsHuman && (item.Submission == nil || item.Submission.State == NeedsHuman && !item.Submission.Claimed)
-			}
-			item.State = transition.From
-			if final {
-				item.State = transition.Target
-			} else {
-				item.ResumeState = transition.From
-			}
-		}
-	}
-	if item.Submission != nil && item.Submission.PendingReview != "" && (item.Transition == nil || item.Transition.Completed) && sourceProblem == "" && (item.Problem == "" || item.Problem == "contradictory lifecycle projections") {
-		item.Problem = ""
-		item.State = item.Submission.PendingReview
 	}
 	if item.Submission != nil && item.Submission.Merged {
 		item.Claimed = false
@@ -321,7 +276,7 @@ func StartImplementation(ctx context.Context, root, remote string, id WorkItemID
 		return cmp.Compare(a.Order, b.Order)
 	})
 	for _, item := range items {
-		if item.Claimed || item.Submission != nil && item.Submission.PendingReview != "" || item.Transition != nil && !item.Transition.Completed || item.State != Ready && item.State != Rework {
+		if item.Claimed || item.State != Ready && item.State != Rework {
 			continue
 		}
 		blocked := false

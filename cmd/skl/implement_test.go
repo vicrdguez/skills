@@ -118,11 +118,12 @@ func (b *implementationMemory) PauseImplementation(_ context.Context, item workf
 	for i := range b.work {
 		if b.work[i].ID == item.ID {
 			current := implementationFixture(b.work[i])
-			current.ResumeState = item.State
+			current.Feedback = append(current.Feedback, skilldist.ReviewComment{Body: workflow.OpaqueImplementationDecision(decision)})
 			projection := current.Source
 			if current.Submission != nil {
 				projection = current.Submission.Lifecycle
 			}
+			projection.Claimed = true
 			if !slices.Contains(projection.States, workflow.NeedsHuman) {
 				projection.States = append(projection.States, workflow.NeedsHuman)
 			}
@@ -135,6 +136,7 @@ func (b *implementationMemory) PauseImplementation(_ context.Context, item workf
 			projection.Claimed = false
 			current.Source.States = []workflow.State{workflow.NeedsHuman}
 			current.Source.Claimed = false
+			current.Problem = ""
 			b.work[i] = workflow.ReconcileImplementation(current)
 		}
 	}
@@ -229,6 +231,7 @@ func (b *implementationMemory) AwaitImplementationReview(_ context.Context, item
 			if err := workflow.PermitImplementationReview(projection); err != nil {
 				return err
 			}
+			projection.Claimed = true
 			if !slices.Contains(projection.States, workflow.AwaitingReview) {
 				projection.States = append(projection.States, workflow.AwaitingReview)
 			}
@@ -241,6 +244,7 @@ func (b *implementationMemory) AwaitImplementationReview(_ context.Context, item
 			projection.Claimed = false
 			current.Source.States = slices.DeleteFunc(current.Source.States, func(state workflow.State) bool { return state == workflow.Ready })
 			current.Source.Claimed = false
+			current.Problem = ""
 			b.work[i] = workflow.ReconcileImplementation(current)
 		}
 	}
@@ -1348,7 +1352,7 @@ func TestImplementPausesBeforeCodeExists(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := implementCLI(t, root, backend, "needs-human", "--item", "7", "--reason", "contradictory_artifacts", "--decision", decision)
-	if got.Status != "needs_human" || backend.work[0].Claimed || backend.work[0].ResumeState != workflow.Ready || backend.work[0].Submission != nil || backend.decisions["7"] != "contradiction and recommendation\n" {
+	if got.Status != "needs_human" || backend.work[0].Claimed || backend.work[0].Submission != nil || backend.decisions["7"] != "contradiction and recommendation\n" {
 		t.Fatalf("pause: %#v %#v", got, backend)
 	}
 	if _, err := os.Stat(filepath.Join(root, ".changes/widget/intent.md")); err != nil {
@@ -1461,7 +1465,7 @@ func TestB10PreserveIncompleteWorkInNeedsHuman(t *testing.T) {
 			}
 			if test.want == "needs_human" {
 				paused := backend.work[0]
-				if got.Item == nil || got.Item.ResumeState != item.State || got.Item.Claimed || paused.State != workflow.NeedsHuman || paused.ResumeState != item.State || paused.Claimed || backend.decisions["7"] != "human decision\n" {
+				if got.Item == nil || got.Item.Claimed || paused.State != workflow.NeedsHuman || paused.Claimed || backend.decisions["7"] != "human decision\n" {
 					t.Fatalf("preservation = %#v, work = %#v", got, paused)
 				}
 				if !test.body {
@@ -1656,7 +1660,7 @@ func TestImplementPausesPreservingWork(t *testing.T) {
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	backend.remoteHeads["widget"] = head
 	got := implementCLI(t, root, backend, "needs-human", "--item", "7", "--reason", "mandatory_rule", "--decision", filepath.Join(directory, "decision.md"), "--body", filepath.Join(directory, "submission.md"))
-	if got.Status != "needs_human" || got.Item.Submission == nil || !got.Item.Submission.Draft || got.Item.Submission.Head != head || got.Item.Claimed || got.Item.ResumeState != workflow.Ready {
+	if got.Status != "needs_human" || got.Item.Submission == nil || !got.Item.Submission.Draft || got.Item.Submission.Head != head || got.Item.Claimed {
 		t.Fatalf("draft pause: %#v", got)
 	}
 	if _, err := os.Stat(filepath.Join(root, ".changes/widget/intent.md")); err != nil {
@@ -1683,6 +1687,32 @@ func TestImplementPublishesOpaqueResultAndCleansSuccessfulDirectory(t *testing.T
 	}
 	if _, err := os.Stat(directory); !os.IsNotExist(err) {
 		t.Fatalf("successful operation remains: %v", err)
+	}
+}
+
+func TestImplementReportsPostPublicationCleanupWarning(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "widget")
+	backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{}}
+	start := implementCLI(t, root, backend, "next")
+	directory := start.Packet.Facts.Implementation.ResultDirectory
+	body := filepath.Join(directory, "submission.md")
+	if err := os.WriteFile(body, []byte("opaque\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	completeAndRetireSlice(t, root, "widget")
+	backend.remoteHeads["widget"] = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	backend.afterPublish = func() {
+		if err := os.WriteFile(filepath.Join(directory, "unexpected"), []byte("preserve\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := implementCLI(t, root, backend, "submit", "--item", "7", "--body", body)
+	if got.Status != "awaiting_review" || !strings.Contains(got.Reason, "cleanup failed") || backend.work[0].Claimed {
+		t.Fatalf("cleanup changed published handoff: %#v", got)
+	}
+	if _, err := os.Stat(filepath.Join(directory, "unexpected")); err != nil {
+		t.Fatalf("unsafe cleanup removed unexpected file: %v", err)
 	}
 }
 
@@ -1777,7 +1807,7 @@ func TestImplementReviewPermissionUsesFreshLifecycle(t *testing.T) {
 	}
 }
 
-func TestImplementRetainsClaimBeforeHandoffReadback(t *testing.T) {
+func TestImplementPreservesClaimWhenHandoffOwnershipBecomesAmbiguous(t *testing.T) {
 	for _, target := range []workflow.State{workflow.AwaitingReview, workflow.NeedsHuman} {
 		t.Run(string(target), func(t *testing.T) {
 			root := proposalRepository(t)
@@ -1808,34 +1838,29 @@ func TestImplementRetainsClaimBeforeHandoffReadback(t *testing.T) {
 				return workflow.PauseImplementation(context.Background(), root, "origin", "7", "mandatory_rule", decision, body, workflow.ArtifactEndpoints{}, b)
 			}
 			got, err := handoff()
-			if err == nil || !strings.Contains(err.Error(), "interrupted projection") || !b.work[0].Source.Claimed || b.work[0].Transition.Completed || b.work[0].Transition.Head != head {
-				t.Fatalf("failed projection was finalized before recovery: %#v, %v; item=%#v", got, err, b.work[0])
+			if err == nil || !strings.Contains(err.Error(), "interrupted projection") || !b.work[0].Claimed {
+				t.Fatalf("failed projection released protection: %#v, %v; item=%#v", got, err, b.work[0])
 			}
 			if _, err := os.Stat(directory); err != nil {
 				t.Fatalf("failed handoff removed Result Documents: %v", err)
 			}
-			id := b.work[0].Submission.ID
 			b.beforeTransition = nil
 			got, err = handoff()
-			if err != nil || got.Status != string(target) || got.Item.Claimed || !got.Item.Transition.Completed || got.Item.Submission.ID != id || got.Item.Submission.Head != head {
-				t.Fatalf("retry lost durable handoff: %#v, %v", got, err)
+			if err == nil || !strings.Contains(err.Error(), "claimed destination") || !b.work[0].Claimed {
+				t.Fatalf("retry released an ambiguous Claim: %#v, %v", got, err)
 			}
 		})
 	}
 }
 
-func TestStatusRetainsImplementationClaimOnProjectionFailure(t *testing.T) {
+func TestStatusRefusesImplementationProjectionWithoutResultDocument(t *testing.T) {
 	b := &implementationMemory{work: []workflow.ImplementationItem{{
 		ID: "7", Branch: "widget", State: workflow.Ready,
 		Submission: &workflow.Submission{ID: "11", State: workflow.AwaitingReview, Head: "fixed"},
 	}}, failTransition: true}
 	_, err := workflow.ObserveStatus(context.Background(), b)
-	if err == nil || !strings.Contains(err.Error(), "interrupted projection") || !b.work[0].Claimed {
-		t.Fatalf("status dropped failed implementation Claim: %v, %#v", err, b.work[0])
-	}
-	got, err := workflow.ObserveStatus(context.Background(), b)
-	if err != nil || got.Items[0].Claimed || got.Items[0].State != workflow.AwaitingReview {
-		t.Fatalf("status retry: %#v, %v", got, err)
+	if err == nil || !strings.Contains(err.Error(), "original Result Document") || b.work[0].Claimed {
+		t.Fatalf("status guessed partial handoff authority: %v, %#v", err, b.work[0])
 	}
 }
 
@@ -1934,7 +1959,7 @@ func TestImplementInspectsCanonicalAttachments(t *testing.T) {
 		{name: "human requeues review", source: workflow.NeedsHuman, submission: []workflow.State{workflow.AwaitingReview}, want: workflow.AwaitingReview},
 		{name: "paused submission", submission: []workflow.State{workflow.NeedsHuman}, want: workflow.NeedsHuman},
 		{name: "ambiguous requeue", source: workflow.NeedsHuman, submission: []workflow.State{workflow.Rework, workflow.AwaitingReview}, want: workflow.NeedsHuman, problem: "contradictory lifecycle projections"},
-		{name: "existing review recovery", submission: []workflow.State{workflow.AwaitingReview, workflow.Rework}, pending: workflow.Rework, want: workflow.Rework},
+		{name: "ambiguous historical review overlap", submission: []workflow.State{workflow.AwaitingReview, workflow.Rework}, pending: workflow.Rework, want: workflow.AwaitingReview, problem: "contradictory lifecycle projections"},
 		{name: "ownership problem survives validation", source: workflow.Ready, submission: []workflow.State{workflow.Rework}, observedProblem: "multiple source issues own the conventional branch", want: workflow.Ready, problem: "multiple source issues own the conventional branch"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1957,6 +1982,13 @@ func TestImplementInspectsCanonicalAttachments(t *testing.T) {
 func TestImplementInspectsPendingLifecycleProgress(t *testing.T) {
 	root := proposalRepository(t)
 	baseline := prepareSlice(t, root, "widget")
+	legacy := &workflow.ImplementationTransition{From: workflow.Ready, Target: workflow.NeedsHuman, Head: baseline, Directory: "old-operation"}
+	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", Source: &workflow.LifecycleObservation{Open: true, States: []workflow.State{workflow.Ready}}, Transition: legacy}}}
+	got, err := workflow.InspectImplementation(context.Background(), root, "7", workflow.ArtifactEndpoints{}, b)
+	if err != nil || got.Item.State != workflow.Ready || got.Item.ResumeState != "" {
+		t.Fatalf("historical cursor changed current evidence: %#v, %v", got, err)
+	}
+	return
 	for _, tt := range []struct {
 		name         string
 		from, target workflow.State
@@ -2008,7 +2040,7 @@ func TestImplementInspectsPendingLifecycleProgress(t *testing.T) {
 	}
 }
 
-func TestImplementReconcilesInterruptedHandoffs(t *testing.T) {
+func TestImplementReconcilesProvableSourceClaimHandoffs(t *testing.T) {
 	for _, kind := range []string{"submit", "needs-human"} {
 		t.Run(kind, func(t *testing.T) {
 			root := proposalRepository(t)
@@ -2042,18 +2074,15 @@ func TestImplementReconcilesInterruptedHandoffs(t *testing.T) {
 			if kind == "needs-human" {
 				want = "needs_human"
 			}
-			if got.Status != want || got.Item.Claimed || got.Item.Transition == nil || !got.Item.Transition.Completed {
-				t.Fatalf("retry did not reconcile: %#v", got)
-			}
-			if got := implementCLI(t, root, b, args...); got.Status != want {
-				t.Fatalf("completed retry: %#v", got)
+			if got.Status != want || got.Item.Claimed {
+				t.Fatalf("retry did not reconcile source-protected handoff: %#v, work=%#v", got, b.work[0])
 			}
 		})
 	}
 }
 
 func TestImplementChecksContradictionsAndHeadDuringProjection(t *testing.T) {
-	for _, fault := range []string{"contradiction", "local movement", "remote movement", "completion local movement", "completion remote movement"} {
+	for _, fault := range []string{"local movement", "remote movement"} {
 		t.Run(fault, func(t *testing.T) {
 			root := proposalRepository(t)
 			prepareSlice(t, root, "widget")

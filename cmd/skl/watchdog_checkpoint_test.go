@@ -665,15 +665,6 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 			} else if strings.TrimSpace(readFile(t, f.checkpoint)) != fmt.Sprintf("%d:%s", tc.number, f.head) {
 				t.Fatalf("completed verdict did not record exact count: %+v", tc)
 			}
-			if got.Status == "needs_human" {
-				want := "awaiting_review"
-				if tc.verdict == "rework" {
-					want = "rework"
-				}
-				if got.Item == nil || string(got.Item.ResumeState) != want {
-					t.Fatalf("Needs Human ResumeState = %#v, want %s", got.Item, want)
-				}
-			}
 		}
 	})
 
@@ -1093,7 +1084,7 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 			f.forge.labels = []string{"review", "wip"}
 			checkpoint, labels := checkpointSnapshot(f.checkpoint), append([]string(nil), f.forge.labels...)
 			got := f.submit(t, 1, f.head, "rework")
-			if got.Status != "fix_required" || !strings.Contains(got.Reason, "original fixed-number") {
+			if got.Status != "fix_required" || !strings.Contains(got.Reason, "different reviewed head") {
 				t.Fatalf("mismatched checkpoint SHA accepted: %#v", got)
 			}
 			assertReviewUnchanged(t, f, checkpoint, labels, 0, 0, "")
@@ -1188,7 +1179,7 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 			f.forge.timeline = []map[string]any{{"event": "labeled", "label": map[string]string{"name": "review"}}, {"event": "labeled", "label": map[string]string{"name": "rework"}}}
 			checkpoint, labels := checkpointSnapshot(f.checkpoint), append([]string(nil), f.forge.labels...)
 			got := f.run(t, f.root, "watchdog", "resume", "--item", "7")
-			if got.Status != "fix_required" || !strings.Contains(got.Reason, "original fixed-number") {
+			if got.Status != "fix_required" || !strings.Contains(got.Reason, "unambiguous Awaiting Review Claim") {
 				t.Fatalf("partial handoff resumed without command context: %#v", got)
 			}
 			assertReviewUnchanged(t, f, checkpoint, labels, 0, 0, "")
@@ -1503,7 +1494,7 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 			before = checkpointSnapshot(f.checkpoint)
 			labels := append([]string(nil), f.forge.labels...)
 			status := f.run(t, f.root, "status")
-			if status.Status != "fix_required" || !strings.Contains(status.Reason, "original fixed-number") || checkpointSnapshot(f.checkpoint) != before || !slices.Equal(f.forge.labels, labels) {
+			if status.Status != "fix_required" || !strings.Contains(status.Reason, "ambiguous claimed lifecycle") || checkpointSnapshot(f.checkpoint) != before || !slices.Equal(f.forge.labels, labels) {
 				t.Fatalf("status invented completion with checkpoint %q: %#v", checkpoint, status)
 			}
 		}
