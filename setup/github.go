@@ -12,12 +12,15 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"strconv"
 	"strings"
 
+	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/workflow"
 )
 
 type GitHubBackend struct {
+	repository  github.RepositoryID
 	baseURL     string
 	token       string
 	tokenSource func() (string, error)
@@ -26,17 +29,42 @@ type GitHubBackend struct {
 	issueBodies map[int]string
 }
 
+func (b *GitHubBackend) BindRepository(repository github.RepositoryID) {
+	if b.repository != repository {
+		clear(b.issueIDs)
+		clear(b.issueBodies)
+	}
+	b.repository = repository
+}
+
+func (b *GitHubBackend) requireRepository() error {
+	if b.repository.Owner == "" || b.repository.Name == "" {
+		return errors.New("GitHub backend is not bound to a repository")
+	}
+	return nil
+}
+
+func githubIssueNumber(id workflow.WorkItemID) (int, error) {
+	number, err := strconv.Atoi(string(id))
+	if err != nil || number <= 0 || strconv.Itoa(number) != string(id) {
+		return 0, fmt.Errorf("invalid GitHub issue identity %q", id)
+	}
+	return number, nil
+}
+
 func NewGitHubBackend(baseURL, token string, client *http.Client) *GitHubBackend {
 	return &GitHubBackend{baseURL: strings.TrimRight(baseURL, "/"), token: token, client: client, issueIDs: make(map[int]int64), issueBodies: make(map[int]string)}
 }
 
-func NewGitHubBackendFromEnv() (Backend, error) {
-	return newGitHubBackend("https://api.github.com", http.DefaultClient, func() (string, error) {
+func NewGitHubBackendFromEnv(repository github.RepositoryID) (Backend, error) {
+	backend := newGitHubBackend("https://api.github.com", http.DefaultClient, func() (string, error) {
 		return resolveGitHubToken(os.Getenv, func() (string, error) {
 			output, err := exec.Command("gh", "auth", "token").Output()
 			return strings.TrimSpace(string(output)), err
 		})
-	}), nil
+	})
+	backend.BindRepository(repository)
+	return backend, nil
 }
 
 func newGitHubBackend(baseURL string, client *http.Client, tokenSource func() (string, error)) *GitHubBackend {
@@ -59,7 +87,11 @@ type githubIssue struct {
 	PullRequest json.RawMessage `json:"pull_request"`
 }
 
-func (b *GitHubBackend) FindWorkItems(ctx context.Context, repository workflow.RepositoryID, prepared []workflow.WorkItem, dependencies []workflow.Dependency) ([]workflow.WorkItem, error) {
+func (b *GitHubBackend) FindWorkItems(ctx context.Context, prepared []workflow.WorkItem, dependencies []workflow.Dependency) ([]workflow.WorkItem, error) {
+	if err := b.requireRepository(); err != nil {
+		return nil, err
+	}
+	repository := b.repository
 	titles := make([]string, len(prepared))
 	for index, item := range prepared {
 		titles[index] = item.Title
@@ -94,17 +126,21 @@ func (b *GitHubBackend) FindWorkItems(ctx context.Context, repository workflow.R
 		}
 		// Recognize only our exact declared suffixes; supplied Markdown is opaque.
 		body := strings.TrimRight(item.Body, "\n")
-		var fallback []int
+		var fallback []workflow.WorkItemID
 		for _, dependency := range slices.Backward(dependencies) {
 			blockers := matchesByTitle[dependency.Blocker]
 			if dependency.Dependent != wanted.Title || len(blockers) != 1 {
 				continue
 			}
-			number := items[blockers[0]].Number
+			id := items[blockers[0]].ID
+			number, err := githubIssueNumber(id)
+			if err != nil {
+				return nil, err
+			}
 			suffix := dependencySuffix(number)
 			if strings.HasSuffix(body, suffix) {
 				body = strings.TrimSuffix(body, suffix)
-				fallback = append(fallback, number)
+				fallback = append(fallback, id)
 			}
 		}
 		if len(fallback) > 0 && body == strings.TrimRight(wanted.Body, "\n") {
@@ -119,7 +155,11 @@ func (b *GitHubBackend) FindWorkItems(ctx context.Context, repository workflow.R
 	return items, nil
 }
 
-func (b *GitHubBackend) ListMergedWorkItems(ctx context.Context, repository workflow.RepositoryID) ([]workflow.WorkItem, error) {
+func (b *GitHubBackend) ListMergedWorkItems(ctx context.Context) ([]workflow.WorkItem, error) {
+	if err := b.requireRepository(); err != nil {
+		return nil, err
+	}
+	repository := b.repository
 	issues, err := b.listIssues(ctx, repository)
 	if err != nil {
 		return nil, err
@@ -163,7 +203,7 @@ func (b *GitHubBackend) ListMergedWorkItems(ctx context.Context, repository work
 			}
 		}
 		if workflowItem && closed {
-			item := workflow.WorkItem{Number: issue.Number, Title: issue.Title, Body: issue.Body, Branch: issue.Title, Merged: true}
+			item := workflow.WorkItem{ID: workflow.WorkItemID(strconv.Itoa(issue.Number)), Title: issue.Title, Body: issue.Body, Branch: issue.Title, Merged: true}
 			matches := 0
 			for _, commit := range commits {
 				for page := 1; ; page++ {
@@ -210,8 +250,8 @@ func hasWorkflowLabel(issue githubIssue) bool {
 	return false
 }
 
-func (b *GitHubBackend) normalizeWorkItem(ctx context.Context, repository workflow.RepositoryID, issue githubIssue) (workflow.WorkItem, error) {
-	item := workflow.WorkItem{Number: issue.Number, Title: issue.Title, Body: issue.Body, Closed: issue.State == "closed"}
+func (b *GitHubBackend) normalizeWorkItem(ctx context.Context, repository github.RepositoryID, issue githubIssue) (workflow.WorkItem, error) {
+	item := workflow.WorkItem{ID: workflow.WorkItemID(strconv.Itoa(issue.Number)), Title: issue.Title, Body: issue.Body, Closed: issue.State == "closed"}
 	for _, label := range issue.Labels {
 		item.Ready = item.Ready || label.Name == "ready"
 	}
@@ -221,7 +261,7 @@ func (b *GitHubBackend) normalizeWorkItem(ctx context.Context, repository workfl
 		return workflow.WorkItem{}, err
 	}
 	if found {
-		item.Parent = parent.Number
+		item.Parent = workflow.WorkItemID(strconv.Itoa(parent.Number))
 		b.issueIDs[parent.Number] = parent.ID
 	}
 	var blockers []githubIssue
@@ -230,57 +270,89 @@ func (b *GitHubBackend) normalizeWorkItem(ctx context.Context, repository workfl
 		return workflow.WorkItem{}, err
 	}
 	for _, blocker := range blockers {
-		item.Blockers = append(item.Blockers, blocker.Number)
+		item.Blockers = append(item.Blockers, workflow.WorkItemID(strconv.Itoa(blocker.Number)))
 		b.issueIDs[blocker.Number] = blocker.ID
 	}
 	return item, nil
 }
 
-func (b *GitHubBackend) CreateWorkItem(ctx context.Context, repository workflow.RepositoryID, item workflow.WorkItem) (workflow.WorkItem, error) {
-	issue, err := b.createIssue(ctx, repository, item.Title, item.Body)
+func (b *GitHubBackend) CreateWorkItem(ctx context.Context, item workflow.WorkItem) (workflow.WorkItem, error) {
+	if err := b.requireRepository(); err != nil {
+		return workflow.WorkItem{}, err
+	}
+	issue, err := b.createIssue(ctx, b.repository, item.Title, item.Body)
 	if err != nil {
 		return workflow.WorkItem{}, err
 	}
-	item.Number = issue.Number
+	item.ID = workflow.WorkItemID(strconv.Itoa(issue.Number))
 	b.issueIDs[issue.Number] = issue.ID
 	b.issueBodies[issue.Number] = item.Body
 	return item, nil
 }
 
-func (b *GitHubBackend) FindCoordinationItems(ctx context.Context, repository workflow.RepositoryID, title string) ([]workflow.CoordinationItem, error) {
-	issues, err := b.listIssues(ctx, repository)
+func (b *GitHubBackend) FindCoordinationItems(ctx context.Context, title string) ([]workflow.CoordinationItem, error) {
+	if err := b.requireRepository(); err != nil {
+		return nil, err
+	}
+	issues, err := b.listIssues(ctx, b.repository)
 	if err != nil {
 		return nil, err
 	}
 	items := make([]workflow.CoordinationItem, 0, len(issues))
 	for _, issue := range issues {
 		if len(issue.PullRequest) == 0 && issue.Title == title {
-			items = append(items, workflow.CoordinationItem{Number: issue.Number, Title: issue.Title, Body: issue.Body, Closed: issue.State == "closed"})
+			items = append(items, workflow.CoordinationItem{ID: workflow.WorkItemID(strconv.Itoa(issue.Number)), Title: issue.Title, Body: issue.Body, Closed: issue.State == "closed"})
 		}
 	}
 	return items, nil
 }
 
-func (b *GitHubBackend) CreateCoordinationItem(ctx context.Context, repository workflow.RepositoryID, item workflow.CoordinationItem) (workflow.CoordinationItem, error) {
-	issue, err := b.createIssue(ctx, repository, item.Title, item.Body)
+func (b *GitHubBackend) CreateCoordinationItem(ctx context.Context, item workflow.CoordinationItem) (workflow.CoordinationItem, error) {
+	if err := b.requireRepository(); err != nil {
+		return workflow.CoordinationItem{}, err
+	}
+	issue, err := b.createIssue(ctx, b.repository, item.Title, item.Body)
 	if err != nil {
 		return workflow.CoordinationItem{}, err
 	}
-	item.Number = issue.Number
+	item.ID = workflow.WorkItemID(strconv.Itoa(issue.Number))
 	b.issueIDs[issue.Number] = issue.ID
 	b.issueBodies[issue.Number] = item.Body
 	return item, nil
 }
 
-func (b *GitHubBackend) AddChild(ctx context.Context, repository workflow.RepositoryID, parent, child int) error {
+func (b *GitHubBackend) AddChild(ctx context.Context, parentID, childID workflow.WorkItemID) error {
+	if err := b.requireRepository(); err != nil {
+		return err
+	}
+	parent, err := githubIssueNumber(parentID)
+	if err != nil {
+		return err
+	}
+	child, err := githubIssueNumber(childID)
+	if err != nil {
+		return err
+	}
 	id, ok := b.issueIDs[child]
 	if !ok {
 		return fmt.Errorf("GitHub issue id unavailable for #%d", child)
 	}
-	return b.request(ctx, http.MethodPost, b.repositoryPath(repository)+fmt.Sprintf("/issues/%d/sub_issues", parent), map[string]int64{"sub_issue_id": id}, nil)
+	return b.request(ctx, http.MethodPost, b.repositoryPath(b.repository)+fmt.Sprintf("/issues/%d/sub_issues", parent), map[string]int64{"sub_issue_id": id}, nil)
 }
 
-func (b *GitHubBackend) AddDependency(ctx context.Context, repository workflow.RepositoryID, dependent, blocker int) error {
+func (b *GitHubBackend) AddDependency(ctx context.Context, dependentID, blockerID workflow.WorkItemID) error {
+	if err := b.requireRepository(); err != nil {
+		return err
+	}
+	dependent, err := githubIssueNumber(dependentID)
+	if err != nil {
+		return err
+	}
+	blocker, err := githubIssueNumber(blockerID)
+	if err != nil {
+		return err
+	}
+	repository := b.repository
 	id, ok := b.issueIDs[blocker]
 	if !ok {
 		return fmt.Errorf("GitHub issue id unavailable for #%d", blocker)
@@ -302,11 +374,18 @@ func dependencySuffix(blocker int) string {
 	return fmt.Sprintf("\n\nBlocked by: #%d", blocker)
 }
 
-func (b *GitHubBackend) SetReady(ctx context.Context, repository workflow.RepositoryID, number int) error {
-	return b.request(ctx, http.MethodPost, b.repositoryPath(repository)+fmt.Sprintf("/issues/%d/labels", number), map[string][]string{"labels": {"ready"}}, nil)
+func (b *GitHubBackend) SetReady(ctx context.Context, id workflow.WorkItemID) error {
+	if err := b.requireRepository(); err != nil {
+		return err
+	}
+	number, err := githubIssueNumber(id)
+	if err != nil {
+		return err
+	}
+	return b.request(ctx, http.MethodPost, b.repositoryPath(b.repository)+fmt.Sprintf("/issues/%d/labels", number), map[string][]string{"labels": {"ready"}}, nil)
 }
 
-func (b *GitHubBackend) listIssues(ctx context.Context, repository workflow.RepositoryID) ([]githubIssue, error) {
+func (b *GitHubBackend) listIssues(ctx context.Context, repository github.RepositoryID) ([]githubIssue, error) {
 	var all []githubIssue
 	for page := 1; ; page++ {
 		var issues []githubIssue
@@ -325,7 +404,7 @@ func (b *GitHubBackend) listIssues(ctx context.Context, repository workflow.Repo
 	}
 }
 
-func (b *GitHubBackend) createIssue(ctx context.Context, repository workflow.RepositoryID, title, body string) (githubIssue, error) {
+func (b *GitHubBackend) createIssue(ctx context.Context, repository github.RepositoryID, title, body string) (githubIssue, error) {
 	var issue githubIssue
 	err := b.request(ctx, http.MethodPost, b.repositoryPath(repository)+"/issues", map[string]string{"title": title, "body": body}, &issue)
 	return issue, err
@@ -344,7 +423,7 @@ func resolveGitHubToken(getenv func(string) string, ghToken func() (string, erro
 	return strings.TrimSpace(token), nil
 }
 
-func (b *GitHubBackend) Validate(ctx context.Context, repository RepositoryID) (string, error) {
+func (b *GitHubBackend) validate(ctx context.Context, repository github.RepositoryID) (string, error) {
 	var response struct {
 		DefaultBranch string `json:"default_branch"`
 	}
@@ -357,7 +436,7 @@ func (b *GitHubBackend) Validate(ctx context.Context, repository RepositoryID) (
 	return response.DefaultBranch, nil
 }
 
-func (b *GitHubBackend) EnsureLabels(ctx context.Context, repository RepositoryID, wanted []Label) error {
+func (b *GitHubBackend) EnsureLabels(ctx context.Context, repository github.RepositoryID, wanted []Label) error {
 	existing := make(map[string]Label)
 	for page := 1; ; page++ {
 		var labels []Label
@@ -390,7 +469,7 @@ func (b *GitHubBackend) EnsureLabels(ctx context.Context, repository RepositoryI
 	return nil
 }
 
-func (b *GitHubBackend) repositoryPath(repository RepositoryID) string {
+func (b *GitHubBackend) repositoryPath(repository github.RepositoryID) string {
 	return "/repos/" + url.PathEscape(repository.Owner) + "/" + url.PathEscape(repository.Name)
 }
 

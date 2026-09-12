@@ -8,48 +8,79 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-
-	"github.com/vicrdguez/skills/workflow"
 )
 
 const AgentsBlock = `<!-- dev-pipeline:start -->
 ## Workflow
 
 Use ` + "`skl`" + ` as the Workflow entrypoint. Do not manually mutate Workflow Projections. Only a human merges.
+
+## Simplicity
+
+Choose the least complexity that satisfies the accepted scope, repository
+standards, and required verification. Preserve relevant invariants, error
+handling, security, and accessibility. When a simpler approach would change
+the agreed behavior, raise that trade-off rather than silently reducing scope.
+
+### Understand and Reuse
+
+Trace the affected behavior and relevant callers before choosing a solution.
+Fix causes at the boundary responsible for them, rather than patching symptoms
+in individual callers.
+
+Look for adequate existing code, standard-library features, native platform
+capabilities, and installed dependencies before adding a mechanism. Check
+that a candidate actually satisfies the required semantics and failure modes;
+availability alone does not make it suitable.
+
+### Justify Structure
+
+Introduce abstractions, configuration, dependencies, and test infrastructure
+for concrete current needs. Prefer the approach that leaves less for callers
+and maintainers to understand, rather than the fewest lines or files.
+
+Apply the deletion test while preserving behavior: if removing an abstraction
+eliminates complexity, simplify it; if it spreads responsibilities into callers,
+keep those responsibilities together. A boundary can earn its keep through
+encapsulation or testability without multiple production implementations.
+
+### Keep Tests Direct
+
+Test observable behavior at the agreed seams, using the project's existing
+test tools. Keep setup direct and expected results independent of the
+implementation.
+
+Ask what meaningful regression would lose protection if a test disappeared.
+Keep distinct regression protection; simplify repeated setup and incidental
+implementation coupling. Remove redundant or implementation-coupled tests
+only when their behavioral and failure-mode protection remains covered at
+the appropriate interface.
+
+### Review Concrete Alternatives
+
+Judge simplifications by the burden they remove, not lines saved.
+
+For a proposed simplification, identify the simpler alternative, the burden
+it removes, and why required behavior and verification remain intact.
+A named code smell is not sufficient justification.
+
+Keep cleanup within the change's scope; raise unrelated opportunities
+separately.
 <!-- dev-pipeline:end -->
 `
 
-type RepositoryID = workflow.RepositoryID
-
-type Label struct {
-	Name        string `json:"name"`
-	Color       string `json:"color"`
-	Description string `json:"description"`
-}
-
-var WorkflowLabels = []Label{
-	{Name: "ready", Color: "0e8a16", Description: "proposed change awaiting an implementor"},
-	{Name: "wip", Color: "fbca04", Description: "additive Worker Claim. An agent is working on it"},
-	{Name: "review", Color: "1d76db", Description: "built change awaiting a reviewer"},
-	{Name: "rework", Color: "d93f0b", Description: "reviewer bounced it back to the implementor after review"},
-	{Name: "needs-human", Color: "b60205", Description: "automation paused for a narrow human decision"},
-	{Name: "done", Color: "5319e7", Description: "passed review, awaiting the human's approval to merge"},
-}
-
 type Backend interface {
-	Validate(context.Context, RepositoryID) (targetBranch string, err error)
-	EnsureLabels(context.Context, RepositoryID, []Label) error
+	Validate(context.Context) (targetBranch string, err error)
+	Prepare(context.Context) error
 }
 
 type Request struct {
 	Location string
-	Remote   string
 	Confirm  func(string) (bool, error)
 }
 
 type Outcome struct {
 	Root         string
-	Repository   RepositoryID
 	TargetBranch string
 }
 
@@ -57,18 +88,6 @@ func Run(ctx context.Context, request Request, backend Backend) (Outcome, error)
 	root, err := git(request.Location, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return Outcome{}, errors.New("not a Git repository")
-	}
-	remote, err := workflow.ResolveGitHubRemote(root, request.Remote)
-	if err != nil {
-		return Outcome{}, err
-	}
-	remoteURL, err := git(root, "remote", "get-url", remote)
-	if err != nil {
-		return Outcome{}, fmt.Errorf("resolve GitHub remote %q: %w", remote, err)
-	}
-	repository, err := parseGitHubRemote(remoteURL)
-	if err != nil {
-		return Outcome{}, err
 	}
 	agents, err := planAgents(filepath.Join(root, "AGENTS.md"))
 	if err != nil {
@@ -88,9 +107,9 @@ func Run(ctx context.Context, request Request, backend Backend) (Outcome, error)
 	if err != nil {
 		return Outcome{}, err
 	}
-	targetBranch, err := backend.Validate(ctx, repository)
+	targetBranch, err := backend.Validate(ctx)
 	if err != nil {
-		return Outcome{}, fmt.Errorf("validate GitHub repository: %w", err)
+		return Outcome{}, fmt.Errorf("validate repository: %w", err)
 	}
 	linkClaude := false
 	if offerClaude && request.Confirm != nil {
@@ -100,8 +119,8 @@ func Run(ctx context.Context, request Request, backend Backend) (Outcome, error)
 		}
 	}
 
-	if err := backend.EnsureLabels(ctx, repository, WorkflowLabels); err != nil {
-		return Outcome{}, fmt.Errorf("prepare workflow labels: %w", err)
+	if err := backend.Prepare(ctx); err != nil {
+		return Outcome{}, fmt.Errorf("prepare workflow backend: %w", err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), agents, 0o644); err != nil {
 		return Outcome{}, err
@@ -122,7 +141,7 @@ func Run(ctx context.Context, request Request, backend Backend) (Outcome, error)
 			return Outcome{}, err
 		}
 	}
-	return Outcome{Root: root, Repository: repository, TargetBranch: targetBranch}, nil
+	return Outcome{Root: root, TargetBranch: targetBranch}, nil
 }
 
 func planGitignore(path string) ([]byte, error) {
@@ -225,8 +244,4 @@ func git(directory string, args ...string) (string, error) {
 	command := exec.Command("git", append([]string{"-C", directory}, args...)...)
 	output, err := command.Output()
 	return strings.TrimSpace(string(output)), err
-}
-
-func parseGitHubRemote(remote string) (RepositoryID, error) {
-	return workflow.ParseGitHubRemote(remote)
 }

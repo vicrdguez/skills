@@ -28,6 +28,9 @@ Break the work into **tracer-bullets** tickets.
 - Each slice cuts a narrow but COMPLETE path through every layer (schema, API, UI, tests) - vertical, NOT a horizontal slice of one layer
 - A completed slice is demoable and verifiable on its own
 - Each slice is sized to fit in a single fresh context window
+- Prefer separate Work Items for behaviors that deliver safe, useful results independently. Assess independence after declared Dependencies are Merged, without requiring later Work Items.
+- Combine independently useful behaviors only for a concrete reduction in overall implementation or review burden. Shared files or a shared Workflow stage alone are insufficient.
+- Assess review burden from the behavior and materially different correctness, failure, and recovery concerns a reviewer must understand together, using agreed requirements and focused repository inspection rather than line counts or exhaustive implementation planning. Different error cases alone do not require separate Work Items.
 - Write the artifacts, then publish them to the project's issue tracker as explained below. 
 
 Use the `design` skill to sketch the seams at which this change will be tested.
@@ -43,6 +46,7 @@ Present the proposed breakdown as a numbered list. For each ticket show:
 - *Title*: Short and descriptive name
 - *Blocked by* which other tickets (if any) must complete first
 - *What it delivers*: the end-to-end behavior this ticket makes work
+- *Review burden*: Briefly explain those concerns and any concrete reason for combining independently useful behaviors
 
 
 Ask the user:
@@ -53,12 +57,14 @@ Ask the user:
 
 Iterate until the user approves the breakdown. A single ticket is possible if the change is small.
 
+If artifact elaboration materially changes proposed boundaries or Dependencies, return to this approval loop before publication: explain the discovery and propose the revised breakdown for approval before freezing the artifacts. Ordinary elaboration within an unchanged coherent delivery needs no renewed approval.
+
 ### 5. Prepare and publish
 
 1. Run `skl propose cleanup --repo <root>` before preparing new slices. It removes only safe local Git state for Work Items already observed Merged and reports everything it preserves.
 2. Commit any durable `CONTEXT.md`, ADR, or capability changes to the target branch before creating slice branches.
-3. For each slice, choose a short verb-led kebab-case slug, create `.worktrees/<slug>` and its branch from the target, write `.changes/<slug>/`, commit the complete ledger at once, and push that exact head.
-4. Write the parent and child issue bodies to private temporary Markdown files. For every child, use the thin-pointer template below. Replace every placeholder with the slice summary, branch slug, and full commit SHA from `git rev-parse HEAD` in that slice worktree after committing the complete ledger; that pushed head is its Artifact Baseline. Keep artifact prose in Git, not in the issue. The files are opaque transport: `skl` neither authors nor interprets them.
+3. For each slice, choose a short verb-led kebab-case slug, create `.worktrees/<slug>` and its branch from the target, write `.changes/<slug>/`, and commit the complete ledger with subject `[baseline] <slug>` (optional explanatory text may follow after a space). Push that exact commit as the publication head.
+4. Write the parent and child issue bodies to private temporary Markdown files. For every child, use the thin-pointer template below. Replace every placeholder with the slice summary, branch slug, and full commit SHA from `git rev-parse HEAD` in that slice worktree; that pushed, marked head is its Artifact Baseline. Keep artifact prose in Git, not in the issue. The files are opaque transport: `skl` neither authors nor interprets them.
 5. Publish the prepared Proposal with `skl propose publish --repo <root> --target <branch> --slice <slug>=<body-file>`. Repeat `--slice` for every child and add `--depends <dependent>:<blocker>` for each Dependency. For a multi-slice Proposal also pass `--parent-title <title> --parent-body <body-file>`.
 
 `skl propose publish` preflights the entire declaration before changing GitHub, creates children in blocker-first order, and applies Ready last. If it returns `fix_required`, make the stated Git repair and repeat the same command. If it returns `needs_human`, stop and present its reason; do not guess which existing record to reuse.
@@ -76,14 +82,14 @@ Implementation Ledger: `.changes/<slug>/` at the Artifact Baseline.
 ## Writing the change artifacts
 These are the artifacts that each vertical slice will use for implementation:
 
-Publishing them freezes them. From that commit on, the only edit anyone may make is ticking an existing `[ ]` to `[x]` — nothing added, removed, reordered or reworded. This is the acceptance baseline: if it can be rewritten mid-flight to match whatever got built, or grown with things discovered during review, it stops being a contract and the change stops converging. Discoveries belong in PR findings or in a new proposal. There is no later addition and no exception.
+Publishing them freezes them as the endpoint contract. Artifact Completion may differ from the marked Baseline only by ticking an existing `[ ]` to lowercase `[x]` outside Manual Verification — nothing added, removed, reordered or reworded, and Manual Verification remains unchecked. This is the acceptance baseline: if it can be rewritten mid-flight to match whatever got built, or grown with things discovered during review, it stops being a contract and the change stops converging. Discoveries belong in PR findings or in a new proposal. There is no later addition and no exception.
 
 So resolve the contradictions now, while you still can — between the artifacts themselves, and between them and the project's own rules. Afterwards nobody downstream can fix them; they can only stop and ask you.
 
 **Always**:
-- `intent.md`: Why / What / Scope / Out of scope / Definition of Done. Follow the [intent.md](./reference/intent.md) template
-- `behavior.md`: The exact required behavior(s) to implement, in *Gherkin notation* that map to `intent.md` *Definition of Done* section. Since seams are where we test at, use `tdd` to define good tests and avoid anti-patterns. The final list of behaviours will translate directly to what should be implemented and tested. Follow the [behavior.md](./reference/behavior.md) template
+- `intent.md`: Why / What / Scope / Out of scope / Definition of Done. Follow the template from `skl skill --resource reference/intent.md propose`
+- `behavior.md`: The exact required behavior(s) to implement, in *Gherkin notation* that map to `intent.md` *Definition of Done* section. Since seams are where we test at, use `tdd` to define good tests and avoid anti-patterns. The final list of behaviours will translate directly to what should be implemented and tested. Follow the template from `skl skill --resource reference/behavior.md propose`
 
 **When warranted**:
-- `plan.md`: The approach, the module shapes and seams chosen for implementation and any pinned decision the implementer MUST NOT make on its own. Follow the [plan.md](./reference/plan.md) template
-- `tasks.md`: Follow the [tasks.md](./reference/tasks.md) template — it states when it is warranted
+- `plan.md`: The approach, the module shapes and seams chosen for implementation and any pinned decision the implementer MUST NOT make on its own. Follow the template from `skl skill --resource reference/plan.md propose`
+- `tasks.md`: Follow the template from `skl skill --resource reference/tasks.md propose` — it states when it is warranted

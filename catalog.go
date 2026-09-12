@@ -15,27 +15,57 @@ import (
 const InstructionProtocol = "skl.instructions/v1"
 
 type InvocationFacts struct {
+	Watchdog       *WatchdogFacts       `json:"watchdog,omitempty"`
 	Implementation *ImplementationFacts `json:"implementation,omitempty"`
 }
 
+type WatchdogFacts struct {
+	WorkItemReference          string            `json:"-"`
+	SubmissionReference        string            `json:"-"`
+	Remote                     string            `json:"remote"`
+	Worktree                   string            `json:"worktree"`
+	ResultDirectory            string            `json:"result_directory"`
+	SubmitCommand              string            `json:"submit_command"`
+	ResumeCommand              string            `json:"resume_command"`
+	BaselineFiles              map[string]string `json:"baseline_files"`
+	CompletionFiles            map[string]string `json:"completion_files"`
+	Bounces                    int               `json:"completed_bounces"`
+	WorkItem                   int               `json:"work_item"`
+	Submission                 int               `json:"submission"`
+	Branch                     string            `json:"branch"`
+	ReviewedHead               string            `json:"reviewed_head"`
+	ArtifactBaseline           string            `json:"artifact_baseline"`
+	ArtifactCompletion         string            `json:"artifact_completion"`
+	SuppliedArtifactBaseline   string            `json:"supplied_artifact_baseline,omitempty"`
+	SuppliedArtifactCompletion string            `json:"supplied_artifact_completion,omitempty"`
+	AuditBody                  string            `json:"audit_body"`
+	Comments                   []ReviewComment   `json:"comments,omitempty"`
+}
+
 type ImplementationFacts struct {
-	Remote               string          `json:"remote"`
-	InspectCommand       string          `json:"inspect_command"`
-	ResultDirectory      string          `json:"result_directory"`
-	SubmitCommand        string          `json:"submit_command"`
-	Submission           int             `json:"submission,omitempty"`
-	PreviousReviewedHead string          `json:"previous_reviewed_head,omitempty"`
-	Comments             []ReviewComment `json:"comments,omitempty"`
-	WorkItem             int             `json:"work_item"`
-	Branch               string          `json:"branch"`
-	Worktree             string          `json:"worktree"`
-	TargetSnapshot       string          `json:"target_snapshot,omitempty"`
-	ArtifactBaseline     string          `json:"artifact_baseline,omitempty"`
-	ArtifactCompletion   string          `json:"artifact_completion,omitempty"`
-	ResumeCommand        string          `json:"resume_command"`
+	WorkItemReference          string          `json:"-"`
+	Remote                     string          `json:"remote"`
+	InspectCommand             string          `json:"inspect_command"`
+	NeedsHumanCommand          string          `json:"needs_human_command"`
+	ResultDirectory            string          `json:"result_directory"`
+	SubmitCommand              string          `json:"submit_command"`
+	Submission                 int             `json:"submission,omitempty"`
+	PreviousReviewedHead       string          `json:"previous_reviewed_head,omitempty"`
+	Comments                   []ReviewComment `json:"comments,omitempty"`
+	WorkItem                   int             `json:"work_item"`
+	Branch                     string          `json:"branch"`
+	Worktree                   string          `json:"worktree"`
+	TargetSnapshot             string          `json:"target_snapshot,omitempty"`
+	ArtifactBaseline           string          `json:"artifact_baseline,omitempty"`
+	ArtifactCompletion         string          `json:"artifact_completion,omitempty"`
+	SuppliedArtifactBaseline   string          `json:"supplied_artifact_baseline,omitempty"`
+	SuppliedArtifactCompletion string          `json:"supplied_artifact_completion,omitempty"`
+	ResumeCommand              string          `json:"resume_command"`
 }
 
 type ReviewComment struct {
+	Line        int    `json:"line,omitempty"`
+	Side        string `json:"side,omitempty"`
 	Body        string `json:"body"`
 	Author      string `json:"author"`
 	Association string `json:"association"`
@@ -100,14 +130,17 @@ func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
 	}
 	if facts.Implementation != nil {
 		f := facts.Implementation
-		instructions += fmt.Sprintf("\n\n## Work Start\n\nWork Item: #%d\nBranch: %s\nWorktree: %s\nArtifact Baseline: %s\nResume: `%s`\n", f.WorkItem, f.Branch, f.Worktree, f.ArtifactBaseline, f.ResumeCommand)
+		instructions += fmt.Sprintf("\n\n## Work Start\n\nWork Item: %s\nBranch: %s\nWorktree: %s\nArtifact Baseline: %s\nResume: `%s`\n", f.WorkItemReference, f.Branch, f.Worktree, f.ArtifactBaseline, f.ResumeCommand)
 		if f.TargetSnapshot != "" {
 			instructions += "\nBefore coding, use ordinary Git in the worktree: `git merge " + f.TargetSnapshot + "`. The engine has not merged or run project checks.\n"
 		}
 		if f.PreviousReviewedHead != "" {
 			instructions += "\nFinding-driven Rework: sync nothing; review only `" + f.PreviousReviewedHead + "...HEAD`. Read the supplied summary, inline evidence, and human comments. Keep the ledger retired.\n"
 		}
-		instructions += "\nWrite the opaque Result Document using the named template, then run `" + f.SubmitCommand + "`. Refresh ledger integrity for Audit with `" + f.InspectCommand + "`.\n"
+		instructions += "\nWrite the opaque Result Document using the named template, then run `" + f.SubmitCommand + "`. Refresh ledger integrity for Audit with `" + f.InspectCommand + "`. If pausing, run `" + f.NeedsHumanCommand + "` and add `--body <result>/submission.md` when preserving implementation changes.\n"
+	}
+	if f := facts.Watchdog; f != nil {
+		instructions += fmt.Sprintf("\n\n## Review Start\n\nWork Item: %s\nSubmission: %s\nWorktree: %s\nReviewed head: %s\nArtifact Baseline: %s\nArtifact Completion: %s\nCompleted finding bounces: %d\nResume: `%s`\n\nUse the supplied historical files, opaque PR body, prior findings, and human comments. Work in this fresh Worker Session at the fixed reviewed head. The engine has not run Audit or project checks.\n\nWrite `summary.md`, optional anchored findings, and on pass `submission.md` in %s. Run `%s --verdict <pass|rework|needs-human>`. Pass also requires `--body <result>/submission.md`; optional inline inputs use `--findings <result>/findings.json`. After permitted Debt Marker comments, commit and push, run the Post-Marker Check, and supply `--head <final-sha>` while retaining the original `--reviewed-head`.\n", f.WorkItemReference, f.SubmissionReference, f.Worktree, f.ReviewedHead, f.ArtifactBaseline, f.ArtifactCompletion, f.Bounces, f.ResumeCommand, f.ResultDirectory, f.SubmitCommand)
 	}
 	resources, err := resourceNames(definition)
 	if err != nil {

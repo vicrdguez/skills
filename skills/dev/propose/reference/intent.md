@@ -4,7 +4,7 @@
 Capture intent so precisely that an implementer needs no further clarification.
 Keep each line tight. Delete this comment in the real file.
 
-Frozen once published: the only later edit is ticking a Done box `[ ]` → `[x]`.
+Frozen at the `[baseline] <slice-slug>` commit. The `[completion] <slice-slug>` endpoint may only tick an existing non-manual Done box `[ ]` → lowercase `[x]`.
 -->
 
 ## Why

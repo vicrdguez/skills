@@ -1,6 +1,6 @@
 ---
 name: watchdog
-description: Adversarial, guilty-until-proven validation of a claimed change in a fresh context -- lands it or bounces it, never editing code.
+description: Adversarial validation in a fresh context, passing review to the human merge boundary or returning findings.
 disable-model-invocation: true
 ---
 
@@ -10,17 +10,17 @@ place before the human approval. It sits between build and the human's merge: a 
 
 **Direct invocation:** When invoked directly, execute the watchdog workflow in the current session. Do not launch `watchdog-runner`; the caller is responsible for starting this skill in a fresh session.
 
- This skill **edits no code**: on a pass it lands; on a fail it comments and bounces.
+ This skill **edits no functional code**: the sole exception is non-functional Debt Marker comments on pass.
  It works on a single unit of work (ticket/PR).
  
- Use `docs/github.md` to know how to work with the Github board.
+ If this packet has Watchdog facts, review that fixed Submission. Otherwise run `skl watchdog next`; `no_work` ends the invocation. Resume an interrupted Claim with `skl watchdog resume --item <number>`. Use the packet's selected remote and conventional worktree, fetching the branch and creating the worktree with ordinary Git if needed. Keep the fixed reviewed head; never rebase or force-push. If startup supplied `--artifact-baseline <full-sha>` or `--artifact-completion <full-sha>`, preserve those exact flags and SHAs on every resume and verdict command for this Work Item; marker-resolved work receives no synthetic override flags.
  
  
 ## Verify independently — never on trust
 
-**Run the gate yourself** — the project's full suite, typecheck and lint — and check artifact integrity with `git diff <artifact-baseline> <artifact-completion> -- .changes/<slug>/`, where the only permitted change is a line whose `[ ]` became `[x]` outside Manual Verification. Resolve Artifact Completion as the first parent of the ledger's deletion commit. Verify that a separate subsequent commit removes the entire ledger, it remains absent through review and rework, and both snapshots remain reachable and inspectable in Git history. Read the contract from those snapshots, not the review head. Do not accept the implementor's green suite as sufficient: a green suite you did not run yourself does not count. **Do not re-run `audit`.** The implementor already ran it and published its ledger; a second pass with the same briefs on the same code returns the judgement calls they weighed and declined, which is a disagreement, not a defect.
+**Run the gate yourself** — the project's full suite, typecheck and lint — and independently verify the exact Baseline and Completion snapshots named by the packet. For new work, confirm each exact `[baseline] <slug>` and `[completion] <slug>` subject prefix resolves once in selected reachable history, including merge parents; an explicit markerless handoff uses its supplied full SHAs. Their relative path sets must match; every entry must be a mode `100644` blob; bytes must match except an existing automated `[ ]` may become lowercase `[x]`; Manual Verification stays unchecked; and every automated box is checked at Completion. Verify Baseline is an ancestor of or equal to Completion, both endpoints are reachable from the fixed reviewed head, and the entire ledger is absent there and at any final Debt Marker head. Inspect only these endpoints and head presence: intermediate edits, transition counts, merge trees, and a deletion commit's parent are not evidence to infer or reject Completion. Read the contract from the endpoint snapshots, not the review head. Do not accept the implementor's green suite as sufficient: a green suite you did not run yourself does not count. **Do not re-run `audit`.** The implementor already ran it and published its ledger; a second pass with the same briefs on the same code returns the judgement calls they weighed and declined, which is a disagreement, not a defect.
 
-Pin the baselines yourself: the PR base merge-base on a first review, the previous summary's `Reviewed head` on a repeat. Artifact integrity always runs against the proposal's `Artifact baseline`, whichever round this is.
+Pin the code-review baseline yourself: the PR base merge-base on a first review, the previous summary's `Reviewed head` on a repeat. Artifact integrity always uses the same exact Artifact Baseline and Completion, whichever round this is.
 
 ## Review guilty-until-proven — claims, tests, contract
 
@@ -44,11 +44,13 @@ The first review of a PR is complete: read all of it, batch every finding, publi
 
 Assign a new ID only for a defect the rework introduced or a critical discovery of that last kind. A pre-existing, noncritical thing you merely noticed this round is a `NOTE`, not another bounce. A finding that was `NOTE` last round cannot become `BLOCK` this round without new material evidence or a human's `BLOCK`.
 
-**You may issue one bounce.** If a second review still fails, do not bounce again: publish the ledger, pause at `needs-human`, and let a human break the tie. Counting *completed* bounces instead spends another build and another review before the human ever sees it.
+**One finding-driven bounce.** Return the semantic `rework` verdict for a failing review; the engine counts completed bounces from backend history and routes a second failure to Needs Human. Synchronization Rework does not spend this allowance.
 
 A repeat review with no new commits is legal: a human resolved everything by disposition. Tun the gate and the artifact check, honor the dispositions and pass or pause on what remains.
 
 ## Findings
+
+Before assigning dispositions for any verdict, retrieve `skl skill --resource reference/review.md watchdog` for human-directive authorization and precedence, stable finding identities, and Result Document transport.
 
 Each carries one disposition — `BLOCK`, `HUMAN` or `NOTE` — and three things:
 
@@ -82,7 +84,7 @@ DEBT(#<pr>/W<n>): one-line debt
 
 The marker is the record and `grep -rn 'DEBT('` is the index. There is no second copy to keep in sync. A note with no code location stays in the PR or an already-linked issue, do not invent a location to hang it on.
 
-The implementor materializes surviving notes during rework. If a PR passes with notes outstanding and no rework round is coming, you may add the markers entries yourself as part of finalizing. That is bookkeeping, not review: run the formatter or parser for the files you touched and `git diff --check`, not `audit` and not the full suite just for comments.
+The implementor materializes surviving notes during rework. If a PR passes with notes outstanding and no rework round is coming, you may add the marker entries yourself as part of finalizing. Verify each `DEBT(#<pr>/W<n>)` names the correct stable finding and only non-functional comments changed. Commit and push the final head, record it, then run the formatter or parser for the files you touched and `git diff --check`, not `audit` and not the full suite just for comments. Supply this pushed final SHA with `--head` while retaining the packet's original `--reviewed-head` and any explicit artifact endpoint flags. The CLI verifies Git identities, not source comments or project checks.
 
 ## Pass -> Ready for Merge
 
@@ -90,25 +92,21 @@ When verification passes **and** no `BLOCK` or `HUMAN` finding is still active, 
 - Read the historical `intent.md` with `git show <artifact-baseline>:.changes/<slug>/intent.md`. Copy its `Manual verification` section into the PR body verbatim, with every checkbox unchecked, as the human's checklist. You tick nothing in it: by definition those are the checks no agent can run.
 - Keep the retired Implementation Ledger absent; do not restore or archive it.
 
-Hand off through the Board reference: remove `review` and `wip` as it adds `done`. The change now awaits the **human's merge**. The watchdog does not merge.
+Write the complete final PR body to the packet's `submission.md`, and submit the packet's semantic command with `--verdict pass --body <absolute-submission.md>`. The engine appends the issue-closing footer and reports `ready_for_merge`, or `rework` for a merge conflict with a fresh Target Snapshot. Ready for Merge leaves the source issue open until GitHub observes the merge. The change now awaits the **human's merge**. The watchdog does not merge.
 
 
 ## Pause → hand the decision to a human
 
-Follow the rare human-decision handoff in `docs/github.md`.
-
-Publish the ledger and the inline evidence first, then transition to `needs-human` through the Board reference and exit. Do not bounce an undecided question to an implementor: they cannot answer it either, and the PR will come straight back. A human answers three ways: requeue to `rework` when implementation must continue, to `review` when only verification remains, or supersede, closing the PR unmerged and letting `explore` revisit the slice before `propose` cuts its replacement. Say which you recommend and why.
+Supply the current ledger and inline evidence with `--verdict needs-human` and exit on the verified outcome. Do not bounce an undecided question to an implementor: they cannot answer it either, and the PR will come straight back. A human answers three ways: requeue to `rework` when implementation must continue, to `review` when only verification remains, or supersede, closing the PR unmerged and letting `explore` revisit the slice before `propose` cuts its replacement. Say which you recommend and why. Read the supplied raw human comments and their association metadata; interpret authorized directives yourself. Prose alone never requeues work.
 
 ## Fail → bounce to rework, edit no code
 
 When verification fails **or** the review surfaces a blocking issue:
 
-1. **Leave findings as PR comments before the handoff**, following the ledger and inline-comment protocol in `docs/github.md`.
-2. Through the Board reference, remove `review` and `wip` as it adds `rework` to hand it back to the implementor.
+1. **Write all findings before the handoff**, preserving stable agent-authored `W<n>` identities and the reviewed head in the summary.
+2. Submit the packet's command with `--verdict rework`. It publishes the opaque summary and inline bodies before applying the convergence transition.
 3. **Modify no code.** Fixing is the implementor's job; collapsing that boundary is exactly what this stage exists to prevent. Do not archive, do not mark as `done`.
 
 ## Confirm every handoff completed
 
-After each handoff operation, verify its outcome. If a command fails before any remote side effect occurs—for example, local CLI argument validation—correct the command and retry once. 
-
-If a remote side effect may have occurred, inspect GitHub before retrying to avoid duplicate comments or transitions. Stop when the outcome cannot be established, or when the final Board state is not `done`, `rework` or `needs-human` with `wip` removed. Never remove `wip` just to clean up a partial handoff.
+Use the structured `skl` outcome: only `ready_for_merge`, `rework`, or `needs_human` with the Claim released completes review. A `fix_required` outcome retains the Claim: repair only the reported deterministic precondition and retry the same semantic command with the same Result Documents. The engine rereads ambiguous writes before retrying; never mutate projections yourself to clean up a partial handoff. Return the final CLI JSON unchanged to a queue adapter; stop on an error or an unverifiable result.

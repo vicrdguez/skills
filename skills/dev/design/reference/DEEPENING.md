@@ -1,7 +1,7 @@
 # Deepening
 
 How to deepen a cluster of shallow modules safely, given its dependencies. Assumes the vocabulary in
-[../SKILL.md](../SKILL.md) — **module**, **interface**, **seam**, **adapter**.
+the Design definition (retrieve with `skl skill design` if not already supplied) — **module**, **interface**, **seam**, **adapter**.
 
 ## Dependency categories
 

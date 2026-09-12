@@ -13,3 +13,9 @@ Treat `.changes/<slug>` Markdown as an ephemeral implementation ledger rather th
 - Ledger commits have no durability guarantee after merge; Superseded Work Items retain a lightweight durable reference so later exploration can inspect the abandoned evidence.
 - Cleanup relies on semantic Merged state, not an archive directory or Git ancestry.
 - V1 stores no extra baseline identity, so rewritten-but-equivalent reachable history cannot be detected after a prohibited rebase or force-push. Those operations remain forbidden by agent instructions rather than motivating another metadata store.
+
+## Scoped supersession: Endpoint validation
+
+The endpoint-validation slice supersedes only the first-parent identity, `absent* -> present+ -> absent*` transition count, intermediate-edit and merge-tree constraints, and immediate-child deletion requirement above. Artifact identity now uses unique slice-scoped commit-subject prefixes `[baseline] <slice-slug>` and `[completion] <slice-slug>` in selected reachable history. Validation compares those endpoint path sets, mode `100644` blobs, and exact bytes except permitted lowercase completion ticks; requires endpoint ancestry, completed automated checks, unchecked Manual Verification, and ledger absence at the review head; and deliberately ignores restored intermediate edits. Completion still contains the ledger and a later commit removes it. Missing or ambiguous markers are never guessed; markerless work may supply full endpoint SHAs per relevant invocation, applying the same checks without rewriting history or persisted Adoption state.
+
+The retirement-before-review decision, historical contract access, Rework behavior, and human-owned Manual Verification remain in force. Startup content delivery and the other [candidate-first corrections](../capabilities/work-item-lifecycle.md#planned-correction-candidate-first-workflow) remain planned in slices #2 through #5.
