@@ -1078,7 +1078,7 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 			_ = os.WriteFile(summary, []byte("round 2"), 0600)
 			_ = os.WriteFile(body, []byte("duplicate finding"), 0600)
 			_ = os.WriteFile(findings, []byte(fmt.Sprintf(`[{"path":"README.md","line":1,"side":"RIGHT","body_file":%q}]`, body)), 0600)
-			f.forge.inlines = []map[string]any{{"body": "duplicate finding", "commit_id": f.head, "path": "README.md", "line": float64(1), "side": "RIGHT"}, {"body": "duplicate finding", "commit_id": f.head, "path": "README.md", "line": float64(1), "side": "RIGHT"}}
+			f.forge.inlines = []map[string]any{{"body": "duplicate finding", "commit_id": f.head, "path": "README.md", "line": float64(1), "side": "RIGHT", "created_at": "2026-01-01T00:00:03Z"}, {"body": "duplicate finding", "commit_id": f.head, "path": "README.md", "line": float64(1), "side": "RIGHT", "created_at": "2026-01-01T00:00:04Z"}}
 			checkpoint, labels := checkpointSnapshot(f.checkpoint), append([]string(nil), f.forge.labels...)
 			got := f.run(t, f.worktree, "watchdog", "submit", "--item", "7", "--review-number", "2", "--reviewed-head", f.head, "--verdict", "rework", "--summary", summary, "--findings", findings)
 			if got.Status != "fix_required" || checkpointSnapshot(f.checkpoint) != checkpoint || !slices.Equal(f.forge.labels, labels) || len(f.forge.summaries) != 1 || reviewSummaryText(t, f.forge.summaries[0]) != "round 2" || len(f.forge.inlines) != 2 {
@@ -1522,7 +1522,7 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 		f := newReviewFixture(t)
 		_ = os.WriteFile(f.checkpoint, []byte("2:"+f.head+"\n"), 0600)
 		f.forge.timeline = []map[string]any{{"event": "labeled", "label": map[string]string{"name": "rework"}}}
-		f.forge.summaries = []map[string]any{{"body": "old completed review", "commit_id": f.head, "state": "CHANGES_REQUESTED"}}
+		f.forge.summaries = []map[string]any{storedReviewSummary(1, "rework", "round 1", f.head, "2026-01-01T00:00:01Z")}
 		f.forge.sourceComments = []map[string]any{{"body": "<!-- watchdog-checkpoint review-count=2 reviewed-head=" + f.head + " -->", "author_association": "OWNER"}}
 		oldGitDir := filepath.Dir(f.checkpoint)
 		runGit(t, f.root, "worktree", "remove", "--force", f.worktree)

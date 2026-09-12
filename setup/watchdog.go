@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	skilldist "github.com/vicrdguez/skills"
 	"github.com/vicrdguez/skills/github"
@@ -198,7 +199,7 @@ func (b *GitHubBackend) PublishReview(ctx context.Context, repository github.Rep
 		published := func() (bool, error) {
 			current, err := b.implementationComments(ctx, repository, stream)
 			for _, c := range current {
-				if c.Body == comment.Body && c.Commit == comment.Commit && c.Path == comment.Path && c.Line == comment.Line && c.Side == comment.Side {
+				if c.Body == comment.Body && c.Commit == comment.Commit && c.Path == comment.Path && c.Line == comment.Line && c.Side == comment.Side && afterClaim(comment.ClaimAcquiredAt, c.CreatedAt) {
 					return true, err
 				}
 			}
@@ -230,9 +231,10 @@ func (b *GitHubBackend) publishReviewSummary(ctx context.Context, repository git
 	path := b.repositoryPath(repository) + fmt.Sprintf("/pulls/%d/reviews", number)
 	published := func() (int, error) {
 		type review struct {
-			Body   string `json:"body"`
-			Commit string `json:"commit_id"`
-			State  string `json:"state"`
+			Body        string `json:"body"`
+			Commit      string `json:"commit_id"`
+			State       string `json:"state"`
+			SubmittedAt string `json:"submitted_at"`
 		}
 		matches := 0
 		for page := 1; ; page++ {
@@ -241,7 +243,7 @@ func (b *GitHubBackend) publishReviewSummary(ctx context.Context, repository git
 				return 0, err
 			}
 			for _, review := range reviews {
-				if review.Body == body && review.Commit == wanted.Commit && review.State == "COMMENTED" {
+				if review.Body == body && review.Commit == wanted.Commit && review.State == "COMMENTED" && afterClaim(wanted.ClaimAcquiredAt, review.SubmittedAt) {
 					matches++
 				}
 			}
@@ -267,4 +269,13 @@ func (b *GitHubBackend) publishReviewSummary(ctx context.Context, repository git
 		return writeErr
 	}
 	return fmt.Errorf("review summary publication not observed; retry the same fixed-number command")
+}
+
+func afterClaim(claimedAt, createdAt string) bool {
+	if claimedAt == "" {
+		return true
+	}
+	claim, claimErr := time.Parse(time.RFC3339Nano, claimedAt)
+	created, createdErr := time.Parse(time.RFC3339Nano, createdAt)
+	return claimErr == nil && createdErr == nil && claim.Before(created)
 }
