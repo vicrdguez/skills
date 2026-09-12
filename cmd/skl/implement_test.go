@@ -184,13 +184,14 @@ func (b *implementationMemory) ImplementationItems(_ context.Context, repository
 func (b *implementationMemory) ClaimImplementation(_ context.Context, _ github.RepositoryID, item workflow.ImplementationItem) error {
 	for i := range b.work {
 		if b.work[i].ID == item.ID {
+			wasClaimed := b.work[i].Claimed
 			b.work[i].TargetSnapshot = item.TargetSnapshot
 			b.work[i].TargetBranch = item.TargetBranch
 			if item.Submission != nil {
 				b.work[i].Submission = item.Submission
 			}
 			b.work[i].Claimed = true
-			if b.work[i].Submission != nil {
+			if !wasClaimed && b.work[i].Submission != nil {
 				b.work[i].Submission.ClaimAcquiredAt = b.reviewTime()
 			}
 		}

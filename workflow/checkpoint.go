@@ -85,7 +85,7 @@ func (c reviewCheckpoint) replace(count uint64, head string, guard func() error)
 	if closeErr := temporary.Close(); err == nil {
 		err = closeErr
 	}
-	if err == nil && guard != nil {
+	if err == nil {
 		if err := guard(); err != nil {
 			return err
 		}

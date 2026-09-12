@@ -202,7 +202,7 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	}
 	if !retry && item.State == AwaitingReview {
 		currentSummaries, unambiguous := reviewSummariesForClaim(item.Submission.Comments, submission.ClaimAcquiredAt)
-		if !unambiguous || len(currentSummaries) > 0 && (len(currentSummaries) != 1 || !reviewCommentsMatch(currentSummaries[0], comments[0]) || !reviewEvidenceCompatible(item, comments, finalBody, submission.ClaimAcquiredAt)) {
+		if !unambiguous || len(currentSummaries) > 0 && (len(currentSummaries) != 1 || !reviewCommentsMatch(currentSummaries[0], comments[0]) || !reviewEvidenceCompatible(item, comments, submission.ClaimAcquiredAt)) {
 			return ImplementationOutcome{}, Refuse("review publication already started under this Claim; replay its original fixed-number command and Result Documents")
 		}
 		if receiptCount > 0 && (receiptCount != 1 || !claimPrecedesReceipt(submission.ClaimAcquiredAt, receipt.CreatedAt)) {
@@ -276,6 +276,9 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 		result := completedReviewOutcome(item, head, checkpoint)
 		return result, guard()
 	}
+	if err := backend.PublishReview(ctx, repository, item, comments, guard); err != nil {
+		return ImplementationOutcome{}, err
+	}
 	if verdict == "pass" {
 		wanted := *item.Submission
 		wanted.Body = finalBody
@@ -286,9 +289,6 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 		if published.Head != head {
 			return ImplementationOutcome{}, Refuse("Submission head changed during final body publication")
 		}
-	}
-	if err := backend.PublishReview(ctx, repository, item, comments, guard); err != nil {
-		return ImplementationOutcome{}, err
 	}
 	published, err := backend.ImplementationItems(ctx, repository)
 	if err != nil {
@@ -342,8 +342,8 @@ func reviewEvidenceMatches(item ImplementationItem, wanted []skilldist.ReviewCom
 	return finalBody == "" || finalBody == item.Submission.Body
 }
 
-func reviewEvidenceCompatible(item ImplementationItem, wanted []skilldist.ReviewComment, finalBody, claimedAt string) bool {
-	if item.Submission == nil || finalBody != "" && finalBody != item.Submission.Body {
+func reviewEvidenceCompatible(item ImplementationItem, wanted []skilldist.ReviewComment, claimedAt string) bool {
+	if item.Submission == nil {
 		return false
 	}
 	claim, err := time.Parse(time.RFC3339Nano, claimedAt)
@@ -410,7 +410,7 @@ func matchingSummaryReceipt(submission Submission, wanted skilldist.ReviewCommen
 	var receipt skilldist.ReviewComment
 	count := 0
 	for _, existing := range submission.Comments {
-		if existing.Path == "" && existing.Body == wanted.Body && existing.Verdict == wanted.Verdict && existing.Commit == wanted.Commit && existing.ReviewNumber == wanted.ReviewNumber {
+		if existing.Path == "" && reviewCommentsMatch(existing, wanted) {
 			receipt, count = existing, count+1
 		}
 	}

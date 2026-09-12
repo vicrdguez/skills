@@ -37,6 +37,7 @@ type reviewForge struct {
 	failInline     bool
 	failInlinePost bool
 	failBody       bool
+	failBodyPost   bool
 	failReadback   bool
 	duplicateRead  bool
 	reviewReads    int
@@ -181,6 +182,11 @@ func (f *reviewForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPatch && path == "/pulls/11":
 		var value map[string]string
 		_ = json.NewDecoder(r.Body).Decode(&value)
+		if f.failBodyPost {
+			f.failBodyPost = false
+			http.Error(w, "body unavailable", http.StatusInternalServerError)
+			return
+		}
 		f.body = value["body"]
 		if f.failBody {
 			f.failBody = false
@@ -766,6 +772,25 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 			got := f.submit(t, 1, f.head, "pass")
 			if got.Status != "ready_for_merge" || f.forge.body != "final\n\nCloses #7\n" || len(f.forge.summaries) != 1 {
 				t.Fatalf("body response recovery: %#v body=%q", got, f.forge.body)
+			}
+		})
+		t.Run("body write unapplied", func(t *testing.T) {
+			f := newReviewFixture(t)
+			f.start(t, f.root)
+			f.forge.failBodyPost = true
+			dir := t.TempDir()
+			summary, body := filepath.Join(dir, "summary.md"), filepath.Join(dir, "submission.md")
+			_ = os.WriteFile(summary, []byte("pass"), 0600)
+			_ = os.WriteFile(body, []byte("final"), 0600)
+			args := []string{"watchdog", "submit", "--item", "7", "--review-number", "1", "--reviewed-head", f.head, "--verdict", "pass", "--summary", summary, "--body", body}
+			if _, err := f.runResult(f.worktree, args...); err == nil || len(f.forge.summaries) != 1 || f.forge.body != "" || fileExists(f.checkpoint) || !slices.Contains(f.forge.labels, "wip") {
+				t.Fatalf("unapplied body did not retain retry evidence: %v summaries=%#v", err, f.forge.summaries)
+			}
+			if resumed := f.run(t, f.root, "watchdog", "resume", "--item", "7"); resumed.Status != "fix_required" || !strings.Contains(resumed.Reason, "original fixed-number") {
+				t.Fatalf("resume lost partial body publication: %#v", resumed)
+			}
+			if got := f.run(t, f.worktree, args...); got.Status != "ready_for_merge" || len(f.forge.summaries) != 1 || f.forge.body != "final\n\nCloses #7\n" {
+				t.Fatalf("unapplied body retry: %#v body=%q", got, f.forge.body)
 			}
 		})
 		t.Run("exact command and Result Documents survive handoff retry", func(t *testing.T) {
