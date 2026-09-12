@@ -84,7 +84,6 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	if head != reviewed && (verdict != "pass" || gitOK(root, "merge-base", "--is-ancestor", reviewed, head) != nil) {
 		return ImplementationOutcome{}, Refuse("post-marker head must descend from the fixed reviewed head on pass")
 	}
-	requireMergeable := false
 	guard := func() error {
 		local, err := git(root, "rev-parse", "--verify", "refs/heads/"+item.Branch+"^{commit}")
 		if err != nil || local != head {
@@ -103,9 +102,6 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 		}
 		if submission.Head != head || submission.Merged || submission.Draft {
 			return Refuse("Submission head changed during verdict")
-		}
-		if requireMergeable && submission.Mergeability != "mergeable" {
-			return Refuse("mergeability changed during verdict; retry to observe the current target")
 		}
 		return nil
 	}
@@ -163,28 +159,10 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 		item.ResumeState = AwaitingReview
 	}
 	if verdict == "pass" {
-		if submission.Mergeability != "mergeable" && submission.Mergeability != "conflicting" {
-			return ImplementationOutcome{}, Refuse("mergeability unavailable; wait for backend evaluation and retry")
-		}
 		target = ReadyForMerge
-		if item.State == Rework && item.Synchronization {
-			target = Rework
-		} else if submission.Mergeability == "conflicting" && (item.State == AwaitingReview || item.State == ReadyForMerge) {
-			target = Rework
-			item.Synchronization = true
-			item.TargetBranch = submission.Base
-			item.TargetSnapshot, err = backend.ImplementationHead(ctx, repository, submission.Base)
-			if err != nil {
-				return ImplementationOutcome{}, err
-			}
-			if item.TargetSnapshot == "" {
-				return ImplementationOutcome{}, Refuse("current target unavailable; restore it and retry")
-			}
-		}
-		requireMergeable = target == ReadyForMerge
 	}
 	if item.State != AwaitingReview {
-		compatible := verdict == "rework" && (item.State == Rework || item.State == NeedsHuman) || verdict == "needs-human" && item.State == NeedsHuman || verdict == "pass" && (item.State == ReadyForMerge || item.State == Rework && item.Synchronization)
+		compatible := verdict == "rework" && (item.State == Rework || item.State == NeedsHuman) || verdict == "needs-human" && item.State == NeedsHuman || verdict == "pass" && item.State == ReadyForMerge
 		for _, wanted := range comments {
 			found := false
 			for _, existing := range item.Submission.Comments {

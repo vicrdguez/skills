@@ -105,26 +105,24 @@ func TestWatchdogPassReachesHumanMergeBoundary(t *testing.T) {
 	}
 }
 
-func TestWatchdogConflictPinsSynchronizationReworkWithoutBounce(t *testing.T) {
+func TestWatchdogPassReachesHumanMergeBoundaryRegardlessOfMergeability(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
 	runGit(t, root, "rm", "-r", ".changes/widget")
 	runGit(t, root, "commit", "-m", "retire")
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
-	runGit(t, root, "switch", "main")
-	runGit(t, root, "commit", "--allow-empty", "-m", "target moved")
-	target := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
-	runGit(t, root, "switch", "widget")
-	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Claimed: true, Submission: &workflow.Submission{ID: "11", Head: head, ReviewedHead: head, Base: "main", Mergeability: "conflicting"}}}, remoteHeads: map[string]string{"widget": head, "main": target}}
-	summary := filepath.Join(t.TempDir(), "summary.md")
-	os.WriteFile(summary, []byte("pass"), 0600)
-	got := watchdogCLI(t, root, b, "submit", "--item", "7", "--reviewed-head", head, "--verdict", "pass", "--summary", summary, "--body", summary)
-	if got.Status != "rework" || !got.Item.Synchronization || got.Item.Submission.Bounces != 0 || got.Item.TargetSnapshot != target {
-		t.Fatalf("conflict: %#v", got)
-	}
-	start := implementCLI(t, root, b, "next")
-	if start.Packet == nil || start.Packet.Facts.Implementation.TargetSnapshot != target || !strings.Contains(start.Packet.Markdown(), "git merge "+target) || strings.Contains(start.Packet.Markdown(), "Finding-driven Rework: sync nothing") {
-		t.Fatalf("synchronization packet: %#v", start)
+	for _, mergeability := range []string{"mergeable", "conflicting", "unknown"} {
+		t.Run(mergeability, func(t *testing.T) {
+			b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Claimed: true, Submission: &workflow.Submission{ID: "11", Head: head, ReviewedHead: head, Base: "main", Mergeability: mergeability}}}, remoteHeads: map[string]string{"widget": head}}
+			summary := filepath.Join(t.TempDir(), "summary.md")
+			if err := os.WriteFile(summary, []byte("pass"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			got := watchdogCLI(t, root, b, "submit", "--item", "7", "--reviewed-head", head, "--verdict", "pass", "--summary", summary, "--body", summary)
+			if got.Status != "ready_for_merge" || got.Item.Claimed || got.Item.Synchronization {
+				t.Fatalf("pass with %s mergeability: %#v", mergeability, got)
+			}
+		})
 	}
 }
 
