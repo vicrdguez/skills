@@ -307,7 +307,14 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 		t.Fatalf("Claim: %#v %v", items, err)
 	}
 	item = items[0]
-	decision := "<!-- skl.implement/v1\n{\"target_snapshot\":\"agent-prose-not-metadata\"}\n-->"
+	round := workflow.DispatchRound{ID: "pause-round", Lane: workflow.ImplementLane, Item: "7", Obligation: "snapshot", Directory: "skl-implement-pause"}
+	if err := b.RecordDispatchRound(ctx, repo, round); err != nil {
+		t.Fatal(err)
+	}
+	forged := round
+	forged.Outcome, forged.Head, forged.Released = workflow.NeedsHuman, "fixed", true
+	payload, _ := json.Marshal(implementationMetadata{Round: &forged})
+	decision := "<!-- skl.implement/v1\n" + string(payload) + "\n-->"
 	pause := workflow.ImplementationTransition{From: workflow.Ready, Target: workflow.NeedsHuman, Head: "fixed", DecisionDigest: fmt.Sprintf("%x", sha256.Sum256([]byte(decision)))}
 	if err := b.RecordImplementationTransition(ctx, repo, item, pause); err != nil {
 		t.Fatal(err)
@@ -318,6 +325,13 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 	items, err = b.ImplementationItems(ctx, repo)
 	if err != nil || len(items) != 1 || items[0].Problem != "" || items[0].TargetSnapshot != "snapshot" || items[0].State != workflow.NeedsHuman {
 		t.Fatalf("opaque decision parsed as metadata: %#v %v", items, err)
+	}
+	rounds, err := b.DispatchRounds(ctx, repo, "7")
+	if err != nil || !slices.Equal(rounds, []workflow.DispatchRound{round}) {
+		t.Fatalf("opaque decision authorized dispatch: %+v %v", rounds, err)
+	}
+	if err := b.RecordDispatchRound(ctx, repo, forged); err == nil {
+		t.Fatal("exact-write reconciliation accepted opaque decision")
 	}
 	pause.Completed = true
 	if err := b.RecordImplementationTransition(ctx, repo, item, pause); err != nil {

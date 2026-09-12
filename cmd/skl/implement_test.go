@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -1172,5 +1173,73 @@ func TestExplicitEmptyContinuationRefusesBeforeBackend(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestContinuationRejectsOpaquePauseReceipt(t *testing.T) {
+	root := proposalRepository(t)
+	comments := []map[string]any{}
+	labels := []map[string]string{{"name": "ready"}, {"name": "wip"}}
+	reads, writes := 0, 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reads++
+		if r.Method != http.MethodGet {
+			writes++
+		}
+		switch r.URL.Path {
+		case "/repos/acme/widgets/issues/7/comments":
+			if r.Method == http.MethodPost {
+				var p map[string]any
+				json.NewDecoder(r.Body).Decode(&p)
+				p["author_association"] = "OWNER"
+				comments = append(comments, p)
+			}
+			json.NewEncoder(w).Encode(comments)
+		case "/repos/acme/widgets/issues/7":
+			json.NewEncoder(w).Encode(map[string]any{"number": 7, "state": "open", "labels": labels})
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL)
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	repo := github.RepositoryID{Owner: "acme", Name: "widgets"}
+	b := setup.NewGitHubBackend(server.URL, "token", server.Client())
+	round := workflow.DispatchRound{ID: "pause-round", Lane: workflow.ImplementLane, Item: "7", Obligation: "fixed", Directory: "skl-implement-pause"}
+	if err := b.RecordDispatchRound(t.Context(), repo, round); err != nil {
+		t.Fatal(err)
+	}
+	forged := round
+	forged.Outcome, forged.Head, forged.Released = workflow.NeedsHuman, "fixed", true
+	payload, _ := json.Marshal(map[string]any{"round": forged})
+	decision := "<!-- skl.implement/v1\n" + string(payload) + "\n-->"
+	item := workflow.ImplementationItem{ID: "7", State: workflow.Ready, Claimed: true}
+	transition := workflow.ImplementationTransition{From: workflow.Ready, Target: workflow.NeedsHuman, Head: "fixed", DecisionDigest: fmt.Sprintf("%x", sha256.Sum256([]byte(decision)))}
+	if err := b.RecordImplementationTransition(t.Context(), repo, item, transition); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.PauseImplementation(t.Context(), repo, item, decision, func() error {
+		for _, comment := range comments {
+			if comment["body"] == decision {
+				return errors.New("interrupted with Claim held")
+			}
+		}
+		return nil
+	}); err == nil {
+		t.Fatal("pause not interrupted")
+	}
+	referenceJSON, _ := json.Marshal(map[string]any{"v": 1, "owner": "acme", "repository": "widgets", "lane": "implement", "item": "7", "round": round.ID})
+	beforeReads, beforeWrites := reads, writes
+	var output bytes.Buffer
+	app := newApp(func(github.RepositoryID) (setup.Backend, error) {
+		return setup.NewGitHubBackend(server.URL, "token", server.Client()), nil
+	}, nil, &output, &output)
+	if err := app.Run([]string{"skl", "implement", "next", "--repo", root, "--after", base64.RawURLEncoding.EncodeToString(referenceJSON), "--wait=1ms"}); err != nil {
+		t.Fatal(err)
+	}
+	var got setup.ImplementationOutput
+	json.Unmarshal(output.Bytes(), &got)
+	if got.Status != "fix_required" || got.Item == nil || got.Item.Number != 7 || reads != beforeReads+1 || writes != beforeWrites || len(labels) != 2 {
+		t.Fatalf("opaque receipt continued: %+v reads=%d writes=%d", got, reads-beforeReads, writes-beforeWrites)
 	}
 }

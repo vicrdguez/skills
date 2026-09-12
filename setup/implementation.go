@@ -385,6 +385,28 @@ func trustedMetadata(comment skilldist.ReviewComment) bool {
 	return slices.Contains([]string{"OWNER", "MEMBER", "COLLABORATOR"}, comment.Association)
 }
 
+// implementationEvidence excludes opaque decisions identified before publication.
+// Keep every prior digest: later operations must not reinterpret earlier prose.
+func implementationEvidence(comments []skilldist.ReviewComment) []skilldist.ReviewComment {
+	var evidence []skilldist.ReviewComment
+	decisions := make(map[string]bool)
+	for _, comment := range comments {
+		if !trustedMetadata(comment) || decisions[fmt.Sprintf("%x", sha256.Sum256([]byte(comment.Body)))] {
+			continue
+		}
+		evidence = append(evidence, comment)
+		body, ok := strings.CutPrefix(comment.Body, "<!-- skl.implement/v1\n")
+		if !ok || !strings.HasSuffix(body, "\n-->") {
+			continue
+		}
+		var metadata implementationMetadata
+		if json.Unmarshal([]byte(strings.TrimSuffix(body, "\n-->")), &metadata) == nil && metadata.Transition != nil {
+			decisions[metadata.Transition.DecisionDigest] = true
+		}
+	}
+	return evidence
+}
+
 type implementationMetadata struct {
 	SynchronizationTarget string                             `json:"synchronization_target,omitempty"`
 	WatchdogHead          string                             `json:"watchdog_head,omitempty"`
@@ -408,7 +430,7 @@ func (b *GitHubBackend) RecordDispatchRound(ctx context.Context, repository gith
 	}
 	body := "<!-- skl.implement/v1\n" + string(payload) + "\n-->"
 	published := func(comments []skilldist.ReviewComment) bool {
-		for _, comment := range comments {
+		for _, comment := range implementationEvidence(comments) {
 			if comment.Body == body && trustedMetadata(comment) {
 				return true
 			}
@@ -445,7 +467,7 @@ func (b *GitHubBackend) DispatchRounds(ctx context.Context, repository github.Re
 	}
 	positions := make(map[string]int)
 	var rounds []workflow.DispatchRound
-	for _, comment := range comments {
+	for _, comment := range implementationEvidence(comments) {
 		body, ok := strings.CutPrefix(comment.Body, "<!-- skl.implement/v1\n")
 		if !ok || !strings.HasSuffix(body, "\n-->") || !trustedMetadata(comment) {
 			continue
