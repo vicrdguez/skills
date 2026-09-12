@@ -391,7 +391,7 @@ func (b *implementationMemory) SubmissionBodyMatches(id workflow.WorkItemID, act
 }
 
 func (b *implementationMemory) AnchorSide(side string) bool {
-	return side == "LEFT" || side == "RIGHT"
+	return (&setup.GitHubBackend{}).AnchorSide(side)
 }
 
 func (b *implementationMemory) ReviewSubmission(_ context.Context, id workflow.SubmissionID) (workflow.Submission, error) {
