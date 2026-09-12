@@ -2,14 +2,50 @@ package setup
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	skilldist "github.com/vicrdguez/skills"
 	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/workflow"
 )
+
+const reviewSummaryPrefix = "<!-- skl.watchdog.review/v1\n"
+
+type reviewSummaryMetadata struct {
+	ReviewNumber uint64 `json:"review_number"`
+	Verdict      string `json:"verdict"`
+}
+
+func reviewSummaryBody(comment skilldist.ReviewComment) (string, error) {
+	if comment.ReviewNumber == 0 || comment.Verdict != "rework" && comment.Verdict != "pass" && comment.Verdict != "needs-human" {
+		return "", fmt.Errorf("invalid review number or verdict")
+	}
+	metadata, err := json.Marshal(reviewSummaryMetadata{ReviewNumber: comment.ReviewNumber, Verdict: comment.Verdict})
+	if err != nil {
+		return "", err
+	}
+	return reviewSummaryPrefix + string(metadata) + "\n-->\n" + comment.Body, nil
+}
+
+func parseReviewSummary(body string) (reviewSummaryMetadata, string, bool) {
+	body, ok := strings.CutPrefix(body, reviewSummaryPrefix)
+	if !ok {
+		return reviewSummaryMetadata{}, "", false
+	}
+	metadata, body, ok := strings.Cut(body, "\n-->\n")
+	if !ok {
+		return reviewSummaryMetadata{}, "", false
+	}
+	var parsed reviewSummaryMetadata
+	if json.Unmarshal([]byte(metadata), &parsed) != nil || parsed.ReviewNumber == 0 || parsed.Verdict != "rework" && parsed.Verdict != "pass" && parsed.Verdict != "needs-human" {
+		return reviewSummaryMetadata{}, "", false
+	}
+	return parsed, body, true
+}
 
 func (b *GitHubBackend) CompleteReview(ctx context.Context, repository github.RepositoryID, item workflow.ImplementationItem, target workflow.State, guard func() error) error {
 	label := map[workflow.State]string{workflow.Rework: "rework", workflow.NeedsHuman: "needs-human", workflow.ReadyForMerge: "done"}[target]
@@ -187,11 +223,9 @@ func (b *GitHubBackend) PublishReview(ctx context.Context, repository github.Rep
 }
 
 func (b *GitHubBackend) publishReviewSummary(ctx context.Context, repository github.RepositoryID, number int, wanted skilldist.ReviewComment) error {
-	states := map[string]string{"rework": "CHANGES_REQUESTED", "pass": "APPROVED", "needs-human": "COMMENTED"}
-	events := map[string]string{"rework": "REQUEST_CHANGES", "pass": "APPROVE", "needs-human": "COMMENT"}
-	state, event := states[wanted.Verdict], events[wanted.Verdict]
-	if state == "" {
-		return fmt.Errorf("invalid review verdict %q", wanted.Verdict)
+	body, err := reviewSummaryBody(wanted)
+	if err != nil {
+		return err
 	}
 	path := b.repositoryPath(repository) + fmt.Sprintf("/pulls/%d/reviews", number)
 	published := func() (int, error) {
@@ -207,7 +241,7 @@ func (b *GitHubBackend) publishReviewSummary(ctx context.Context, repository git
 				return 0, err
 			}
 			for _, review := range reviews {
-				if review.Body == wanted.Body && review.Commit == wanted.Commit && review.State == state {
+				if review.Body == body && review.Commit == wanted.Commit && review.State == "COMMENTED" {
 					matches++
 				}
 			}
@@ -221,7 +255,7 @@ func (b *GitHubBackend) publishReviewSummary(ctx context.Context, repository git
 	} else if found > 1 {
 		return fmt.Errorf("multiple exact review summary receipts observed; inspect before retrying")
 	}
-	writeErr := b.request(ctx, http.MethodPost, path, map[string]string{"body": wanted.Body, "commit_id": wanted.Commit, "event": event}, nil)
+	writeErr := b.request(ctx, http.MethodPost, path, map[string]string{"body": body, "commit_id": wanted.Commit, "event": "COMMENT"}, nil)
 	if found, err := published(); err != nil {
 		return err
 	} else if found == 1 {

@@ -154,7 +154,7 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
-	comments := []skilldist.ReviewComment{{Body: string(summary), Commit: reviewed, Verdict: verdict}}
+	comments := []skilldist.ReviewComment{{Body: string(summary), Commit: reviewed, Verdict: verdict, ReviewNumber: reviewNumber}}
 	if findingsPath != "" {
 		data, err := os.ReadFile(findingsPath)
 		if err != nil {
@@ -322,7 +322,7 @@ func reviewEvidenceMatches(item ImplementationItem, wanted []skilldist.ReviewCom
 	for _, comment := range wanted {
 		matches := 0
 		for _, existing := range item.Submission.Comments {
-			if comment.Body == existing.Body && comment.Path == existing.Path && comment.Verdict == existing.Verdict && comment.Commit == existing.Commit && (comment.Path == "" || comment.Line == existing.Line && comment.Side == existing.Side) {
+			if comment.Body == existing.Body && comment.Path == existing.Path && comment.Verdict == existing.Verdict && comment.Commit == existing.Commit && (comment.Path != "" || comment.ReviewNumber == existing.ReviewNumber) && (comment.Path == "" || comment.Line == existing.Line && comment.Side == existing.Side) {
 				matches++
 			}
 		}
@@ -337,7 +337,7 @@ func matchingSummaryReceipt(submission Submission, wanted skilldist.ReviewCommen
 	var receipt skilldist.ReviewComment
 	count := 0
 	for _, existing := range submission.Comments {
-		if existing.Path == "" && existing.Body == wanted.Body && existing.Verdict == wanted.Verdict && existing.Commit == wanted.Commit {
+		if existing.Path == "" && existing.Body == wanted.Body && existing.Verdict == wanted.Verdict && existing.Commit == wanted.Commit && existing.ReviewNumber == wanted.ReviewNumber {
 			receipt, count = existing, count+1
 		}
 	}

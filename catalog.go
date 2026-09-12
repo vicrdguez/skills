@@ -65,15 +65,16 @@ type ImplementationFacts struct {
 }
 
 type ReviewComment struct {
-	Line        int    `json:"line,omitempty"`
-	Side        string `json:"side,omitempty"`
-	Body        string `json:"body"`
-	Author      string `json:"author"`
-	Association string `json:"association"`
-	Commit      string `json:"commit,omitempty"`
-	Path        string `json:"path,omitempty"`
-	CreatedAt   string `json:"created_at,omitempty"`
-	Verdict     string `json:"verdict,omitempty"`
+	Line         int    `json:"line,omitempty"`
+	Side         string `json:"side,omitempty"`
+	Body         string `json:"body"`
+	Author       string `json:"author"`
+	Association  string `json:"association"`
+	Commit       string `json:"commit,omitempty"`
+	Path         string `json:"path,omitempty"`
+	CreatedAt    string `json:"created_at,omitempty"`
+	Verdict      string `json:"verdict,omitempty"`
+	ReviewNumber uint64 `json:"review_number,omitempty"`
 }
 
 type Packet struct {

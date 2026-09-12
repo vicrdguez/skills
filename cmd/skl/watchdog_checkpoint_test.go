@@ -132,7 +132,11 @@ func (f *reviewForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		var value map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&value)
-		value["state"] = map[string]string{"REQUEST_CHANGES": "CHANGES_REQUESTED", "APPROVE": "APPROVED", "COMMENT": "COMMENTED"}[value["event"].(string)]
+		if value["event"] != "COMMENT" {
+			http.Error(w, "pull request authors cannot approve or request changes on their own submissions", http.StatusUnprocessableEntity)
+			return
+		}
+		value["state"] = "COMMENTED"
 		value["submitted_at"] = f.timestamp()
 		f.summaries = append(f.summaries, value)
 		if f.failPostRead {
