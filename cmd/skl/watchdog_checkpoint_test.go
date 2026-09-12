@@ -356,7 +356,7 @@ func TestFirstImplementationHandoffProtectsDestinationThroughPublicHTTP(t *testi
 		}
 	}
 	_, err := f.runResult(f.worktree, "implement", "submit", "--item", "7", "--body", body)
-	if !releaseObserved || !claimed || len(f.forge.sourceLabels) != 0 || !slices.Equal(f.forge.labels, []string{"review", "wip"}) {
+	if !releaseObserved || !claimed || err == nil || !strings.Contains(err.Error(), "label mutation not observed") || len(f.forge.sourceLabels) != 0 || !slices.Equal(f.forge.labels, []string{"review", "wip"}) {
 		t.Fatalf("first handoff lost release ordering: err=%v released=%t source=%v destination=%v", err, releaseObserved, f.forge.sourceLabels, f.forge.labels)
 	}
 }
@@ -448,10 +448,13 @@ func TestWatchdogVerdictsReleaseLastThroughPublicHTTP(t *testing.T) {
 				if unprotected {
 					released = true
 					claimedRework = got.Status == "work_available" && got.Item != nil && got.Item.Number == 7
+					if want != "rework" && got.Status != "no_work" {
+						t.Fatalf("implementation accepted released %s verdict: %#v labels=%v", mode, got, f.forge.labels)
+					}
 					return
 				}
-				if got.Status == "work_available" && got.Item != nil && got.Item.Number == 7 {
-					t.Fatalf("implementation claimed verdict before release: %#v labels=%v", got, f.forge.labels)
+				if got.Status != "no_work" {
+					t.Fatalf("implementation accepted verdict before release: %#v labels=%v", got, f.forge.labels)
 				}
 			}
 			got, err := f.runResult(f.worktree, args...)
