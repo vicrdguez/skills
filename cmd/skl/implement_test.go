@@ -1812,3 +1812,74 @@ func TestUnappliedCompletionReceiptRecoversOnlyThroughExplicitHandoff(t *testing
 		t.Fatalf("explicit handoff failed to recover receipt: %+v", got)
 	}
 }
+
+func TestReworkResumeRejectsOverrideBeforeConcreteMetadataMutation(t *testing.T) {
+	root := proposalRepository(t)
+	other := prepareSlice(t, root, "widget")
+	runGit(t, root, "rm", "-r", ".changes/widget")
+	runGit(t, root, "commit", "-m", "retire")
+	reviewed := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	runGit(t, root, "commit", "--allow-empty", "-m", "rework fixes")
+	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	directory, err := os.MkdirTemp("", "skl-implement-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(directory)
+	os.WriteFile(filepath.Join(directory, ".skl-result"), []byte("skl.implement/v1\n"), 0600)
+	round := workflow.DispatchRound{ID: "active", Lane: workflow.ImplementLane, Item: "7", Submission: "11", Obligation: reviewed, Directory: filepath.Base(directory)}
+	comments := []map[string]any{}
+	for _, v := range []any{map[string]any{"reviewed_head": reviewed, "review_round_head": head}, map[string]any{"round": round}} {
+		p, _ := json.Marshal(v)
+		comments = append(comments, map[string]any{"body": "<!-- skl.implement/v1\n" + string(p) + "\n-->", "author_association": "OWNER"})
+	}
+	writes := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/acme/widgets/issues":
+			fmt.Fprint(w, `[{"number":7,"title":"widget","state":"open","labels":[]}]`)
+		case "/repos/acme/widgets/pulls", "/repos/acme/widgets/pulls/11":
+			pull := map[string]any{"number": 11, "state": "open", "labels": []map[string]string{{"name": "rework"}, {"name": "wip"}}, "head": map[string]any{"ref": "widget", "sha": head, "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": "main"}}
+			if r.URL.Path == "/repos/acme/widgets/pulls" {
+				json.NewEncoder(w).Encode([]any{pull})
+			} else {
+				json.NewEncoder(w).Encode(pull)
+			}
+		case "/repos/acme/widgets/issues/7/comments":
+			if r.Method == http.MethodPost {
+				writes++
+				var p map[string]any
+				json.NewDecoder(r.Body).Decode(&p)
+				p["author_association"] = "OWNER"
+				comments = append(comments, p)
+			}
+			json.NewEncoder(w).Encode(comments)
+		case "/repos/acme/widgets/issues/11/comments", "/repos/acme/widgets/pulls/11/comments", "/repos/acme/widgets/pulls/11/reviews", "/repos/acme/widgets/issues/11/timeline":
+			fmt.Fprint(w, `[]`)
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL)
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	b := setup.NewGitHubBackend(server.URL, "token", server.Client())
+	before, _ := json.Marshal(comments)
+	got := returnedCLI(t, b, "skl implement resume --repo '"+root+"' --item 7 --reviewed-head "+other)
+	after, _ := json.Marshal(comments)
+	if got.Status != "fix_required" || got.Item == nil || got.Item.Number != 7 || writes != 0 || !bytes.Equal(before, after) {
+		t.Fatalf("override mutated active obligation: %+v writes=%d", got, writes)
+	}
+	fresh := setup.NewGitHubBackend(server.URL, "token", server.Client())
+	items, err := fresh.ImplementationItems(t.Context(), github.RepositoryID{Owner: "acme", Name: "widgets"})
+	if err != nil || items[0].Problem != "" || items[0].Submission.PreviousReviewedHead != reviewed || !items[0].Claimed {
+		t.Fatalf("refusal poisoned projection: %+v %v", items, err)
+	}
+	got = returnedCLI(t, fresh, "skl implement resume --repo '"+root+"' --item 7 --reviewed-head "+reviewed)
+	if got.Status != "work_available" || got.Packet.Facts.Implementation.PreviousReviewedHead != reviewed {
+		t.Fatalf("original obligation no longer resumes: %+v", got)
+	}
+	rounds, err := fresh.DispatchRounds(t.Context(), github.RepositoryID{Owner: "acme", Name: "widgets"}, "7")
+	if err != nil || !slices.Equal(rounds, []workflow.DispatchRound{round}) {
+		t.Fatalf("resume replaced round: %+v %v", rounds, err)
+	}
+}

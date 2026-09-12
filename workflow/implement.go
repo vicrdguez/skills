@@ -182,6 +182,13 @@ func StartImplementation(ctx context.Context, root, remote string, id WorkItemID
 					return outcome, err
 				}
 				selected = &prepared
+				rounds, err := backend.DispatchRounds(ctx, repository, prepared.ID)
+				if err != nil {
+					return ImplementationOutcome{}, err
+				}
+				if _, err := activeDispatch(rounds, prepared, ImplementLane); err != nil {
+					return ImplementationOutcome{}, err
+				}
 				if err := backend.ClaimImplementation(ctx, repository, prepared); err != nil {
 					return ImplementationOutcome{}, err
 				}
