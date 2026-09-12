@@ -66,7 +66,7 @@ func (c reviewCheckpoint) validHead(head string) bool {
 	return len(head) == c.ObjectIDWidth && strings.IndexFunc(head, func(r rune) bool { return !unicode.Is(unicode.ASCII_Hex_Digit, r) }) < 0
 }
 
-func (c reviewCheckpoint) replace(count uint64, head string) error {
+func (c reviewCheckpoint) replace(count uint64, head string, guard func() error) error {
 	stale, _ := filepath.Glob(filepath.Join(filepath.Dir(c.Path), ".watchdog-*"))
 	for _, name := range stale {
 		if err := os.Remove(name); err != nil {
@@ -84,6 +84,11 @@ func (c reviewCheckpoint) replace(count uint64, head string) error {
 	}
 	if closeErr := temporary.Close(); err == nil {
 		err = closeErr
+	}
+	if err == nil && guard != nil {
+		if err := guard(); err != nil {
+			return err
+		}
 	}
 	if err == nil {
 		err = os.Rename(name, c.Path)

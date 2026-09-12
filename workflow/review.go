@@ -197,6 +197,9 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	if retry && (!evidenceMatches || receiptCount != 1) {
 		return ImplementationOutcome{}, Refuse("recorded review differs from the supplied summary, verdict, body, or inline evidence; replay the original fixed-number command and Result Documents")
 	}
+	if retry && item.State == AwaitingReview && !claimPrecedesReceipt(submission.ClaimAcquiredAt, receipt.CreatedAt) {
+		return ImplementationOutcome{}, Refuse("recorded review receipt does not belong to the current Awaiting Review Claim; replay the current round's original fixed-number command")
+	}
 	if !retry && item.State == AwaitingReview {
 		currentSummaries, unambiguous := reviewSummariesForClaim(item.Submission.Comments, submission.ClaimAcquiredAt)
 		if !unambiguous || len(currentSummaries) > 0 && (len(currentSummaries) != 1 || !reviewCommentsMatch(currentSummaries[0], comments[0]) || !reviewEvidenceCompatible(item, comments, finalBody, submission.ClaimAcquiredAt)) {
@@ -302,7 +305,7 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	if matches != 1 || publishedItem.Problem != "" || publishedItem.State != AwaitingReview || !publishedItem.Claimed || publishedItem.Submission == nil || !reviewEvidenceMatches(publishedItem, comments, finalBody) {
 		return ImplementationOutcome{}, Refuse("published review evidence is not exactly observable; retain the Claim and retry the same fixed-number command and Result Documents")
 	}
-	if err := checkpoint.replace(reviewNumber, reviewed); err != nil {
+	if err := checkpoint.replace(reviewNumber, reviewed, guard); err != nil {
 		return ImplementationOutcome{}, Refuse(err.Error())
 	}
 	if err := backend.CompleteReview(ctx, repository, item, target, guard); err != nil {
