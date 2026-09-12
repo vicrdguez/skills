@@ -253,7 +253,7 @@ func implementCLI(t *testing.T, root string, backend *implementationMemory, args
 	return result
 }
 
-func returnedCLI(t *testing.T, backend *implementationMemory, command string) setup.ImplementationOutput {
+func returnedCLI(t *testing.T, backend setup.Backend, command string) setup.ImplementationOutput {
 	t.Helper()
 	parsed, err := exec.Command("sh", "-c", "set -- "+command+`; printf '%s\000' "$@"`).Output()
 	if err != nil {
@@ -1314,5 +1314,83 @@ func TestReworkMissingReviewedHeadRetainsRecoverableHistory(t *testing.T) {
 	got = implementCLI(t, root, b, "resume", "--item", "7", "--reviewed-head", head)
 	if got.Status != "work_available" || len(b.rounds["7"]) != 2 || b.rounds["7"][0] != old || b.rounds["7"][1].Obligation != head {
 		t.Fatalf("explicit recovery failed: %+v %+v", got, b.rounds)
+	}
+}
+
+// Observe real GitHub head-scoped metadata while retaining the existing mutation fixture.
+type githubProjectedImplementation struct {
+	*implementationMemory
+	projection *setup.GitHubBackend
+}
+
+func (b *githubProjectedImplementation) ImplementationItems(ctx context.Context, repo github.RepositoryID) ([]workflow.ImplementationItem, error) {
+	return b.projection.ImplementationItems(ctx, repo)
+}
+
+func TestReworkPushSubmitsThroughGitHubProjection(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "widget")
+	runGit(t, root, "rm", "-r", ".changes/widget")
+	runGit(t, root, "commit", "-m", "retire")
+	reviewed := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	memory := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Rework, Submission: &workflow.Submission{ID: "11", Head: reviewed, Base: "main"}}}, remoteHeads: map[string]string{"widget": reviewed}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		item := memory.work[0]
+		switch r.URL.Path {
+		case "/repos/acme/widgets/issues":
+			fmt.Fprint(w, `[{"number":7,"title":"widget","state":"open","labels":[]}]`)
+		case "/repos/acme/widgets/pulls", "/repos/acme/widgets/pulls/11":
+			label := "rework"
+			if item.State == workflow.AwaitingReview {
+				label = "review"
+			}
+			labels := []map[string]string{{"name": label}}
+			if item.Claimed {
+				labels = append(labels, map[string]string{"name": "wip"})
+			}
+			pull := map[string]any{"number": 11, "state": "open", "labels": labels, "head": map[string]any{"ref": "widget", "sha": memory.remoteHeads["widget"], "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": "main"}}
+			if strings.HasSuffix(r.URL.Path, "/11") {
+				json.NewEncoder(w).Encode(pull)
+			} else {
+				json.NewEncoder(w).Encode([]any{pull})
+			}
+		case "/repos/acme/widgets/issues/7/comments":
+			metadata := []any{map[string]any{"reviewed_head": reviewed, "review_round_head": reviewed}}
+			for _, round := range memory.rounds["7"] {
+				metadata = append(metadata, map[string]any{"round": round})
+			}
+			if item.Transition != nil {
+				metadata = append(metadata, map[string]any{"transition": item.Transition})
+			}
+			comments := []map[string]string{}
+			for _, value := range metadata {
+				p, _ := json.Marshal(value)
+				comments = append(comments, map[string]string{"author_association": "OWNER", "body": "<!-- skl.implement/v1\n" + string(p) + "\n-->"})
+			}
+			json.NewEncoder(w).Encode(comments)
+		case "/repos/acme/widgets/issues/11/comments", "/repos/acme/widgets/pulls/11/comments", "/repos/acme/widgets/pulls/11/reviews", "/repos/acme/widgets/issues/11/timeline":
+			fmt.Fprint(w, `[]`)
+		default:
+			t.Errorf("unexpected request %s", r.URL)
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	b := &githubProjectedImplementation{memory, setup.NewGitHubBackend(server.URL, "token", server.Client())}
+	start := returnedCLI(t, b, "skl implement next --repo '"+root+"'")
+	runGit(t, root, "switch", "main")
+	worktree := start.Packet.Facts.Implementation.Worktree
+	runGit(t, root, "worktree", "add", worktree, "widget")
+	resumed := returnedCLI(t, b, start.WorkerCommand)
+	runGit(t, worktree, "commit", "--allow-empty", "-m", "fix findings")
+	pushed := strings.TrimSpace(runGitOutput(t, worktree, "rev-parse", "HEAD"))
+	memory.remoteHeads["widget"] = pushed
+	os.WriteFile(filepath.Join(resumed.Packet.Facts.Implementation.ResultDirectory, "submission.md"), []byte("fixes"), 0600)
+	got := returnedCLI(t, b, resumed.Packet.Facts.Implementation.SubmitCommand)
+	if got.Status != "awaiting_review" || memory.rounds["7"][0].Obligation != reviewed || memory.rounds["7"][0].Head != pushed {
+		t.Fatalf("pushed Rework rejected: %+v %+v", got, memory.rounds)
+	}
+	if got := returnedCLI(t, b, start.ContinuationCommand); got.Status != "no_work" || got.PreviousHandoff == nil {
+		t.Fatalf("Rework continuation: %+v", got)
 	}
 }

@@ -468,6 +468,10 @@ func (b *GitHubBackend) DispatchRounds(ctx context.Context, repository github.Re
 	if err != nil {
 		return nil, err
 	}
+	return dispatchRoundsFromComments(comments, item)
+}
+
+func dispatchRoundsFromComments(comments []skilldist.ReviewComment, item workflow.WorkItemID) ([]workflow.DispatchRound, error) {
 	positions := make(map[string]int)
 	var rounds []workflow.DispatchRound
 	for _, comment := range implementationEvidence(comments) {
@@ -688,6 +692,21 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository gith
 				}
 				if metadata.Transition != nil {
 					item.Transition = metadata.Transition
+				}
+			}
+		}
+		// A Rework push changes the Submission head, not the active round's
+		// fixed reviewed obligation. Legacy metadata remains head-scoped.
+		rounds, roundErr := dispatchRoundsFromComments(comments, item.ID)
+		if roundErr != nil {
+			item.Problem = roundErr.Error()
+		}
+		for _, round := range rounds {
+			if round.Lane == workflow.ImplementLane && round.Outcome == "" && !round.Synchronization && round.Submission != "" && item.Submission != nil && round.Submission == item.Submission.ID {
+				if item.Submission.PreviousReviewedHead != "" && item.Submission.PreviousReviewedHead != round.Obligation {
+					item.Problem = "active dispatch contradicts the reviewed obligation"
+				} else {
+					item.Submission.PreviousReviewedHead = round.Obligation
 				}
 			}
 		}

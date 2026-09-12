@@ -235,7 +235,7 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 			pulls[0]["draft"] = strings.Contains(payload["query"].(string), "convertPullRequestToDraft")
 			http.Error(w, "response lost after draft conversion", 500)
 			return
-		case path == "/pulls/11/reviews":
+		case path == "/pulls/11/reviews" || path == "/issues/11/timeline":
 			result = []any{}
 		case path == "/pulls/11" && r.Method == http.MethodPatch:
 			var payload map[string]any
@@ -356,6 +356,27 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 		t.Fatalf("labels=%v", labels)
 	}
 	labels[11] = []string{"rework", "wip"}
+	item.Submission.PreviousReviewedHead = "fixed"
+	item.State = workflow.Rework
+	if err := b.ClaimImplementation(ctx, repo, item); err != nil {
+		t.Fatal(err)
+	}
+	rework := workflow.DispatchRound{ID: "rework-round", Lane: workflow.ImplementLane, Item: "7", Submission: "11", Obligation: "fixed", Directory: "skl-implement-rework"}
+	// Finish the earlier round so only this implementation round is active.
+	round.Outcome, round.Head, round.Released = workflow.AwaitingReview, "fixed", true
+	if err := b.RecordDispatchRound(ctx, repo, round); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.RecordDispatchRound(ctx, repo, rework); err != nil {
+		t.Fatal(err)
+	}
+	pulls[0]["head"].(map[string]any)["sha"] = "pushed-fixes"
+	fresh := NewGitHubBackend(server.URL, "token", server.Client())
+	projected, err := fresh.ImplementationItems(ctx, repo)
+	if err != nil || projected[0].Submission.PreviousReviewedHead != "fixed" || projected[0].Submission.Head != "pushed-fixes" {
+		t.Fatalf("push lost active obligation: %+v %v", projected, err)
+	}
+	pulls[0]["head"].(map[string]any)["sha"] = "fixed"
 	item.State = workflow.Rework
 	item.Claimed = true
 	transition := workflow.ImplementationTransition{From: workflow.Rework, Target: workflow.NeedsHuman, Head: "fixed"}
