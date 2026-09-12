@@ -7,7 +7,7 @@ Two-axis review of the diff between `HEAD` and a fixed point the user supplies:
 
 - **Standards** — does the code conform to this repo's documented coding standards? This includes any documented standard in the repo but also make use of project/repo specific skills to aid here. E.g. the repo has a specific skill to review a module or a layer present in the project
 - **Artifacts** — does the code faithfully implement the originating intent, behaviors, plan and tasks?
-  1. The Workflow Engine's ledger inspection reports permitted ticks only, with Manual Verification unchecked; normal submission also requires separate ledger retirement
+  1. The Workflow Engine's endpoint inspection reports identical paths, regular non-executable blobs, and exact bytes except permitted lowercase completion ticks, with Manual Verification unchecked; normal submission also requires completed automated boxes and later ledger retirement
   2. Every `intent.md` item in "Definition of Done" is demonstrably met
   3. Every `behavior.md` scenario has materialized as a test (or for prose changes, encoded)
   4. The full suite is green
@@ -29,7 +29,7 @@ The goal is to review the work done for the single claimed unit of work. Which p
 - **First review of a change** — the PR base merge-base, or the parent of the implementor's first commit. Never that first commit itself: `git diff <it>...HEAD` would omit everything it introduced.
 - **Repeat review after a bounce** — the `Reviewed head` recorded in the previous reviewer's summary, so the round reads only what changed since.
 
-Artifact integrity uses its own, unmoving Artifact Baseline from the engine's ledger inspection. It never advances with review rounds. Refresh fixed Git facts with the packet's `inspect_command`, or `skl implement inspect --remote <name> --item <number>` when invoked independently; the engine inspects history, while you read and judge the historical contract.
+Artifact integrity uses its own, unmoving Artifact Baseline and, when available, Artifact Completion from the engine's endpoint inspection. It never advances with review rounds. Refresh fixed Git facts with the packet's `inspect_command`, or `skl implement inspect --remote <name> --item <number>` when invoked independently; preserve any caller-supplied `--artifact-baseline <full-sha>` and `--artifact-completion <full-sha>`. The engine validates endpoint identity and snapshots, while you read and judge the historical contract.
 
 If the user provides the fixed point — a commit SHA, branch name, tag, `main`, `HEAD~5`, etc. — use that instead. If this skill was invoked independently of a claimed unit of work and no fixed point was given, ask for one.
 
@@ -41,7 +41,7 @@ Before going further, confirm the fixed point resolves (`git rev-parse <fixed-po
 
 Look for the originating artifacts, in this order:
 
-1. The supplied Work Item's Artifact Baseline and Completion; read with `git show <snapshot>:.changes/<slug>/<file>`.
+1. The supplied Work Item's exact Artifact Baseline and Completion; read with `git show <snapshot>:.changes/<slug>/<file>`.
 2. A path the user passed as an argument.
 3. Artifacts in `.changes/<slug>` for the in-flight unit of work matching the branch name or feature; after retirement, read them from the historical Artifact Baseline and Completion without recreating them
 4. If nothing is found, ask the user where the artifacts are. If they say there isn't one, the **Artifacts** sub-agent will skip and report "no Artifacts available".
@@ -57,7 +57,7 @@ On top of whatever the repo documents, the Standards axis always carries the **s
 These two produce facts, not judgements — a diff read or an exit code. Run them here, before spawning anything, and hand the recorded results to both briefs. Two reviewers running them concurrently would contend over the same worktree, and a fact produced inside a reviewer's context is a fact the two axes can end up reporting differently.
 
 1. **The documented gate** — the project's full suite, typecheck and lint, exactly once per invocation. A red gate is worth knowing before spending two reviewer contexts on it.
-2. **Artifact integrity** — record the engine's ledger inspection: Baseline, optional Completion/deletion, phase, and every violation. A frozen-content or history violation is a hard Artifacts finding. First-pass Audit may precede final ticks and retirement; normal review submission requires completion and retirement, and Rework keeps the ledger absent. For an independent Audit without engine facts, compare the supplied frozen artifacts directly and report any missing integrity evidence explicitly.
+2. **Artifact integrity** — record the engine's endpoint inspection: Baseline, optional Completion, provisional/present/retired phase, and every violation. Compare only the resolved Baseline and Completion, or Baseline and current provisional head before Completion; do not inspect intermediate artifact contents, infer Completion from deletion, or require monotonic intermediate ticks. First-pass Audit may precede final ticks and retirement, so label those facts pending rather than claim review readiness. Normal submission requires completed automated boxes at Completion and ledger absence at the review head; Rework keeps it absent. For an independent Audit without engine facts, compare the supplied endpoint snapshots directly and report missing integrity evidence explicitly.
 
 ### 5. Spawn both sub-agents in parallel
 
@@ -78,9 +78,9 @@ Dispatch both axes as parallel sub-agents, each in a fresh context carrying its 
 **Artifacts sub-agent prompt** — include:
 
 - The diff command and commit list.
-- The path or fetched contents of the Artifacts, read at the artifact baseline.
+- The paths or fetched contents of the Artifacts at the exact Baseline and, when available, Completion or provisional head.
 - The gate and artifact-integrity results from step 4.
-- The brief: "Report: (a) requirements, intent and behaviors the artifacts asked for that are missing or partial; (b) behaviour in the diff that wasn't asked for (scope creep); (c) requirements that look implemented but where the implementation looks wrong; (d) the gate result you were given, if it is not green — do not rerun it; (e) read `plan.md` against the diff and note any divergence; (f) any forbidden artifact mutation the integrity result reports. Judge (a) to (c) against the complete final implementation even when the diff is only the latest increment. Quote the spec line for each finding. Tag each finding `HARD` or `JUDGEMENT` as its first token: (a), (b), (c) and (f) are `HARD`; (d) is `HARD` when the gate is red; (e) is `JUDGEMENT` unless the divergence breaks a frozen requirement. Report each finding as its own bullet, anchored to `file:line`. Under 500 words — compress findings rather than omit any."
+- The brief: "Report: (a) requirements, intent and behaviors the artifacts asked for that are missing or partial; (b) behaviour in the diff that wasn't asked for (scope creep); (c) requirements that look implemented but where the implementation looks wrong; (d) the gate result you were given, if it is not green — do not rerun it; (e) read `plan.md` against the diff and note any divergence; (f) any endpoint violation the integrity result reports, without adding intermediate-history or deletion-inference rules. Judge (a) to (c) against the complete final implementation even when the diff is only the latest increment. Quote the spec line for each finding. Tag each finding `HARD` or `JUDGEMENT` as its first token: (a), (b), (c) and (f) are `HARD`; (d) is `HARD` when the gate is red; (e) is `JUDGEMENT` unless the divergence breaks a frozen requirement. Report each finding as its own bullet, anchored to `file:line`. Under 500 words — compress findings rather than omit any."
 
 Nothing written after the artifacts were published is a requirement: not review comments, not rework notes. They can be evidence, never a spec line to hold the implementation against.
 

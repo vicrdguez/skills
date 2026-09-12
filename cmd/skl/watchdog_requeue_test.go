@@ -19,8 +19,7 @@ import (
 func TestWatchdogHumanRequeuePreservesFirstFailureBounce(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
-	runGit(t, root, "rm", "-r", ".changes/widget")
-	runGit(t, root, "commit", "-m", "retire")
+	completeAndRetireSlice(t, root, "widget")
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	pause := []string{"+review", "+wip", "+needs-human", "-review", "-wip", "-needs-human", "+rework", "+wip", "+review", "-rework", "-wip", "+wip"}
 	bounce := []string{"+review", "+wip", "+rework", "-review", "-wip", "-rework"}

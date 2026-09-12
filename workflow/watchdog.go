@@ -11,7 +11,7 @@ import (
 	skilldist "github.com/vicrdguez/skills"
 )
 
-func StartWatchdog(ctx context.Context, root, remote string, id WorkItemID, backend ImplementationBackend) (ImplementationOutcome, error) {
+func StartWatchdog(ctx context.Context, root, remote string, id WorkItemID, endpoints ArtifactEndpoints, backend ImplementationBackend) (ImplementationOutcome, error) {
 	items, err := loadImplementation(ctx, backend)
 	if err != nil {
 		return ImplementationOutcome{}, err
@@ -33,7 +33,7 @@ func StartWatchdog(ctx context.Context, root, remote string, id WorkItemID, back
 		if item.Submission.ReviewedHead != "" && item.Submission.ReviewedHead != item.Submission.Head && item.Claimed {
 			return ImplementationOutcome{Status: "fix_required", Reason: "Submission moved after Claim; restore the fixed reviewed head before resuming"}, nil
 		}
-		history, err := InspectLedger(root, item.Submission.Head, item.Branch)
+		history, err := InspectLedger(root, item.Submission.Head, item.Branch, endpoints, RequireRetiredArtifacts)
 		if err != nil {
 			return ImplementationOutcome{}, err
 		}
@@ -54,12 +54,12 @@ func StartWatchdog(ctx context.Context, root, remote string, id WorkItemID, back
 			if current.ID != item.ID || !current.Claimed || current.State != AwaitingReview || current.Problem != "" || current.Submission == nil || current.Submission.Head != submission.Head || current.Submission.ReviewedHead != submission.Head {
 				continue
 			}
-			facts := skilldist.WatchdogFacts{Branch: item.Branch, ReviewedHead: submission.Head, ArtifactBaseline: history.Baseline, ArtifactCompletion: history.Completion, AuditBody: submission.Body, Comments: submission.Comments}
-			facts.BaselineFiles, err = ledgerFiles(root, history.Baseline, ".changes/"+item.Branch)
+			facts := skilldist.WatchdogFacts{Branch: item.Branch, ReviewedHead: submission.Head, ArtifactBaseline: history.Baseline, ArtifactCompletion: history.Completion, SuppliedArtifactBaseline: endpoints.Baseline, SuppliedArtifactCompletion: endpoints.Completion, AuditBody: submission.Body, Comments: submission.Comments}
+			facts.BaselineFiles, err = endpointFiles(root, history.Baseline, item.Branch)
 			if err != nil {
 				return ImplementationOutcome{}, err
 			}
-			facts.CompletionFiles, err = ledgerFiles(root, history.Completion, ".changes/"+item.Branch)
+			facts.CompletionFiles, err = endpointFiles(root, history.Completion, item.Branch)
 			if err != nil {
 				return ImplementationOutcome{}, err
 			}

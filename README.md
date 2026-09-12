@@ -47,7 +47,7 @@ Four rules hold it together:
 
 - **A fresh context per stage.** Handoff happens through the board and the filesystem, never through conversation history. The watchdog is the strict case: it never runs in the context that built the change, so a green suite it did not run itself does not count.
 - **The backend projects the queue.** GitHub issues and PRs project Workflow State through `ready`, `review`, `rework`, `needs-human`, and `done`; `wip` is an additive Claim, not a lifecycle state. `done` means Ready for Merge, not Merged. Each slice has one branch and one conventional worktree under `.worktrees/<slug>`.
-- **Two document lifetimes.** Implementation Ledgers (`intent.md`, `behavior.md`, and optional `plan.md` / `tasks.md`) live in `.changes/<slug>/` on the slice branch. They freeze on publication: only existing non-manual boxes may be ticked. The implementer commits Artifact Completion, then removes the ledger in a separate child commit before review. Review and Rework read historical snapshots rather than restoring or archiving the ledger. Durable docs (`CONTEXT.md`, `docs/adr/`, `docs/capabilities/`) outlive the change.
+- **Two document lifetimes.** Implementation Ledgers (`intent.md`, `behavior.md`, and optional `plan.md` / `tasks.md`) live in `.changes/<slug>/` on the slice branch. The pushed publication head is marked `[baseline] <slug>`; after only existing non-manual boxes change to lowercase `[x]`, the still-present ledger is marked `[completion] <slug>`. A later commit removes it before review. Review and Rework compare those exact historical endpoints and ledger absence, not intermediate edits. Durable docs (`CONTEXT.md`, `docs/adr/`, `docs/capabilities/`) outlive the change.
 - **Slices are tracer bullets.** Each one cuts a complete path through every layer, is demoable on its own, declares its blocking edges, and is sized to fit a single fresh context window.
 
 ### How this differs
@@ -71,7 +71,7 @@ Use `skl setup --repo <path>` to target another checkout. If that repository has
 
 ### Publish a Proposal
 
-After Propose has prepared and pushed each slice branch at its complete Artifact Baseline, remove only safe Merged local state and publish the agent-authored issue bodies:
+After Propose has prepared and pushed each slice branch at its complete Artifact Baseline with exact subject prefix `[baseline] <slice-slug>`, remove only safe Merged local state and publish the agent-authored issue bodies:
 
 ```sh
 skl propose cleanup --repo <path>
@@ -86,15 +86,17 @@ Omit the parent flags and repeated slice/dependency flags for a single-slice Pro
 
 ### Implement a Work Item
 
-Run `skl implement next` for one claimed Work Item and its bundled Instruction Packet, or `skl implement resume --item <number>` for interrupted work. Inside its conventional worktree, `skl implement resume` resolves the Claim by location. Selection prefers eligible Rework and skips blocked, claimed, and paused items.
+Run `skl implement next` for one claimed Work Item and its bundled Instruction Packet, or `skl implement resume --item <number>` for interrupted work. Inside its conventional worktree, `skl implement resume` resolves the Claim by location. Selection prefers eligible Rework and skips blocked, claimed, and paused items. Markerless existing work may supply full `--artifact-baseline` and `--artifact-completion` SHAs on relevant Implement and Watchdog commands; preserve those exact flags through every command for that invocation and Work Item.
 
 Implement uses Setup's remote inference: GitHub `origin`, otherwise the sole GitHub remote. Select explicitly with `--remote <name>` when ambiguous or overriding `origin`; all Implement operations accept it, and packet retry commands retain it. Use that same remote for ordinary Git fetch/push.
 
-The worker merges the pinned Target Snapshot, writes code and scenario tests in red-green commits, and runs focused checks. At the Audit gate the worker runs the Full Gate and both independent review axes, dispositions every finding, then commits final ticks and ledger retirement and pushes. `skl` runs none of those project checks or Git mutations.
+The worker merges the pinned Target Snapshot, writes code and scenario tests in red-green commits, and runs focused checks. At the Audit gate the worker runs the Full Gate and both independent review axes against a provisional endpoint, which may still have unfinished boxes and must not be reported ready for review. After dispositions, the worker ticks every automated box, commits the still-present ledger with `[completion] <slug>`, removes it in a later commit, and pushes. `skl` runs none of those project checks or Git mutations.
 
-Write the Audit-bearing `submission.md` in the packet's private temporary directory, then run `skl implement submit --item <number> --body <absolute-file>`. A repairable refusal retains the Claim and prose. Successful publication reports `awaiting_review`, removes the temporary directory, and leaves the issue open until human merge. `skl implement inspect --item <number>` supplies current fixed Git and historical ledger evidence for Audit.
+Write the Audit-bearing `submission.md` in the packet's private temporary directory, then run `skl implement submit --item <number> --body <absolute-file>` with any supplied artifact endpoint flags. A repairable refusal retains the Claim and prose. Successful publication reports `awaiting_review`, removes the temporary directory, and leaves the issue open until human merge. `skl implement inspect --item <number>` supplies current fixed Git and endpoint-only ledger evidence for Audit.
 
 For a permitted human decision, use `skl implement needs-human --item <number> --reason <reason> --decision <absolute-decision.md>`; also supply `--body` and push when a draft Submission must preserve implementation work. Retrieve both Result Document templates through `skl skill --resource reference/submission.md implement` or `skl skill --resource reference/decision.md implement`.
+
+Existing in-flight work stays on its former CLI unless an operator explicitly hands it to this endpoint contract with full SHAs. The handoff is per invocation: it writes no Adoption record, never overrides a unique marker, and never resolves ambiguous markers by choosing one.
 
 ### Wait for claimable work
 
@@ -136,7 +138,7 @@ Retrieve a parent definition with `skl skill <name>` only when it is not already
 
 ### Review and human completion
 
-In a fresh session, run `skl watchdog next`, or resume the fixed Claim with `skl watchdog resume --item <number>`. The packet carries the reviewed head, historical Artifact Baseline and Completion files, the opaque Audit-bearing PR body, prior findings, and raw human comments. Watchdog runs the Full Gate and independent artifact checks but never reruns Audit.
+In a fresh session, run `skl watchdog next`, or resume the fixed Claim with `skl watchdog resume --item <number>`. The packet carries the reviewed head, historical Artifact Baseline and Completion files, the opaque Audit-bearing PR body, prior findings, and raw human comments. Watchdog runs the Full Gate and independently checks only the exact endpoint paths, modes, bytes, ticks, ancestry, and ledger absence; it neither audits intermediate artifact history nor reruns Audit.
 
 Write the summary and optional anchored findings in the packet's private temporary directory. Submit its concrete command with `--verdict pass`, `--verdict rework`, or `--verdict needs-human`. A pass also takes `--body <absolute-submission.md>` containing the complete final PR body and unchecked Manual Verification checklist. Retrieve the transport template with `skl skill --resource reference/review.md watchdog`. If passing Notes need Debt Marker comments, the worker commits and pushes them, runs the formatter/parser and `git diff --check`, and supplies `--head <final-sha>` without replacing `--reviewed-head`.
 

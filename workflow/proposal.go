@@ -403,7 +403,7 @@ func primaryWorktree(root string) (string, error) {
 }
 
 func artifactBaseline(root, slug, head string) (string, error) {
-	history, err := InspectLedger(root, head, slug)
+	history, err := InspectLedger(root, head, slug, ArtifactEndpoints{}, InspectArtifacts)
 	if err != nil {
 		return "", err
 	}
@@ -414,7 +414,7 @@ func artifactBaseline(root, slug, head string) (string, error) {
 		return "", errors.New("ledger is removed before publication")
 	}
 	if history.Baseline != head {
-		return "", errors.New("Artifact Baseline is not the published branch head")
+		return "", errors.New("Artifact Baseline must be the published branch head")
 	}
 	return history.Baseline, nil
 }

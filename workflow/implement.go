@@ -246,7 +246,7 @@ func PermitImplementationReview(observation *LifecycleObservation) error {
 	return nil
 }
 
-func InspectImplementation(ctx context.Context, root string, id WorkItemID, backend ImplementationBackend) (ImplementationOutcome, error) {
+func InspectImplementation(ctx context.Context, root string, id WorkItemID, endpoints ArtifactEndpoints, backend ImplementationBackend) (ImplementationOutcome, error) {
 	items, err := loadImplementation(ctx, backend)
 	if err != nil {
 		return ImplementationOutcome{}, err
@@ -259,13 +259,13 @@ func InspectImplementation(ctx context.Context, root string, id WorkItemID, back
 		if err != nil {
 			return ImplementationOutcome{}, err
 		}
-		history, err := InspectLedger(root, head, item.Branch)
+		history, err := InspectLedger(root, head, item.Branch, endpoints, implementationLedgerPolicy(item.State))
 		return ImplementationOutcome{Status: "inspected", Item: &item, Head: head, Ledger: &history}, err
 	}
 	return ImplementationOutcome{Status: "fix_required", Reason: "Work Item unavailable; supply its explicit stable --item identity"}, nil
 }
 
-func StartImplementation(ctx context.Context, root, remote string, id WorkItemID, snapshot, reviewedHead string, backend ImplementationBackend) (ImplementationOutcome, error) {
+func StartImplementation(ctx context.Context, root, remote string, id WorkItemID, snapshot, reviewedHead string, endpoints ArtifactEndpoints, backend ImplementationBackend) (ImplementationOutcome, error) {
 	items, err := loadImplementation(ctx, backend)
 	if err != nil {
 		return ImplementationOutcome{}, err
@@ -291,7 +291,7 @@ func StartImplementation(ctx context.Context, root, remote string, id WorkItemID
 		}
 		for _, item := range items {
 			if item.ID == id && item.Claimed && (item.State == Ready || item.State == Rework) {
-				prepared, outcome, err := prepareImplementationStart(ctx, root, remote, item, snapshot, reviewedHead, backend)
+				prepared, outcome, err := prepareImplementationStart(ctx, root, remote, item, snapshot, reviewedHead, endpoints, backend)
 				if err != nil || outcome.Status != "" {
 					return outcome, err
 				}
@@ -299,7 +299,7 @@ func StartImplementation(ctx context.Context, root, remote string, id WorkItemID
 					return ImplementationOutcome{}, err
 				}
 				item = prepared
-				return implementationPacket(root, remote, item)
+				return implementationPacket(root, remote, item, endpoints)
 			}
 		}
 		return ImplementationOutcome{Status: "fix_required", Reason: "explicit Work Item is not an unambiguous implementation Claim; repair its projections before resuming"}, nil
@@ -335,7 +335,7 @@ func StartImplementation(ctx context.Context, root, remote string, id WorkItemID
 		if blocked {
 			continue
 		}
-		prepared, outcome, err := prepareImplementationStart(ctx, root, remote, item, snapshot, reviewedHead, backend)
+		prepared, outcome, err := prepareImplementationStart(ctx, root, remote, item, snapshot, reviewedHead, endpoints, backend)
 		if err != nil || outcome.Status != "" {
 			return outcome, err
 		}
@@ -347,7 +347,7 @@ func StartImplementation(ctx context.Context, root, remote string, id WorkItemID
 		}
 		for _, current := range observed {
 			if current.ID == item.ID && current.Claimed && current.State == item.State && current.Problem == "" && current.Branch == item.Branch && current.TargetSnapshot == item.TargetSnapshot {
-				return implementationPacket(root, remote, current)
+				return implementationPacket(root, remote, current, endpoints)
 			}
 		}
 		if claimErr != nil {
@@ -358,7 +358,7 @@ func StartImplementation(ctx context.Context, root, remote string, id WorkItemID
 	return ImplementationOutcome{Status: "no_work"}, nil
 }
 
-func prepareImplementationStart(ctx context.Context, root, remote string, item ImplementationItem, snapshot, reviewedHead string, backend ImplementationBackend) (ImplementationItem, ImplementationOutcome, error) {
+func prepareImplementationStart(ctx context.Context, root, remote string, item ImplementationItem, snapshot, reviewedHead string, endpoints ArtifactEndpoints, backend ImplementationBackend) (ImplementationItem, ImplementationOutcome, error) {
 	refuse := func(reason string) (ImplementationItem, ImplementationOutcome, error) {
 		return item, ImplementationOutcome{Status: "fix_required", Reason: reason, Item: &item}, nil
 	}
@@ -375,7 +375,7 @@ func prepareImplementationStart(ctx context.Context, root, remote string, item I
 	if err != nil {
 		return refuse("branch unavailable; fetch the published branch and resume")
 	}
-	history, err := InspectLedger(root, head, item.Branch)
+	history, err := InspectLedger(root, head, item.Branch, endpoints, implementationLedgerPolicy(item.State))
 	if err != nil {
 		return item, ImplementationOutcome{}, err
 	}
@@ -404,7 +404,7 @@ func prepareImplementationStart(ctx context.Context, root, remote string, item I
 		}
 		if item.TargetSnapshot == "" {
 			if item.Claimed && head != history.Baseline {
-				return refuse("Target Snapshot is unknown after history changed; read the original packet and resume with --target-snapshot <sha>")
+				return item, implementationRecovery(item, remote, endpoints, "Target Snapshot is unknown after history changed; read the original packet"), nil
 			}
 			item.TargetSnapshot, err = backend.ImplementationHead(ctx, item.TargetBranch)
 			if err != nil {
@@ -444,9 +444,14 @@ func prepareImplementationStart(ctx context.Context, root, remote string, item I
 	return item, ImplementationOutcome{}, nil
 }
 
-func implementationPacket(root, remote string, item ImplementationItem) (ImplementationOutcome, error) {
+func implementationRecovery(item ImplementationItem, remote string, endpoints ArtifactEndpoints, reason string) ImplementationOutcome {
+	facts := skilldist.ImplementationFacts{Remote: remote, TargetSnapshot: item.TargetSnapshot, SuppliedArtifactBaseline: endpoints.Baseline, SuppliedArtifactCompletion: endpoints.Completion}
+	return ImplementationOutcome{Status: "fix_required", Item: &item, Reason: reason, Facts: &skilldist.InvocationFacts{Implementation: &facts}}
+}
+
+func implementationPacket(root, remote string, item ImplementationItem, endpoints ArtifactEndpoints) (ImplementationOutcome, error) {
 	if item.State == Rework && !item.Synchronization && (item.Submission == nil || item.Submission.PreviousReviewedHead == "") {
-		return ImplementationOutcome{Status: "fix_required", Item: &item, Reason: "previous reviewed head needs agent extraction from the supplied watchdog summary; resume --reviewed-head <full-sha> without rewriting history"}, nil
+		return implementationRecovery(item, remote, endpoints, "previous reviewed head needs agent extraction from the supplied watchdog summary without rewriting history"), nil
 	}
 	main, err := primaryWorktree(root)
 	if err != nil {
@@ -462,7 +467,7 @@ func implementationPacket(root, remote string, item ImplementationItem) (Impleme
 		if headErr != nil {
 			return ImplementationOutcome{Status: "fix_required", Reason: "branch unavailable; fetch and create the conventional worktree before resuming"}, nil
 		}
-		history, err = InspectLedger(root, head, item.Branch)
+		history, err = InspectLedger(root, head, item.Branch, endpoints, implementationLedgerPolicy(item.State))
 		if err != nil {
 			return ImplementationOutcome{}, err
 		}
@@ -470,7 +475,7 @@ func implementationPacket(root, remote string, item ImplementationItem) (Impleme
 			return ImplementationOutcome{Status: "fix_required", Reason: fmt.Sprint(history.Violations) + "; repair ledger history and resume"}, nil
 		}
 	}
-	facts := skilldist.ImplementationFacts{Branch: item.Branch, Worktree: filepath.Join(main, ".worktrees", item.Branch), TargetSnapshot: target, ArtifactBaseline: history.Baseline, ArtifactCompletion: history.Completion}
+	facts := skilldist.ImplementationFacts{Branch: item.Branch, Worktree: filepath.Join(main, ".worktrees", item.Branch), TargetSnapshot: target, ArtifactBaseline: history.Baseline, ArtifactCompletion: history.Completion, SuppliedArtifactBaseline: endpoints.Baseline, SuppliedArtifactCompletion: endpoints.Completion}
 	if item.Submission != nil {
 		facts.PreviousReviewedHead, facts.Comments = item.Submission.PreviousReviewedHead, item.Submission.Comments
 	}
@@ -490,4 +495,11 @@ func implementationPacket(root, remote string, item ImplementationItem) (Impleme
 		return ImplementationOutcome{}, err
 	}
 	return ImplementationOutcome{Status: "work_available", Item: &item, Facts: &skilldist.InvocationFacts{Implementation: &facts}}, nil
+}
+
+func implementationLedgerPolicy(state State) LedgerPolicy {
+	if state == Rework || state == AwaitingReview || state == ReadyForMerge {
+		return RequireRetiredArtifacts
+	}
+	return InspectArtifacts
 }

@@ -20,8 +20,7 @@ import (
 func TestGitHubWatchdogBodyPassRetry(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
-	runGit(t, root, "rm", "-r", ".changes/widget")
-	runGit(t, root, "commit", "-m", "retire")
+	completeAndRetireSlice(t, root, "widget")
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	for _, footer := range []bool{false, true} {
 		for _, partial := range []bool{false, true} {
@@ -110,7 +109,7 @@ func TestGitHubWatchdogBodyPassRetry(t *testing.T) {
 					}
 				}
 				submit := func() (workflow.ImplementationOutcome, error) {
-					return workflow.SubmitWatchdog(context.Background(), root, "origin", "7", head, head, "pass", summary, "", bodyPath, backend)
+					return workflow.SubmitWatchdog(context.Background(), root, "origin", "7", head, head, "pass", summary, "", bodyPath, workflow.ArtifactEndpoints{}, backend)
 				}
 				first, err := submit()
 				if partial {
@@ -152,8 +151,7 @@ func TestGitHubWatchdogBodyPassRetry(t *testing.T) {
 func TestGitHubWatchdogBodyObservation(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
-	runGit(t, root, "rm", "-r", ".changes/widget")
-	runGit(t, root, "commit", "-m", "retire")
+	completeAndRetireSlice(t, root, "widget")
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	for name, body := range map[string]string{
 		"adopted":   "original",
@@ -187,7 +185,7 @@ func TestGitHubWatchdogBodyObservation(t *testing.T) {
 			backend := setup.NewGitHubBackend(server.URL, "token", server.Client())
 			backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
 			ctx := context.Background()
-			inspected, err := workflow.InspectImplementation(ctx, root, "7", backend)
+			inspected, err := workflow.InspectImplementation(ctx, root, "7", workflow.ArtifactEndpoints{}, backend)
 			if err != nil || inspected.Item == nil {
 				t.Fatalf("inspect: %#v, %v", inspected, err)
 			}
@@ -202,7 +200,7 @@ func TestGitHubWatchdogBodyObservation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			started, err := workflow.StartWatchdog(ctx, root, "origin", "7", backend)
+			started, err := workflow.StartWatchdog(ctx, root, "origin", "7", workflow.ArtifactEndpoints{}, backend)
 			if err != nil || started.Facts == nil {
 				t.Fatalf("Watchdog resume: %#v, %v", started, err)
 			}

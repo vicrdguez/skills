@@ -5,7 +5,7 @@ Submission: #11
 Worktree: <worktree>
 Reviewed head: <head>
 Artifact Baseline: <baseline>
-Artifact Completion: <baseline>
+Artifact Completion: <completion>
 Completed finding bounces: 1
 Resume: `skl watchdog resume --repo '<worktree>' --remote 'origin' --item 7`
 
