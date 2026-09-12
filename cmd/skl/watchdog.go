@@ -8,7 +8,6 @@ import (
 
 	"github.com/urfave/cli/v2"
 	"github.com/vicrdguez/skills/github"
-	"github.com/vicrdguez/skills/setup"
 	"github.com/vicrdguez/skills/workflow"
 )
 
@@ -49,13 +48,10 @@ func watchdogCommands(newBackend backendFactory, stdout io.Writer) []*cli.Comman
 				}
 				return err
 			}
-			output, err := setup.PresentImplementation(outcome)
-			if err != nil {
-				return err
-			}
-			return json.NewEncoder(stdout).Encode(output)
+			return writeWorkOutput(stdout, outcome, workflow.WatchdogLane)
 		}})
 	}
+	commands[0].Description = dispatchCallingConvention
 	commands[0].Flags = append(commands[0].Flags, &cli.StringFlag{Name: "after", Usage: "verify one completed dispatch before selecting again; use once and stop for explicit recovery if the response is uncertain"})
 	commands[0].Flags = append(commands[0].Flags, waitFlags()...)
 	return commands

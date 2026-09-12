@@ -190,7 +190,7 @@ func TestNextWaitInvalidOptionsBeforeBackend(t *testing.T) {
 				calls := 0
 				var out bytes.Buffer
 				app := newApp(func(github.RepositoryID) (setup.Backend, error) { calls++; return &waitingMemory{}, nil }, nil, &out, &out)
-				args := append([]string{"skl", lane, "next", "--repo", root}, strings.Fields(tc.option)...)
+				args := append([]string{"skl", lane, "next", "--repo", root, "--after", "eyJ2IjoxLCJvd25lciI6ImFjbWUiLCJyZXBvc2l0b3J5Ijoid2lkZ2V0cyIsImxhbmUiOiJpbXBsZW1lbnQiLCJpdGVtIjoiNyIsInJvdW5kIjoicHJldmlvdXMifQ"}, strings.Fields(tc.option)...)
 				err := app.Run(args)
 				if err == nil || !strings.Contains(err.Error(), tc.flag) || calls != 0 {
 					t.Fatalf("err %v backend constructions %d", err, calls)
@@ -549,5 +549,267 @@ func TestNextWaitHelp(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func completedWaitFixture(t *testing.T, lane string) (string, *waitingMemory, string) {
+	t.Helper()
+	root, b := waitFixture(t, lane)
+	start, err := waitingCLI(t, t.Context(), root, lane, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lane == "implement" {
+		dir := start.Packet.Facts.Implementation.ResultDirectory
+		os.WriteFile(filepath.Join(dir, "decision.md"), []byte("pause"), 0600)
+		got := returnedCLI(t, b, "skl implement needs-human --repo '"+root+"' --remote upstream --item 7 --reason mandatory_rule --decision '"+filepath.Join(dir, "decision.md")+"'")
+		if got.Status != "needs_human" {
+			t.Fatalf("fixture pause: %+v", got)
+		}
+	} else {
+		dir := start.Packet.Facts.Watchdog.ResultDirectory
+		os.WriteFile(filepath.Join(dir, "summary.md"), []byte("pause"), 0600)
+		b.remoteHeads["widget"] = b.work[0].Submission.Head
+		got := returnedCLI(t, b, "skl watchdog submit --repo '"+root+"' --remote upstream --item 7 --reviewed-head "+b.work[0].Submission.Head+" --verdict needs-human --summary '"+filepath.Join(dir, "summary.md")+"'")
+		if got.Status != "needs_human" {
+			t.Fatalf("fixture review pause: %+v", got)
+		}
+	}
+	b.reads, b.claims, b.roundReads = 0, 0, 0
+	return root, b, strings.Trim(strings.Fields(start.ContinuationCommand)[4], "'")
+}
+
+func TestVerifiedContinuationWaitingOptionsAndFreshReuse(t *testing.T) {
+	for _, lane := range []string{"implement", "watchdog"} {
+		for _, tc := range []struct {
+			options      string
+			window, poll time.Duration
+			polls        int
+		}{
+			{"", 0, 0, 1}, {"--wait", 15 * time.Minute, 30 * time.Second, 30}, {"--wait=2m", 2 * time.Minute, 30 * time.Second, 4}, {"--wait 2m --poll 5s", 2 * time.Minute, 5 * time.Second, 24}, {"--wait 2m --poll=5s", 2 * time.Minute, 5 * time.Second, 24}, {"--poll=5s", 0, 0, 1},
+		} {
+			t.Run(lane+tc.options, func(t *testing.T) {
+				root, b, reference := completedWaitFixture(t, lane)
+				synctest.Test(t, func(t *testing.T) {
+					// Worker time and evidence observation are outside each fresh idle window.
+					time.Sleep(time.Hour)
+					options := append([]string{"--after", reference}, strings.Fields(tc.options)...)
+					for attempt := 0; attempt < 2; attempt++ {
+						b.reads = 0
+						start := time.Now()
+						b.observe = func(context.Context) error {
+							if b.reads == 1 {
+								time.Sleep(7 * time.Second)
+							} else if elapsed := time.Since(start) - 7*time.Second; elapsed != time.Duration(b.reads-2)*tc.poll {
+								t.Fatalf("poll %d at %s", b.reads, elapsed)
+							}
+							return nil
+						}
+						got, err := waitingCLI(t, t.Context(), root, lane, b, options...)
+						want := "no_work"
+						if tc.window > 0 {
+							want = "idle_timeout"
+						}
+						if err != nil || got.Status != want || got.PreviousHandoff == nil || b.claims != 0 || b.reads != tc.polls+1 || time.Since(start) != tc.window+7*time.Second {
+							t.Fatalf("verified waiting: %+v err=%v reads=%d elapsed=%s", got, err, b.reads, time.Since(start))
+						}
+						time.Sleep(2 * time.Hour)
+					}
+					b.observe = nil
+					successor := workflow.ImplementationItem{ID: "8", Branch: "widget", State: workflow.Ready}
+					if lane == "watchdog" {
+						successor.State = workflow.AwaitingReview
+						successor.Submission = &workflow.Submission{ID: "12", Head: b.work[0].Submission.Head}
+					}
+					b.work = append(b.work, successor)
+					got, err := waitingCLI(t, t.Context(), root, lane, b, options...)
+					if err != nil || got.Status != "work_available" || got.Item.Number != 8 || got.PreviousHandoff.Number != 7 || b.claims != 1 {
+						t.Fatalf("reuse replayed empty response: %+v %v", got, err)
+					}
+					if tc.window > 0 && (!strings.Contains(got.ContinuationCommand, "--wait "+tc.window.String()) || !strings.Contains(got.ContinuationCommand, "--poll "+tc.poll.String())) {
+						t.Fatalf("lost options: %s", got.ContinuationCommand)
+					}
+					if tc.options == "--poll=5s" && (!strings.Contains(got.ContinuationCommand, "--poll 5s") || strings.Contains(got.ContinuationCommand, "--wait")) {
+						t.Fatalf("poll enabled waiting: %s", got.ContinuationCommand)
+					}
+				})
+			})
+		}
+	}
+}
+
+func TestVerifiedContinuationPostClaimFailureRequiresKnownRecovery(t *testing.T) {
+	for _, lane := range []string{"implement", "watchdog"} {
+		for _, fault := range []string{"applied round unreadable", "unapplied round", "packet allocation"} {
+			t.Run(lane+fault, func(t *testing.T) {
+				root, b, reference := completedWaitFixture(t, lane)
+				successor := workflow.ImplementationItem{ID: "8", Branch: "widget", State: workflow.Ready}
+				if lane == "watchdog" {
+					successor.State = workflow.AwaitingReview
+					successor.Submission = &workflow.Submission{ID: "12", Head: b.work[0].Submission.Head}
+				}
+				b.work = append(b.work, successor)
+				switch fault {
+				case "applied round unreadable":
+					b.afterRound = func(round workflow.DispatchRound) error {
+						if round.Item == "8" {
+							return errors.New("lost dispatch response")
+						}
+						return nil
+					}
+				case "unapplied round":
+					b.roundWriteError = errors.New("dispatch write unapplied")
+				case "packet allocation":
+					file := filepath.Join(root, "not-a-directory")
+					os.WriteFile(file, []byte("block allocation"), 0600)
+					t.Setenv("TMPDIR", file)
+				}
+				got, err := waitingCLI(t, t.Context(), root, lane, b, "--after", reference, "--wait=1s", "--poll=1ms")
+				if err == nil || got.Status != "" || !b.work[1].Claimed || b.claims != 1 || !strings.Contains(err.Error(), "--item 8") || !strings.Contains(err.Error(), "stop") || !strings.Contains(err.Error(), "resume") {
+					t.Fatalf("uncertain dispatch lacks known recovery: %+v %v claims=%d", got, err, b.claims)
+				}
+				if fault != "packet allocation" {
+					b.afterRound = nil
+					b.roundWriteError = nil
+					got = returnedCLI(t, b, "skl "+lane+" resume --repo '"+root+"' --remote upstream --item 8")
+					if got.Status != "work_available" || len(b.rounds["8"]) != 1 || !b.work[1].Claimed {
+						t.Fatalf("explicit recovery replaced round: %+v %+v", got, b.rounds)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestVerifiedContinuationOperationalFailuresAndCancellation(t *testing.T) {
+	for _, lane := range []string{"implement", "watchdog"} {
+		for _, fault := range []string{"evidence read", "initial selection", "later poll", "cancel before", "cancel waiting"} {
+			t.Run(lane+fault, func(t *testing.T) {
+				root, b, reference := completedWaitFixture(t, lane)
+				synctest.Test(t, func(t *testing.T) {
+					ctx, cancel := context.WithCancel(t.Context())
+					defer cancel()
+					switch fault {
+					case "evidence read":
+						b.roundReadError = errors.New("forge evidence unavailable")
+					case "initial selection":
+						b.observe = func(context.Context) error {
+							if b.reads == 2 {
+								return errors.New("forge selection unavailable")
+							}
+							return nil
+						}
+					case "later poll":
+						b.observe = func(context.Context) error {
+							if b.reads == 3 {
+								return errors.New("forge poll unavailable")
+							}
+							return nil
+						}
+					case "cancel before":
+						cancel()
+					case "cancel waiting":
+						go func() { time.Sleep(5 * time.Second); cancel() }()
+					}
+					before, _ := json.Marshal([]any{b.work, b.rounds})
+					got, err := waitingCLI(t, ctx, root, lane, b, "--after", reference, "--wait=1m", "--poll=10s")
+					after, _ := json.Marshal([]any{b.work, b.rounds})
+					if err == nil || got.Status != "" || b.claims != 0 || !bytes.Equal(before, after) || b.reads > 3 {
+						t.Fatalf("failure became idle/retry: %+v %v reads=%d claims=%d", got, err, b.reads, b.claims)
+					}
+					if fault == "evidence read" && (!strings.Contains(err.Error(), "--item 7") || !strings.Contains(err.Error(), "stop")) {
+						t.Fatalf("evidence error lost recovery: %v", err)
+					}
+				})
+			})
+		}
+	}
+}
+
+type lostDispatchOutput struct{}
+
+func (lostDispatchOutput) Write([]byte) (int, error) { return 0, errors.New("output connection lost") }
+
+func TestContinuationLostResponseRetainsSelectionAndRequiresInspection(t *testing.T) {
+	for _, lane := range []string{"implement", "watchdog"} {
+		for _, available := range []bool{false, true} {
+			t.Run(lane+fmt.Sprint(available), func(t *testing.T) {
+				root, b, reference := completedWaitFixture(t, lane)
+				if available {
+					successor := workflow.ImplementationItem{ID: "8", Branch: "widget", State: workflow.Ready}
+					if lane == "watchdog" {
+						successor.State = workflow.AwaitingReview
+						successor.Submission = &workflow.Submission{ID: "12", Head: b.work[0].Submission.Head}
+					}
+					b.work = append(b.work, successor)
+				}
+				synctest.Test(t, func(t *testing.T) {
+					app := newApp(func(github.RepositoryID) (setup.Backend, error) { return b, nil }, nil, lostDispatchOutput{}, &bytes.Buffer{})
+					err := app.Run([]string{"skl", lane, "next", "--repo", root, "--remote", "upstream", "--after", reference, "--wait=1s"})
+					want := 0
+					if available {
+						want = 1
+					}
+					if err == nil || !strings.Contains(err.Error(), "stop") || b.claims != want || available && !b.work[1].Claimed {
+						t.Fatalf("lost response replayed or abandoned: %v claims=%d", err, b.claims)
+					}
+					if available && !strings.Contains(err.Error(), "--item 8") {
+						t.Fatalf("known successor lost: %v", err)
+					}
+				})
+			})
+		}
+	}
+}
+
+func TestNextHelpRequiresStopOnAmbiguousResponses(t *testing.T) {
+	for _, lane := range []string{"implement", "watchdog"} {
+		var output bytes.Buffer
+		app := newApp(func(github.RepositoryID) (setup.Backend, error) { t.Fatal("help reached backend"); return nil, nil }, nil, &output, &output)
+		if err := app.Run([]string{"skl", lane, "next", "--help"}); err != nil {
+			t.Fatal(err)
+		}
+		for _, wanted := range []string{"stop", "inspect", "resume", "next --after", "idle_timeout"} {
+			if !strings.Contains(output.String(), wanted) {
+				t.Fatalf("help lacks %s: %s", wanted, &output)
+			}
+		}
+	}
+}
+
+func TestVerifiedContinuationClaimsNewlyEligibleWorkDuringWaiting(t *testing.T) {
+	for _, lane := range []string{"implement", "watchdog"} {
+		for _, options := range []string{"--wait", "--wait 2m --poll 5s", "--wait 2m --poll=5s"} {
+			t.Run(lane+options, func(t *testing.T) {
+				root, b, reference := completedWaitFixture(t, lane)
+				successor := workflow.ImplementationItem{ID: "8", Branch: "widget", State: workflow.NeedsHuman}
+				state := workflow.Ready
+				if lane == "watchdog" {
+					state = workflow.AwaitingReview
+					successor.Submission = &workflow.Submission{ID: "12", Head: b.work[0].Submission.Head}
+				}
+				b.work = append(b.work, successor)
+				synctest.Test(t, func(t *testing.T) {
+					start := time.Now()
+					b.observe = func(context.Context) error {
+						if b.reads == 2 {
+							time.Sleep(2 * time.Second)
+						}
+						if b.reads == 3 {
+							b.work[1].State = state
+						}
+						return nil
+					}
+					got, err := waitingCLI(t, t.Context(), root, lane, b, append([]string{"--after", reference}, strings.Fields(options)...)...)
+					elapsed := 7 * time.Second
+					if options == "--wait" {
+						elapsed = 32 * time.Second
+					}
+					if err != nil || got.Status != "work_available" || got.Item.Number != 8 || got.PreviousHandoff.Number != 7 || b.claims != 1 || b.reads != 4 || time.Since(start) != elapsed {
+						t.Fatalf("continuation failed to poll current eligibility: %+v %v reads=%d elapsed=%s", got, err, b.reads, time.Since(start))
+					}
+				})
+			})
+		}
 	}
 }

@@ -240,6 +240,23 @@ func prepareDispatch(ctx context.Context, repository github.RepositoryID, item I
 	return *active, reference, nil
 }
 
+func dispatchRecovery(lane DispatchLane, item *ImplementationItem, outcome *ImplementationOutcome, err *error) {
+	if item == nil {
+		return
+	}
+	guidance := fmt.Sprintf("stop; inspect the retained Work Item and explicitly run %s resume --item %s; do not replay next or next --after", lane, item.ID)
+	var violation *InvariantError
+	if errors.As(*err, &violation) {
+		*outcome = ImplementationOutcome{Status: "fix_required", Item: item, Reason: violation.Reason + "; " + guidance}
+		*err = nil
+	} else if *err != nil {
+		*err = fmt.Errorf("%s: %w", guidance, *err)
+	} else if outcome.Status == "fix_required" {
+		outcome.Item = item
+		outcome.Reason += "; " + guidance
+	}
+}
+
 func permitsDispatchOutcome(lane DispatchLane, outcome State) bool {
 	return lane == ImplementLane && slices.Contains([]State{AwaitingReview, NeedsHuman}, outcome) || lane == WatchdogLane && slices.Contains([]State{ReadyForMerge, Rework, NeedsHuman}, outcome)
 }

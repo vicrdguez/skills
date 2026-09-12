@@ -2,14 +2,45 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/vicrdguez/skills/setup"
+	"io"
 	"strings"
 	"time"
 
 	"github.com/urfave/cli/v2"
 	"github.com/vicrdguez/skills/workflow"
 )
+
+const dispatchCallingConvention = "Selection is mutating, not replayable. On a lost or ambiguous response (including idle_timeout), stop; inspect Claims and explicitly resume --item <id>. Never automatically repeat next or next --after. Missing identity requires manual inspection."
+
+func selectionError(lane workflow.DispatchLane, item workflow.WorkItemID, err error) error {
+	recovery := "stop; inspect Claims before explicitly resuming; do not replay next or next --after"
+	if item != "" {
+		recovery = fmt.Sprintf("stop; inspect and explicitly run %s resume --item %s; do not replay next or next --after", lane, item)
+	}
+	return fmt.Errorf("%s: %w", recovery, err)
+}
+
+func writeWorkOutput(stdout io.Writer, outcome workflow.ImplementationOutcome, lane workflow.DispatchLane) error {
+	output, err := setup.PresentImplementation(outcome)
+	if err == nil {
+		err = json.NewEncoder(stdout).Encode(output)
+	}
+	if err != nil && outcome.Dispatch != nil {
+		item := workflow.WorkItemID("")
+		if outcome.Item != nil {
+			item = outcome.Item.ID
+		}
+		return selectionError(lane, item, err)
+	}
+	if err != nil && outcome.PreviousHandoff != nil {
+		return selectionError(lane, "", err)
+	}
+	return err
+}
 
 type stageApp struct{ *cli.App }
 
@@ -126,12 +157,12 @@ func continuedWork(ctx context.Context, root, remote, reference string, lane wor
 			return workflow.ImplementationOutcome{Status: "fix_required", Reason: violation.Reason, Item: &workflow.ImplementationItem{ID: previous.Item}}, nil
 		}
 		if err != nil {
-			return workflow.ImplementationOutcome{}, err
+			return workflow.ImplementationOutcome{}, selectionError(lane, previous.Item, err)
 		}
 	}
 	outcome, err := nextWork(ctx, wait, poll, selectWork)
 	if err != nil {
-		return outcome, err
+		return outcome, selectionError(lane, "", err)
 	}
 	if reference != "" {
 		outcome.PreviousHandoff = &previous

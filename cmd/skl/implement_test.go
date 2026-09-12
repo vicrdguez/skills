@@ -26,6 +26,7 @@ import (
 )
 
 type implementationMemory struct {
+	roundWriteError       error
 	itemReads, roundReads int
 	memoryBackend
 	coordination     []workflow.CoordinationItem
@@ -47,6 +48,9 @@ func (b *implementationMemory) DispatchRounds(_ context.Context, _ github.Reposi
 }
 
 func (b *implementationMemory) RecordDispatchRound(_ context.Context, _ github.RepositoryID, round workflow.DispatchRound) error {
+	if b.roundWriteError != nil {
+		return b.roundWriteError
+	}
 	if b.rounds == nil {
 		b.rounds = make(map[workflow.WorkItemID][]workflow.DispatchRound)
 	}
@@ -1207,6 +1211,7 @@ func TestExplicitEmptyContinuationRefusesBeforeBackend(t *testing.T) {
 
 func TestContinuationRejectsOpaquePauseReceipt(t *testing.T) {
 	root := proposalRepository(t)
+	prepareSlice(t, root, "second")
 	comments := []map[string]any{}
 	labels := []map[string]string{{"name": "ready"}, {"name": "wip"}}
 	reads, writes := 0, 0
@@ -1224,6 +1229,10 @@ func TestContinuationRejectsOpaquePauseReceipt(t *testing.T) {
 				comments = append(comments, p)
 			}
 			json.NewEncoder(w).Encode(comments)
+		case "/repos/acme/widgets/issues":
+			fmt.Fprint(w, `[{"number":7,"title":"first","state":"open","labels":[{"name":"ready"},{"name":"wip"}]},{"number":8,"title":"second","state":"open","labels":[{"name":"ready"}]}]`)
+		case "/repos/acme/widgets/pulls", "/repos/acme/widgets/issues/8/comments", "/repos/acme/widgets/issues/8/dependencies/blocked_by":
+			fmt.Fprint(w, `[]`)
 		case "/repos/acme/widgets/issues/7":
 			json.NewEncoder(w).Encode(map[string]any{"number": 7, "state": "open", "labels": labels})
 		default:
@@ -1755,5 +1764,37 @@ func TestHistoricalContinuationAfterLaterActivity(t *testing.T) {
 				t.Fatalf("historical proof disturbed later activity: %+v before=%s after=%s", got, before, after)
 			}
 		})
+	}
+}
+
+func TestUnappliedCompletionReceiptRecoversOnlyThroughExplicitHandoff(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "widget")
+	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{}}
+	start := implementCLI(t, root, b, "next")
+	body := filepath.Join(start.Packet.Facts.Implementation.ResultDirectory, "submission.md")
+	os.WriteFile(body, []byte("opaque"), 0600)
+	runGit(t, root, "rm", "-r", ".changes/widget")
+	runGit(t, root, "commit", "-m", "retire")
+	b.remoteHeads["widget"] = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	b.afterCompletion = func() { b.roundWriteError = errors.New("receipt unapplied") }
+	var output bytes.Buffer
+	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return b, nil }, nil, &output, &output)
+	if err := app.Run([]string{"skl", "implement", "submit", "--repo", root, "--item", "7", "--body", body}); err == nil {
+		t.Fatal("receipt failure not injected")
+	}
+	b.roundWriteError = nil
+	b.afterCompletion = nil
+	if got := returnedCLI(t, b, start.ContinuationCommand); got.Status != "fix_required" {
+		t.Fatalf("missing receipt continued: %+v", got)
+	}
+	if _, err := os.Stat(body); err != nil {
+		t.Fatal("continuation removed repair prose")
+	}
+	if got := implementCLI(t, root, b, "submit", "--item", "7", "--body", body); got.Status != "awaiting_review" {
+		t.Fatalf("explicit recovery failed: %+v", got)
+	}
+	if got := returnedCLI(t, b, start.ContinuationCommand); got.Status != "no_work" || got.PreviousHandoff == nil {
+		t.Fatalf("explicit handoff failed to recover receipt: %+v", got)
 	}
 }

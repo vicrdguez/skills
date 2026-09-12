@@ -145,8 +145,10 @@ func InspectImplementation(ctx context.Context, root, remote string, id WorkItem
 	return ImplementationOutcome{Status: "fix_required", Reason: "Work Item unavailable; supply its explicit stable --item identity"}, nil
 }
 
-func StartImplementation(ctx context.Context, root, remote string, id WorkItemID, snapshot, reviewedHead string, backend ImplementationBackend) (ImplementationOutcome, error) {
-	remote, err := github.ResolveGitHubRemote(root, remote)
+func StartImplementation(ctx context.Context, root, remote string, id WorkItemID, snapshot, reviewedHead string, backend ImplementationBackend) (outcome ImplementationOutcome, err error) {
+	var selected *ImplementationItem
+	defer func() { dispatchRecovery(ImplementLane, selected, &outcome, &err) }()
+	remote, err = github.ResolveGitHubRemote(root, remote)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
@@ -179,6 +181,7 @@ func StartImplementation(ctx context.Context, root, remote string, id WorkItemID
 				if err != nil || outcome.Status != "" {
 					return outcome, err
 				}
+				selected = &prepared
 				if err := backend.ClaimImplementation(ctx, repository, prepared); err != nil {
 					return ImplementationOutcome{}, err
 				}
@@ -233,6 +236,7 @@ func StartImplementation(ctx context.Context, root, remote string, id WorkItemID
 			return outcome, err
 		}
 		item = prepared
+		selected = &item
 		claimErr := backend.ClaimImplementation(ctx, repository, item)
 		observed, err := backend.ImplementationItems(ctx, repository)
 		if err != nil {

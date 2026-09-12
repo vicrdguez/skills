@@ -9,7 +9,6 @@ import (
 
 	"github.com/urfave/cli/v2"
 	"github.com/vicrdguez/skills/github"
-	"github.com/vicrdguez/skills/setup"
 	"github.com/vicrdguez/skills/workflow"
 )
 
@@ -19,7 +18,7 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 		commands = append(commands, &cli.Command{Name: name,
 			Flags: []cli.Flag{&cli.PathFlag{Name: "repo", Value: "."}, &cli.StringFlag{Name: "remote"}, &cli.IntFlag{Name: "item"}, &cli.PathFlag{Name: "body"}, &cli.PathFlag{Name: "decision"}, &cli.StringFlag{Name: "reason"}, &cli.StringFlag{Name: "target-snapshot"}, &cli.StringFlag{Name: "reviewed-head"}},
 			Action: func(command *cli.Context) error {
-				if command.Int("item") < 0 || command.NArg() != 0 || command.IsSet("after") && (name != "next" || command.IsSet("item") || command.IsSet("target-snapshot") || command.IsSet("reviewed-head")) {
+				if command.Int("item") < 0 || command.NArg() != 0 || command.IsSet("after") && (name != "next" || command.IsSet("item") || command.IsSet("target-snapshot") || command.IsSet("reviewed-head") || command.IsSet("body") || command.IsSet("decision") || command.IsSet("reason")) {
 					return fmt.Errorf("invalid implementation invocation: use flags and a positive Work Item identity")
 				}
 				if command.IsSet("after") && command.String("after") == "" {
@@ -59,15 +58,12 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 					}
 					return err
 				}
-				output, err := setup.PresentImplementation(outcome)
-				if err != nil {
-					return err
-				}
-				return json.NewEncoder(stdout).Encode(output)
+				return writeWorkOutput(stdout, outcome, workflow.ImplementLane)
 			},
 		})
 	}
 	commands[0].Aliases = []string{"start"}
+	commands[0].Description = dispatchCallingConvention
 	commands[0].Flags = append(commands[0].Flags, &cli.StringFlag{Name: "after", Usage: "verify one completed dispatch before selecting again; use once and stop for explicit recovery if the response is uncertain"})
 	commands[0].Flags = append(commands[0].Flags, waitFlags()...)
 	return commands

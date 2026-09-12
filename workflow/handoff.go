@@ -78,6 +78,9 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 	}
 	prior := item.Transition
 	if prior != nil && prior.Completed && prior.Target == target && prior.Directory == directory && prior.Head == head && item.State == target && !item.Claimed {
+		if err := completeDispatch(ctx, repository, item, ImplementLane, target, head, backend); err != nil {
+			return ImplementationOutcome{}, err
+		}
 		if _, err := os.Lstat(filepath.Dir(resultPath)); err == nil {
 			if err := removeResultDirectory(resultPath); err != nil {
 				return ImplementationOutcome{}, err

@@ -12,8 +12,10 @@ import (
 	"github.com/vicrdguez/skills/github"
 )
 
-func StartWatchdog(ctx context.Context, root, remote string, id WorkItemID, backend ImplementationBackend) (ImplementationOutcome, error) {
-	remote, err := github.ResolveGitHubRemote(root, remote)
+func StartWatchdog(ctx context.Context, root, remote string, id WorkItemID, backend ImplementationBackend) (outcome ImplementationOutcome, err error) {
+	var selected *ImplementationItem
+	defer func() { dispatchRecovery(WatchdogLane, selected, &outcome, &err) }()
+	remote, err = github.ResolveGitHubRemote(root, remote)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
@@ -48,6 +50,7 @@ func StartWatchdog(ctx context.Context, root, remote string, id WorkItemID, back
 		submission := *item.Submission
 		submission.ReviewedHead = submission.Head
 		item.Submission = &submission
+		selected = &item
 		if err := backend.ClaimImplementation(ctx, repository, item); err != nil {
 			return ImplementationOutcome{}, err
 		}
