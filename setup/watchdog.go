@@ -64,16 +64,14 @@ func (b *GitHubBackend) CompleteReview(ctx context.Context, item workflow.Implem
 	if err := guard(); err != nil {
 		return err
 	}
+	if err := b.implementationLabelMutation(ctx, repository, submissionNumber, []string{"wip"}, nil, guard); err != nil {
+		return err
+	}
 	if item.Synchronization && target == workflow.Rework {
 		if err := b.publishImplementationMetadata(ctx, repository, itemNumber, implementationMetadata{SynchronizationTarget: item.TargetSnapshot, TargetBranch: item.TargetBranch}); err != nil {
 			return err
 		}
 		if err := b.implementationLabelMutation(ctx, repository, submissionNumber, []string{"sync"}, nil, guard); err != nil {
-			return err
-		}
-	}
-	if target == workflow.NeedsHuman {
-		if err := b.publishImplementationMetadata(ctx, repository, itemNumber, implementationMetadata{ResumeState: item.ResumeState}); err != nil {
 			return err
 		}
 	}
@@ -118,8 +116,6 @@ func (b *GitHubBackend) ReviewSubmission(ctx context.Context, id workflow.Submis
 		}
 	}
 	labels := map[string]bool{}
-	latest := ""
-	synchronizing := false
 	claimAcquiredAt := ""
 	claimAmbiguous := false
 	for page := 1; ; page++ {
@@ -147,34 +143,13 @@ func (b *GitHubBackend) ReviewSubmission(ctx context.Context, id workflow.Submis
 				}
 			}
 			labels[event.Label.Name] = event.Event == "labeled"
-			if event.Event == "labeled" && (event.Label.Name == "review" || event.Label.Name == "rework" || event.Label.Name == "done" || event.Label.Name == "needs-human") {
-				// A conflicting pass retry can add rework before its claimed review is removed.
-				synchronizing = event.Label.Name == "rework" && latest == "done" && labels["done"] && labels["sync"] && (!labels["review"] || labels["wip"]) && !labels["needs-human"] && !labels["ready"]
-				latest = event.Label.Name
-			}
 		}
 		if len(events) < 100 {
 			break
 		}
 	}
-	current := map[string]bool{}
-	states := 0
-	for _, label := range pull.Labels {
-		current[label.Name] = true
-		if label.Name == "review" || label.Name == "rework" || label.Name == "done" || label.Name == "needs-human" || label.Name == "ready" {
-			states++
-		}
-	}
-	if current["review"] && states == 2 && current[latest] && latest != "review" && latest != "ready" {
-		result.PendingReview = map[string]workflow.State{"rework": workflow.Rework, "done": workflow.ReadyForMerge, "needs-human": workflow.NeedsHuman}[latest]
-		result.State = result.PendingReview
-	}
-	if current["review"] && claimed && labels["wip"] && !claimAmbiguous {
+	if claimed && labels["wip"] && !claimAmbiguous {
 		result.ClaimAcquiredAt = claimAcquiredAt
-	}
-	if (states == 2 && !current["review"] || states == 3 && current["review"] && claimed && labels["wip"]) && current["review"] == labels["review"] && current["done"] && current["rework"] && current["sync"] && labels["done"] && labels["rework"] && labels["sync"] && synchronizing {
-		result.PendingReview = workflow.Rework
-		result.State = workflow.Rework
 	}
 	return result, nil
 }

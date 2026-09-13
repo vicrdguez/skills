@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -85,7 +86,7 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 			item = candidate
 		}
 	}
-	if item.Problem != "" || item.Submission == nil || item.State == AwaitingReview && !item.Claimed {
+	if item.Problem != "" && item.Problem != "contradictory lifecycle projections" || item.Submission == nil || item.State == AwaitingReview && !item.Claimed {
 		return ImplementationOutcome{}, Refuse("verdict requires the selected review Claim or an exactly observable fixed-number retry")
 	}
 	checkpoint, err := loadReviewCheckpoint(root, item.Branch)
@@ -230,11 +231,9 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	target := Rework
 	if reviewNumber >= 2 {
 		target = NeedsHuman
-		item.ResumeState = Rework
 	}
 	if verdict == "needs-human" {
 		target = NeedsHuman
-		item.ResumeState = AwaitingReview
 	}
 	if verdict == "pass" {
 		if submission.Mergeability != "mergeable" && submission.Mergeability != "conflicting" {
@@ -257,15 +256,18 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 		}
 		requireMergeable = target == ReadyForMerge
 	}
-	if item.State != AwaitingReview {
-		if item.Claimed && item.Submission.PendingReview == "" {
-			return ImplementationOutcome{}, Refuse("target-only Claim cannot prove it belongs to this review handoff; inspect before replaying the original fixed-number command")
+	if item.State != AwaitingReview || retry && item.Problem == "contradictory lifecycle projections" {
+		if item.Claimed {
+			if !retry || submission.ClaimAcquiredAt == "" || !evidenceMatches || receiptCount != 1 || !claimPrecedesReceipt(submission.ClaimAcquiredAt, receipt.CreatedAt) {
+				return ImplementationOutcome{}, Refuse("target-only Claim cannot prove it belongs to this review handoff; inspect before replaying the original fixed-number command")
+			}
 		}
 		completedEvidence := bodyMatches && reviewEvidenceMatches(item, comments)
 		if item.Claimed && submission.ClaimAcquiredAt != "" {
 			completedEvidence = bodyMatches && reviewEvidenceMatchesForClaim(item, comments, submission.ClaimAcquiredAt)
 		}
 		compatible := verdict == "rework" && (item.State == Rework || item.State == NeedsHuman) || verdict == "needs-human" && item.State == NeedsHuman || verdict == "pass" && (item.State == ReadyForMerge || item.State == Rework && item.Synchronization)
+		compatible = compatible || retry && item.Submission.Lifecycle != nil && slices.Contains(item.Submission.Lifecycle.States, target)
 		compatible = compatible && completedEvidence
 		if !compatible {
 			return ImplementationOutcome{}, Refuse("completed or partial review differs from supplied verdict; restore its exact Result Documents")
@@ -273,7 +275,7 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 		if completedDone {
 			return ImplementationOutcome{Status: string(item.State), Item: &item, Head: head}, guard()
 		}
-		if verdict != "pass" {
+		if verdict != "pass" && item.Problem != "contradictory lifecycle projections" {
 			target = item.State
 		}
 		if !retry {

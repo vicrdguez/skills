@@ -2,7 +2,6 @@ package setup
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -315,10 +314,13 @@ func (b *GitHubBackend) AwaitImplementationReview(ctx context.Context, item work
 	if err := workflow.PermitImplementationReview(implementationLifecycle(issue)); err != nil {
 		return err
 	}
-	if err := b.implementationLabelMutation(ctx, repository, submissionNumber, []string{"review"}, []string{"rework", "wip", "sync"}, guard); err != nil {
+	if err := b.implementationLabelMutation(ctx, repository, submissionNumber, []string{"wip", "review"}, []string{"rework", "sync"}, guard); err != nil {
 		return err
 	}
-	return b.implementationLabelMutation(ctx, repository, itemNumber, nil, []string{"ready", "wip"}, guard)
+	if err := b.implementationLabelMutation(ctx, repository, itemNumber, nil, []string{"ready", "needs-human", "wip"}, guard); err != nil {
+		return err
+	}
+	return b.implementationLabelMutation(ctx, repository, submissionNumber, nil, []string{"wip"}, guard)
 }
 
 func (b *GitHubBackend) PauseImplementation(ctx context.Context, item workflow.ImplementationItem, decision string, guard func() error) error {
@@ -330,52 +332,25 @@ func (b *GitHubBackend) PauseImplementation(ctx context.Context, item workflow.I
 	if err != nil {
 		return err
 	}
-	if err := guard(); err != nil {
-		return err
-	}
-	if err := b.publishImplementationMetadata(ctx, repository, itemNumber, implementationMetadata{ResumeState: item.State}); err != nil {
-		return err
-	}
 	number := itemNumber
 	if item.Submission != nil {
 		number = submissionNumber
 	}
-	if err := b.implementationComment(ctx, repository, number, decision, false); err != nil {
+	if err := b.implementationComment(ctx, repository, number, workflow.OpaqueImplementationDecision(decision), false); err != nil {
 		return err
 	}
 	if item.Submission != nil {
-		if err := b.implementationLabelMutation(ctx, repository, number, []string{"needs-human"}, []string{"review", "rework", "wip"}, guard); err != nil {
+		if err := b.implementationLabelMutation(ctx, repository, number, []string{"wip", "needs-human"}, []string{"review", "rework", "sync"}, guard); err != nil {
 			return err
 		}
 	}
-	return b.implementationLabelMutation(ctx, repository, itemNumber, []string{"needs-human"}, []string{"ready", "wip"}, guard)
-}
-
-func (b *GitHubBackend) RecordImplementationTransition(ctx context.Context, item workflow.ImplementationItem, transition workflow.ImplementationTransition) error {
-	if err := b.requireRepository(); err != nil {
+	if err := b.implementationLabelMutation(ctx, repository, itemNumber, []string{"needs-human"}, []string{"ready", "wip"}, guard); err != nil {
 		return err
 	}
-	repository := b.repository
-	number, err := githubIssueNumber(item.ID)
-	if err != nil {
-		return err
+	if item.Submission != nil {
+		return b.implementationLabelMutation(ctx, repository, submissionNumber, nil, []string{"wip"}, guard)
 	}
-	return b.publishImplementationMetadata(ctx, repository, number, implementationMetadata{Transition: &transition})
-}
-
-func (b *GitHubBackend) RetainImplementationClaim(ctx context.Context, item workflow.ImplementationItem) error {
-	if err := b.requireRepository(); err != nil {
-		return err
-	}
-	repository := b.repository
-	number, submissionNumber, err := githubImplementationNumbers(item)
-	if err != nil {
-		return err
-	}
-	if item.State == workflow.Rework && item.Submission != nil {
-		number = submissionNumber
-	}
-	return b.implementationLabelMutation(ctx, repository, number, []string{"wip"}, nil, nil)
+	return nil
 }
 
 func trustedMetadata(comment skilldist.ReviewComment) bool {
@@ -383,11 +358,9 @@ func trustedMetadata(comment skilldist.ReviewComment) bool {
 }
 
 type implementationMetadata struct {
-	SynchronizationTarget string                             `json:"synchronization_target,omitempty"`
-	Transition            *workflow.ImplementationTransition `json:"transition,omitempty"`
-	TargetSnapshot        string                             `json:"target_snapshot,omitempty"`
-	TargetBranch          string                             `json:"target_branch,omitempty"`
-	ResumeState           workflow.State                     `json:"resume_state,omitempty"`
+	SynchronizationTarget string `json:"synchronization_target,omitempty"`
+	TargetSnapshot        string `json:"target_snapshot,omitempty"`
+	TargetBranch          string `json:"target_branch,omitempty"`
 }
 
 func implementationBranchOwners(issues []githubIssue) map[string]int {
@@ -529,12 +502,11 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 			return nil, err
 		}
 		for _, comment := range comments {
+			if !strings.HasPrefix(comment.Body, "<!-- skl.implement/v1\n") {
+				item.Feedback = append(item.Feedback, comment)
+			}
 			if item.Submission != nil && !strings.HasPrefix(comment.Body, "<!-- skl.implement/v1\n") {
 				item.Submission.Comments = append(item.Submission.Comments, comment)
-			}
-			// The operation identifies opaque prose before that prose is published.
-			if item.Transition != nil && fmt.Sprintf("%x", sha256.Sum256([]byte(comment.Body))) == item.Transition.DecisionDigest {
-				continue
 			}
 			if body, ok := strings.CutPrefix(comment.Body, "<!-- skl.implement/v1\n"); ok && strings.HasSuffix(body, "\n-->") {
 				if !trustedMetadata(comment) {
@@ -558,28 +530,11 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 				if metadata.SynchronizationTarget != "" {
 					item.TargetSnapshot = metadata.SynchronizationTarget
 				}
-				if metadata.ResumeState != "" {
-					item.ResumeState = metadata.ResumeState
-				}
-				if metadata.Transition != nil {
-					item.Transition = metadata.Transition
-				}
 			}
 		}
 		item = workflow.ReconcileImplementation(item)
 		if owners[item.Branch] != issue.Number {
 			item.Problem = "multiple source issues own the conventional branch"
-		}
-		if len(matches) == 1 && (item.Problem == "contradictory lifecycle projections" || item.Problem == "" && item.Claimed && (item.State == workflow.ReadyForMerge || item.State == workflow.NeedsHuman || item.State == workflow.Rework)) && (item.Transition == nil || item.Transition.Completed) {
-			observation, err := b.ReviewSubmission(ctx, item.Submission.ID)
-			if err != nil {
-				return nil, err
-			}
-			if observation.PendingReview != "" && observation.Head == item.Submission.Head && problem == "" {
-				item.Problem = ""
-				item.State = observation.PendingReview
-				item.Submission.PendingReview = observation.PendingReview
-			}
 		}
 		items = append(items, item)
 	}

@@ -20,7 +20,6 @@ type ImplementationOutput struct {
 type implementationItemOutput struct {
 	Synchronization bool
 	Problem         string
-	ResumeState     workflow.State
 	Submission      *submissionOutput
 	Branch          string
 	TargetSnapshot  string
@@ -30,22 +29,20 @@ type implementationItemOutput struct {
 	CreatedAt       string
 	Claimed         bool
 	Blockers        []int
-	Transition      *workflow.ImplementationTransition
 }
 
 type submissionOutput struct {
-	PendingReview workflow.State
-	Merged        bool
-	Mergeability  string
-	CreatedAt     string
-	State         workflow.State
-	Claimed       bool
-	Number        int
-	Head          string
-	Base          string
-	Body          string
-	Draft         bool
-	Comments      []skilldist.ReviewComment
+	Merged       bool
+	Mergeability string
+	CreatedAt    string
+	State        workflow.State
+	Claimed      bool
+	Number       int
+	Head         string
+	Base         string
+	Body         string
+	Draft        bool
+	Comments     []skilldist.ReviewComment
 }
 
 type StatusOutput struct {
@@ -56,9 +53,9 @@ type StatusOutput struct {
 
 func presentItem(item workflow.ImplementationItem) (implementationItemOutput, error) {
 	output := implementationItemOutput{
-		Synchronization: item.Synchronization, Problem: item.Problem, ResumeState: item.ResumeState,
+		Synchronization: item.Synchronization, Problem: item.Problem,
 		Branch: item.Branch, TargetSnapshot: item.TargetSnapshot, TargetBranch: item.TargetBranch,
-		State: item.State, CreatedAt: item.CreatedAt, Claimed: item.Claimed, Transition: item.Transition,
+		State: item.State, CreatedAt: item.CreatedAt, Claimed: item.Claimed,
 	}
 	var err error
 	if item.ID != "" {
@@ -77,7 +74,7 @@ func presentItem(item workflow.ImplementationItem) (implementationItemOutput, er
 	if item.Submission != nil {
 		s := item.Submission
 		output.Submission = &submissionOutput{
-			PendingReview: s.PendingReview, Merged: s.Merged, Mergeability: s.Mergeability,
+			Merged: s.Merged, Mergeability: s.Mergeability,
 			CreatedAt: s.CreatedAt, State: s.State, Claimed: s.Claimed,
 			Head: s.Head, Base: s.Base, Body: s.Body, Draft: s.Draft, Comments: s.Comments,
 		}

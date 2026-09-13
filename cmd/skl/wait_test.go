@@ -513,18 +513,17 @@ func TestNextWaitCanonicalEligibility(t *testing.T) {
 				{ID: "4", State: workflow.AwaitingReview, CreatedAt: "2000"},
 				{ID: "5", State: workflow.AwaitingReview, CreatedAt: "2026"},
 				{ID: "6", State: workflow.Ready, CreatedAt: "1990", Claimed: true},
-				{ID: "7", State: workflow.NeedsHuman, CreatedAt: "1990", ResumeState: workflow.Ready},
+				{ID: "7", State: workflow.NeedsHuman, CreatedAt: "1990"},
 				{ID: "9", State: workflow.ReadyForMerge},
 			}
 			if lane == "watchdog" {
 				work[5].State = workflow.AwaitingReview
-				work[6].ResumeState = workflow.AwaitingReview
 			}
 			for i := range work {
 				item := &work[i]
 				item.Branch = fmt.Sprintf("slice-%s", item.ID)
 				prepareSlice(t, root, item.Branch)
-				if item.State != workflow.Ready && item.ResumeState != workflow.Ready {
+				if item.State != workflow.Ready && !(item.State == workflow.NeedsHuman && lane == "implement") {
 					completeAndRetireSlice(t, root, item.Branch)
 					head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 					number, err := strconv.Atoi(string(item.ID))

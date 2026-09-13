@@ -13,7 +13,7 @@ place before the human approval. It sits between build and the human's merge: a 
  This skill **edits no functional code**: the sole exception is non-functional Debt Marker comments on pass.
  It works on a single unit of work (ticket/PR).
  
- If this packet has Watchdog facts, review that fixed Submission. Otherwise run `skl watchdog next`; `no_work` ends the invocation. Resume an interrupted Claim with `skl watchdog resume --item <number>`. Use the packet's selected remote and conventional worktree, fetching the branch and creating the worktree with ordinary Git if needed. Keep the fixed reviewed head; never rebase or force-push. If startup supplied `--artifact-baseline <full-sha>` or `--artifact-completion <full-sha>`, preserve those exact flags and SHAs on every resume and verdict command for this Work Item; marker-resolved work receives no synthetic override flags.
+ If this packet has Watchdog facts, review that fixed Submission. Otherwise run `skl watchdog next`; `no_work` ends the invocation. Resume an interrupted Claim with `skl watchdog resume --item <number>` and inspect that selected Work Item's Git, historical artifacts, and visible feedback rather than expecting persisted worker progress. Use the packet's selected remote and conventional worktree, fetching the branch and creating the worktree with ordinary Git if needed. Keep the fixed reviewed head; never rebase or force-push. If startup supplied `--artifact-baseline <full-sha>` or `--artifact-completion <full-sha>`, preserve those exact flags and SHAs on every resume and verdict command for this Work Item; marker-resolved work receives no synthetic override flags.
  
  
 ## Verify independently — never on trust
@@ -92,7 +92,7 @@ When verification passes **and** no `BLOCK` or `HUMAN` finding is still active, 
 - Read the historical `intent.md` with `git show <artifact-baseline>:.changes/<slug>/intent.md`. Copy its `Manual verification` section into the PR body verbatim, with every checkbox unchecked, as the human's checklist. You tick nothing in it: by definition those are the checks no agent can run.
 - Keep the retired Implementation Ledger absent; do not restore or archive it.
 
-Write the complete final PR body to the packet's `submission.md`, and submit the packet's semantic command with `--verdict pass --body <absolute-submission.md>`. The engine appends the issue-closing footer and reports `ready_for_merge`, or `rework` for a merge conflict with a fresh Target Snapshot. Ready for Merge leaves the source issue open until GitHub observes the merge. The change now awaits the **human's merge**. The watchdog does not merge.
+Write the complete final PR body to the packet's `submission.md`, and submit the packet's semantic command with `--verdict pass --body <absolute-submission.md>`. The engine appends the issue-closing footer and reports `ready_for_merge`, or `rework` for a merge conflict with a fresh Target Snapshot. A successful verdict may include a cleanup-only warning for retained local files; do not repeat the verdict. Ready for Merge leaves the source issue open until GitHub observes the merge. The change now awaits the **human's merge**. The watchdog does not merge.
 
 
 ## Pause → hand the decision to a human

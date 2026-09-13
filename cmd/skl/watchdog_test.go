@@ -177,7 +177,7 @@ func TestWatchdogPausesSecondFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := watchdogCLI(t, root, b, "submit", "--item", "7", "--review-number", "2", "--reviewed-head", head, "--verdict", "rework", "--summary", summary)
-	if got.Status != "needs_human" || got.Item.Claimed || got.Item.ResumeState != workflow.Rework || got.Item.Submission.Comments[0].Body != "current W1 BLOCK" {
+	if got.Status != "needs_human" || got.Item.Claimed || got.Item.Submission.Comments[0].Body != "current W1 BLOCK" {
 		t.Fatalf("second failure: %#v", got)
 	}
 }
@@ -262,7 +262,7 @@ func TestWatchdogHumanDirectionRequiresExplicitRequeue(t *testing.T) {
 		summary := filepath.Join(t.TempDir(), "summary.md")
 		os.WriteFile(summary, []byte("W1 HUMAN"), 0600)
 		got := watchdogCLI(t, root, b, "submit", "--item", "7", "--reviewed-head", head, "--verdict", "needs-human", "--summary", summary)
-		if got.Status != "needs_human" || got.Item.ResumeState != workflow.AwaitingReview {
+		if got.Status != "needs_human" {
 			t.Fatalf("human verdict: %#v", got)
 		}
 		human := skilldist.ReviewComment{Body: "W1 resolved [no parsing\n", Association: "OWNER"}
@@ -330,9 +330,6 @@ func TestWatchdogPassRetryChecksMergeability(t *testing.T) {
 					body := "opaque final"
 					storedBody := body + "\n\nCloses #7\n"
 					b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.ReadyForMerge, Claimed: claimed, Submission: &workflow.Submission{ID: "11", Head: head, Base: "main", State: workflow.ReadyForMerge, Claimed: claimed, Body: storedBody, Mergeability: "mergeable", ClaimAcquiredAt: "2026-01-01T00:00:01Z", Comments: []skilldist.ReviewComment{{Body: "pass", Commit: head, Verdict: "pass", ReviewNumber: 1, CreatedAt: "2026-01-01T00:00:02Z"}}}}}, remoteHeads: map[string]string{"widget": head, "main": target}}
-					if claimed {
-						b.work[0].Submission.PendingReview = workflow.ReadyForMerge
-					}
 					watchdogCLI(t, root, b, "next")
 					gitDir := strings.TrimSpace(runGitOutput(t, filepath.Join(root, ".worktrees", "widget"), "rev-parse", "--absolute-git-dir"))
 					// Exercise recorded-round replay. A verified done whose checkpoint
@@ -432,7 +429,6 @@ func (b *implementationMemory) CompleteReview(_ context.Context, item workflow.I
 	for i := range b.work {
 		if b.work[i].ID == item.ID {
 			b.work[i] = implementationFixture(b.work[i])
-			b.work[i].ResumeState = item.ResumeState
 			b.work[i].Synchronization = item.Synchronization
 			b.work[i].TargetSnapshot = item.TargetSnapshot
 			b.work[i].TargetBranch = item.TargetBranch
@@ -441,7 +437,6 @@ func (b *implementationMemory) CompleteReview(_ context.Context, item workflow.I
 			}
 			b.work[i].Submission.Lifecycle.States = []workflow.State{target}
 			b.work[i].Submission.Lifecycle.Claimed = false
-			b.work[i].Submission.PendingReview = ""
 			b.work[i].Submission.ClaimAcquiredAt = ""
 			b.work[i] = workflow.ReconcileImplementation(b.work[i])
 		}
