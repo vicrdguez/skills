@@ -671,8 +671,8 @@ func TestGitHubReviewRecoverySourceDeletionFailsUnapplied(t *testing.T) {
 		t.Fatal(err)
 	}
 	items, err = b.ImplementationItems(ctx)
-	if err != nil || len(items) != 1 || items[0].Problem != "" || items[0].Claimed || items[0].State != workflow.ReadyForMerge || sourcePaused || deletes != 2 || !slices.Equal(labels, []string{"done"}) {
-		t.Fatalf("retry incomplete: %#v %v labels=%v paused=%t deletes=%d", items, err, labels, sourcePaused, deletes)
+	if err != nil || len(items) != 1 || items[0].Problem != "" || items[0].Claimed || items[0].State != workflow.ReadyForMerge || sourcePaused || deletes != 2 || !slices.Equal(labels, []string{"done"}) || len(metadata) != 1 {
+		t.Fatalf("retry incomplete: %#v %v labels=%v paused=%t deletes=%d metadata=%v", items, err, labels, sourcePaused, deletes, metadata)
 	}
 }
 
