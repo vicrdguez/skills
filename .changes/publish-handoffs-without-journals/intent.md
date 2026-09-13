@@ -35,20 +35,20 @@ Dependencies: None. Slices 1, 2, 3, and 5 and the separate pending claim-safety 
 
 ## Definition of Done
 
-- [ ] B1 Publish implementation review with release last: new and Rework Submissions become claimable only after verified evidence and complete source cleanup.
-- [ ] B2 Publish implementation pauses with release last: issue-only and draft pauses preserve their evidence and work before releasing Claims, without `resume_state`.
-- [ ] B3 Publish Watchdog verdicts with release last: all verdicts verify required evidence and source cleanup, and any already-landed checkpoint, before release.
-- [ ] B4 Keep destinations nonclaimable when source cleanup fails: every affected producer retains protection and preserves published evidence at each failed cleanup step.
-- [ ] B5 Retry a provable partial handoff forward: retained exact Result Documents and unambiguous source/evidence observations complete missing effects without duplicate publication.
-- [ ] B6 Recognize verified completed unclaimed handoffs: exact evidence and final state produce no-op success without a journal or a second publication.
-- [ ] B7 Refuse changed input during handoff recovery: mismatched bodies, decisions, summaries, or anchors never silently replace already-published evidence.
-- [ ] B8 Preserve a new Claim after an uncertain release: accepted writes with lost responses and failed readbacks cannot cause retry, resume, or status to release a subsequent Claim.
-- [ ] B9 Refuse stale commands at the same SHA: an old command whose tuple is indistinguishable from a later claimed round stops without changing state or adding identity storage.
-- [ ] B10 Report cleanup warnings after verified publication: local cleanup failures leave the successful outcome intact without resubmission, rollback, or `wip` reacquisition.
-- [ ] B11 Stop on unknown or contradictory recovery state: ambiguous direction, missing evidence, and drift cause actionable refusal, not status-driven Claim release.
-- [ ] B12 Recover without transition journals or timeline direction: new commands neither write nor consume retired operation records, while independently owned pin and review policies remain intact.
-- [ ] B13 Keep envelope-shaped decisions opaque: trusted-author decision prose cannot become transition or pin metadata after digest removal, and retained legitimate pins still work.
-- [ ] B14 Resume only the selected Work Item from current evidence: packets direct fresh workers to inspect preserved Git, artifacts, and feedback without a persisted execution cursor or `resume_state`.
+- [x] B1 Publish implementation review with release last: new and Rework Submissions become claimable only after verified evidence and complete source cleanup.
+- [x] B2 Publish implementation pauses with release last: issue-only and draft pauses preserve their evidence and work before releasing Claims, without `resume_state`.
+- [x] B3 Publish Watchdog verdicts with release last: all verdicts verify required evidence and source cleanup, and any already-landed checkpoint, before release.
+- [x] B4 Keep destinations nonclaimable when source cleanup fails: every affected producer retains protection and preserves published evidence at each failed cleanup step.
+- [x] B5 Retry a provable partial handoff forward: retained exact Result Documents and unambiguous source/evidence observations complete missing effects without duplicate publication.
+- [x] B6 Recognize verified completed unclaimed handoffs: exact evidence and final state produce no-op success without a journal or a second publication.
+- [x] B7 Refuse changed input during handoff recovery: mismatched bodies, decisions, summaries, or anchors never silently replace already-published evidence.
+- [x] B8 Preserve a new Claim after an uncertain release: accepted writes with lost responses and failed readbacks cannot cause retry, resume, or status to release a subsequent Claim.
+- [x] B9 Refuse stale commands at the same SHA: an old command whose tuple is indistinguishable from a later claimed round stops without changing state or adding identity storage.
+- [x] B10 Report cleanup warnings after verified publication: local cleanup failures leave the successful outcome intact without resubmission, rollback, or `wip` reacquisition.
+- [x] B11 Stop on unknown or contradictory recovery state: ambiguous direction, missing evidence, and drift cause actionable refusal, not status-driven Claim release.
+- [x] B12 Recover without transition journals or timeline direction: new commands neither write nor consume retired operation records, while independently owned pin and review policies remain intact.
+- [x] B13 Keep envelope-shaped decisions opaque: trusted-author decision prose cannot become transition or pin metadata after digest removal, and retained legitimate pins still work.
+- [x] B14 Resume only the selected Work Item from current evidence: packets direct fresh workers to inspect preserved Git, artifacts, and feedback without a persisted execution cursor or `resume_state`.
 
 ## Manual verification
 
