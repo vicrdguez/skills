@@ -111,9 +111,11 @@ func (b *GitHubBackend) publishImplementationMetadata(ctx context.Context, repos
 	return b.implementationComment(ctx, repository, number, "<!-- skl.implement/v2\n"+string(payload)+"\n-->", true)
 }
 
+const decisionFraming = "<!-- skl.decision/v1 -->\n"
+
 func (b *GitHubBackend) implementationComment(ctx context.Context, repository github.RepositoryID, number int, body string, metadata bool) error {
 	if !metadata {
-		body = "<!-- skl.decision/v1 -->\n" + body
+		body = decisionFraming + body
 	}
 	published := func(comments []skilldist.ReviewComment) bool {
 		if metadata {
@@ -398,6 +400,13 @@ func implementationPayload(body string) (string, bool) {
 	return strings.CutPrefix(body, "<!-- skl.implement/v1\n")
 }
 
+// implementationDocument exposes the opaque Result Document bytes beneath the
+// transport-only decision framing, so exact-document recovery compares authored
+// prose rather than its publication envelope.
+func implementationDocument(body string) string {
+	return strings.TrimPrefix(body, decisionFraming)
+}
+
 // New decisions always have a non-metadata outer prefix, even when their opaque
 // contents are an entire metadata publication. Only legacy v1 transitions need
 // digest-based exclusion. A metadata-shaped unframed decision makes that legacy
@@ -638,7 +647,10 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository gith
 					if err != nil {
 						return nil, err
 					}
-					item.Submission.Comments = append(item.Submission.Comments, comments...)
+					for _, comment := range comments {
+						comment.Body = implementationDocument(comment.Body)
+						item.Submission.Comments = append(item.Submission.Comments, comment)
+					}
 				}
 				for page := 1; ; page++ {
 					var reviews []struct {
@@ -700,6 +712,7 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository gith
 		}
 		for _, comment := range comments {
 			if _, metadata := implementationPayload(comment.Body); item.Submission != nil && !metadata {
+				comment.Body = implementationDocument(comment.Body)
 				item.Submission.Comments = append(item.Submission.Comments, comment)
 			}
 		}
