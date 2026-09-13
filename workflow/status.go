@@ -25,6 +25,9 @@ func ObserveStatus(ctx context.Context, backend ImplementationBackend) (StatusOu
 			outcome.Items[i].State = NeedsHuman
 			continue
 		}
+		// A conflicting pass retry routes to Synchronization Rework, but it is
+		// still an interrupted verdict and must bind recovery to its accepted head.
+		interruptedPass := item.Submission != nil && item.Submission.PendingReview == ReadyForMerge
 		if item.State == ReadyForMerge && item.Submission != nil {
 			if port, ok := backend.(ReviewBackend); ok {
 				current, err := port.ReviewSubmission(ctx, item.Submission.ID)
@@ -65,7 +68,7 @@ func ObserveStatus(ctx context.Context, backend ImplementationBackend) (StatusOu
 				if current.Head != item.Submission.Head || current.Merged {
 					return Refuse("Submission changed during status reconciliation")
 				}
-				if item.Submission.PendingReview == ReadyForMerge {
+				if interruptedPass {
 					accepted := item.Submission.VerdictHead
 					if accepted == "" {
 						accepted = item.Submission.ReviewedHead

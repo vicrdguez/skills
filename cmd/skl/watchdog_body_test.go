@@ -19,14 +19,17 @@ import (
 
 func TestGitHubStatusRefusesPendingPassAtReplacedHead(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		verdict string
-		head    string
-		refused bool
+		name     string
+		verdict  string
+		head     string
+		conflict bool
+		refused  bool
 	}{
-		{"replaced after post-marker pass", "marker", "replacement", true},
-		{"replaced without verdict record", "", "replacement", true},
-		{"post-marker head recovers", "marker", "marker", false},
+		{"replaced after post-marker pass", "marker", "replacement", false, true},
+		{"replaced without verdict record", "", "replacement", false, true},
+		{"replaced conflicting after post-marker pass", "marker", "replacement", true, true},
+		{"conflicting replacement without verdict record", "", "replacement", true, true},
+		{"post-marker head recovers", "marker", "marker", false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			labels := []string{"review", "wip", "done"}
@@ -51,7 +54,7 @@ func TestGitHubStatusRefusesPendingPassAtReplacedHead(t *testing.T) {
 				for _, label := range labels {
 					ls = append(ls, map[string]string{"name": label})
 				}
-				pull := map[string]any{"number": 11, "state": "open", "mergeable": true, "labels": ls, "head": map[string]any{"ref": "widget", "sha": tc.head, "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": "main"}}
+				pull := map[string]any{"number": 11, "state": "open", "mergeable": !tc.conflict, "labels": ls, "head": map[string]any{"ref": "widget", "sha": tc.head, "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": "main"}}
 				var result any = []any{}
 				switch {
 				case path == "/issues" && r.Method == http.MethodGet:
@@ -70,6 +73,8 @@ func TestGitHubStatusRefusesPendingPassAtReplacedHead(t *testing.T) {
 						metadata = append(metadata, payload)
 					}
 					result = metadata
+				case path == "/git/ref/heads/main" && r.Method == http.MethodGet:
+					result = map[string]any{"object": map[string]string{"sha": "target"}}
 				case path == "/issues/11/timeline" && r.Method == http.MethodGet:
 					result = events
 				case path == "/issues/11/labels" && r.Method == http.MethodPost:
