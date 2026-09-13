@@ -578,6 +578,35 @@ func TestGitHubImplementationRejectsForeignAttachmentsAndConflictingMetadata(t *
 	}
 }
 
+func TestGitHubObservationDecodesPublicationsWithoutAlteringInlineFindings(t *testing.T) {
+	summary := "<!-- skl.decision/v1 -->\n## Summary\n"
+	inline := "<!-- skl.decision/v1 -->\nW1 inline\n"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/acme/widgets/issues":
+			fmt.Fprint(w, `[{"number":7,"title":"widget","state":"open"}]`)
+		case "/repos/acme/widgets/pulls":
+			fmt.Fprint(w, `[{"number":11,"state":"open","labels":[{"name":"review"}],"head":{"sha":"fixed","ref":"widget","repo":{"full_name":"acme/widgets"}}}]`)
+		case "/repos/acme/widgets/issues/11/comments":
+			json.NewEncoder(w).Encode([]map[string]any{{"body": summary, "author_association": "OWNER"}})
+		case "/repos/acme/widgets/pulls/11/comments":
+			json.NewEncoder(w).Encode([]map[string]any{{"body": inline, "path": "main.go", "line": 12, "side": "RIGHT", "commit_id": "fixed", "author_association": "OWNER"}})
+		default:
+			fmt.Fprint(w, `[]`)
+		}
+	}))
+	defer server.Close()
+	b := NewGitHubBackend(server.URL, "token", server.Client())
+	items, err := b.ImplementationItems(context.Background(), github.RepositoryID{Owner: "acme", Name: "widgets"})
+	if err != nil || len(items) != 1 {
+		t.Fatalf("items: %#v %v", items, err)
+	}
+	comments := items[0].Submission.Comments
+	if len(comments) != 2 || comments[0].Body != "## Summary\n" || comments[1].Body != inline || comments[1].Path != "main.go" {
+		t.Fatalf("observation altered documents: %#v", comments)
+	}
+}
+
 func TestGitHubDispatchWriterRejectsMissingObligationBeforePublication(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests++; fmt.Fprint(w, `[]`) }))

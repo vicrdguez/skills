@@ -642,13 +642,23 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository gith
 				item.State = workflow.Superseded
 			}
 			if item.State == workflow.Rework || item.State == workflow.AwaitingReview || item.State == workflow.NeedsHuman || item.State == workflow.ReadyForMerge {
-				for _, stream := range []string{fmt.Sprintf("/issues/%d/comments", pull.Number), fmt.Sprintf("/pulls/%d/comments", pull.Number)} {
-					comments, err := b.implementationComments(ctx, repository, stream)
+				// Only issue-level publications carry the transport framing;
+				// inline findings are posted and observed as authored bytes.
+				for _, stream := range []struct {
+					path   string
+					framed bool
+				}{
+					{fmt.Sprintf("/issues/%d/comments", pull.Number), true},
+					{fmt.Sprintf("/pulls/%d/comments", pull.Number), false},
+				} {
+					comments, err := b.implementationComments(ctx, repository, stream.path)
 					if err != nil {
 						return nil, err
 					}
 					for _, comment := range comments {
-						comment.Body = implementationDocument(comment.Body)
+						if stream.framed {
+							comment.Body = implementationDocument(comment.Body)
+						}
 						item.Submission.Comments = append(item.Submission.Comments, comment)
 					}
 				}
