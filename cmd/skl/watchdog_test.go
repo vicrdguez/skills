@@ -726,3 +726,49 @@ func TestWatchdogOrdersEligibleSubmissionsDespiteUnrelatedItems(t *testing.T) {
 		t.Fatalf("not oldest eligible Submission: %#v", got)
 	}
 }
+
+func TestWatchdogSynchronizationHandoffReadsBackAfterOriginalPin(t *testing.T) {
+	f := newReviewFixture(t)
+	original := strings.TrimSpace(runGitOutput(t, f.root, "rev-parse", "main"))
+	runGit(t, f.root, "commit", "--allow-empty", "-m", "advance target for synchronization handoff")
+	advanced := strings.TrimSpace(runGitOutput(t, f.root, "rev-parse", "main"))
+	f.forge.labels = []string{"review", "wip"}
+	f.forge.sourceComments = []map[string]any{{
+		"author_association": "OWNER",
+		"body":               fmt.Sprintf("<!-- skl.implement/v2\n{\"target_snapshot\":%q,\"target_branch\":\"main\"}\n-->", original),
+	}}
+	backend := setup.NewGitHubBackend(f.server.URL, "token", f.server.Client())
+	backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
+	items, err := backend.ImplementationItems(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var item workflow.ImplementationItem
+	for _, candidate := range items {
+		if candidate.ID == "7" {
+			item = candidate
+		}
+	}
+	if item.Problem != "" || !item.Claimed || item.TargetSnapshot != original || item.Synchronization {
+		t.Fatalf("original pin readback: %#v", item)
+	}
+	item.Synchronization, item.TargetSnapshot, item.TargetBranch = true, advanced, "main"
+	if err := backend.CompleteReview(t.Context(), item, workflow.Rework, func() error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	fresh := setup.NewGitHubBackend(f.server.URL, "token", f.server.Client())
+	fresh.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
+	items, err = fresh.ImplementationItems(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got workflow.ImplementationItem
+	for _, candidate := range items {
+		if candidate.ID == "7" {
+			got = candidate
+		}
+	}
+	if got.Problem != "" || got.State != workflow.Rework || !got.Synchronization || got.Claimed || got.TargetSnapshot != advanced || got.TargetBranch != "main" {
+		t.Fatalf("synchronization handoff readback: %#v", got)
+	}
+}

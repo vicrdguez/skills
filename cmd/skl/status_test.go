@@ -134,6 +134,21 @@ func TestStatusPreservesPersistedSynchronizationTargetAcrossRetry(t *testing.T) 
 	}
 }
 
+func TestStatusFirstDiversionPinsCurrentTarget(t *testing.T) {
+	root := proposalRepository(t)
+	original := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "main"))
+	runGit(t, root, "commit", "--allow-empty", "-m", "advance target before first synchronization")
+	advanced := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	b := &implementationMemory{work: []workflow.ImplementationItem{{
+		ID: "7", Branch: "widget", State: workflow.ReadyForMerge, TargetBranch: "main", TargetSnapshot: original,
+		Submission: &workflow.Submission{ID: "11", Head: "fixed", Base: "main", Mergeability: "conflicting"},
+	}}, remoteHeads: map[string]string{"main": advanced}}
+	got := statusCLI(t, root, b).Items[0]
+	if got.State != workflow.Rework || !got.Synchronization || got.TargetSnapshot != advanced || got.TargetBranch != "main" || got.Claimed {
+		t.Fatalf("first diversion at %s kept original pin %s: %#v", advanced, original, got)
+	}
+}
+
 func TestStatusReturnsStructuredRepairableRefusal(t *testing.T) {
 	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.ReadyForMerge, Submission: &workflow.Submission{ID: "11", Head: "fixed", Base: "main", Mergeability: "conflicting"}}}}
 	var output bytes.Buffer

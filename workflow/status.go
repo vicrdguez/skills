@@ -38,9 +38,12 @@ func ObserveStatus(ctx context.Context, backend ImplementationBackend) (StatusOu
 					continue
 				}
 				if current.Head == item.Submission.Head && current.Mergeability == "conflicting" {
+					// A first diversion pins the current target; a retry of an
+					// established synchronization obligation keeps its recorded pin.
+					established := item.Synchronization && item.TargetSnapshot != ""
 					item.Synchronization = true
 					item.TargetBranch = current.Base
-					if item.TargetSnapshot == "" {
+					if !established {
 						item.TargetSnapshot, err = backend.ImplementationHead(ctx, current.Base)
 						if err != nil {
 							return StatusOutcome{}, err

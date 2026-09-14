@@ -731,6 +731,7 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 				item.Submission.Comments = append(item.Submission.Comments, comment)
 			}
 		}
+		originalTarget, synchronizationTarget := "", ""
 		for _, comment := range implementationEvidence(comments) {
 			if body, ok := implementationPayload(comment.Body); ok && strings.HasSuffix(body, "\n-->") {
 				if !trustedMetadata(comment) {
@@ -742,21 +743,25 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 					continue
 				}
 				if metadata.TargetSnapshot != "" {
-					if item.TargetSnapshot != "" && item.TargetSnapshot != metadata.TargetSnapshot {
+					if metadata.TargetSnapshot == synchronizationTarget {
+						// A Claim republishes the established synchronization pin under the
+						// original field; it does not restate the original obligation.
+					} else if originalTarget != "" && originalTarget != metadata.TargetSnapshot {
 						item.Problem = "conflicting Target Snapshot metadata"
 						continue
+					} else {
+						originalTarget = metadata.TargetSnapshot
 					}
-					item.TargetSnapshot = metadata.TargetSnapshot
 				}
 				if metadata.TargetBranch != "" {
 					item.TargetBranch = metadata.TargetBranch
 				}
 				if metadata.SynchronizationTarget != "" {
-					if item.TargetSnapshot != "" && item.TargetSnapshot != metadata.SynchronizationTarget {
+					if synchronizationTarget != "" && synchronizationTarget != metadata.SynchronizationTarget {
 						item.Problem = "conflicting Synchronization Target metadata"
 						continue
 					}
-					item.TargetSnapshot = metadata.SynchronizationTarget
+					synchronizationTarget = metadata.SynchronizationTarget
 				}
 				if metadata.ReviewedHead != "" && item.Submission != nil && metadata.ReviewRoundHead == item.Submission.Head {
 					item.Submission.PreviousReviewedHead = metadata.ReviewedHead
@@ -768,6 +773,13 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 					item.Transition = metadata.Transition
 				}
 			}
+		}
+		// The synchronization obligation supersedes the original implementation pin;
+		// the two remain distinct historical facts, not contradictory copies.
+		if synchronizationTarget != "" {
+			item.TargetSnapshot = synchronizationTarget
+		} else if originalTarget != "" {
+			item.TargetSnapshot = originalTarget
 		}
 		// A Rework push changes the Submission head, not the active round's
 		// fixed reviewed obligation. Legacy metadata remains head-scoped.

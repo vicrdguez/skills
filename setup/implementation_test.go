@@ -584,6 +584,54 @@ func TestGitHubImplementationRejectsForeignAttachmentsAndConflictingMetadata(t *
 	}
 }
 
+func TestGitHubImplementationSeparatesOriginalAndSynchronizationObligations(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		pins    []string
+		target  string
+		problem string
+	}{
+		{"original pin then new synchronization obligation", []string{`{"target_snapshot":"original"}`, `{"synchronization_target":"advanced"}`}, "advanced", ""},
+		{"synchronization retry republishes the established pin", []string{`{"target_snapshot":"original"}`, `{"synchronization_target":"advanced"}`, `{"synchronization_target":"advanced"}`}, "advanced", ""},
+		{"contradictory synchronization retries refuse", []string{`{"synchronization_target":"advanced"}`, `{"synchronization_target":"replacement"}`}, "", "conflicting Synchronization Target metadata"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/repos/acme/widgets/issues":
+					fmt.Fprint(w, `[{"number":7,"title":"widget","state":"open"}]`)
+				case "/repos/acme/widgets/pulls":
+					fmt.Fprint(w, `[{"number":11,"state":"open","head":{"ref":"widget","sha":"fixed","repo":{"full_name":"acme/widgets"}},"base":{"ref":"main"},"labels":[{"name":"rework"},{"name":"sync"}]}]`)
+				case "/repos/acme/widgets/issues/7/comments":
+					comments := []map[string]string{}
+					for _, pin := range tc.pins {
+						comments = append(comments, map[string]string{"author_association": "OWNER", "body": "<!-- skl.implement/v1\n" + pin + "\n-->"})
+					}
+					json.NewEncoder(w).Encode(comments)
+				default:
+					fmt.Fprint(w, `[]`)
+				}
+			}))
+			defer server.Close()
+			b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
+			items, err := b.ImplementationItems(context.Background())
+			if err != nil || len(items) != 1 {
+				t.Fatalf("items = %#v %v", items, err)
+			}
+			item := items[0]
+			if tc.problem != "" {
+				if !strings.Contains(item.Problem, tc.problem) {
+					t.Fatalf("contradictory obligation accepted: %#v", item)
+				}
+				return
+			}
+			if item.Problem != "" || item.TargetSnapshot != tc.target || !item.Synchronization {
+				t.Fatalf("legitimate obligation history rejected: %#v", item)
+			}
+		})
+	}
+}
+
 func TestGitHubObservationDecodesPublicationsWithoutAlteringInlineFindings(t *testing.T) {
 	summary := "<!-- skl.decision/v1 -->\n## Summary\n"
 	inline := "<!-- skl.decision/v1 -->\nW1 inline\n"
