@@ -38,8 +38,6 @@ type submissionOutput struct {
 	Merged        bool
 	Mergeability  string
 	CreatedAt     string
-	ReviewedHead  string
-	VerdictHead   string
 	State         workflow.State
 	Claimed       bool
 	Number        int
@@ -80,7 +78,7 @@ func presentItem(item workflow.ImplementationItem) (implementationItemOutput, er
 		s := item.Submission
 		output.Submission = &submissionOutput{
 			PendingReview: s.PendingReview, Merged: s.Merged, Mergeability: s.Mergeability,
-			CreatedAt: s.CreatedAt, ReviewedHead: s.ReviewedHead, VerdictHead: s.VerdictHead, State: s.State, Claimed: s.Claimed,
+			CreatedAt: s.CreatedAt, State: s.State, Claimed: s.Claimed,
 			Head: s.Head, Base: s.Base, Body: s.Body, Draft: s.Draft, Comments: s.Comments,
 		}
 		if item.Submission.ID != "" {
