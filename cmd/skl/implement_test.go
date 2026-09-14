@@ -3070,7 +3070,16 @@ func TestHistoricalContinuationAfterLaterActivity(t *testing.T) {
 			original := initial
 			lane := "implement"
 			if activity == "human requeue" {
-				b.work[0].State = workflow.Ready
+				requeued := implementationFixture(b.work[0])
+				requeued.Source.States = []workflow.State{workflow.Ready}
+				b.work[0] = workflow.ReconcileImplementation(requeued)
+				observed, err := b.ImplementationItems(context.Background())
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(observed) != 1 || observed[0].State != workflow.Ready || observed[0].Claimed || observed[0].Problem != "" || len(b.rounds["7"]) != 1 || b.rounds["7"][0].Outcome != workflow.NeedsHuman {
+					t.Fatalf("human requeue did not establish a claimable Ready source: %#v rounds=%#v", observed, b.rounds["7"])
+				}
 			} else {
 				watch := watchdogCLI(t, root, b, "next")
 				if activity != "Watchdog Claim" {
