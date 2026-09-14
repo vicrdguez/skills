@@ -52,6 +52,8 @@ type Submission struct {
 	Merged          bool
 	Mergeability    string
 	CreatedAt       string
+	ReviewedHead    string
+	VerdictHead     string
 	State           State
 	Claimed         bool
 	ID              SubmissionID
@@ -163,7 +165,7 @@ func ReconcileImplementation(item ImplementationItem) ImplementationItem {
 		}
 	}
 	if !item.Source.Open && item.State != Merged && item.State != ReadyForMerge && item.State != Superseded && (item.Problem == "" || item.Problem == "contradictory lifecycle projections" || item.Problem == "source Ready contradicts Submission lifecycle") {
-		item.Problem = "source issue is closed without a merged Submission"
+		item.Problem = "source is closed without a merged Submission"
 	}
 	if transition := item.Transition; transition != nil && !transition.Completed {
 		allowed := func(observation *LifecycleObservation, states []State) bool {

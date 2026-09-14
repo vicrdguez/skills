@@ -318,7 +318,7 @@ func (b *GitHubBackend) AwaitImplementationReview(ctx context.Context, item work
 	if err := b.implementationLabelMutation(ctx, repository, submissionNumber, []string{"review"}, []string{"rework", "wip", "sync"}, guard); err != nil {
 		return err
 	}
-	return b.implementationLabelMutation(ctx, repository, itemNumber, nil, []string{"ready", "wip"}, guard)
+	return b.implementationLabelMutation(ctx, repository, itemNumber, nil, []string{"ready", "wip", "needs-human"}, guard)
 }
 
 func (b *GitHubBackend) PauseImplementation(ctx context.Context, item workflow.ImplementationItem, decision string, guard func() error) error {
@@ -384,6 +384,8 @@ func trustedMetadata(comment skilldist.ReviewComment) bool {
 
 type implementationMetadata struct {
 	SynchronizationTarget string                             `json:"synchronization_target,omitempty"`
+	ReviewedHead          string                             `json:"watchdog_head,omitempty"`
+	VerdictHead           string                             `json:"verdict_head,omitempty"`
 	Transition            *workflow.ImplementationTransition `json:"transition,omitempty"`
 	TargetSnapshot        string                             `json:"target_snapshot,omitempty"`
 	TargetBranch          string                             `json:"target_branch,omitempty"`
@@ -560,6 +562,12 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 				}
 				if metadata.ResumeState != "" {
 					item.ResumeState = metadata.ResumeState
+				}
+				if metadata.ReviewedHead != "" && item.Submission != nil {
+					item.Submission.ReviewedHead = metadata.ReviewedHead
+				}
+				if metadata.VerdictHead != "" && item.Submission != nil {
+					item.Submission.VerdictHead = metadata.VerdictHead
 				}
 				if metadata.Transition != nil {
 					item.Transition = metadata.Transition
