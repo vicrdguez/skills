@@ -234,9 +234,6 @@ func (b *GitHubBackend) PublishImplementation(ctx context.Context, repository gi
 	if len(matches) == 0 && wanted.ID != "" {
 		return workflow.Submission{}, workflow.Refuse("existing Submission disappeared; repair its attachment")
 	}
-	if len(matches) == 1 && matches[0].Base.Ref != "main" {
-		return workflow.Submission{}, workflow.Refuse("existing Submission " + strconv.Itoa(matches[0].Number) + " targets " + matches[0].Base.Ref + "; inspect it and explicitly repair its base to main before retrying")
-	}
 	var pull githubPull
 	var writeErr error
 	if len(matches) == 0 {
@@ -254,6 +251,10 @@ func (b *GitHubBackend) PublishImplementation(ctx context.Context, repository gi
 		}
 	} else {
 		pull = matches[0]
+	}
+	// A recovered or already known non-main Submission must be refused before any further edit.
+	if err := workflow.RefuseNonMainBase(workflow.SubmissionID(strconv.Itoa(pull.Number)), pull.Base.Ref); err != nil {
+		return workflow.Submission{}, err
 	}
 	if pull.Head.Ref != item.Branch || !strings.EqualFold(pull.Head.Repo.FullName, repository.Owner+"/"+repository.Name) || pull.Head.SHA != wanted.Head || pull.State == "closed" {
 		return workflow.Submission{}, workflow.Refuse("Submission head or state changed during publication; inspect and retry at a pushed fixed head")

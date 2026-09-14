@@ -934,3 +934,153 @@ func TestStatusRefusesRetargetedPartialHandoffThroughGitHub(t *testing.T) {
 	}
 }
 
+func TestSubmitRefusesRecoveredNonMainSubmissionThroughGitHub(t *testing.T) {
+	root := proposalRepository(t)
+	baseline := prepareSlice(t, root, "widget")
+	sourceLabels := []string{"ready"}
+	pullLabels := []string{"review", "wip"}
+	branchHead := baseline
+	prBody := "human body"
+	draft := true
+	created := false
+	patched := false
+	draftMutations := 0
+	unwanted := ""
+	metadata := []map[string]any{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets")
+		toLabels := func(values []string) []map[string]string {
+			labels := make([]map[string]string, 0, len(values))
+			for _, value := range values {
+				labels = append(labels, map[string]string{"name": value})
+			}
+			return labels
+		}
+		source := map[string]any{"number": 7, "title": "widget", "state": "open", "labels": toLabels(sourceLabels)}
+		pull := map[string]any{"number": 11, "node_id": "PR_node", "state": "open", "draft": draft, "body": prBody, "labels": toLabels(pullLabels), "head": map[string]any{"ref": "widget", "sha": branchHead, "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": "release"}}
+		var result any = []any{}
+		switch {
+		case path == "/issues":
+			result = []any{source}
+		case path == "/pulls":
+			switch {
+			case r.Method == http.MethodPost:
+				// The create lands a fixed-head PR but its response is lost.
+				created = true
+				http.Error(w, "ambiguous create response", http.StatusInternalServerError)
+				return
+			case r.URL.Query().Get("head") != "" && !created:
+			case created:
+				result = []any{pull}
+			}
+		case path == "/issues/7/dependencies/blocked_by", path == "/issues/11/comments", path == "/pulls/11/comments", path == "/pulls/11/reviews", path == "/issues/11/timeline":
+		case path == "/issues/7":
+			result = source
+		case path == "/issues/7/comments":
+			if r.Method == http.MethodPost {
+				var comment map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&comment); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				comment["author_association"] = "OWNER"
+				metadata = append(metadata, comment)
+			}
+			result = metadata
+		case path == "/issues/7/labels" && r.Method == http.MethodPost:
+			var payload struct{ Labels []string }
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			for _, label := range payload.Labels {
+				if !slices.Contains(sourceLabels, label) {
+					sourceLabels = append(sourceLabels, label)
+				}
+			}
+		case strings.HasPrefix(path, "/issues/7/labels/") && r.Method == http.MethodDelete:
+			label := strings.TrimPrefix(path, "/issues/7/labels/")
+			sourceLabels = slices.DeleteFunc(sourceLabels, func(value string) bool { return value == label })
+		case path == "/git/ref/heads/widget":
+			result = map[string]any{"object": map[string]string{"sha": branchHead}}
+		case path == "/pulls/11" && r.Method == http.MethodPatch:
+			patched = true
+			var payload map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			prBody = payload["body"]
+		case path == "/pulls/11", path == "/issues/11":
+			result = pull
+		case path == "/issues/11/labels" && r.Method == http.MethodPost:
+			var payload struct{ Labels []string }
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			for _, label := range payload.Labels {
+				if !slices.Contains(pullLabels, label) {
+					pullLabels = append(pullLabels, label)
+				}
+			}
+		case strings.HasPrefix(path, "/issues/11/labels/") && r.Method == http.MethodDelete:
+			label := strings.TrimPrefix(path, "/issues/11/labels/")
+			pullLabels = slices.DeleteFunc(pullLabels, func(value string) bool { return value == label })
+		case path == "/graphql":
+			draftMutations++
+			draft = false
+			result = map[string]any{"data": map[string]any{}}
+		case path == "/git/ref/heads/main" || strings.Contains(path, "target"):
+			unwanted = r.Method + " " + path
+			http.Error(w, "integration target unavailable", http.StatusInternalServerError)
+			return
+		default:
+			unwanted = r.Method + " " + path
+			http.Error(w, "unexpected request", http.StatusNotFound)
+			return
+		}
+		json.NewEncoder(w).Encode(result)
+	}))
+	defer server.Close()
+	run := func(args ...string) ([]byte, error) {
+		t.Helper()
+		var output bytes.Buffer
+		app := newApp(func(github.RepositoryID) (setup.Backend, error) {
+			return setup.NewGitHubBackend(server.URL, "token", server.Client()), nil
+		}, bytes.NewReader(nil), &output, &output)
+		command := append([]string{"skl"}, args...)
+		command = append(command, "--repo", root)
+		err := app.Run(command)
+		return slices.Clone(output.Bytes()), err
+	}
+	mustRun := func(args ...string) []byte {
+		t.Helper()
+		output, err := run(args...)
+		if err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, output)
+		}
+		return output
+	}
+	var start setup.ImplementationOutput
+	if err := json.Unmarshal(mustRun("implement", "next"), &start); err != nil || start.Packet == nil {
+		t.Fatalf("start: %#v, %v", start, err)
+	}
+	directory := start.Packet.Facts.Implementation.ResultDirectory
+	t.Cleanup(func() { os.RemoveAll(directory) })
+	body := filepath.Join(directory, "submission.md")
+	if err := os.WriteFile(body, []byte("candidate"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "rm", "-r", ".changes/widget")
+	runGit(t, root, "commit", "-m", "retire")
+	branchHead = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	var result setup.ImplementationOutput
+	if err := json.Unmarshal(mustRun("implement", "submit", "--item", "7", "--body", body), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "fix_required" || !strings.Contains(result.Reason, "release") || !strings.Contains(result.Reason, "main") || patched || draftMutations != 0 || prBody != "human body" || !draft || !slices.Contains(pullLabels, "wip") || !slices.Contains(sourceLabels, "wip") || unwanted != "" {
+		t.Fatalf("recovered non-main Submission: %#v patched=%t draft=%d body=%q/%t pull=%v source=%v unwanted=%q", result, patched, draftMutations, prBody, draft, pullLabels, sourceLabels, unwanted)
+	}
+}
+
