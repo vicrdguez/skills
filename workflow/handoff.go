@@ -9,30 +9,24 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-
-	"github.com/vicrdguez/skills/github"
 )
 
-func SubmitImplementation(ctx context.Context, root, remote string, id WorkItemID, bodyPath string, backend ImplementationBackend) (ImplementationOutcome, error) {
+func SubmitImplementation(ctx context.Context, root, remote string, id WorkItemID, bodyPath string, endpoints ArtifactEndpoints, backend ImplementationBackend) (ImplementationOutcome, error) {
 	if id == "" || bodyPath == "" {
 		return ImplementationOutcome{}, errors.New("submit requires --item and --body")
 	}
-	return handoffImplementation(ctx, root, remote, id, AwaitingReview, "", bodyPath, backend)
+	return handoffImplementation(ctx, root, remote, id, AwaitingReview, "", bodyPath, endpoints, backend)
 }
 
-func PauseImplementation(ctx context.Context, root, remote string, id WorkItemID, reason, decisionPath, bodyPath string, backend ImplementationBackend) (ImplementationOutcome, error) {
+func PauseImplementation(ctx context.Context, root, remote string, id WorkItemID, reason, decisionPath, bodyPath string, endpoints ArtifactEndpoints, backend ImplementationBackend) (ImplementationOutcome, error) {
 	if id == "" || decisionPath == "" || !slices.Contains([]string{"contradictory_artifacts", "mandatory_rule", "frozen_interface", "disputed_blocker", "bounce_cap"}, reason) {
 		return ImplementationOutcome{}, errors.New("Needs Human requires --item, --decision and a permitted --reason")
 	}
-	return handoffImplementation(ctx, root, remote, id, NeedsHuman, decisionPath, bodyPath, backend)
+	return handoffImplementation(ctx, root, remote, id, NeedsHuman, decisionPath, bodyPath, endpoints, backend)
 }
 
-func handoffImplementation(ctx context.Context, root, remote string, id WorkItemID, target State, decisionPath, bodyPath string, backend ImplementationBackend) (outcome ImplementationOutcome, err error) {
-	remote, err = github.ResolveGitHubRemote(root, remote)
-	if err != nil {
-		return ImplementationOutcome{}, err
-	}
-	repository, items, err := loadImplementation(ctx, root, remote, backend)
+func handoffImplementation(ctx context.Context, root, remote string, id WorkItemID, target State, decisionPath, bodyPath string, endpoints ArtifactEndpoints, backend ImplementationBackend) (outcome ImplementationOutcome, err error) {
+	items, err := loadImplementation(ctx, backend)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
@@ -70,7 +64,7 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 		if bodyPath == "" {
 			return nil
 		}
-		remote, err := backend.ImplementationHead(ctx, repository, item.Branch)
+		remote, err := backend.ImplementationHead(ctx, item.Branch)
 		if err != nil {
 			return err
 		}
@@ -81,7 +75,7 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 			return nil
 		}
 		// A retarget after publication must stop the handoff rather than move lifecycle labels.
-		observed, err := backend.ImplementationItems(ctx, repository)
+		observed, err := backend.ImplementationItems(ctx)
 		if err != nil {
 			return err
 		}
@@ -140,7 +134,11 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 			return ImplementationOutcome{}, err
 		}
 	}
-	history, err := InspectLedger(root, head, item.Branch)
+	policy := RequireRetiredArtifacts
+	if target == NeedsHuman {
+		policy = PreserveIncompleteArtifacts
+	}
+	history, err := InspectLedger(root, head, item.Branch, endpoints, policy)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
@@ -148,10 +146,9 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 		if history.Phase != "retired" || len(history.Violations) > 0 {
 			return ImplementationOutcome{}, Refuse(fmt.Sprint(history.Violations) + "; complete permitted ticks, commit Completion, then delete the entire ledger in a child commit and push")
 		}
+	} else if len(history.endpointIdentityViolations) != 0 || len(history.acceptedBaselineViolations) != 0 {
+		return ImplementationOutcome{}, Refuse(fmt.Sprint(append(history.endpointIdentityViolations, history.acceptedBaselineViolations...)) + "; repair endpoint identity or the accepted baseline before pausing")
 	} else if bodyPath == "" {
-		if history.Baseline == "" {
-			return ImplementationOutcome{}, Refuse("ledger baseline missing; repair history before pausing")
-		}
 		changed, err := git(root, "diff", "--name-only", history.Baseline, head, "--", ".", ":(exclude).changes/"+item.Branch)
 		if err != nil {
 			return ImplementationOutcome{}, err
@@ -165,22 +162,22 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 		return ImplementationOutcome{}, Refuse("pending handoff differs from supplied intent or head; restore its fixed Result Documents and resume")
 	}
 	item.State = from
-	if err := backend.RecordImplementationTransition(ctx, repository, item, transition); err != nil {
+	if err := backend.RecordImplementationTransition(ctx, item, transition); err != nil {
 		return ImplementationOutcome{}, err
 	}
 	item.Transition = &transition
 	defer func() {
 		if err != nil {
 			transition.Completed = false
-			err = errors.Join(err, backend.RecordImplementationTransition(ctx, repository, item, transition), backend.RetainImplementationClaim(ctx, repository, item))
+			err = errors.Join(err, backend.RecordImplementationTransition(ctx, item, transition), backend.RetainImplementationClaim(ctx, item))
 		}
 	}()
 	if bodyPath != "" {
-		submission := Submission{Head: head, Base: "main", Body: withClosingReference(string(body), item.ClosingReference), Draft: target == NeedsHuman}
+		submission := Submission{Head: head, Base: "main", Body: string(body), Draft: target == NeedsHuman}
 		if item.Submission != nil {
 			submission.ID = item.Submission.ID
 		}
-		submission, err = backend.PublishImplementation(ctx, repository, item, submission)
+		submission, err = backend.PublishImplementation(ctx, item, submission)
 		if err != nil {
 			return ImplementationOutcome{}, err
 		}
@@ -192,16 +189,11 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 	if err := guard(); err != nil {
 		return ImplementationOutcome{}, err
 	}
-	var writeErr error
-	if target == AwaitingReview {
-		writeErr = backend.AwaitImplementationReview(ctx, repository, item, guard)
-	} else {
-		writeErr = backend.PauseImplementation(ctx, repository, item, string(decision), guard)
-	}
+	writeErr := projectImplementation(ctx, backend, item, target, string(decision), guard)
 	if err := guard(); err != nil {
 		return ImplementationOutcome{}, err
 	}
-	_, observed, err := loadImplementation(ctx, root, remote, backend)
+	observed, err := loadImplementation(ctx, backend)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
@@ -219,7 +211,7 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 		}
 		if current.Problem == "" && current.State == target && !current.Claimed && (bodyPath == "" || current.Submission != nil && current.Submission.Head == head && current.Submission.Draft == (target == NeedsHuman)) {
 			transition.Completed = true
-			if err := backend.RecordImplementationTransition(ctx, repository, current, transition); err != nil {
+			if err := backend.RecordImplementationTransition(ctx, current, transition); err != nil {
 				return ImplementationOutcome{}, err
 			}
 			if err := guard(); err != nil {
@@ -238,15 +230,18 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 	return ImplementationOutcome{}, Refuse("handoff projection is incomplete; retry the same semantic command with retained Result Documents")
 }
 
-func withClosingReference(body, reference string) string {
-	if reference == "" {
-		return body
+func projectImplementation(ctx context.Context, backend ImplementationBackend, item ImplementationItem, target State, decision string, guard func() error) error {
+	var err error
+	if target == AwaitingReview {
+		err = backend.AwaitImplementationReview(ctx, item, guard)
+	} else {
+		err = backend.PauseImplementation(ctx, item, decision, guard)
 	}
-	footer := "\n\n" + reference + "\n"
-	if !strings.HasSuffix(body, footer) {
-		body += footer
+	if err != nil {
+		// Restore the Claim before read-back can mistake a failed write for completion.
+		err = errors.Join(err, backend.RetainImplementationClaim(ctx, item))
 	}
-	return body
+	return err
 }
 
 func removeResultDirectory(bodyPath string) error {

@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -18,6 +17,15 @@ import (
 	"github.com/vicrdguez/skills/setup"
 	"github.com/vicrdguez/skills/workflow"
 )
+
+func prepareReviewWorktree(t *testing.T, root, branch string) {
+	t.Helper()
+	runGit(t, root, "switch", "main")
+	worktree := filepath.Join(root, ".worktrees", branch)
+	if _, err := os.Stat(worktree); os.IsNotExist(err) {
+		runGit(t, root, "worktree", "add", worktree, branch)
+	}
+}
 
 func TestReadyStartAndResumeDoNotObserveIntegrationTargetThroughGitHub(t *testing.T) {
 	root := proposalRepository(t)
@@ -126,7 +134,9 @@ func TestReadyStartAndResumeDoNotObserveIntegrationTargetThroughGitHub(t *testin
 		t.Helper()
 		var output bytes.Buffer
 		app := newApp(func(github.RepositoryID) (setup.Backend, error) {
-			return setup.NewGitHubBackend(server.URL, "token", server.Client()), nil
+			backend := setup.NewGitHubBackend(server.URL, "token", server.Client())
+			backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
+			return backend, nil
 		}, bytes.NewReader(nil), &output, &output)
 		command := append([]string{"skl", "implement"}, args...)
 		command = append(command, "--repo", root)
@@ -160,8 +170,7 @@ func TestReadyStartAndResumeDoNotObserveIntegrationTargetThroughGitHub(t *testin
 	if err := os.WriteFile(result, []byte("candidate"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, root, "rm", "-r", ".changes/widget")
-	runGit(t, root, "commit", "-m", "retire")
+	completeAndRetireSlice(t, root, "widget")
 	branchHead = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	submitted := run("submit", "--item", "7", "--body", result)
 	if submitted.Status != "awaiting_review" || postedBase != "main" || prBody != "candidate\n\nCloses #7\n" || !pullExists || !slices.Contains(prLabels, "review") || slices.Contains(labels, "ready") || unwanted != "" {
@@ -172,9 +181,14 @@ func TestReadyStartAndResumeDoNotObserveIntegrationTargetThroughGitHub(t *testin
 func TestStaleSynchronizationReworkUsesOrdinaryCLIFlow(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
-	runGit(t, root, "rm", "-r", ".changes/widget")
-	runGit(t, root, "commit", "-m", "retire")
+	completeAndRetireSlice(t, root, "widget")
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	prepareReviewWorktree(t, root, "widget")
+	worktreeGitDir := strings.TrimSpace(runGitOutput(t, filepath.Join(root, ".worktrees", "widget"), "rev-parse", "--absolute-git-dir"))
+	checkpoint := filepath.Join(worktreeGitDir, ".watchdog")
+	if err := os.WriteFile(checkpoint, []byte("1:"+head+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	labels := []string{"rework", "sync"}
 	body := "existing"
 	metadata := []map[string]any{{"body": fmt.Sprintf("<!-- skl.implement/v1\n{\"reviewed_head\":%q,\"review_round_head\":%q,\"target_snapshot\":\"missing\",\"target_branch\":\"release\",\"synchronization_target\":\"conflicting\"}\n-->", head, head), "author_association": "OWNER"}}
@@ -266,7 +280,9 @@ func TestStaleSynchronizationReworkUsesOrdinaryCLIFlow(t *testing.T) {
 		t.Helper()
 		var output bytes.Buffer
 		app := newApp(func(github.RepositoryID) (setup.Backend, error) {
-			return setup.NewGitHubBackend(server.URL, "token", server.Client()), nil
+			backend := setup.NewGitHubBackend(server.URL, "token", server.Client())
+			backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
+			return backend, nil
 		}, bytes.NewReader(nil), &output, &output)
 		command := append([]string{"skl"}, args...)
 		command = append(command, "--repo", root)
@@ -288,15 +304,11 @@ func TestStaleSynchronizationReworkUsesOrdinaryCLIFlow(t *testing.T) {
 		t.Fatalf("status changed stale sync: %#v labels=%v", status, labels)
 	}
 	start := run("implement", "next")
-	if start.Status != "work_available" || start.Packet == nil || start.Packet.Facts.Implementation.PreviousReviewedHead != head || len(start.Packet.Facts.Implementation.Comments) != 1 || start.Packet.Facts.Implementation.Comments[0].Body != "retained review feedback" || !slices.Contains(labels, "sync") {
+	if start.Status != "work_available" || start.Packet == nil || len(start.Packet.Facts.Implementation.Comments) != 1 || start.Packet.Facts.Implementation.Comments[0].Body != "retained review feedback" || !slices.Contains(labels, "sync") || readFile(t, checkpoint) != "1:"+head+"\n" {
 		t.Fatalf("start lost review evidence or sync: %#v labels=%v", start, labels)
 	}
-	counted, err := setup.NewGitHubBackend(server.URL, "token", server.Client()).ReviewSubmission(context.Background(), github.RepositoryID{Owner: "acme", Name: "widgets"}, "11")
-	if err != nil || counted.Bounces != 1 {
-		t.Fatalf("retained review count = %d, %v", counted.Bounces, err)
-	}
 	resume := run("implement", "resume", "--item", "7")
-	if resume.Status != "work_available" || resume.Packet.Facts.Implementation.PreviousReviewedHead != head || !slices.Contains(labels, "sync") {
+	if resume.Status != "work_available" || !slices.Contains(labels, "sync") || readFile(t, checkpoint) != "1:"+head+"\n" {
 		t.Fatalf("resume lost review evidence or sync: %#v labels=%v", resume, labels)
 	}
 	resultDir := resume.Packet.Facts.Implementation.ResultDirectory
@@ -305,12 +317,8 @@ func TestStaleSynchronizationReworkUsesOrdinaryCLIFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	completed := run("implement", "submit", "--item", "7", "--body", result)
-	if completed.Status != "awaiting_review" || slices.Contains(labels, "sync") || !slices.Contains(labels, "review") || unwanted != "" {
+	if completed.Status != "awaiting_review" || slices.Contains(labels, "sync") || !slices.Contains(labels, "review") || unwanted != "" || readFile(t, checkpoint) != "1:"+head+"\n" {
 		t.Fatalf("ordinary handoff: %#v labels=%v unwanted=%q", completed, labels, unwanted)
-	}
-	counted, err = setup.NewGitHubBackend(server.URL, "token", server.Client()).ReviewSubmission(context.Background(), github.RepositoryID{Owner: "acme", Name: "widgets"}, "11")
-	if err != nil || counted.Bounces != 1 {
-		t.Fatalf("review count changed after handoff = %d, %v", counted.Bounces, err)
 	}
 }
 
@@ -327,15 +335,19 @@ func TestWatchdogPassRetryAndStatusIgnoreMergeabilityThroughGitHub(t *testing.T)
 		t.Run(tc.name, func(t *testing.T) {
 			root := proposalRepository(t)
 			prepareSlice(t, root, "widget")
-			runGit(t, root, "rm", "-r", ".changes/widget")
-			runGit(t, root, "commit", "-m", "retire")
+			completeAndRetireSlice(t, root, "widget")
 			head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+			prepareReviewWorktree(t, root, "widget")
 			labels := []string{"review", "wip"}
 			prBody := "audit"
 			mergeability := tc.initial
 			failRelease := tc.recover != ""
 			metadata := []map[string]any{{"body": fmt.Sprintf("<!-- skl.implement/v1\n{\"watchdog_head\":%q}\n-->", head), "author_association": "OWNER"}}
-			var summaries, events []map[string]any
+			var summaries []map[string]any
+			events := []map[string]any{}
+			for _, label := range labels {
+				events = append(events, map[string]any{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": label}})
+			}
 			writes := 0
 			unwanted := ""
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -370,7 +382,19 @@ func TestWatchdogPassRetryAndStatusIgnoreMergeabilityThroughGitHub(t *testing.T)
 						summaries = append(summaries, comment)
 					}
 					result = summaries
-				case path == "/pulls/11/comments", path == "/pulls/11/reviews":
+				case path == "/pulls/11/reviews":
+					if r.Method == http.MethodPost {
+						var review map[string]any
+						if err := json.NewDecoder(r.Body).Decode(&review); err != nil {
+							http.Error(w, err.Error(), http.StatusBadRequest)
+							return
+						}
+						review["state"] = "COMMENTED"
+						review["submitted_at"] = "2026-01-01T00:00:02Z"
+						summaries = append(summaries, review)
+					}
+					result = summaries
+				case path == "/pulls/11/comments":
 				case path == "/pulls/11" && r.Method == http.MethodPatch:
 					var payload map[string]string
 					if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
@@ -425,7 +449,9 @@ func TestWatchdogPassRetryAndStatusIgnoreMergeabilityThroughGitHub(t *testing.T)
 				t.Helper()
 				var output bytes.Buffer
 				app := newApp(func(github.RepositoryID) (setup.Backend, error) {
-					return setup.NewGitHubBackend(server.URL, "token", server.Client()), nil
+					backend := setup.NewGitHubBackend(server.URL, "token", server.Client())
+					backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
+					return backend, nil
 				}, bytes.NewReader(nil), &output, &output)
 				command := append([]string{"skl"}, args...)
 				command = append(command, "--repo", root)
@@ -448,7 +474,7 @@ func TestWatchdogPassRetryAndStatusIgnoreMergeabilityThroughGitHub(t *testing.T)
 			if err := os.WriteFile(finalBody, []byte("final body"), 0600); err != nil {
 				t.Fatal(err)
 			}
-			command := []string{"watchdog", "submit", "--item", "7", "--reviewed-head", head, "--verdict", "pass", "--summary", summary, "--body", finalBody}
+			command := []string{"watchdog", "submit", "--item", "7", "--review-number", "1", "--reviewed-head", head, "--verdict", "pass", "--summary", summary, "--body", finalBody}
 			if tc.recover != "" {
 				if _, err := run(command...); err == nil || !slices.Contains(labels, "done") || !slices.Contains(labels, "wip") {
 					t.Fatalf("partial pass was not retained: %v labels=%v", err, labels)
@@ -493,9 +519,9 @@ func TestNonMainSubmissionRefusesPublicHandoffsThroughGitHub(t *testing.T) {
 		t.Run(operation, func(t *testing.T) {
 			root := proposalRepository(t)
 			prepareSlice(t, root, "widget")
-			runGit(t, root, "rm", "-r", ".changes/widget")
-			runGit(t, root, "commit", "-m", "retire")
+			completeAndRetireSlice(t, root, "widget")
 			head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+			prepareReviewWorktree(t, root, "widget")
 			labels := []string{"rework", "wip"}
 			metadataBody := fmt.Sprintf("<!-- skl.implement/v1\n{\"reviewed_head\":%q,\"review_round_head\":%q}\n-->", head, head)
 			if operation == "watchdog submit" {
@@ -538,7 +564,9 @@ func TestNonMainSubmissionRefusesPublicHandoffsThroughGitHub(t *testing.T) {
 			defer server.Close()
 			var output bytes.Buffer
 			app := newApp(func(github.RepositoryID) (setup.Backend, error) {
-				return setup.NewGitHubBackend(server.URL, "token", server.Client()), nil
+				backend := setup.NewGitHubBackend(server.URL, "token", server.Client())
+				backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
+				return backend, nil
 			}, bytes.NewReader(nil), &output, &output)
 			dir := t.TempDir()
 			summary, body, decision := filepath.Join(dir, "summary.md"), filepath.Join(dir, "submission.md"), filepath.Join(dir, "decision.md")
@@ -554,7 +582,7 @@ func TestNonMainSubmissionRefusesPublicHandoffsThroughGitHub(t *testing.T) {
 			case "implement needs-human":
 				args = append(args, "--item", "7", "--body", body, "--decision", decision, "--reason", "mandatory_rule")
 			case "watchdog submit":
-				args = append(args, "--item", "7", "--reviewed-head", head, "--verdict", "pass", "--summary", summary, "--body", body)
+				args = append(args, "--item", "7", "--review-number", "1", "--reviewed-head", head, "--verdict", "pass", "--summary", summary, "--body", body)
 			}
 			args = append([]string{"skl"}, args...)
 			args = append(args, "--repo", root)
@@ -668,7 +696,9 @@ func TestNeedsHumanPreservesDraftMainSubmissionThroughGitHub(t *testing.T) {
 	defer server.Close()
 	var output bytes.Buffer
 	app := newApp(func(github.RepositoryID) (setup.Backend, error) {
-		return setup.NewGitHubBackend(server.URL, "token", server.Client()), nil
+		backend := setup.NewGitHubBackend(server.URL, "token", server.Client())
+		backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
+		return backend, nil
 	}, bytes.NewReader(nil), &output, &output)
 	if err := app.Run([]string{"skl", "implement", "resume", "--repo", root, "--item", "7"}); err != nil {
 		t.Fatal(err)
@@ -811,7 +841,9 @@ func TestSubmitRefusesLateRetargetThroughGitHub(t *testing.T) {
 		t.Helper()
 		var output bytes.Buffer
 		app := newApp(func(github.RepositoryID) (setup.Backend, error) {
-			return setup.NewGitHubBackend(server.URL, "token", server.Client()), nil
+			backend := setup.NewGitHubBackend(server.URL, "token", server.Client())
+			backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
+			return backend, nil
 		}, bytes.NewReader(nil), &output, &output)
 		command := append([]string{"skl"}, args...)
 		command = append(command, "--repo", root)
@@ -836,8 +868,7 @@ func TestSubmitRefusesLateRetargetThroughGitHub(t *testing.T) {
 	if err := os.WriteFile(body, []byte("candidate"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, root, "rm", "-r", ".changes/widget")
-	runGit(t, root, "commit", "-m", "retire")
+	completeAndRetireSlice(t, root, "widget")
 	branchHead = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	var result setup.ImplementationOutput
 	if err := json.Unmarshal(mustRun("implement", "submit", "--item", "7", "--body", body), &result); err != nil {
@@ -851,8 +882,7 @@ func TestSubmitRefusesLateRetargetThroughGitHub(t *testing.T) {
 func TestStatusRefusesRetargetedPartialHandoffThroughGitHub(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
-	runGit(t, root, "rm", "-r", ".changes/widget")
-	runGit(t, root, "commit", "-m", "retire")
+	completeAndRetireSlice(t, root, "widget")
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	sourceLabels := []string{"ready", "wip"}
 	pullLabels := []string{"review"}
@@ -920,7 +950,9 @@ func TestStatusRefusesRetargetedPartialHandoffThroughGitHub(t *testing.T) {
 	defer server.Close()
 	var output bytes.Buffer
 	app := newApp(func(github.RepositoryID) (setup.Backend, error) {
-		return setup.NewGitHubBackend(server.URL, "token", server.Client()), nil
+		backend := setup.NewGitHubBackend(server.URL, "token", server.Client())
+		backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
+		return backend, nil
 	}, bytes.NewReader(nil), &output, &output)
 	if err := app.Run([]string{"skl", "status", "--repo", root}); err != nil {
 		t.Fatal(err)
@@ -1047,7 +1079,9 @@ func TestSubmitRefusesRecoveredNonMainSubmissionThroughGitHub(t *testing.T) {
 		t.Helper()
 		var output bytes.Buffer
 		app := newApp(func(github.RepositoryID) (setup.Backend, error) {
-			return setup.NewGitHubBackend(server.URL, "token", server.Client()), nil
+			backend := setup.NewGitHubBackend(server.URL, "token", server.Client())
+			backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
+			return backend, nil
 		}, bytes.NewReader(nil), &output, &output)
 		command := append([]string{"skl"}, args...)
 		command = append(command, "--repo", root)
@@ -1072,8 +1106,7 @@ func TestSubmitRefusesRecoveredNonMainSubmissionThroughGitHub(t *testing.T) {
 	if err := os.WriteFile(body, []byte("candidate"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, root, "rm", "-r", ".changes/widget")
-	runGit(t, root, "commit", "-m", "retire")
+	completeAndRetireSlice(t, root, "widget")
 	branchHead = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	var result setup.ImplementationOutput
 	if err := json.Unmarshal(mustRun("implement", "submit", "--item", "7", "--body", body), &result); err != nil {
@@ -1096,23 +1129,24 @@ func TestWatchdogRefusesInvalidReviewedEvidenceThroughGitHub(t *testing.T) {
 			reason            string
 		}{
 			{evidence: "PR head moves during verdict publication", labels: []string{"review", "wip"}, moveHead: true, reason: "Submission head changed"},
-			{evidence: "supplied reviewed head differs from claimed revision", labels: []string{"review", "wip"}, differentReviewed: true, reason: "fixed Awaiting Review Claim"},
+			{evidence: "supplied reviewed head differs from claimed revision", labels: []string{"review", "wip"}, differentReviewed: true, reason: "local reviewed head changed"},
 			{evidence: "pushed final head does not descend from reviewed head", labels: []string{"review", "wip"}, divergentHead: true, reason: "descend"},
-			{evidence: "required review Claim is absent", labels: []string{"review"}, claimAbsent: true, reason: "fixed Awaiting Review Claim"},
+			{evidence: "required review Claim is absent", labels: []string{"review"}, claimAbsent: true, reason: "selected review Claim"},
 		} {
 			t.Run(mergeability+"/"+tc.evidence, func(t *testing.T) {
 				root := proposalRepository(t)
 				baseline := prepareSlice(t, root, "widget")
-				runGit(t, root, "rm", "-r", ".changes/widget")
-				runGit(t, root, "commit", "-m", "retire")
+				completeAndRetireSlice(t, root, "widget")
 				reviewed := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 				head := reviewed
 				if tc.divergentHead {
 					runGit(t, root, "switch", "-C", "widget", baseline)
+					runGit(t, root, "commit", "--allow-empty", "-m", "[completion] widget divergent")
 					runGit(t, root, "rm", "-r", ".changes/widget")
 					runGit(t, root, "commit", "-m", "divergent retirement")
 					head = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 				}
+				prepareReviewWorktree(t, root, "widget")
 				supplied := reviewed
 				if tc.differentReviewed {
 					supplied = baseline
@@ -1123,14 +1157,18 @@ func TestWatchdogRefusesInvalidReviewedEvidenceThroughGitHub(t *testing.T) {
 				moved := false
 				writes := 0
 				metadata := []map[string]any{{"body": fmt.Sprintf("<!-- skl.implement/v1\n{\"watchdog_head\":%q}\n-->", reviewed), "author_association": "OWNER"}}
-				var summaries, events []map[string]any
+				var summaries []map[string]any
+				events := []map[string]any{}
+				for _, label := range labels {
+					events = append(events, map[string]any{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": label}})
+				}
 				unwanted := ""
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					path := strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets")
 					if r.Method != http.MethodGet {
 						writes++
 					}
-					if tc.moveHead && path == "/issues/11/comments" && r.Method == http.MethodPost && !moved {
+					if tc.moveHead && path == "/pulls/11/reviews" && r.Method == http.MethodPost && !moved {
 						moved = true
 						pullHead = strings.Repeat("e", 40)
 					}
@@ -1204,7 +1242,19 @@ func TestWatchdogRefusesInvalidReviewedEvidenceThroughGitHub(t *testing.T) {
 						unwanted = r.Method + " " + path
 						http.Error(w, "integration target unavailable", http.StatusInternalServerError)
 						return
-					case path == "/pulls/11/comments", path == "/pulls/11/reviews", path == "/issues/7/dependencies/blocked_by":
+					case path == "/pulls/11/reviews":
+						if r.Method == http.MethodPost {
+							var review map[string]any
+							if err := json.NewDecoder(r.Body).Decode(&review); err != nil {
+								http.Error(w, err.Error(), http.StatusBadRequest)
+								return
+							}
+							review["state"] = "COMMENTED"
+							review["submitted_at"] = "2026-01-01T00:00:02Z"
+							summaries = append(summaries, review)
+						}
+						result = summaries
+					case path == "/pulls/11/comments", path == "/issues/7/dependencies/blocked_by":
 					default:
 						unwanted = r.Method + " " + path
 						http.Error(w, "unexpected request", http.StatusNotFound)
@@ -1215,7 +1265,9 @@ func TestWatchdogRefusesInvalidReviewedEvidenceThroughGitHub(t *testing.T) {
 				defer server.Close()
 				var output bytes.Buffer
 				app := newApp(func(github.RepositoryID) (setup.Backend, error) {
-					return setup.NewGitHubBackend(server.URL, "token", server.Client()), nil
+					backend := setup.NewGitHubBackend(server.URL, "token", server.Client())
+					backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
+					return backend, nil
 				}, bytes.NewReader(nil), &output, &output)
 				dir := t.TempDir()
 				summary, body := filepath.Join(dir, "summary.md"), filepath.Join(dir, "body.md")
@@ -1224,7 +1276,7 @@ func TestWatchdogRefusesInvalidReviewedEvidenceThroughGitHub(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				command := []string{"skl", "watchdog", "submit", "--item", "7", "--reviewed-head", supplied, "--verdict", "pass", "--summary", summary, "--body", body}
+				command := []string{"skl", "watchdog", "submit", "--item", "7", "--review-number", "1", "--reviewed-head", supplied, "--verdict", "pass", "--summary", summary, "--body", body}
 				if tc.divergentHead {
 					command = append(command, "--head", head)
 				}

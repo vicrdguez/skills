@@ -3,7 +3,7 @@
 <!--
 Specify behavior in Gherkin NOTATION (there are no .feature files and no Cucumber and no runtime).
 
-Frozen once published: a scenario discovered during review is a new proposal, never a new scenario here.
+Frozen at the `[baseline] <slice-slug>` commit: a scenario discovered during review is a new proposal, never an edit at `[completion] <slice-slug>`.
 
 Use the keywords that make behavior unambiguous and map cleanly onto a test;
 skip the ones that only exist to drive the Cucumber engine.

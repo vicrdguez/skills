@@ -144,7 +144,7 @@ _Avoid_: Work item, implementation slice
 
 **Implementation Ledger**:
 The ephemeral Markdown contract used while implementing a **Work Item**. It is removed before review and is not durable project knowledge.
-_Avoid_: Capability documentation, archived plan
+_Avoid_: Archived plan
 
 **Artifact Baseline**:
 The immutable Git snapshot containing the initially accepted **Implementation Ledger**.
@@ -230,7 +230,7 @@ _Avoid_: Local Git helper, GitHub cache
 >
 > **Developer:** Where is the accepted contract after the Implementation Ledger is deleted?
 >
-> **Domain expert:** The Workflow Engine resolves the Artifact Baseline and Artifact Completion snapshots for review; durable project knowledge belongs in the glossary, ADRs, and capability documents.
+> **Domain expert:** The Workflow Engine resolves the Artifact Baseline and Artifact Completion snapshots for review; durable project knowledge belongs in the glossary and ADRs.
 >
 > **Developer:** Does the Full Gate replace Audit or Watchdog Review?
 >

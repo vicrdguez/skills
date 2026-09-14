@@ -40,10 +40,10 @@ func TestStatusCompletesCoordinationOnlyWhenEveryChildMerged(t *testing.T) {
 	}
 }
 
-func (b *implementationMemory) CoordinationItems(context.Context, github.RepositoryID) ([]workflow.CoordinationItem, error) {
+func (b *implementationMemory) CoordinationItems(context.Context) ([]workflow.CoordinationItem, error) {
 	return b.coordination, nil
 }
-func (b *implementationMemory) CloseCoordination(_ context.Context, _ github.RepositoryID, id workflow.WorkItemID) error {
+func (b *implementationMemory) CloseCoordination(_ context.Context, id workflow.WorkItemID) error {
 	for i := range b.coordination {
 		if b.coordination[i].ID == id {
 			b.coordination[i].Closed = true
@@ -91,28 +91,20 @@ func TestStatusNormalizesPartialAndContradictoryRecords(t *testing.T) {
 	}
 }
 
-func TestStatusCompletesPartiallyProjectedReview(t *testing.T) {
-	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Rework, Claimed: true, Submission: &workflow.Submission{ID: "11", Head: "fixed", PendingReview: workflow.Rework}}}}
-	got := statusCLI(t, proposalRepository(t), b)
-	if got.Items[0].Claimed || got.Items[0].Submission.PendingReview != "" || got.Items[0].State != workflow.Rework {
-		t.Fatalf("partial review: %#v", got)
-	}
-}
-
 // Model multiple guarded writes without changing the shared backend fake.
 type statusGuardMemory struct {
 	*implementationMemory
 	beforeLaterGuard func()
 }
 
-func (b *statusGuardMemory) CompleteReview(ctx context.Context, repository github.RepositoryID, item workflow.ImplementationItem, target workflow.State, guard func() error) error {
+func (b *statusGuardMemory) CompleteReview(ctx context.Context, item workflow.ImplementationItem, target workflow.State, guard func() error) error {
 	if err := guard(); err != nil {
 		return err
 	}
 	if b.beforeLaterGuard != nil {
 		b.beforeLaterGuard()
 	}
-	return b.implementationMemory.CompleteReview(ctx, repository, item, target, guard)
+	return b.implementationMemory.CompleteReview(ctx, item, target, guard)
 }
 
 func TestStatusPreservesApprovalRegardlessOfMergeability(t *testing.T) {
@@ -120,9 +112,9 @@ func TestStatusPreservesApprovalRegardlessOfMergeability(t *testing.T) {
 	for _, mergeability := range []string{"conflicting", "unknown"} {
 		for _, pending := range []workflow.State{"", workflow.ReadyForMerge} {
 			t.Run(mergeability+"/"+string(pending), func(t *testing.T) {
-				b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.ReadyForMerge, Claimed: pending != "", Submission: &workflow.Submission{ID: "11", Head: "fixed", Base: "main", Mergeability: mergeability, Bounces: 1, PendingReview: pending, Claimed: pending != ""}}}}
+				b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.ReadyForMerge, Claimed: pending != "", Submission: &workflow.Submission{ID: "11", Head: "fixed", Base: "main", Mergeability: mergeability, PendingReview: pending, Claimed: pending != ""}}}}
 				got := statusCLI(t, root, b).Items[0]
-				if got.State != workflow.ReadyForMerge || got.Synchronization || got.Submission.Bounces != 1 || got.Claimed || got.Submission.Claimed || got.Submission.PendingReview != "" {
+				if got.State != workflow.ReadyForMerge || got.Synchronization || got.Claimed || got.Submission.Claimed || got.Submission.PendingReview != "" {
 					t.Fatalf("approval changed (pending %q): %#v / %#v", pending, got, got.Submission)
 				}
 			})

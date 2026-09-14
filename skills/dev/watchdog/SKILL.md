@@ -13,14 +13,14 @@ place before the human approval. It sits between build and the human's merge: a 
  This skill **edits no functional code**: the sole exception is non-functional Debt Marker comments on pass.
  It works on a single unit of work (ticket/PR).
  
- If this packet has Watchdog facts, review that fixed Submission. Otherwise run `skl watchdog next`; `no_work` ends the invocation. Resume an interrupted Claim with `skl watchdog resume --item <number>`. Use the packet's selected remote and conventional worktree, fetching the branch and creating the worktree with ordinary Git if needed. Keep the fixed reviewed head; never rebase or force-push.
+ If this packet has Watchdog facts, review that fixed Submission. Otherwise run `skl watchdog next`; `no_work` ends the invocation. Resume an interrupted Claim with `skl watchdog resume --item <number>`. Use the packet's selected remote and conventional worktree, fetching the branch and creating the worktree with ordinary Git if needed. Keep the fixed reviewed head; never rebase or force-push. If startup supplied `--artifact-baseline <full-sha>` or `--artifact-completion <full-sha>`, preserve those exact flags and SHAs on every resume and verdict command for this Work Item; marker-resolved work receives no synthetic override flags.
  
  
 ## Verify independently — never on trust
 
-**Run the gate yourself** — the project's full suite, typecheck and lint — and check artifact integrity with `git diff <artifact-baseline> <artifact-completion> -- .changes/<slug>/`, where the only permitted change is a line whose `[ ]` became `[x]` outside Manual Verification. Resolve Artifact Completion as the first parent of the ledger's deletion commit. Verify that a separate subsequent commit removes the entire ledger, it remains absent through review and rework, and both snapshots remain reachable and inspectable in Git history. Read the contract from those snapshots, not the review head. Do not accept the implementor's green suite as sufficient: a green suite you did not run yourself does not count. **Do not re-run `audit`.** The implementor already ran it and published its ledger; a second pass with the same briefs on the same code returns the judgement calls they weighed and declined, which is a disagreement, not a defect.
+**Run the gate yourself** — the project's full suite, typecheck and lint — and independently verify the exact Baseline and Completion snapshots named by the packet. For new work, confirm each exact `[baseline] <slug>` and `[completion] <slug>` subject prefix resolves once in selected reachable history, including merge parents; an explicit markerless handoff uses its supplied full SHAs. Their relative path sets must match; every entry must be a mode `100644` blob; bytes must match except an existing automated `[ ]` may become lowercase `[x]`; Manual Verification stays unchecked; and every automated box is checked at Completion. Verify Baseline is an ancestor of or equal to Completion, both endpoints are reachable from the fixed reviewed head, and the entire ledger is absent there and at any final Debt Marker head. Inspect only these endpoints and head presence: intermediate edits, transition counts, merge trees, and a deletion commit's parent are not evidence to infer or reject Completion. Read the contract from the endpoint snapshots, not the review head. Do not accept the implementor's green suite as sufficient: a green suite you did not run yourself does not count. **Do not re-run `audit`.** The implementor already ran it and published its ledger; a second pass with the same briefs on the same code returns the judgement calls they weighed and declined, which is a disagreement, not a defect.
 
-Pin the baselines yourself: the PR base merge-base on a first review, the previous summary's `Reviewed head` on a repeat. Artifact integrity always runs against the proposal's `Artifact baseline`, whichever round this is.
+Use the packet's supplied full or incremental comparison. Artifact integrity always uses the same exact Artifact Baseline and Completion, whichever round this is.
 
 ## Review guilty-until-proven — claims, tests, contract
 
@@ -39,14 +39,14 @@ If the change is high-stakes or considered critical you can do an **Independent 
 The first review of a PR is complete: read all of it, batch every finding, publish them together. A repeat review is not a second complete review — restarting an unconstrained search is how a PR gets four rounds of new blockers and never converges. Instead:
 
 1. Rerun the gate yourself and verify every still-active finding against the final state.
-2. Read only `previous-reviewed-head...HEAD` for regressions the rework introduced and for false claims in the updated ledger.
+2. Read only the packet's incremental comparison for regressions the rework introduced and for false claims in the updated ledger.
 3. Scan the resulting whole only for the critical class — security, privacy, authorization, data loss, compatibility, accessibility, an unusable path.
 
 Assign a new ID only for a defect the rework introduced or a critical discovery of that last kind. A pre-existing, noncritical thing you merely noticed this round is a `NOTE`, not another bounce. A finding that was `NOTE` last round cannot become `BLOCK` this round without new material evidence or a human's `BLOCK`.
 
-**One finding-driven bounce.** Return the semantic `rework` verdict for a failing review; the engine counts completed bounces from backend history and routes a second failure to Needs Human.
+Return the semantic `rework` verdict for a failing review. The engine records every completed review and routes a failure at the default limit of two to Needs Human; passing reviews are never capped.
 
-A repeat review with no new commits is legal: a human resolved everything by disposition. Tun the gate and the artifact check, honor the dispositions and pass or pause on what remains.
+A repeat review with no new commits is legal: a human resolved everything by disposition. Run the gate and artifact check, honor the dispositions, and pass or pause on what remains.
 
 ## Findings
 
@@ -84,7 +84,7 @@ DEBT(#<pr>/W<n>): one-line debt
 
 The marker is the record and `grep -rn 'DEBT('` is the index. There is no second copy to keep in sync. A note with no code location stays in the PR or an already-linked issue, do not invent a location to hang it on.
 
-The implementor materializes surviving notes during rework. If a PR passes with notes outstanding and no rework round is coming, you may add the marker entries yourself as part of finalizing. Verify each `DEBT(#<pr>/W<n>)` names the correct stable finding and only non-functional comments changed. Commit and push the final head, record it, then run the formatter or parser for the files you touched and `git diff --check`, not `audit` and not the full suite just for comments. Supply this pushed final SHA with `--head` while retaining the packet's original `--reviewed-head`. The CLI verifies Git identities, not source comments or project checks.
+The implementor materializes surviving notes during rework. If a PR passes with notes outstanding and no rework round is coming, you may add the marker entries yourself as part of finalizing. Verify each `DEBT(#<pr>/W<n>)` names the correct stable finding and only non-functional comments changed. Commit and push the final head, record it, then run the formatter or parser for the files you touched and `git diff --check`, not `audit` and not the full suite just for comments. Supply this pushed final SHA with `--head` while retaining the packet's original `--reviewed-head` and any explicit artifact endpoint flags. The CLI verifies Git identities, not source comments or project checks.
 
 ## Pass -> Ready for Merge
 

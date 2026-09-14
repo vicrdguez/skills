@@ -6,11 +6,14 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/workflow"
 )
 
-func (b *GitHubBackend) CoordinationItems(ctx context.Context, repository github.RepositoryID) ([]workflow.CoordinationItem, error) {
+func (b *GitHubBackend) CoordinationItems(ctx context.Context) ([]workflow.CoordinationItem, error) {
+	if err := b.requireRepository(); err != nil {
+		return nil, err
+	}
+	repository := b.repository
 	issues, err := b.listIssues(ctx, repository)
 	if err != nil {
 		return nil, err
@@ -41,7 +44,11 @@ func (b *GitHubBackend) CoordinationItems(ctx context.Context, repository github
 	return parents, nil
 }
 
-func (b *GitHubBackend) CloseCoordination(ctx context.Context, repository github.RepositoryID, id workflow.WorkItemID) error {
+func (b *GitHubBackend) CloseCoordination(ctx context.Context, id workflow.WorkItemID) error {
+	if err := b.requireRepository(); err != nil {
+		return err
+	}
+	repository := b.repository
 	number, err := githubIssueNumber(id)
 	if err != nil {
 		return err
