@@ -119,6 +119,21 @@ func TestStatusRoutesAcceptedConflictToSynchronizationRework(t *testing.T) {
 	}
 }
 
+func TestStatusPreservesPersistedSynchronizationTargetAcrossRetry(t *testing.T) {
+	root := proposalRepository(t)
+	pinned := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "main"))
+	runGit(t, root, "commit", "--allow-empty", "-m", "target advances after partial synchronization diversion")
+	advanced := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	b := &implementationMemory{work: []workflow.ImplementationItem{{
+		ID: "7", Branch: "widget", State: workflow.ReadyForMerge, Synchronization: true, TargetBranch: "main", TargetSnapshot: pinned,
+		Submission: &workflow.Submission{ID: "11", Head: "fixed", Base: "main", Mergeability: "conflicting"},
+	}}, remoteHeads: map[string]string{"main": advanced}}
+	got := statusCLI(t, root, b).Items[0]
+	if got.State != workflow.Rework || !got.Synchronization || got.TargetSnapshot != pinned || got.TargetBranch != "main" {
+		t.Fatalf("status repinned persisted synchronization target: %#v", got)
+	}
+}
+
 func TestStatusReturnsStructuredRepairableRefusal(t *testing.T) {
 	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.ReadyForMerge, Submission: &workflow.Submission{ID: "11", Head: "fixed", Base: "main", Mergeability: "conflicting"}}}}
 	var output bytes.Buffer

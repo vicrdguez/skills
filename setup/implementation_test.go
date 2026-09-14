@@ -536,7 +536,7 @@ func TestGitHubDispatchRoundWriteUncertaintyStopsWithoutReplay(t *testing.T) {
 }
 
 func TestGitHubImplementationRejectsForeignAttachmentsAndConflictingMetadata(t *testing.T) {
-	for _, kind := range []string{"fork", "untrusted metadata", "conflicting metadata"} {
+	for _, kind := range []string{"fork", "untrusted metadata", "conflicting metadata", "conflicting synchronization metadata"} {
 		t.Run(kind, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
@@ -553,12 +553,16 @@ func TestGitHubImplementationRejectsForeignAttachmentsAndConflictingMetadata(t *
 				case "/repos/acme/widgets/issues/7/comments":
 					comments := []map[string]string{}
 					if kind != "fork" {
-						comments = append(comments, map[string]string{"author_association": "OWNER", "body": "<!-- skl.implement/v1\n{\"target_snapshot\":\"original\"}\n-->"})
+						field := "target_snapshot"
+						if kind == "conflicting synchronization metadata" {
+							field = "synchronization_target"
+						}
+						comments = append(comments, map[string]string{"author_association": "OWNER", "body": "<!-- skl.implement/v1\n{\"" + field + "\":\"original\"}\n-->"})
 						association := "NONE"
-						if kind == "conflicting metadata" {
+						if kind == "conflicting metadata" || kind == "conflicting synchronization metadata" {
 							association = "OWNER"
 						}
-						comments = append(comments, map[string]string{"author_association": association, "body": "<!-- skl.implement/v1\n{\"target_snapshot\":\"replacement\"}\n-->"})
+						comments = append(comments, map[string]string{"author_association": association, "body": "<!-- skl.implement/v1\n{\"" + field + "\":\"replacement\"}\n-->"})
 					}
 					json.NewEncoder(w).Encode(comments)
 				default:
@@ -573,7 +577,7 @@ func TestGitHubImplementationRejectsForeignAttachmentsAndConflictingMetadata(t *
 				t.Fatalf("items = %#v %v", items, err)
 			}
 			item := items[0]
-			if kind == "fork" && (item.Submission != nil || item.State == workflow.Merged) || kind == "untrusted metadata" && item.TargetSnapshot != "original" || kind == "conflicting metadata" && item.Problem == "" {
+			if kind == "fork" && (item.Submission != nil || item.State == workflow.Merged) || kind == "untrusted metadata" && item.TargetSnapshot != "original" || strings.HasPrefix(kind, "conflicting") && item.Problem == "" {
 				t.Fatalf("unsafe adoption: %#v", item)
 			}
 		})

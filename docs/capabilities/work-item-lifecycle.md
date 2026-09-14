@@ -78,7 +78,7 @@ The Workflow Engine owns eligibility, ordering, canonical transitions, Git evide
 
 ## Planned correction: Candidate-first workflow
 
-The endpoint-validation portion is now described in Behaviors. The remaining settled exploration decisions below are still planned: slices #2 through #5 retire Target Snapshot and Synchronization Rework, add the Review Checkpoint policy, remove handoff journals, and defer Git/artifact preparation until after selection. The separate queue-draining extension also remains planned.
+The endpoint-validation and Review Checkpoint portions are now described in Behaviors. The remaining settled exploration decisions below are still planned: slices #2 through #5 retire Target Snapshot and Synchronization Rework, remove handoff journals, and defer Git/artifact preparation until after selection. The separate queue-draining extension also remains planned.
 
 - Selects implementation candidates from open `rework` Submissions before open `ready` Work Items. Each queue uses its own record's creation time, so Rework uses Submission age rather than source Work Item age. Records carrying `wip` are excluded.
 - Selects Watchdog candidates from open `review` Submissions without `wip`, ordered by Submission creation time.

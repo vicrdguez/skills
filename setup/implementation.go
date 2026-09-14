@@ -752,6 +752,10 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 					item.TargetBranch = metadata.TargetBranch
 				}
 				if metadata.SynchronizationTarget != "" {
+					if item.TargetSnapshot != "" && item.TargetSnapshot != metadata.SynchronizationTarget {
+						item.Problem = "conflicting Synchronization Target metadata"
+						continue
+					}
 					item.TargetSnapshot = metadata.SynchronizationTarget
 				}
 				if metadata.ReviewedHead != "" && item.Submission != nil && metadata.ReviewRoundHead == item.Submission.Head {

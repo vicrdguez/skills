@@ -40,12 +40,14 @@ func ObserveStatus(ctx context.Context, backend ImplementationBackend) (StatusOu
 				if current.Head == item.Submission.Head && current.Mergeability == "conflicting" {
 					item.Synchronization = true
 					item.TargetBranch = current.Base
-					item.TargetSnapshot, err = backend.ImplementationHead(ctx, current.Base)
-					if err != nil {
-						return StatusOutcome{}, err
-					}
 					if item.TargetSnapshot == "" {
-						return StatusOutcome{}, Refuse("current target unavailable; retry status after restoring the target")
+						item.TargetSnapshot, err = backend.ImplementationHead(ctx, current.Base)
+						if err != nil {
+							return StatusOutcome{}, err
+						}
+						if item.TargetSnapshot == "" {
+							return StatusOutcome{}, Refuse("current target unavailable; retry status after restoring the target")
+						}
 					}
 					submission := *item.Submission
 					submission.PendingReview = Rework
