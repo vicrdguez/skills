@@ -146,7 +146,9 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 		}
 	}
 	claimAcquiredAt := ""
-	if item.Submission != nil {
+	if from == Ready {
+		claimAcquiredAt = item.SourceClaimAcquiredAt
+	} else if item.Submission != nil {
 		claimAcquiredAt = item.Submission.ClaimAcquiredAt
 	}
 	if decisionPath != "" && implementationDecisionConflicts(item, string(decision), claimAcquiredAt) {

@@ -267,8 +267,12 @@ func (b *implementationMemory) ClaimImplementation(_ context.Context, item workf
 				claim = b.work[i].Submission.Lifecycle
 			}
 			claim.Claimed = true
-			if !wasClaimed && b.work[i].Submission != nil {
-				b.work[i].Submission.ClaimAcquiredAt = b.reviewTime()
+			if !wasClaimed {
+				if b.work[i].Submission != nil && (item.State == workflow.Rework || item.State == workflow.AwaitingReview) {
+					b.work[i].Submission.ClaimAcquiredAt = b.reviewTime()
+				} else {
+					b.work[i].SourceClaimAcquiredAt = b.reviewTime()
+				}
 			}
 			b.work[i] = workflow.ReconcileImplementation(b.work[i])
 		}

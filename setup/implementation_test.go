@@ -247,6 +247,8 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 			return
 		case path == "/issues/7/dependencies/blocked_by":
 			result = []any{}
+		case path == "/issues/7/timeline":
+			result = []any{}
 		case strings.HasSuffix(path, "/comments"):
 			var number int
 			fmt.Sscanf(path, "/issues/%d/comments", &number)
@@ -377,6 +379,8 @@ func TestGitHubImplementationRejectsForeignAttachmentsAndConflictingMetadata(t *
 						fmt.Fprint(w, `[]`)
 					}
 				case "/repos/acme/widgets/issues/7/dependencies/blocked_by":
+					fmt.Fprint(w, `[]`)
+				case "/repos/acme/widgets/issues/7/timeline":
 					fmt.Fprint(w, `[]`)
 				case "/repos/acme/widgets/issues/7/comments":
 					comments := []map[string]string{}

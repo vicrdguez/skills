@@ -415,6 +415,12 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 		state, claimed, problem := implementationLabels(issue)
 		item := workflow.ImplementationItem{ID: workflow.WorkItemID(strconv.Itoa(issue.Number)), Order: issue.Number, Branch: issue.Title, CreatedAt: issue.CreatedAt, State: state, Claimed: claimed, Problem: problem}
 		item.Source = implementationLifecycle(issue)
+		if claimed {
+			item.SourceClaimAcquiredAt, err = b.issueClaimAcquiredAt(ctx, repository, issue.Number)
+			if err != nil {
+				return nil, err
+			}
+		}
 		if len(matches) > 1 {
 			item.Problem = "multiple Submissions share the conventional branch"
 		}

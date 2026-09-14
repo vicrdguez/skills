@@ -28,20 +28,21 @@ const (
 )
 
 type ImplementationItem struct {
-	Source          *LifecycleObservation
-	Synchronization bool
-	Problem         string
-	Submission      *Submission
-	Feedback        []skilldist.ReviewComment
-	Branch          string
-	TargetSnapshot  string
-	TargetBranch    string
-	ID              WorkItemID
-	Order           int
-	State           State
-	CreatedAt       string
-	Claimed         bool
-	Blockers        []WorkItemID
+	Source                *LifecycleObservation
+	Synchronization       bool
+	Problem               string
+	Submission            *Submission
+	Feedback              []skilldist.ReviewComment
+	Branch                string
+	TargetSnapshot        string
+	TargetBranch          string
+	ID                    WorkItemID
+	Order                 int
+	State                 State
+	CreatedAt             string
+	Claimed               bool
+	SourceClaimAcquiredAt string
+	Blockers              []WorkItemID
 }
 
 type Submission struct {

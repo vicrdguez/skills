@@ -21,49 +21,52 @@ import (
 )
 
 type reviewForge struct {
-	mu              sync.Mutex
-	head            string
-	branch          string
-	remoteHead      string
-	pullHead        string
-	body            string
-	draft           bool
-	noPull          bool
-	noOther         bool
-	labels          []string
-	sourceLabels    []string
-	summaries       []map[string]any
-	issueComments   []map[string]any
-	inlines         []map[string]any
-	sourceComments  []map[string]any
-	timeline        []map[string]any
-	failSummary     bool
-	failHandoff     bool
-	failInline      bool
-	failInlinePost  bool
-	failBody        bool
-	failBodyPost    bool
-	failReadback    bool
-	duplicateRead   bool
-	reviewReads     int
-	failPostRead    bool
-	failDelete      string
-	loseDelete      string
-	failItemsRead   bool
-	failFinalRead   bool
-	failPullRead    bool
-	failPullCreate  bool
-	failSourceLabel bool
-	denyCleanup     string
-	mergeable       bool
-	checkpointPath  string
-	atWipRelease    string
-	denyRename      string
-	renameDenied    bool
-	afterMutation   func()
-	clock           int
-	writes          int
-	pullCreations   int
+	mu                    sync.Mutex
+	head                  string
+	branch                string
+	remoteHead            string
+	pullHead              string
+	body                  string
+	draft                 bool
+	noPull                bool
+	noOther               bool
+	labels                []string
+	sourceLabels          []string
+	summaries             []map[string]any
+	issueComments         []map[string]any
+	inlines               []map[string]any
+	sourceComments        []map[string]any
+	timeline              []map[string]any
+	sourceTimeline        []map[string]any
+	failSummary           bool
+	failHandoff           bool
+	failInline            bool
+	failInlinePost        bool
+	failBody              bool
+	failBodyPost          bool
+	failReadback          bool
+	duplicateRead         bool
+	reviewReads           int
+	failPostRead          bool
+	failDelete            string
+	loseDelete            string
+	failItemsRead         bool
+	failFinalRead         bool
+	failPullRead          bool
+	failPullCreate        bool
+	failSourceLabel       bool
+	failSourceComment     bool
+	failSourceCommentRead bool
+	denyCleanup           string
+	mergeable             bool
+	checkpointPath        string
+	atWipRelease          string
+	denyRename            string
+	renameDenied          bool
+	afterMutation         func()
+	clock                 int
+	writes                int
+	pullCreations         int
 }
 
 func (f *reviewForge) timestamp() string {
@@ -166,6 +169,8 @@ func (f *reviewForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		write(map[string]any{"object": map[string]string{"sha": f.head}})
 	case r.Method == http.MethodGet && path == "/issues/11/timeline":
 		write(f.timeline)
+	case r.Method == http.MethodGet && path == "/issues/7/timeline":
+		write(f.sourceTimeline)
 	case r.Method == http.MethodGet && path == "/pulls/11/reviews":
 		f.reviewReads++
 		if f.duplicateRead && f.reviewReads == 2 {
@@ -178,6 +183,11 @@ func (f *reviewForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		write(f.summaries)
 	case r.Method == http.MethodGet && path == "/issues/7/comments":
+		if f.failSourceCommentRead {
+			f.failSourceCommentRead = false
+			http.Error(w, "comment readback unavailable", http.StatusInternalServerError)
+			return
+		}
 		write(f.sourceComments)
 	case r.Method == http.MethodGet && path == "/issues/8/comments":
 		write([]any{})
@@ -209,6 +219,11 @@ func (f *reviewForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		value["author_association"] = "OWNER"
 		value["created_at"] = f.timestamp()
 		f.sourceComments = append(f.sourceComments, value)
+		if f.failSourceComment {
+			f.failSourceComment = false
+			f.failSourceCommentRead = true
+			http.Error(w, "decision response lost", http.StatusInternalServerError)
+		}
 	case r.Method == http.MethodPost && path == "/pulls/11/comments":
 		var value map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&value)
@@ -268,13 +283,14 @@ func (f *reviewForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = json.NewDecoder(r.Body).Decode(&value)
 		labels := &f.labels
+		events := &f.timeline
 		if strings.HasPrefix(path, "/issues/7/") {
-			labels = &f.sourceLabels
+			labels, events = &f.sourceLabels, &f.sourceTimeline
 		}
 		for _, label := range value.Labels {
 			if !slices.Contains(*labels, label) {
 				*labels = append(*labels, label)
-				f.timeline = append(f.timeline, map[string]any{"event": "labeled", "created_at": f.timestamp(), "label": map[string]string{"name": label}})
+				*events = append(*events, map[string]any{"event": "labeled", "created_at": f.timestamp(), "label": map[string]string{"name": label}})
 			}
 		}
 	case r.Method == http.MethodDelete && strings.Contains(path, "/labels/"):
@@ -288,11 +304,12 @@ func (f *reviewForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		labels := &f.labels
+		events := &f.timeline
 		if strings.HasPrefix(path, "/issues/7/") {
-			labels = &f.sourceLabels
+			labels, events = &f.sourceLabels, &f.sourceTimeline
 		}
 		*labels = slices.DeleteFunc(*labels, func(current string) bool { return current == label })
-		f.timeline = append(f.timeline, map[string]any{"event": "unlabeled", "created_at": f.timestamp(), "label": map[string]string{"name": label}})
+		*events = append(*events, map[string]any{"event": "unlabeled", "created_at": f.timestamp(), "label": map[string]string{"name": label}})
 		if label == "wip" && f.failFinalRead {
 			f.failItemsRead = true
 		}
@@ -863,6 +880,28 @@ func TestImplementationCleanupFailuresKeepDestinationProtectedThroughPublicHTTP(
 			t.Fatalf("failed sync cleanup exposed the destination: %#v labels=%v", got, f.forge.labels)
 		}
 	})
+	t.Run("first submit wip cleanup", func(t *testing.T) {
+		f := newReviewFixture(t)
+		f.forge.noPull = true
+		f.forge.labels = nil
+		f.forge.sourceLabels = []string{"ready", "wip"}
+		f.forge.sourceComments = []map[string]any{{"author_association": "OWNER", "body": "<!-- skl.implement/v1\n{\"target_snapshot\":\"" + f.head + "\",\"target_branch\":\"main\"}\n-->"}}
+		start := f.run(t, f.worktree, "implement", "resume", "--item", "7")
+		body := filepath.Join(start.Packet.Facts.Implementation.ResultDirectory, "submission.md")
+		if err := os.WriteFile(body, []byte("first"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		f.forge.failDelete = "wip"
+		if _, err := f.runResult(f.worktree, "implement", "submit", "--item", "7", "--body", body); err == nil {
+			t.Fatal("source wip cleanup failure was not reported")
+		}
+		if f.forge.body != "first\n\nCloses #7\n" || !slices.Contains(f.forge.labels, "review") || !slices.Contains(f.forge.labels, "wip") || !fileExists(body) {
+			t.Fatalf("first submit evidence or protection lost: body=%q labels=%v", f.forge.body, f.forge.labels)
+		}
+		if got := f.run(t, f.root, "watchdog", "next"); got.Status != "no_work" {
+			t.Fatalf("failed wip cleanup exposed the destination: %#v labels=%v", got, f.forge.labels)
+		}
+	})
 	t.Run("pause label cleanup", func(t *testing.T) {
 		f := newReviewFixture(t)
 		f.forge.labels = []string{"rework", "wip"}
@@ -996,48 +1035,52 @@ func TestImplementationCleanupWarningsThroughPublicHTTP(t *testing.T) {
 }
 
 func TestImplementationDecisionTransportStaysOpaqueThroughPublicCLI(t *testing.T) {
-	f := newReviewFixture(t)
-	f.forge.noPull = true
-	f.forge.labels = nil
-	f.forge.sourceLabels = []string{"ready", "wip"}
-	f.forge.sourceComments = []map[string]any{
-		{"author_association": "OWNER", "body": "<!-- skl.implement/v1\n{\"target_snapshot\":\"" + f.head + "\",\"target_branch\":\"main\",\"transition\":{\"from\":\"ready_for_implementation\",\"target\":\"needs_human\",\"head\":\"" + f.head + "\"},\"resume_state\":\"stale\"}\n-->"},
-		{"author_association": "OWNER", "body": "malformed retired envelope"},
-	}
-	start := f.run(t, f.worktree, "implement", "resume", "--item", "7")
-	directory := start.Packet.Facts.Implementation.ResultDirectory
-	decision := filepath.Join(directory, "decision.md")
-	prose := "<!-- skl.implement/v1\n{\"target_snapshot\":\"agent-prose\",\"transition\":{\"from\":\"x\"},\"resume_state\":\"resume\"}\n-->\nmalformed {not json\n"
-	if err := os.WriteFile(decision, []byte(prose), 0600); err != nil {
-		t.Fatal(err)
-	}
-	got := f.run(t, f.worktree, "implement", "needs-human", "--item", "7", "--reason", "mandatory_rule", "--decision", decision)
-	if got.Status != "needs_human" || !slices.Equal(f.forge.sourceLabels, []string{"needs-human"}) {
-		t.Fatalf("pause with opaque decision: %#v source=%v", got, f.forge.sourceLabels)
-	}
-	transported := workflow.OpaqueImplementationDecision(prose)
-	transportedComments := 0
-	for _, comment := range f.forge.sourceComments {
-		if comment["body"] == transported {
-			transportedComments++
-		}
-	}
-	if transportedComments != 1 {
-		t.Fatalf("decision transport changed bytes: %#v", f.forge.sourceComments)
-	}
-	if status := f.run(t, f.root, "status"); status.Status != "observed" {
-		t.Fatalf("status consumed opaque decision prose: %#v", status)
-	}
-	if resumed := f.run(t, f.root, "implement", "resume", "--item", "7"); resumed.Status != "fix_required" {
-		t.Fatalf("resume consumed opaque decision prose: %#v", resumed)
-	}
-	for _, comment := range f.forge.sourceComments {
-		if comment["body"] == transported {
-			transportedComments--
-		}
-	}
-	if transportedComments != 0 {
-		t.Fatalf("status or resume rewrote the opaque decision: %#v", f.forge.sourceComments)
+	for _, tc := range []struct{ name, prose string }{
+		{"old transition and resume envelope", "<!-- skl.implement/v1\n{\"target_snapshot\":\"agent-prose\",\"transition\":{\"from\":\"x\"},\"resume_state\":\"resume\"}\n-->\nold envelope prose\n"},
+		{"old target and watchdog pin envelope", "<!-- skl.implement/v1\n{\"watchdog_head\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"reviewed_head\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"review_round_head\":\"cccccccccccccccccccccccccccccccccccccccc\"}\n-->\npin-looking prose\n"},
+		{"malformed metadata-looking envelope", "<!-- skl.implement/v1\n{not json at all\n-->\nmalformed prose\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newReviewFixture(t)
+			f.forge.noPull = true
+			f.forge.labels = nil
+			f.forge.sourceLabels = []string{"ready", "wip"}
+			f.forge.sourceComments = []map[string]any{
+				{"author_association": "OWNER", "body": "<!-- skl.implement/v1\n{\"target_snapshot\":\"" + f.head + "\",\"target_branch\":\"main\",\"transition\":\"stale\",\"resume_state\":7}\n-->"},
+				{"author_association": "OWNER", "body": "malformed retired envelope"},
+			}
+			start := f.run(t, f.worktree, "implement", "resume", "--item", "7")
+			decision := filepath.Join(start.Packet.Facts.Implementation.ResultDirectory, "decision.md")
+			if err := os.WriteFile(decision, []byte(tc.prose), 0600); err != nil {
+				t.Fatal(err)
+			}
+			got := f.run(t, f.worktree, "implement", "needs-human", "--item", "7", "--reason", "mandatory_rule", "--decision", decision)
+			if got.Status != "needs_human" || !slices.Equal(f.forge.sourceLabels, []string{"needs-human"}) {
+				t.Fatalf("pause with opaque decision: %#v source=%v", got, f.forge.sourceLabels)
+			}
+			transported := workflow.OpaqueImplementationDecision(tc.prose)
+			count := func() int {
+				matches := 0
+				for _, comment := range f.forge.sourceComments {
+					if comment["body"] == transported {
+						matches++
+					}
+				}
+				return matches
+			}
+			if count() != 1 {
+				t.Fatalf("decision transport changed bytes: %#v", f.forge.sourceComments)
+			}
+			if status := f.run(t, f.root, "status"); status.Status != "observed" {
+				t.Fatalf("status consumed opaque decision prose: %#v", status)
+			}
+			if resumed := f.run(t, f.root, "implement", "resume", "--item", "7"); resumed.Status != "fix_required" {
+				t.Fatalf("resume consumed opaque decision prose: %#v", resumed)
+			}
+			if count() != 1 {
+				t.Fatalf("status or resume rewrote the opaque decision: %#v", f.forge.sourceComments)
+			}
+		})
 	}
 }
 
@@ -1059,6 +1102,51 @@ func TestImplementationReadyResumePreservesWorktreeThroughPublicHTTP(t *testing.
 	explicit := f.run(t, f.root, "implement", "resume", "--item", "7")
 	if explicit.Status != "work_available" || explicit.Packet.Facts.Implementation.Branch != "widget" {
 		t.Fatalf("explicit resume selected another Work Item: %#v", explicit)
+	}
+}
+
+func TestImplementationIssueOnlyPausePublishesNewDecisionAfterRequeueThroughPublicHTTP(t *testing.T) {
+	f := newReviewFixture(t)
+	f.forge.noPull = true
+	f.forge.labels = nil
+	f.forge.sourceLabels = []string{"ready", "wip"}
+	f.forge.sourceComments = []map[string]any{{"author_association": "OWNER", "body": "<!-- skl.implement/v1\n{\"target_snapshot\":\"" + f.head + "\",\"target_branch\":\"main\"}\n-->"}}
+	start := f.run(t, f.worktree, "implement", "resume", "--item", "7")
+	first := filepath.Join(start.Packet.Facts.Implementation.ResultDirectory, "decision.md")
+	if err := os.WriteFile(first, []byte("first decision\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.run(t, f.worktree, "implement", "needs-human", "--item", "7", "--reason", "mandatory_rule", "--decision", first); got.Status != "needs_human" || !slices.Equal(f.forge.sourceLabels, []string{"needs-human"}) {
+		t.Fatalf("first issue-only pause: %#v source=%v", got, f.forge.sourceLabels)
+	}
+	// Explicit human requeue opens a new Ready stage.
+	f.forge.sourceLabels = []string{"ready"}
+	if resumed := f.run(t, f.worktree, "implement", "next"); resumed.Status != "work_available" || resumed.Packet.Facts.Implementation.WorkItem != 7 {
+		t.Fatalf("requeued issue-only stage was not claimable: %#v", resumed)
+	}
+	runGit(t, f.worktree, "commit", "--allow-empty", "-m", "requeued issue-only work")
+	f.head = strings.TrimSpace(runGitOutput(t, f.worktree, "rev-parse", "HEAD"))
+	f.forge.head = f.head
+	secondDirectory := newImplementationResultDirectory(t)
+	second := filepath.Join(secondDirectory, "decision.md")
+	if err := os.WriteFile(second, []byte("second decision\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got := f.run(t, f.worktree, "implement", "needs-human", "--item", "7", "--reason", "mandatory_rule", "--decision", second)
+	if got.Status != "needs_human" || !slices.Equal(f.forge.sourceLabels, []string{"needs-human"}) {
+		t.Fatalf("second issue-only pause: %#v source=%v", got, f.forge.sourceLabels)
+	}
+	transported := []string{workflow.OpaqueImplementationDecision("first decision\n"), workflow.OpaqueImplementationDecision("second decision\n")}
+	for _, wanted := range transported {
+		matches := 0
+		for _, comment := range f.forge.sourceComments {
+			if comment["body"] == wanted {
+				matches++
+			}
+		}
+		if matches != 1 {
+			t.Fatalf("issue-only decision history lost or duplicated: %#v", f.forge.sourceComments)
+		}
 	}
 }
 
@@ -1106,6 +1194,27 @@ func TestWatchdogCleanupFailuresKeepDestinationsProtectedThroughPublicHTTP(t *te
 			}
 		})
 	}
+	t.Run("source needs human cleanup", func(t *testing.T) {
+		f := newReviewFixture(t)
+		f.forge.noOther = true
+		f.forge.sourceLabels = []string{"needs-human"}
+		f.start(t, f.root)
+		f.forge.failDelete = "needs-human"
+		directory := t.TempDir()
+		summary := filepath.Join(directory, "summary.md")
+		if err := os.WriteFile(summary, []byte("verdict"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.runResult(f.worktree, "watchdog", "submit", "--item", "7", "--review-number", "1", "--reviewed-head", f.head, "--verdict", "rework", "--summary", summary); err == nil {
+			t.Fatal("source Needs Human cleanup failure was not reported")
+		}
+		if len(f.forge.summaries) != 1 || !slices.Contains(f.forge.labels, "wip") {
+			t.Fatalf("source cleanup evidence or protection lost: labels=%v", f.forge.labels)
+		}
+		if got := f.run(t, f.root, "implement", "next"); got.Status != "no_work" {
+			t.Fatalf("failed source cleanup exposed the destination: %#v labels=%v", got, f.forge.labels)
+		}
+	})
 }
 
 func TestImplementationPauseRetryRepublishesNothingThroughPublicHTTP(t *testing.T) {
@@ -1132,6 +1241,135 @@ func TestImplementationPauseRetryRepublishesNothingThroughPublicHTTP(t *testing.
 	if got.Status != "needs_human" || len(f.forge.sourceComments) != 2 || !slices.Equal(f.forge.sourceLabels, []string{"needs-human"}) {
 		t.Fatalf("fresh pause retry duplicated or lost evidence: %#v comments=%d source=%v", got, len(f.forge.sourceComments), f.forge.sourceLabels)
 	}
+}
+
+func TestImplementationPauseRetryReusesAcceptedDecisionThroughPublicHTTP(t *testing.T) {
+	f := newReviewFixture(t)
+	f.forge.noPull = true
+	f.forge.labels = nil
+	f.forge.sourceLabels = []string{"ready", "wip"}
+	f.forge.sourceComments = []map[string]any{{"author_association": "OWNER", "body": "<!-- skl.implement/v1\n{\"target_snapshot\":\"" + f.head + "\",\"target_branch\":\"main\"}\n-->"}}
+	start := f.run(t, f.worktree, "implement", "resume", "--item", "7")
+	decision := filepath.Join(start.Packet.Facts.Implementation.ResultDirectory, "decision.md")
+	if err := os.WriteFile(decision, []byte("hold\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	f.forge.failSourceComment = true
+	args := []string{"implement", "needs-human", "--item", "7", "--reason", "mandatory_rule", "--decision", decision}
+	if _, err := f.runResult(f.worktree, args...); err == nil {
+		t.Fatal("accepted decision with lost response and failed readback was not interrupted")
+	}
+	if len(f.forge.sourceComments) != 2 || !slices.Equal(f.forge.sourceLabels, []string{"ready", "wip"}) {
+		t.Fatalf("partial pause state: comments=%d source=%v", len(f.forge.sourceComments), f.forge.sourceLabels)
+	}
+	got := f.run(t, f.worktree, args...)
+	if got.Status != "needs_human" || len(f.forge.sourceComments) != 2 || !slices.Equal(f.forge.sourceLabels, []string{"needs-human"}) {
+		t.Fatalf("fresh pause retry duplicated or lost accepted evidence: %#v comments=%d source=%v", got, len(f.forge.sourceComments), f.forge.sourceLabels)
+	}
+}
+
+func TestImplementationReleaseRecoveryNeverReleasesLaterWatchdogClaimThroughPublicHTTP(t *testing.T) {
+	f := newReviewFixture(t)
+	f.forge.noOther = true
+	f.forge.noPull = true
+	f.forge.labels = nil
+	f.forge.sourceLabels = []string{"ready", "wip"}
+	f.forge.sourceComments = []map[string]any{{"author_association": "OWNER", "body": "<!-- skl.implement/v1\n{\"target_snapshot\":\"" + f.head + "\",\"target_branch\":\"main\"}\n-->"}}
+	start := f.run(t, f.worktree, "implement", "resume", "--item", "7")
+	body := filepath.Join(start.Packet.Facts.Implementation.ResultDirectory, "submission.md")
+	if err := os.WriteFile(body, []byte("final"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	f.forge.loseDelete, f.forge.failFinalRead = "wip", true
+	args := []string{"implement", "submit", "--item", "7", "--body", body}
+	if got, err := f.runResult(f.worktree, args...); err == nil {
+		t.Fatalf("lost release response was not interrupted: %#v", got)
+	}
+	if !slices.Equal(f.forge.labels, []string{"review"}) {
+		t.Fatalf("released review state: %v", f.forge.labels)
+	}
+	claimed := f.run(t, f.root, "watchdog", "next")
+	if claimed.Status != "work_available" || claimed.Packet == nil {
+		t.Fatalf("later Watchdog Claim not acquired: %#v", claimed)
+	}
+	labels := slices.Clone(f.forge.labels)
+	if got := f.run(t, f.worktree, args...); got.Status != "fix_required" {
+		t.Fatalf("old implementation command consumed the later Watchdog Claim: %#v", got)
+	}
+	if !slices.Equal(f.forge.labels, labels) {
+		t.Fatalf("old implementation command released the later Claim: %v", f.forge.labels)
+	}
+	if resumed := f.run(t, f.root, "implement", "resume", "--item", "7"); resumed.Status != "fix_required" {
+		t.Fatalf("implementation resume consumed the later Claim: %#v", resumed)
+	}
+	if status := f.run(t, f.root, "status"); status.Status != "observed" {
+		t.Fatalf("status did not observe the later Claim: %#v", status)
+	}
+	if !slices.Equal(f.forge.labels, labels) {
+		t.Fatalf("resume or status released the later Claim: %v", f.forge.labels)
+	}
+}
+
+func TestImplementationReworkResumePreservesWorktreeThroughPublicHTTP(t *testing.T) {
+	f := newReviewFixture(t)
+	f.forge.labels = []string{"rework", "wip"}
+	f.forge.body = "previous\n\nCloses #7\n"
+	uncommitted := filepath.Join(f.worktree, "uncommitted.txt")
+	if err := os.WriteFile(uncommitted, []byte("rework in progress"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	start := f.run(t, f.worktree, "implement", "resume", "--item", "7")
+	if start.Status != "work_available" || start.Packet.Facts.Implementation.Branch != "widget" || start.Packet.Facts.Implementation.WorkItem != 7 {
+		t.Fatalf("Rework resume packet: %#v", start.Packet.Facts.Implementation)
+	}
+	if readFile(t, uncommitted) != "rework in progress" || !slices.Equal(f.forge.labels, []string{"rework", "wip"}) {
+		t.Fatalf("Rework resume did not preserve files or Claim: %v", f.forge.labels)
+	}
+}
+
+func TestWatchdogCleanupWarningsThroughPublicHTTP(t *testing.T) {
+	for _, verdict := range []string{"rework", "needs-human"} {
+		t.Run(verdict, func(t *testing.T) {
+			f := newReviewFixture(t)
+			f.forge.noOther = true
+			start := f.start(t, f.root)
+			directory := start.Packet.Facts.Watchdog.ResultDirectory
+			summary := filepath.Join(directory, "summary.md")
+			if err := os.WriteFile(summary, []byte(verdict), 0600); err != nil {
+				t.Fatal(err)
+			}
+			f.forge.denyCleanup = directory
+			args := []string{"watchdog", "submit", "--item", "7", "--review-number", "1", "--reviewed-head", f.head, "--verdict", verdict, "--summary", summary}
+			got := f.run(t, f.worktree, args...)
+			_ = os.Chmod(directory, 0700)
+			if got.Status != map[string]string{"rework": "rework", "needs-human": "needs_human"}[verdict] || !strings.Contains(got.Reason, "cleanup failed") || !fileExists(summary) {
+				t.Fatalf("watchdog cleanup warning: %#v", got)
+			}
+			writes := f.forge.writes
+			retry := f.run(t, f.worktree, args...)
+			if retry.Status != got.Status || f.forge.writes != writes || fileExists(summary) || len(f.forge.summaries) != 1 {
+				t.Fatalf("cleanup-only retry mutated the verdict: %#v writes=%d", retry, f.forge.writes)
+			}
+		})
+	}
+	t.Run("unexpected files", func(t *testing.T) {
+		f := newReviewFixture(t)
+		f.forge.noOther = true
+		start := f.start(t, f.root)
+		directory := start.Packet.Facts.Watchdog.ResultDirectory
+		summary := filepath.Join(directory, "summary.md")
+		unexpected := filepath.Join(directory, "keep.txt")
+		if err := os.WriteFile(summary, []byte("rework"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(unexpected, []byte("keep"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		got := f.run(t, f.worktree, "watchdog", "submit", "--item", "7", "--review-number", "1", "--reviewed-head", f.head, "--verdict", "rework", "--summary", summary)
+		if got.Status != "rework" || !strings.Contains(got.Reason, "unexpected files") || readFile(t, unexpected) != "keep" || !fileExists(summary) {
+			t.Fatalf("unexpected-file cleanup warning: %#v", got)
+		}
+	})
 }
 
 func labelObjects(labels []string) []map[string]string {
