@@ -1084,3 +1084,179 @@ func TestSubmitRefusesRecoveredNonMainSubmissionThroughGitHub(t *testing.T) {
 	}
 }
 
+func TestWatchdogRefusesInvalidReviewedEvidenceThroughGitHub(t *testing.T) {
+	for _, mergeability := range []string{"conflicting", "unknown"} {
+		for _, tc := range []struct {
+			evidence          string
+			labels            []string
+			differentReviewed bool
+			divergentHead     bool
+			moveHead          bool
+			claimAbsent       bool
+			reason            string
+		}{
+			{evidence: "PR head moves during verdict publication", labels: []string{"review", "wip"}, moveHead: true, reason: "Submission head changed"},
+			{evidence: "supplied reviewed head differs from claimed revision", labels: []string{"review", "wip"}, differentReviewed: true, reason: "fixed Awaiting Review Claim"},
+			{evidence: "pushed final head does not descend from reviewed head", labels: []string{"review", "wip"}, divergentHead: true, reason: "descend"},
+			{evidence: "required review Claim is absent", labels: []string{"review"}, claimAbsent: true, reason: "fixed Awaiting Review Claim"},
+		} {
+			t.Run(mergeability+"/"+tc.evidence, func(t *testing.T) {
+				root := proposalRepository(t)
+				baseline := prepareSlice(t, root, "widget")
+				runGit(t, root, "rm", "-r", ".changes/widget")
+				runGit(t, root, "commit", "-m", "retire")
+				reviewed := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+				head := reviewed
+				if tc.divergentHead {
+					runGit(t, root, "switch", "-C", "widget", baseline)
+					runGit(t, root, "rm", "-r", ".changes/widget")
+					runGit(t, root, "commit", "-m", "divergent retirement")
+					head = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+				}
+				supplied := reviewed
+				if tc.differentReviewed {
+					supplied = baseline
+				}
+				labels := slices.Clone(tc.labels)
+				pullHead := head
+				prBody := "existing"
+				moved := false
+				writes := 0
+				metadata := []map[string]any{{"body": fmt.Sprintf("<!-- skl.implement/v1\n{\"watchdog_head\":%q}\n-->", reviewed), "author_association": "OWNER"}}
+				var summaries, events []map[string]any
+				unwanted := ""
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					path := strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets")
+					if r.Method != http.MethodGet {
+						writes++
+					}
+					if tc.moveHead && path == "/issues/11/comments" && r.Method == http.MethodPost && !moved {
+						moved = true
+						pullHead = strings.Repeat("e", 40)
+					}
+					toLabels := func() []map[string]string {
+						pullLabels := make([]map[string]string, 0, len(labels))
+						for _, label := range labels {
+							pullLabels = append(pullLabels, map[string]string{"name": label})
+						}
+						return pullLabels
+					}
+					pull := map[string]any{"number": 11, "state": "open", "body": prBody, "labels": toLabels(), "head": map[string]any{"sha": pullHead, "ref": "widget", "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": "main"}}
+					if mergeability != "unknown" {
+						pull["mergeable"] = mergeability == "mergeable"
+					}
+					var result any = []any{}
+					switch {
+					case path == "/issues":
+						result = []any{map[string]any{"number": 7, "title": "widget", "state": "open"}}
+					case path == "/pulls":
+						result = []any{pull}
+					case path == "/issues/7/comments":
+						result = metadata
+					case path == "/issues/11/comments":
+						if r.Method == http.MethodPost {
+							var comment map[string]any
+							if err := json.NewDecoder(r.Body).Decode(&comment); err != nil {
+								http.Error(w, err.Error(), http.StatusBadRequest)
+								return
+							}
+							comment["author_association"] = "OWNER"
+							summaries = append(summaries, comment)
+						}
+						result = summaries
+					case path == "/pulls/11" && r.Method == http.MethodPatch:
+						var payload map[string]string
+						if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+							http.Error(w, err.Error(), http.StatusBadRequest)
+							return
+						}
+						if _, exists := payload["base"]; exists {
+							unwanted = "retargeted Submission"
+						}
+						prBody = payload["body"]
+					case path == "/pulls/11", path == "/issues/11":
+						result = pull
+					case path == "/issues/11/timeline":
+						result = events
+					case path == "/git/ref/heads/widget":
+						result = map[string]any{"object": map[string]string{"sha": head}}
+					case path == "/issues/7":
+						result = map[string]any{"number": 7, "title": "widget", "state": "open"}
+					case path == "/issues/11/labels" && r.Method == http.MethodPost:
+						var payload struct{ Labels []string }
+						if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+							http.Error(w, err.Error(), http.StatusBadRequest)
+							return
+						}
+						for _, label := range payload.Labels {
+							if !slices.Contains(labels, label) {
+								labels = append(labels, label)
+								events = append(events, map[string]any{"event": "labeled", "label": map[string]string{"name": label}})
+							}
+						}
+					case strings.HasPrefix(path, "/issues/11/labels/") && r.Method == http.MethodDelete:
+						label := strings.TrimPrefix(path, "/issues/11/labels/")
+						labels = slices.DeleteFunc(labels, func(value string) bool { return value == label })
+						events = append(events, map[string]any{"event": "unlabeled", "label": map[string]string{"name": label}})
+					case path == "/graphql":
+						result = map[string]any{"data": map[string]any{}}
+					case path == "/git/ref/heads/main" || strings.Contains(path, "target"):
+						unwanted = r.Method + " " + path
+						http.Error(w, "integration target unavailable", http.StatusInternalServerError)
+						return
+					case path == "/pulls/11/comments", path == "/pulls/11/reviews", path == "/issues/7/dependencies/blocked_by":
+					default:
+						unwanted = r.Method + " " + path
+						http.Error(w, "unexpected request", http.StatusNotFound)
+						return
+					}
+					json.NewEncoder(w).Encode(result)
+				}))
+				defer server.Close()
+				var output bytes.Buffer
+				app := newApp(func(github.RepositoryID) (setup.Backend, error) {
+					return setup.NewGitHubBackend(server.URL, "token", server.Client()), nil
+				}, bytes.NewReader(nil), &output, &output)
+				dir := t.TempDir()
+				summary, body := filepath.Join(dir, "summary.md"), filepath.Join(dir, "body.md")
+				for path, content := range map[string]string{summary: "review summary", body: "final body"} {
+					if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				command := []string{"skl", "watchdog", "submit", "--item", "7", "--reviewed-head", supplied, "--verdict", "pass", "--summary", summary, "--body", body}
+				if tc.divergentHead {
+					command = append(command, "--head", head)
+				}
+				command = append(command, "--repo", root)
+				if err := app.Run(command); err != nil {
+					t.Fatal(err)
+				}
+				var result setup.ImplementationOutput
+				if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+					t.Fatal(err)
+				}
+				if result.Status != "fix_required" || !strings.Contains(result.Reason, tc.reason) || slices.Contains(labels, "done") || !slices.Contains(labels, "review") || len(summaries) > 1 || unwanted != "" {
+					t.Fatalf("%s: %#v labels=%v summaries=%d unwanted=%q", tc.evidence, result, labels, len(summaries), unwanted)
+				}
+				if readFile(t, summary) != "review summary" || readFile(t, body) != "final body" {
+					t.Fatalf("%s discarded repair documents", tc.evidence)
+				}
+				switch {
+				case tc.moveHead:
+					if len(summaries) != 1 || !slices.Contains(labels, "wip") {
+						t.Fatalf("%s retained evidence: summaries=%d labels=%v", tc.evidence, len(summaries), labels)
+					}
+				case tc.claimAbsent:
+					if slices.Contains(labels, "wip") || writes != 0 {
+						t.Fatalf("%s fabricated a review Claim: labels=%v writes=%d", tc.evidence, labels, writes)
+					}
+				default:
+					if !slices.Contains(labels, "wip") || writes != 0 {
+						t.Fatalf("%s released the reviewed Claim or mutated the Submission: labels=%v writes=%d", tc.evidence, labels, writes)
+					}
+				}
+			})
+		}
+	}
+}
