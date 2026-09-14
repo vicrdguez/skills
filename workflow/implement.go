@@ -46,23 +46,22 @@ type ImplementationItem struct {
 }
 
 type Submission struct {
-	Lifecycle            *LifecycleObservation
-	PendingReview        State
-	Merged               bool
-	Mergeability         string
-	Bounces              int
-	CreatedAt            string
-	ReviewedHead         string
-	VerdictHead          string
-	State                State
-	Claimed              bool
-	ID                   SubmissionID
-	Head                 string
-	Base                 string
-	Body                 string
-	Draft                bool
-	PreviousReviewedHead string
-	Comments             []skilldist.ReviewComment
+	Lifecycle       *LifecycleObservation
+	PendingReview   State
+	ClaimAcquiredAt string
+	Merged          bool
+	Mergeability    string
+	CreatedAt       string
+	ReviewedHead    string
+	VerdictHead     string
+	State           State
+	Claimed         bool
+	ID              SubmissionID
+	Head            string
+	Base            string
+	Body            string
+	Draft           bool
+	Comments        []skilldist.ReviewComment
 }
 
 // LifecycleObservation retains overlaps while a multi-record transition is in flight.
@@ -266,7 +265,7 @@ func InspectImplementation(ctx context.Context, root string, id WorkItemID, endp
 	return ImplementationOutcome{Status: "fix_required", Reason: "Work Item unavailable; supply its explicit stable --item identity"}, nil
 }
 
-func StartImplementation(ctx context.Context, root, remote string, id WorkItemID, snapshot, reviewedHead string, endpoints ArtifactEndpoints, backend ImplementationBackend) (ImplementationOutcome, error) {
+func StartImplementation(ctx context.Context, root, remote string, id WorkItemID, snapshot string, endpoints ArtifactEndpoints, backend ImplementationBackend) (ImplementationOutcome, error) {
 	items, err := loadImplementation(ctx, backend)
 	if err != nil {
 		return ImplementationOutcome{}, err
@@ -292,7 +291,7 @@ func StartImplementation(ctx context.Context, root, remote string, id WorkItemID
 		}
 		for _, item := range items {
 			if item.ID == id && item.Claimed && (item.State == Ready || item.State == Rework) {
-				prepared, outcome, err := prepareImplementationStart(ctx, root, remote, item, snapshot, reviewedHead, endpoints, backend)
+				prepared, outcome, err := prepareImplementationStart(ctx, root, remote, item, snapshot, endpoints, backend)
 				if err != nil || outcome.Status != "" {
 					return outcome, err
 				}
@@ -336,7 +335,7 @@ func StartImplementation(ctx context.Context, root, remote string, id WorkItemID
 		if blocked {
 			continue
 		}
-		prepared, outcome, err := prepareImplementationStart(ctx, root, remote, item, snapshot, reviewedHead, endpoints, backend)
+		prepared, outcome, err := prepareImplementationStart(ctx, root, remote, item, snapshot, endpoints, backend)
 		if err != nil || outcome.Status != "" {
 			return outcome, err
 		}
@@ -359,14 +358,18 @@ func StartImplementation(ctx context.Context, root, remote string, id WorkItemID
 	return ImplementationOutcome{Status: "no_work"}, nil
 }
 
-func prepareImplementationStart(ctx context.Context, root, remote string, item ImplementationItem, snapshot, reviewedHead string, endpoints ArtifactEndpoints, backend ImplementationBackend) (ImplementationItem, ImplementationOutcome, error) {
+func validConventionalBranch(root, branch string) bool {
+	return branch != "" && gitOK(root, "check-ref-format", "--branch", branch) == nil && !strings.Contains(branch, "/")
+}
+
+func prepareImplementationStart(ctx context.Context, root, remote string, item ImplementationItem, snapshot string, endpoints ArtifactEndpoints, backend ImplementationBackend) (ImplementationItem, ImplementationOutcome, error) {
 	refuse := func(reason string) (ImplementationItem, ImplementationOutcome, error) {
 		return item, ImplementationOutcome{Status: "fix_required", Reason: reason, Item: &item}, nil
 	}
 	if item.Problem != "" {
 		return refuse(item.Problem + "; repair contradictory projections before resuming")
 	}
-	if item.Branch == "" || gitOK(root, "check-ref-format", "--branch", item.Branch) != nil || strings.Contains(item.Branch, "/") {
+	if !validConventionalBranch(root, item.Branch) {
 		return refuse("invalid conventional branch identity; repair the Work Item attachment")
 	}
 	head, err := git(root, "rev-parse", "--verify", "refs/heads/"+item.Branch+"^{commit}")
@@ -423,23 +426,8 @@ func prepareImplementationStart(ctx context.Context, root, remote string, item I
 		if item.Submission == nil {
 			return refuse("Rework requires its existing Submission; repair the attachment")
 		}
-		if reviewedHead != "" {
-			resolved, err := git(root, "rev-parse", "--verify", reviewedHead+"^{commit}")
-			if err != nil || resolved != reviewedHead || gitOK(root, "merge-base", "--is-ancestor", reviewedHead, head) != nil {
-				return refuse("previous reviewed head must be an available ancestor; fetch the original reviewed commit")
-			}
-			copy := *item.Submission
-			copy.PreviousReviewedHead = reviewedHead
-			item.Submission = &copy
-		}
 		if !item.Submission.Draft && history.Phase != "retired" {
 			return refuse("finding-driven Rework must keep the ledger retired; restore its deletion history")
-		}
-		if previous := item.Submission.PreviousReviewedHead; previous != "" {
-			resolved, err := git(root, "rev-parse", "--verify", "--end-of-options", previous+"^{commit}")
-			if err != nil || resolved != previous || gitOK(root, "merge-base", "--is-ancestor", previous, head) != nil {
-				return refuse("recorded reviewed head is unavailable or not an ancestor; fetch the reviewed snapshot and repair its metadata")
-			}
 		}
 	}
 	return item, ImplementationOutcome{}, nil
@@ -451,9 +439,6 @@ func implementationRecovery(item ImplementationItem, remote string, endpoints Ar
 }
 
 func implementationPacket(root, remote string, item ImplementationItem, endpoints ArtifactEndpoints) (ImplementationOutcome, error) {
-	if item.State == Rework && !item.Synchronization && (item.Submission == nil || item.Submission.PreviousReviewedHead == "") {
-		return implementationRecovery(item, remote, endpoints, "previous reviewed head needs agent extraction from the supplied watchdog summary without rewriting history"), nil
-	}
 	main, err := primaryWorktree(root)
 	if err != nil {
 		return ImplementationOutcome{}, err
@@ -478,13 +463,10 @@ func implementationPacket(root, remote string, item ImplementationItem, endpoint
 	}
 	facts := skilldist.ImplementationFacts{Branch: item.Branch, Worktree: filepath.Join(main, ".worktrees", item.Branch), TargetSnapshot: target, ArtifactBaseline: history.Baseline, ArtifactCompletion: history.Completion, SuppliedArtifactBaseline: endpoints.Baseline, SuppliedArtifactCompletion: endpoints.Completion}
 	if item.Submission != nil {
-		facts.PreviousReviewedHead, facts.Comments = item.Submission.PreviousReviewedHead, item.Submission.Comments
+		facts.Comments = item.Submission.Comments
 	}
 	if item.State == Rework && !item.Synchronization {
 		facts.TargetSnapshot = ""
-	}
-	if item.Synchronization {
-		facts.PreviousReviewedHead = ""
 	}
 	facts.ResultDirectory, err = os.MkdirTemp("", "skl-implement-")
 	if err != nil {

@@ -57,6 +57,8 @@ func waitFixture(t *testing.T, lane string) (string, *waitingMemory) {
 		completeAndRetireSlice(t, root, "widget")
 		b.work[0].State = workflow.AwaitingReview
 		b.work[0].Submission = &workflow.Submission{ID: "11", Head: strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))}
+		runGit(t, root, "switch", "main")
+		runGit(t, root, "worktree", "add", filepath.Join(root, ".worktrees", "widget"), "widget")
 	}
 	runGit(t, root, "remote", "rename", "origin", "upstream")
 	runGit(t, root, "remote", "add", "origin", "https://github.com/other/widgets.git")
@@ -371,8 +373,10 @@ func TestNextWaitArtifactEndpoints(t *testing.T) {
 					state := workflow.Rework
 					if lane == "watchdog" {
 						state = workflow.AwaitingReview
+						runGit(t, root, "switch", "main")
+						runGit(t, root, "worktree", "add", filepath.Join(root, ".worktrees", "widget"), "widget")
 					}
-					item := workflow.ImplementationItem{ID: "7", Branch: "widget", State: state, Submission: &workflow.Submission{ID: "11", Head: head, PreviousReviewedHead: head}}
+					item := workflow.ImplementationItem{ID: "7", Branch: "widget", State: state, Submission: &workflow.Submission{ID: "11", Head: head}}
 					if !valid {
 						baseline = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "main"))
 					}
@@ -527,16 +531,24 @@ func TestNextWaitCanonicalEligibility(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					item.Submission = &workflow.Submission{ID: workflow.SubmissionID(strconv.Itoa(number + 100)), Head: head, PreviousReviewedHead: head, Base: "main", State: item.State, Claimed: item.Claimed, CreatedAt: "2025"}
+					item.Submission = &workflow.Submission{ID: workflow.SubmissionID(strconv.Itoa(number + 100)), Head: head, Base: "main", State: item.State, Claimed: item.Claimed, CreatedAt: "2025"}
 					if item.ID == "5" {
 						item.Submission.CreatedAt = "2023"
 					}
 					if item.ID == "6" {
 						item.Submission.CreatedAt = "1990"
-						item.Submission.ReviewedHead = head
 					}
 				}
 			}
+			if lane == "watchdog" {
+				runGit(t, root, "switch", "main")
+				for _, item := range work {
+					if item.State == workflow.AwaitingReview {
+						runGit(t, root, "worktree", "add", filepath.Join(root, ".worktrees", item.Branch), item.Branch)
+					}
+				}
+			}
+			worktreesBefore := runGitOutput(t, root, "worktree", "list", "--porcelain")
 			before, err := json.Marshal(work)
 			if err != nil {
 				t.Fatal(err)
@@ -595,8 +607,8 @@ func TestNextWaitCanonicalEligibility(t *testing.T) {
 					t.Fatalf("ineligible item mutated: %#v -> %#v", original[i], work[i])
 				}
 			}
-			if _, err := os.Stat(filepath.Join(root, ".worktrees")); !os.IsNotExist(err) {
-				t.Fatalf("waiting launched/prepared a worker: %v", err)
+			if after := runGitOutput(t, root, "worktree", "list", "--porcelain"); after != worktreesBefore {
+				t.Fatalf("waiting changed prepared worktrees: %s -> %s", worktreesBefore, after)
 			}
 		})
 	}

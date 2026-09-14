@@ -32,6 +32,12 @@ type implementationMemory struct {
 	failTransition   bool
 	beforeTransition func()
 	afterCompletion  func()
+	reviewClock      int
+}
+
+func (b *implementationMemory) reviewTime() string {
+	b.reviewClock++
+	return fmt.Sprintf("2026-01-01T00:00:%02dZ", b.reviewClock)
 }
 
 // Expand concise initial fixtures into separate records. Once a mutation is made,
@@ -155,6 +161,8 @@ func (b *implementationMemory) PublishImplementation(_ context.Context, item wor
 			submission.Lifecycle = &workflow.LifecycleObservation{Open: true}
 			if current.Submission != nil {
 				submission.Lifecycle = current.Submission.Lifecycle
+				submission.Comments = current.Submission.Comments
+				submission.ClaimAcquiredAt = current.Submission.ClaimAcquiredAt
 			}
 			b.work[i] = current
 			b.work[i].Submission = &submission
@@ -256,6 +264,7 @@ func (b *implementationMemory) ClaimImplementation(_ context.Context, item workf
 	for i := range b.work {
 		if b.work[i].ID == item.ID {
 			b.work[i] = implementationFixture(b.work[i])
+			wasClaimed := b.work[i].Claimed
 			b.work[i].TargetSnapshot = item.TargetSnapshot
 			b.work[i].TargetBranch = item.TargetBranch
 			if item.Submission != nil {
@@ -266,6 +275,9 @@ func (b *implementationMemory) ClaimImplementation(_ context.Context, item workf
 				claim = b.work[i].Submission.Lifecycle
 			}
 			claim.Claimed = true
+			if !wasClaimed && b.work[i].Submission != nil {
+				b.work[i].Submission.ClaimAcquiredAt = b.reviewTime()
+			}
 			b.work[i] = workflow.ReconcileImplementation(b.work[i])
 		}
 	}
@@ -426,7 +438,7 @@ func TestB3RefuseMissingOrAmbiguousRequiredMarkers(t *testing.T) {
 			backend.work[0].State = workflow.Ready
 			if strings.Contains(problem, "completion") {
 				backend.work[0].State = workflow.Rework
-				backend.work[0].Submission = &workflow.Submission{ID: "11", Head: head, PreviousReviewedHead: head}
+				backend.work[0].Submission = &workflow.Submission{ID: "11", Head: head}
 			}
 			start := implementCLI(t, root, backend, "next")
 			if start.Status != "fix_required" || backend.work[0].Claimed {
@@ -848,7 +860,7 @@ func TestB9SubmitOnlyACompletedRetiredContract(t *testing.T) {
 			if test.rework {
 				head := completeAndRetireSlice(t, root, "widget")
 				state = workflow.Rework
-				submission = &workflow.Submission{ID: "42", Head: head, PreviousReviewedHead: head}
+				submission = &workflow.Submission{ID: "42", Head: head}
 			}
 			backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: state, Claimed: true, TargetBranch: "main", TargetSnapshot: strings.TrimSpace(runGitOutput(t, root, "rev-parse", "main")), Submission: submission}}, remoteHeads: map[string]string{}}
 			start := implementCLI(t, root, backend, "resume", "--item", "7")
@@ -935,7 +947,7 @@ func TestImplementClaimsOldestEligibleWork(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			item.Submission = &workflow.Submission{ID: workflow.SubmissionID(strconv.Itoa(number + 100)), Head: head, PreviousReviewedHead: head, Base: "main"}
+			item.Submission = &workflow.Submission{ID: workflow.SubmissionID(strconv.Itoa(number + 100)), Head: head, Base: "main"}
 		}
 	}
 	for _, want := range []int{4, 5, 3, 2} {
@@ -1007,7 +1019,7 @@ func TestImplementLifecycleOrdersOpaqueIDsByBackendFact(t *testing.T) {
 		prepareSlice(t, root, item.Branch)
 	}
 	for _, want := range []workflow.WorkItemID{"zulu", "alpha"} {
-		got, err := workflow.StartImplementation(context.Background(), root, "origin", "", "", "", workflow.ArtifactEndpoints{}, b)
+		got, err := workflow.StartImplementation(context.Background(), root, "origin", "", "", workflow.ArtifactEndpoints{}, b)
 		if err != nil || got.Status != "work_available" || got.Item == nil || got.Item.ID != want || !got.Item.Claimed {
 			t.Fatalf("opaque implementation tie-break: %#v, %v; want %q", got, err, want)
 		}
@@ -1021,6 +1033,10 @@ func TestImplementLifecycleOrdersOpaqueIDsByBackendFact(t *testing.T) {
 		item.Source = &workflow.LifecycleObservation{Open: true}
 		item.Submission = &workflow.Submission{ID: workflow.SubmissionID("review-" + item.ID), Head: strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD")), CreatedAt: "2026"}
 		item.Submission.Lifecycle = &workflow.LifecycleObservation{Open: true, States: []workflow.State{workflow.AwaitingReview}}
+	}
+	runGit(t, root, "switch", "main")
+	for _, item := range b.work {
+		runGit(t, root, "worktree", "add", filepath.Join(root, ".worktrees", item.Branch), item.Branch)
 	}
 	for _, want := range []workflow.WorkItemID{"zulu", "alpha"} {
 		got, err := workflow.StartWatchdog(context.Background(), root, "origin", "", workflow.ArtifactEndpoints{}, b)
@@ -1277,17 +1293,17 @@ func TestImplementStartsFindingDrivenRework(t *testing.T) {
 	completeAndRetireSlice(t, root, "widget")
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	comments := []skilldist.ReviewComment{{Body: "W1 BLOCK evidence", Author: "reviewer"}, {Body: "W1 NOTE reason", Author: "owner", Association: "OWNER"}}
-	backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Rework, Submission: &workflow.Submission{ID: "11", Head: head, PreviousReviewedHead: head, Comments: comments}}}}
+	backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Rework, Submission: &workflow.Submission{ID: "11", Head: head, Comments: comments}}}}
 	got := implementCLI(t, root, backend, "next")
 	if got.Status != "work_available" || got.Packet == nil {
 		t.Fatalf("rework = %#v", got)
 	}
 	facts := got.Packet.Facts.Implementation
-	if facts.Submission != 11 || facts.PreviousReviewedHead != head || !reflect.DeepEqual(facts.Comments, comments) || facts.TargetSnapshot != "" {
+	if facts.Submission != 11 || !reflect.DeepEqual(facts.Comments, comments) || facts.TargetSnapshot != "" {
 		t.Fatalf("facts = %#v", facts)
 	}
-	if !strings.Contains(got.Packet.Markdown(), head+"...HEAD") || strings.Contains(got.Packet.Markdown(), "git merge ") {
-		t.Fatal("rework packet synchronizes target or lacks review fixed point")
+	if !strings.Contains(got.Packet.Markdown(), "current PR comparison") || strings.Contains(got.Packet.Markdown(), "git merge ") || strings.Contains(got.Packet.Markdown(), head+"...HEAD") {
+		t.Fatal("rework packet synchronizes target or requires a previous review cache")
 	}
 }
 
@@ -1306,7 +1322,7 @@ func TestImplementResubmitsExistingRework(t *testing.T) {
 		backend.work[0].State, backend.work[0].TargetSnapshot = workflow.Rework, ""
 		backend.work[0].Source = &workflow.LifecycleObservation{Open: true, States: []workflow.State{workflow.Rework}, Claimed: true}
 		if hasSubmission {
-			backend.work[0].Submission = &workflow.Submission{ID: "42", Head: head, PreviousReviewedHead: head}
+			backend.work[0].Submission = &workflow.Submission{ID: "42", Head: head}
 			backend.work[0].Source = &workflow.LifecycleObservation{Open: true}
 			backend.work[0].Submission.Lifecycle = &workflow.LifecycleObservation{Open: true, States: []workflow.State{workflow.Rework}, Claimed: true}
 		}
@@ -1729,7 +1745,7 @@ func TestImplementRequiresLifecycleObservations(t *testing.T) {
 		if err != nil || got.Item == nil || !strings.Contains(got.Item.Problem, "missing lifecycle observations") {
 			t.Fatalf("incomplete observation accepted: %#v, %v; item=%#v", got, err, got.Item)
 		}
-		resumed, err := workflow.StartImplementation(context.Background(), root, "origin", "7", "", "", workflow.ArtifactEndpoints{}, b)
+		resumed, err := workflow.StartImplementation(context.Background(), root, "origin", "7", "", workflow.ArtifactEndpoints{}, b)
 		if err != nil || resumed.Status != "fix_required" || !b.work[0].Claimed || b.work[0].TargetSnapshot != "" {
 			t.Fatalf("incomplete observation resumed: %#v, %v", resumed, err)
 		}
@@ -1971,7 +1987,7 @@ func TestImplementInspectsPendingLifecycleProgress(t *testing.T) {
 			transition := workflow.ImplementationTransition{From: tt.from, Target: tt.target, Head: baseline, Directory: "original-operation"}
 			item := workflow.ImplementationItem{ID: "opaque-work", Branch: "widget", Source: &tt.source, Problem: tt.problem, TargetSnapshot: baseline, Transition: &transition}
 			if tt.submission != nil {
-				item.Submission = &workflow.Submission{ID: "opaque-submission", Head: baseline, PreviousReviewedHead: baseline, Lifecycle: tt.submission}
+				item.Submission = &workflow.Submission{ID: "opaque-submission", Head: baseline, Lifecycle: tt.submission}
 			}
 			b := &implementationMemory{work: []workflow.ImplementationItem{item}}
 			got, err := workflow.InspectImplementation(context.Background(), root, item.ID, workflow.ArtifactEndpoints{}, b)
@@ -1985,8 +2001,8 @@ func TestImplementInspectsPendingLifecycleProgress(t *testing.T) {
 			if got.Item.Claimed != claimed || got.Head != baseline || got.Item.TargetSnapshot != baseline || *got.Item.Transition != transition || !reflect.DeepEqual(b.work[0], item) {
 				t.Fatalf("inspection changed obligations: %#v", got.Item)
 			}
-			if got.Item.Submission != nil && (got.Item.Submission.ID != "opaque-submission" || got.Item.Submission.PreviousReviewedHead != baseline) {
-				t.Fatalf("inspection lost Submission identity or reviewed head: %#v", got.Item.Submission)
+			if got.Item.Submission != nil && (got.Item.Submission.ID != "opaque-submission" || got.Item.Submission.Head != baseline) {
+				t.Fatalf("inspection lost Submission identity or head: %#v", got.Item.Submission)
 			}
 		})
 	}

@@ -76,14 +76,13 @@ func TestGitHubWatchdogClaimsSubmissionAndReadsReviewFacts(t *testing.T) {
 	if item.ID != "7" || item.Order != 7 || item.Submission.ID != "11" || item.Submission.CreatedAt != "2026-01-01" || len(item.Submission.Comments) != 3 {
 		t.Fatalf("review facts: %#v", item.Submission)
 	}
-	item.Submission.ReviewedHead = "fixed"
 	for range 2 {
 		if err := b.ClaimImplementation(ctx, item); err != nil {
 			t.Fatal(err)
 		}
 	}
 	items, err = b.ImplementationItems(ctx)
-	if err != nil || !items[0].Claimed || items[0].Submission.ReviewedHead != "fixed" || !slices.Contains(labels, "review") || posts != 1 {
+	if err != nil || !items[0].Claimed || !slices.Contains(labels, "review") || posts != 0 {
 		t.Fatalf("claim: %#v %v labels=%v posts=%d", items, err, labels, posts)
 	}
 }
@@ -127,7 +126,7 @@ func TestGitHubWatchdogPublishesOpaqueAnchorsOnceAfterLostResponse(t *testing.T)
 	}
 }
 
-func TestGitHubWatchdogObservesMergeabilityAndCompletedBounceHistory(t *testing.T) {
+func TestGitHubWatchdogObservesMergeabilityWithoutCountingTimelineBounces(t *testing.T) {
 	for _, merged := range []bool{false, true} {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
@@ -154,7 +153,7 @@ func TestGitHubWatchdogObservesMergeabilityAndCompletedBounceHistory(t *testing.
 		b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
 		got, err := b.ReviewSubmission(context.Background(), "11")
 		server.Close()
-		if err != nil || got.ID != "11" || got.Bounces != 1 || got.Mergeability != "conflicting" || got.Merged != merged || got.Head != "fixed" {
+		if err != nil || got.ID != "11" || got.Mergeability != "conflicting" || got.Merged != merged || got.Head != "fixed" {
 			t.Fatalf("observation: %#v %v", got, err)
 		}
 	}
@@ -211,7 +210,7 @@ func TestGitHubWatchdogCompletesReviewWithoutClosingSource(t *testing.T) {
 			}))
 			defer server.Close()
 			b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
-			item := workflow.ImplementationItem{ID: "7", State: workflow.AwaitingReview, ResumeState: workflow.Rework, Submission: &workflow.Submission{ID: "11", Head: "fixed", ReviewedHead: "fixed"}}
+			item := workflow.ImplementationItem{ID: "7", State: workflow.AwaitingReview, ResumeState: workflow.Rework, Submission: &workflow.Submission{ID: "11", Head: "fixed"}}
 			for range 2 {
 				if err := b.CompleteReview(context.Background(), item, target, func() error { return nil }); err != nil {
 					t.Fatal(err)
@@ -399,9 +398,13 @@ func TestGitHubStatusAdoptsOnlyForwardReviewProjections(t *testing.T) {
 		if err != nil || len(items) != 1 {
 			t.Fatalf("items: %#v %v", items, err)
 		}
-		if latest == "rework" || latest == "partial" {
+		if latest == "rework" {
 			if items[0].Problem != "" || items[0].State != workflow.Rework || items[0].Submission.PendingReview != workflow.Rework {
 				t.Fatalf("forward transition: %#v", items[0])
+			}
+		} else if latest == "partial" {
+			if items[0].Problem != "" || items[0].State != workflow.Rework || items[0].Submission.PendingReview != "" || !items[0].Claimed {
+				t.Fatalf("target-only Claim was treated as a proven review handoff: %#v", items[0])
 			}
 		} else if items[0].Problem == "" {
 			t.Fatalf("contradiction guessed through: %#v", items[0])
@@ -576,8 +579,17 @@ func TestGitHubReviewRecoveryConflictingPartialPass(t *testing.T) {
 				t.Fatalf("expected unapplied %s deletion: %v labels=%v", interrupted, err, labels)
 			}
 			items, err = b.ImplementationItems(ctx)
-			if err != nil || len(items) != 1 || items[0].Problem != "" || items[0].State != workflow.Rework || !items[0].Claimed || !items[0].Synchronization || items[0].TargetSnapshot != "target" || items[0].Submission.PendingReview != workflow.Rework {
+			if err != nil || len(items) != 1 || items[0].Problem != "" || items[0].State != workflow.Rework || !items[0].Claimed || !items[0].Synchronization || items[0].TargetSnapshot != "target" {
 				t.Fatalf("combined interruption not recoverable: %#v %v labels=%v", items, err, labels)
+			}
+			if interrupted == "wip" {
+				if items[0].Submission.PendingReview != "" {
+					t.Fatalf("target-only Claim was treated as the interrupted review: %#v", items[0])
+				}
+				return
+			}
+			if items[0].Submission.PendingReview != workflow.Rework {
+				t.Fatalf("protected overlap did not retain recovery target: %#v", items[0])
 			}
 			failDelete = ""
 			for range 2 {
@@ -590,7 +602,7 @@ func TestGitHubReviewRecoveryConflictingPartialPass(t *testing.T) {
 				t.Fatalf("retry incomplete: %#v %v labels=%v metadata=%v", items, err, labels, metadata)
 			}
 			observed, err := b.ReviewSubmission(ctx, "11")
-			if err != nil || observed.Bounces != 0 || observed.PendingReview != "" {
+			if err != nil || observed.PendingReview != "" {
 				t.Fatalf("synchronization counted as bounce or left pending: %#v %v", observed, err)
 			}
 		})
