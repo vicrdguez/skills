@@ -41,21 +41,18 @@ type implementationItemOutput struct {
 }
 
 type submissionOutput struct {
-	PendingReview        workflow.State
-	Merged               bool
-	Mergeability         string
-	Bounces              int
-	CreatedAt            string
-	ReviewedHead         string
-	State                workflow.State
-	Claimed              bool
-	Number               int
-	Head                 string
-	Base                 string
-	Body                 string
-	Draft                bool
-	PreviousReviewedHead string
-	Comments             []skilldist.ReviewComment
+	PendingReview workflow.State
+	Merged        bool
+	Mergeability  string
+	CreatedAt     string
+	State         workflow.State
+	Claimed       bool
+	Number        int
+	Head          string
+	Base          string
+	Body          string
+	Draft         bool
+	Comments      []skilldist.ReviewComment
 }
 
 type StatusOutput struct {
@@ -87,9 +84,9 @@ func presentItem(item workflow.ImplementationItem) (implementationItemOutput, er
 	if item.Submission != nil {
 		s := item.Submission
 		output.Submission = &submissionOutput{
-			PendingReview: s.PendingReview, Merged: s.Merged, Mergeability: s.Mergeability, Bounces: s.Bounces,
-			CreatedAt: s.CreatedAt, ReviewedHead: s.ReviewedHead, State: s.State, Claimed: s.Claimed,
-			Head: s.Head, Base: s.Base, Body: s.Body, Draft: s.Draft, PreviousReviewedHead: s.PreviousReviewedHead, Comments: s.Comments,
+			PendingReview: s.PendingReview, Merged: s.Merged, Mergeability: s.Mergeability,
+			CreatedAt: s.CreatedAt, State: s.State, Claimed: s.Claimed,
+			Head: s.Head, Base: s.Base, Body: s.Body, Draft: s.Draft, Comments: s.Comments,
 		}
 		if item.Submission.ID != "" {
 			output.Submission.Number, err = githubIssueNumber(workflow.WorkItemID(item.Submission.ID))
@@ -122,8 +119,24 @@ func PresentImplementation(outcome workflow.ImplementationOutcome) (Implementati
 	}
 	facts := *outcome.Facts
 	quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'" }
+	endpointFlags := func(baseline, completion string) string {
+		var flags string
+		if baseline != "" {
+			flags += " --artifact-baseline " + baseline
+		}
+		if completion != "" {
+			flags += " --artifact-completion " + completion
+		}
+		return flags
+	}
 	if outcome.Dispatch != nil {
-		output.WorkerCommand = fmt.Sprintf("skl %s resume --item %d --repo %s --remote %s", outcome.Dispatch.Lane, output.Item.Number, quote(outcome.Dispatch.Root), quote(outcome.Dispatch.Remote))
+		flags := ""
+		if source := facts.Implementation; source != nil {
+			flags = endpointFlags(source.SuppliedArtifactBaseline, source.SuppliedArtifactCompletion)
+		} else if source := facts.Watchdog; source != nil {
+			flags = endpointFlags(source.SuppliedArtifactBaseline, source.SuppliedArtifactCompletion)
+		}
+		output.WorkerCommand = fmt.Sprintf("skl %s resume --item %d --repo %s --remote %s%s", outcome.Dispatch.Lane, output.Item.Number, quote(outcome.Dispatch.Root), quote(outcome.Dispatch.Remote), flags)
 		output.ContinuationCommand = fmt.Sprintf("skl %s next --after %s --repo %s --remote %s", outcome.Dispatch.Lane, quote(outcome.Dispatch.Reference), quote(outcome.Dispatch.Root), quote(outcome.Dispatch.Remote))
 		if outcome.Dispatch.Wait != "" {
 			output.ContinuationCommand += " --wait " + outcome.Dispatch.Wait
@@ -138,16 +151,30 @@ func PresentImplementation(outcome workflow.ImplementationOutcome) (Implementati
 		facts.Implementation = &f
 		skill, directory = "implement", f.ResultDirectory
 		f.WorkItem = output.Item.Number
+		f.WorkItemReference = fmt.Sprintf("#%d", f.WorkItem)
 		if output.Item.Submission != nil {
 			f.Submission = output.Item.Submission.Number
+		}
+		if outcome.Status == "fix_required" && f.TargetSnapshot == "" {
+			f.TargetSnapshot = "<sha>"
 		}
 		f.ResumeCommand = fmt.Sprintf("skl implement resume --item %d --target-snapshot %s", f.WorkItem, f.TargetSnapshot)
 		if outcome.Item.State == workflow.Rework && !outcome.Item.Synchronization {
 			f.ResumeCommand = fmt.Sprintf("skl implement resume --item %d", f.WorkItem)
 		}
 		f.ResumeCommand += " --remote " + quote(f.Remote)
+		flags := endpointFlags(f.SuppliedArtifactBaseline, f.SuppliedArtifactCompletion)
+		f.ResumeCommand += flags
+		if outcome.Status == "fix_required" {
+			output.Reason += "; resume with `" + f.ResumeCommand + "`"
+			return output, nil
+		}
 		f.InspectCommand = fmt.Sprintf("skl implement inspect --repo %s --remote %s --item %d", quote(f.Worktree), quote(f.Remote), f.WorkItem)
 		f.SubmitCommand = fmt.Sprintf("skl implement submit --repo %s --remote %s --item %d --body %s", quote(f.Worktree), quote(f.Remote), f.WorkItem, quote(filepath.Join(directory, "submission.md")))
+		f.NeedsHumanCommand = fmt.Sprintf("skl implement needs-human --repo %s --remote %s --item %d --reason <permitted-reason> --decision %s", quote(f.Worktree), quote(f.Remote), f.WorkItem, quote(filepath.Join(directory, "decision.md")))
+		f.InspectCommand += flags
+		f.SubmitCommand += flags
+		f.NeedsHumanCommand += flags
 	} else if source := facts.Watchdog; source != nil {
 		if output.Item.Submission == nil {
 			return output, fmt.Errorf("Watchdog facts require a Submission")
@@ -156,8 +183,12 @@ func PresentImplementation(outcome workflow.ImplementationOutcome) (Implementati
 		facts.Watchdog = &f
 		skill, directory = "watchdog", f.ResultDirectory
 		f.WorkItem, f.Submission = output.Item.Number, output.Item.Submission.Number
+		f.WorkItemReference, f.SubmissionReference = fmt.Sprintf("#%d", f.WorkItem), fmt.Sprintf("#%d", f.Submission)
 		f.ResumeCommand = fmt.Sprintf("skl watchdog resume --repo %s --remote %s --item %d", quote(f.Worktree), quote(f.Remote), f.WorkItem)
-		f.SubmitCommand = fmt.Sprintf("skl watchdog submit --repo %s --remote %s --item %d --reviewed-head %s --summary %s", quote(f.Worktree), quote(f.Remote), f.WorkItem, f.ReviewedHead, quote(filepath.Join(directory, "summary.md")))
+		f.SubmitCommand = fmt.Sprintf("skl watchdog submit --repo %s --remote %s --item %d --review-number %d --reviewed-head %s --summary %s", quote(f.Worktree), quote(f.Remote), f.WorkItem, f.ReviewNumber, f.ReviewedHead, quote(filepath.Join(directory, "summary.md")))
+		flags := endpointFlags(f.SuppliedArtifactBaseline, f.SuppliedArtifactCompletion)
+		f.ResumeCommand += flags
+		f.SubmitCommand += flags
 	}
 	packet, err := skilldist.BuildPacket(skill, facts)
 	if err != nil {

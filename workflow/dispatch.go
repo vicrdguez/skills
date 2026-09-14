@@ -37,8 +37,8 @@ type DispatchRound struct {
 }
 
 type DispatchBackend interface {
-	DispatchRounds(context.Context, github.RepositoryID, WorkItemID) ([]DispatchRound, error)
-	RecordDispatchRound(context.Context, github.RepositoryID, DispatchRound) error
+	DispatchRounds(context.Context, WorkItemID) ([]DispatchRound, error)
+	RecordDispatchRound(context.Context, DispatchRound) error
 }
 
 type DispatchFacts struct {
@@ -191,7 +191,7 @@ func prepareDispatch(ctx context.Context, repository github.RepositoryID, item I
 	if _, obligation := dispatchBinding(item, lane); obligation == "" {
 		return DispatchRound{}, "", Refuse("fixed dispatch obligation is missing; inspect the Work Item and resume --reviewed-head <full-sha> for finding-driven Rework")
 	}
-	rounds, err := backend.DispatchRounds(ctx, repository, item.ID)
+	rounds, err := backend.DispatchRounds(ctx, item.ID)
 	if err != nil {
 		return DispatchRound{}, "", err
 	}
@@ -220,11 +220,11 @@ func prepareDispatch(ctx context.Context, repository github.RepositoryID, item I
 			os.RemoveAll(directory)
 			return DispatchRound{}, "", err
 		}
-		if err := backend.RecordDispatchRound(ctx, repository, round); err != nil {
+		if err := backend.RecordDispatchRound(ctx, round); err != nil {
 			os.RemoveAll(directory)
 			return DispatchRound{}, "", err
 		}
-		rounds, err = backend.DispatchRounds(ctx, repository, item.ID)
+		rounds, err = backend.DispatchRounds(ctx, item.ID)
 		if err != nil {
 			return DispatchRound{}, "", err
 		}
@@ -291,7 +291,7 @@ func VerifyDispatch(ctx context.Context, root, remote string, lane DispatchLane,
 	if repository.Owner != decoded.Owner || repository.Name != decoded.Repository {
 		return handoff, Refuse("dispatch reference belongs to another repository")
 	}
-	rounds, err := backend.DispatchRounds(ctx, repository, decoded.Item)
+	rounds, err := backend.DispatchRounds(ctx, decoded.Item)
 	if err != nil {
 		return handoff, err
 	}
@@ -313,7 +313,7 @@ func VerifyDispatch(ctx context.Context, root, remote string, lane DispatchLane,
 		return handoff, Refuse("dispatch handoff is incomplete or has the wrong stage; explicitly inspect and resume the Work Item")
 	}
 	// Observe identity and contradictions, not historical state/head equality.
-	items, err := backend.ImplementationItems(ctx, repository)
+	items, err := backend.ImplementationItems(ctx)
 	if err != nil {
 		return handoff, err
 	}
@@ -349,8 +349,8 @@ func VerifyDispatch(ctx context.Context, root, remote string, lane DispatchLane,
 	return handoff, nil
 }
 
-func completeDispatch(ctx context.Context, repository github.RepositoryID, item ImplementationItem, lane DispatchLane, outcome State, head string, backend DispatchBackend) error {
-	rounds, err := backend.DispatchRounds(ctx, repository, item.ID)
+func completeDispatch(ctx context.Context, item ImplementationItem, lane DispatchLane, outcome State, head string, backend DispatchBackend) error {
+	rounds, err := backend.DispatchRounds(ctx, item.ID)
 	if err != nil {
 		return err
 	}
@@ -383,10 +383,10 @@ func completeDispatch(ctx context.Context, repository github.RepositoryID, item 
 		return Refuse(fmt.Sprintf("%s cannot complete a %s dispatch", outcome, lane))
 	}
 	active.Outcome, active.Head, active.Released = outcome, head, true
-	if err := backend.RecordDispatchRound(ctx, repository, *active); err != nil {
+	if err := backend.RecordDispatchRound(ctx, *active); err != nil {
 		return err
 	}
-	observed, err := backend.DispatchRounds(ctx, repository, item.ID)
+	observed, err := backend.DispatchRounds(ctx, item.ID)
 	if err != nil {
 		return err
 	}

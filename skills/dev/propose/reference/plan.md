@@ -8,7 +8,7 @@ sure that no context resolution is lost that could drive the implementer to drif
 
 When you include code-snippets anywhere on this document, **trim to the decision-rich parts** - a working demo is not needed, just the important bits
 
-Frozen once published: a decision that turns out wrong is corrected by a new proposal, never by editing this file mid-flight.
+Frozen at the `[baseline] <slice-slug>` commit: a decision that turns out wrong is corrected by a new proposal, never by editing this file at `[completion] <slice-slug>`.
 -->
 
 ## Approach
@@ -55,5 +55,3 @@ Finally, include the Test strategy for the module.
 <!--
 Numbered, Ordered high-level steps, if order matters. Be concise but precise.
 -->
-
-

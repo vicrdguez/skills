@@ -27,19 +27,19 @@ type waitingMemory struct {
 	claim         func(context.Context) error
 }
 
-func (b *waitingMemory) ImplementationItems(ctx context.Context, repo github.RepositoryID) ([]workflow.ImplementationItem, error) {
+func (b *waitingMemory) ImplementationItems(ctx context.Context) ([]workflow.ImplementationItem, error) {
 	b.reads++
 	if b.observe != nil {
 		if err := b.observe(ctx); err != nil {
 			return nil, err
 		}
 	}
-	return b.implementationMemory.ImplementationItems(ctx, repo)
+	return b.implementationMemory.ImplementationItems(ctx)
 }
 
-func (b *waitingMemory) ClaimImplementation(ctx context.Context, repo github.RepositoryID, item workflow.ImplementationItem) error {
+func (b *waitingMemory) ClaimImplementation(ctx context.Context, item workflow.ImplementationItem) error {
 	b.claims++
-	if err := b.implementationMemory.ClaimImplementation(ctx, repo, item); err != nil {
+	if err := b.implementationMemory.ClaimImplementation(ctx, item); err != nil {
 		return err
 	}
 	if b.claim != nil {
@@ -54,10 +54,11 @@ func waitFixture(t *testing.T, lane string) (string, *waitingMemory) {
 	prepareSlice(t, root, "widget")
 	b := &waitingMemory{implementationMemory: implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{"main": strings.TrimSpace(runGitOutput(t, root, "rev-parse", "main"))}}}
 	if lane == "watchdog" {
-		runGit(t, root, "rm", "-r", ".changes/widget")
-		runGit(t, root, "commit", "-m", "retire")
+		completeAndRetireSlice(t, root, "widget")
 		b.work[0].State = workflow.AwaitingReview
 		b.work[0].Submission = &workflow.Submission{ID: "11", Head: strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))}
+		runGit(t, root, "switch", "main")
+		runGit(t, root, "worktree", "add", filepath.Join(root, ".worktrees", "widget"), "widget")
 	}
 	runGit(t, root, "remote", "rename", "origin", "upstream")
 	runGit(t, root, "remote", "add", "origin", "https://github.com/other/widgets.git")
@@ -67,7 +68,10 @@ func waitFixture(t *testing.T, lane string) (string, *waitingMemory) {
 func waitingCLI(t *testing.T, ctx context.Context, root, lane string, b *waitingMemory, options ...string) (setup.ImplementationOutput, error) {
 	t.Helper()
 	var out, stderr bytes.Buffer
-	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return b, nil }, nil, &out, &stderr)
+	app := newApp(func(repository github.RepositoryID) (setup.Backend, error) {
+		b.repository = repository
+		return b, nil
+	}, nil, &out, &stderr)
 	args := append([]string{"skl", lane, "next", "--repo", root, "--remote", "upstream"}, options...)
 	err := app.RunContext(ctx, args)
 	var got setup.ImplementationOutput
@@ -357,6 +361,89 @@ func TestNextWaitLateObservation(t *testing.T) {
 	}
 }
 
+func TestNextWaitArtifactEndpoints(t *testing.T) {
+	for _, lane := range []string{"implement", "watchdog"} {
+		for _, waitFirst := range []bool{true, false} {
+			for _, valid := range []bool{true, false} {
+				t.Run(fmt.Sprintf("%s/wait-first=%t/valid=%t", lane, waitFirst, valid), func(t *testing.T) {
+					root := proposalRepository(t)
+					runGit(t, root, "remote", "rename", "origin", "upstream")
+					runGit(t, root, "switch", "-c", "widget")
+					writeLedger(t, root, "widget", true)
+					runGit(t, root, "add", ".changes/widget")
+					runGit(t, root, "commit", "-m", "legacy baseline")
+					baseline := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+					runGit(t, root, "commit", "--allow-empty", "-m", "legacy completion")
+					completion := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+					runGit(t, root, "rm", "-r", ".changes/widget")
+					runGit(t, root, "commit", "-m", "retire")
+					head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+					state := workflow.Rework
+					if lane == "watchdog" {
+						state = workflow.AwaitingReview
+						runGit(t, root, "switch", "main")
+						runGit(t, root, "worktree", "add", filepath.Join(root, ".worktrees", "widget"), "widget")
+					}
+					item := workflow.ImplementationItem{ID: "7", Branch: "widget", State: state, Submission: &workflow.Submission{ID: "11", Head: head}}
+					if state == workflow.Rework {
+						item.Submission.PreviousReviewedHead = head
+					}
+					if !valid {
+						baseline = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "main"))
+					}
+					flags := []string{"--artifact-baseline", baseline, "--artifact-completion", completion}
+					if waitFirst {
+						flags = append([]string{"--wait"}, flags...)
+					} else {
+						flags = append(flags, "--wait")
+					}
+					b := &waitingMemory{}
+					b.observe = func(context.Context) error {
+						if b.reads == 2 {
+							b.work = []workflow.ImplementationItem{item}
+						}
+						return nil
+					}
+					synctest.Test(t, func(t *testing.T) {
+						start := time.Now()
+						got, err := waitingCLI(t, t.Context(), root, lane, b, flags...)
+						if err != nil || time.Since(start) != 30*time.Second {
+							t.Fatalf("waiting selection: %#v %v elapsed %s", got, err, time.Since(start))
+						}
+						if !valid {
+							if got.Status != "fix_required" || !strings.Contains(got.Reason, "missing ledger directory") || got.Packet != nil || b.reads != 2 || b.claims != 0 {
+								t.Fatalf("endpoint refusal retried or claimed: %#v reads %d claims %d", got, b.reads, b.claims)
+							}
+							return
+						}
+						if got.Status != "work_available" || got.Packet == nil || b.reads != 3 || b.claims != 1 {
+							t.Fatalf("endpoint selection failed: %#v reads %d claims %d", got, b.reads, b.claims)
+						}
+						var commands []string
+						if lane == "implement" {
+							facts := got.Packet.Facts.Implementation
+							commands = []string{facts.ResumeCommand, facts.InspectCommand, facts.SubmitCommand, facts.NeedsHumanCommand}
+						} else {
+							facts := got.Packet.Facts.Watchdog
+							commands = []string{facts.ResumeCommand, facts.SubmitCommand}
+						}
+						for _, command := range commands {
+							for _, want := range []string{"--item 7", "--remote 'upstream'", "--artifact-baseline " + baseline, "--artifact-completion " + completion} {
+								if !strings.Contains(command, want) {
+									t.Errorf("command lost %q after polling: %s", want, command)
+								}
+							}
+							if strings.Contains(command, "--wait") || strings.Contains(command, "--poll") {
+								t.Errorf("explicit handoff inherited waiting: %s", command)
+							}
+						}
+					})
+				})
+			}
+		}
+	}
+}
+
 func TestNextWaitStopsOnFailure(t *testing.T) {
 	for _, lane := range []string{"implement", "watchdog"} {
 		for _, observation := range []int{1, 2} {
@@ -369,8 +456,7 @@ func TestNextWaitStopsOnFailure(t *testing.T) {
 						substitute := workflow.ImplementationItem{ID: "8", Branch: "substitute", State: work[0].State, CreatedAt: "2026"}
 						prepareSlice(t, root, substitute.Branch)
 						if lane == "watchdog" {
-							runGit(t, root, "rm", "-r", ".changes/substitute")
-							runGit(t, root, "commit", "-m", "retire")
+							completeAndRetireSlice(t, root, substitute.Branch)
 							substitute.Submission = &workflow.Submission{ID: "12", Head: strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD")), CreatedAt: "2026"}
 						}
 						work = append(work, substitute)
@@ -450,23 +536,33 @@ func TestNextWaitCanonicalEligibility(t *testing.T) {
 				item.Branch = fmt.Sprintf("slice-%s", item.ID)
 				prepareSlice(t, root, item.Branch)
 				if item.State != workflow.Ready && item.ResumeState != workflow.Ready {
-					runGit(t, root, "rm", "-r", ".changes/"+item.Branch)
-					runGit(t, root, "commit", "-m", "retire")
+					completeAndRetireSlice(t, root, item.Branch)
 					head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 					number, err := strconv.Atoi(string(item.ID))
 					if err != nil {
 						t.Fatal(err)
 					}
-					item.Submission = &workflow.Submission{ID: workflow.SubmissionID(strconv.Itoa(number + 100)), Head: head, PreviousReviewedHead: head, Base: "main", State: item.State, Claimed: item.Claimed, CreatedAt: "2025"}
+					item.Submission = &workflow.Submission{ID: workflow.SubmissionID(strconv.Itoa(number + 100)), Head: head, Base: "main", State: item.State, Claimed: item.Claimed, CreatedAt: "2025"}
+					if item.State == workflow.Rework {
+						item.Submission.PreviousReviewedHead = head
+					}
 					if item.ID == "5" {
 						item.Submission.CreatedAt = "2023"
 					}
 					if item.ID == "6" {
 						item.Submission.CreatedAt = "1990"
-						item.Submission.ReviewedHead = head
 					}
 				}
 			}
+			if lane == "watchdog" {
+				runGit(t, root, "switch", "main")
+				for _, item := range work {
+					if item.State == workflow.AwaitingReview {
+						runGit(t, root, "worktree", "add", filepath.Join(root, ".worktrees", item.Branch), item.Branch)
+					}
+				}
+			}
+			worktreesBefore := runGitOutput(t, root, "worktree", "list", "--porcelain")
 			before, err := json.Marshal(work)
 			if err != nil {
 				t.Fatal(err)
@@ -525,8 +621,8 @@ func TestNextWaitCanonicalEligibility(t *testing.T) {
 					t.Fatalf("ineligible item mutated: %#v -> %#v", original[i], work[i])
 				}
 			}
-			if _, err := os.Stat(filepath.Join(root, ".worktrees")); !os.IsNotExist(err) {
-				t.Fatalf("waiting launched/prepared a worker: %v", err)
+			if after := runGitOutput(t, root, "worktree", "list", "--porcelain"); after != worktreesBefore {
+				t.Fatalf("waiting changed prepared worktrees: %s -> %s", worktreesBefore, after)
 			}
 		})
 	}
@@ -570,7 +666,7 @@ func completedWaitFixture(t *testing.T, lane string) (string, *waitingMemory, st
 		dir := start.Packet.Facts.Watchdog.ResultDirectory
 		os.WriteFile(filepath.Join(dir, "summary.md"), []byte("pause"), 0600)
 		b.remoteHeads["widget"] = b.work[0].Submission.Head
-		got := returnedCLI(t, b, "skl watchdog submit --repo '"+root+"' --remote upstream --item 7 --reviewed-head "+b.work[0].Submission.Head+" --verdict needs-human --summary '"+filepath.Join(dir, "summary.md")+"'")
+		got := returnedCLI(t, b, start.Packet.Facts.Watchdog.SubmitCommand+" --verdict needs-human")
 		if got.Status != "needs_human" {
 			t.Fatalf("fixture review pause: %+v", got)
 		}

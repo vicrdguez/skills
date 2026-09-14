@@ -8,7 +8,7 @@ import (
 	"strconv"
 
 	"github.com/urfave/cli/v2"
-	"github.com/vicrdguez/skills/github"
+	"github.com/vicrdguez/skills/setup"
 	"github.com/vicrdguez/skills/workflow"
 )
 
@@ -16,7 +16,7 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 	var commands []*cli.Command
 	for _, name := range []string{"next", "resume", "inspect", "submit", "needs-human"} {
 		commands = append(commands, &cli.Command{Name: name,
-			Flags: []cli.Flag{&cli.PathFlag{Name: "repo", Value: "."}, &cli.StringFlag{Name: "remote"}, &cli.IntFlag{Name: "item"}, &cli.PathFlag{Name: "body"}, &cli.PathFlag{Name: "decision"}, &cli.StringFlag{Name: "reason"}, &cli.StringFlag{Name: "target-snapshot"}, &cli.StringFlag{Name: "reviewed-head"}},
+			Flags: []cli.Flag{&cli.PathFlag{Name: "repo", Value: "."}, &cli.StringFlag{Name: "remote"}, &cli.IntFlag{Name: "item"}, &cli.PathFlag{Name: "body"}, &cli.PathFlag{Name: "decision"}, &cli.StringFlag{Name: "reason"}, &cli.StringFlag{Name: "target-snapshot"}, &cli.StringFlag{Name: "reviewed-head"}, &cli.StringFlag{Name: "artifact-baseline"}, &cli.StringFlag{Name: "artifact-completion"}},
 			Action: func(command *cli.Context) error {
 				if command.Int("item") < 0 || command.NArg() != 0 || command.IsSet("after") && (name != "next" || command.IsSet("item") || command.IsSet("target-snapshot") || command.IsSet("reviewed-head") || command.IsSet("body") || command.IsSet("decision") || command.IsSet("reason")) {
 					return fmt.Errorf("invalid implementation invocation: use flags and a positive Work Item identity")
@@ -24,7 +24,11 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 				if command.IsSet("after") && command.String("after") == "" {
 					return errors.New("--after requires a supported opaque dispatch reference")
 				}
-				backend, err := newBackend(github.RepositoryID{})
+				repository, err := setup.ResolveRepository(command.Path("repo"), command.String("remote"))
+				if err != nil {
+					return err
+				}
+				backend, err := newBackend(repository.Repository)
 				if err != nil {
 					return err
 				}
@@ -33,22 +37,23 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 					return fmt.Errorf("workflow backend does not support implementation")
 				}
 				var outcome workflow.ImplementationOutcome
+				endpoints := workflow.ArtifactEndpoints{Baseline: command.String("artifact-baseline"), Completion: command.String("artifact-completion")}
 				if name == "inspect" {
 					if command.Int("item") <= 0 {
 						return fmt.Errorf("inspect requires --item")
 					}
-					outcome, err = workflow.InspectImplementation(command.Context, command.Path("repo"), command.String("remote"), workItemID(command.Int("item")), port)
+					outcome, err = workflow.InspectImplementation(command.Context, repository.Root, workItemID(command.Int("item")), endpoints, port)
 				} else if name == "needs-human" {
-					outcome, err = workflow.PauseImplementation(command.Context, command.Path("repo"), command.String("remote"), workItemID(command.Int("item")), command.String("reason"), command.Path("decision"), command.Path("body"), port)
+					outcome, err = workflow.PauseImplementation(command.Context, repository.Root, repository.Remote, workItemID(command.Int("item")), command.String("reason"), command.Path("decision"), command.Path("body"), endpoints, port)
 				} else if name == "submit" {
-					outcome, err = workflow.SubmitImplementation(command.Context, command.Path("repo"), command.String("remote"), workItemID(command.Int("item")), command.Path("body"), port)
+					outcome, err = workflow.SubmitImplementation(command.Context, repository.Root, repository.Remote, workItemID(command.Int("item")), command.Path("body"), endpoints, port)
 				} else {
 					id := workItemID(command.Int("item"))
 					if name == "resume" && id == "" {
 						id = workflow.CurrentWorktree
 					}
-					outcome, err = continuedWork(command.Context, command.Path("repo"), command.String("remote"), command.String("after"), workflow.ImplementLane, command.Duration("wait"), command.Duration("poll"), command.IsSet("poll"), port, func() (workflow.ImplementationOutcome, error) {
-						return workflow.StartImplementation(command.Context, command.Path("repo"), command.String("remote"), id, command.String("target-snapshot"), command.String("reviewed-head"), port)
+					outcome, err = continuedWork(command.Context, repository.Root, repository.Remote, command.String("after"), workflow.ImplementLane, command.Duration("wait"), command.Duration("poll"), command.IsSet("poll"), port, func() (workflow.ImplementationOutcome, error) {
+						return workflow.StartImplementation(command.Context, repository.Root, repository.Remote, id, command.String("target-snapshot"), command.String("reviewed-head"), endpoints, port)
 					})
 				}
 				if err != nil {

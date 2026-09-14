@@ -81,6 +81,7 @@ func TestRepairedOpaqueDecisionCannotShadowPendingMetadata(t *testing.T) {
 			defer server.Close()
 			ctx, repo := t.Context(), github.RepositoryID{Owner: "acme", Name: "widgets"}
 			b := setup.NewGitHubBackend(server.URL, "token", server.Client())
+			b.BindRepository(repo)
 			envelope := func(v any) string {
 				p, err := json.Marshal(v)
 				if err != nil {
@@ -107,13 +108,13 @@ func TestRepairedOpaqueDecisionCannotShadowPendingMetadata(t *testing.T) {
 			transition1 := transition2
 			transition1.DecisionDigest = digest(decision1)
 			item := workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Ready, Claimed: true}
-			if err := b.RecordDispatchRound(ctx, repo, round); err != nil {
+			if err := b.RecordDispatchRound(ctx, round); err != nil {
 				t.Fatal(err)
 			}
-			if err := b.RecordImplementationTransition(ctx, repo, item, transition1); err != nil {
+			if err := b.RecordImplementationTransition(ctx, item, transition1); err != nil {
 				t.Fatal(err)
 			}
-			if err := b.PauseImplementation(ctx, repo, item, decision1, func() error {
+			if err := b.PauseImplementation(ctx, item, decision1, func() error {
 				for _, c := range comments {
 					if strings.Contains(c["body"].(string), decision1) {
 						return errors.New("first interruption after decision")
@@ -123,20 +124,20 @@ func TestRepairedOpaqueDecisionCannotShadowPendingMetadata(t *testing.T) {
 			}); err == nil {
 				t.Fatal("first interruption absent")
 			}
-			if err := b.RecordImplementationTransition(ctx, repo, item, transition1); err != nil {
+			if err := b.RecordImplementationTransition(ctx, item, transition1); err != nil {
 				t.Fatal(err)
 			}
-			if err := b.RecordImplementationTransition(ctx, repo, item, transition2); err != nil {
+			if err := b.RecordImplementationTransition(ctx, item, transition2); err != nil {
 				t.Fatal(err)
 			}
-			items, err := b.ImplementationItems(ctx, repo)
+			items, err := b.ImplementationItems(ctx)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if items[0].Transition == nil || items[0].Transition.DecisionDigest != digest(decision2) {
 				t.Error("genuine repaired transition hidden by original opaque document")
 			}
-			if err := b.PauseImplementation(ctx, repo, item, decision2, func() error {
+			if err := b.PauseImplementation(ctx, item, decision2, func() error {
 				if tc.stop == "after decision" {
 					for _, c := range comments {
 						if strings.Contains(c["body"].(string), decision2) {
@@ -152,11 +153,12 @@ func TestRepairedOpaqueDecisionCannotShadowPendingMetadata(t *testing.T) {
 				t.Fatal("second interruption absent")
 			}
 			fresh := setup.NewGitHubBackend(server.URL, "token", server.Client())
-			items, err = fresh.ImplementationItems(ctx, repo)
+			fresh.BindRepository(repo)
+			items, err = fresh.ImplementationItems(ctx)
 			if err != nil {
 				t.Fatal(err)
 			}
-			rounds, err := fresh.DispatchRounds(ctx, repo, "7")
+			rounds, err := fresh.DispatchRounds(ctx, "7")
 			if err != nil || !slices.Equal(rounds, []workflow.DispatchRound{round}) || !items[0].Claimed || items[0].Transition.Completed {
 				t.Errorf("opaque completion accepted: items=%+v rounds=%+v err=%v", items, rounds, err)
 			}
@@ -169,8 +171,10 @@ func TestRepairedOpaqueDecisionCannotShadowPendingMetadata(t *testing.T) {
 			before, _ := json.Marshal(comments)
 			beforeLabels := slices.Clone(labels)
 			var output bytes.Buffer
-			app := newApp(func(github.RepositoryID) (setup.Backend, error) {
-				return setup.NewGitHubBackend(server.URL, "token", server.Client()), nil
+			app := newApp(func(repository github.RepositoryID) (setup.Backend, error) {
+				backend := setup.NewGitHubBackend(server.URL, "token", server.Client())
+				backend.BindRepository(repository)
+				return backend, nil
 			}, nil, &output, &output)
 			if err := app.Run([]string{"skl", "implement", "next", "--repo", root, "--remote", "origin", "--after", reference, "--wait=1ms"}); err != nil {
 				t.Fatal(err)

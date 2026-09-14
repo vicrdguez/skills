@@ -51,12 +51,16 @@ func githubImplementationNumbers(item workflow.ImplementationItem) (int, int, er
 	return number, submissionNumber, nil
 }
 
-func (b *GitHubBackend) ClaimImplementation(ctx context.Context, repository github.RepositoryID, item workflow.ImplementationItem) error {
+func (b *GitHubBackend) ClaimImplementation(ctx context.Context, item workflow.ImplementationItem) error {
+	if err := b.requireRepository(); err != nil {
+		return err
+	}
+	repository := b.repository
 	itemNumber, submissionNumber, err := githubImplementationNumbers(item)
 	if err != nil {
 		return err
 	}
-	items, err := b.ImplementationItems(ctx, repository)
+	items, err := b.ImplementationItems(ctx)
 	if err != nil {
 		return err
 	}
@@ -83,9 +87,6 @@ func (b *GitHubBackend) ClaimImplementation(ctx context.Context, repository gith
 		if item.State == workflow.AwaitingReview {
 			if item.Submission == nil || current.Submission == nil || current.Submission.Head != item.Submission.ReviewedHead || current.Submission.ID != item.Submission.ID || current.Claimed && current.Submission.ReviewedHead != "" && current.Submission.ReviewedHead != item.Submission.ReviewedHead {
 				return workflow.Refuse("Submission changed before Watchdog Claim; restore the fixed head")
-			}
-			if err := b.publishImplementationMetadata(ctx, repository, itemNumber, implementationMetadata{WatchdogHead: item.Submission.ReviewedHead}); err != nil {
-				return err
 			}
 		}
 		if current.Claimed {
@@ -208,7 +209,11 @@ func (b *GitHubBackend) implementationLabelMutation(ctx context.Context, reposit
 	return nil
 }
 
-func (b *GitHubBackend) PublishImplementation(ctx context.Context, repository github.RepositoryID, item workflow.ImplementationItem, wanted workflow.Submission) (workflow.Submission, error) {
+func (b *GitHubBackend) PublishImplementation(ctx context.Context, item workflow.ImplementationItem, wanted workflow.Submission) (workflow.Submission, error) {
+	if err := b.requireRepository(); err != nil {
+		return workflow.Submission{}, err
+	}
+	repository := b.repository
 	itemNumber, err := githubIssueNumber(item.ID)
 	if err != nil {
 		return workflow.Submission{}, err
@@ -220,6 +225,7 @@ func (b *GitHubBackend) PublishImplementation(ctx context.Context, repository gi
 			return workflow.Submission{}, err
 		}
 	}
+	wanted.Body = withClosingReference(wanted.Body, itemNumber)
 	issues, err := b.listIssues(ctx, repository)
 	if err != nil {
 		return workflow.Submission{}, err
@@ -303,31 +309,24 @@ func (b *GitHubBackend) PublishImplementation(ctx context.Context, repository gi
 	return wanted, nil
 }
 
-func (b *GitHubBackend) AwaitImplementationReview(ctx context.Context, repository github.RepositoryID, item workflow.ImplementationItem, guard func() error) (err error) {
+func (b *GitHubBackend) AwaitImplementationReview(ctx context.Context, item workflow.ImplementationItem, guard func() error) error {
+	if err := b.requireRepository(); err != nil {
+		return err
+	}
+	repository := b.repository
 	itemNumber, submissionNumber, err := githubImplementationNumbers(item)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if err != nil {
-			number := itemNumber
-			if item.State == workflow.Rework && item.Submission != nil {
-				number = submissionNumber
-			}
-			err = errors.Join(err, b.implementationLabelMutation(ctx, repository, number, []string{"wip"}, nil, nil))
-		}
-	}()
 	if item.Submission == nil {
-		return workflow.Refuse("review requires a durable Submission; publish it before retrying")
+		return workflow.PermitImplementationReview(nil)
 	}
 	var issue githubIssue
 	if err := b.request(ctx, http.MethodGet, b.repositoryPath(repository)+fmt.Sprintf("/issues/%d", submissionNumber), nil, &issue); err != nil {
 		return err
 	}
-	state, _, problem := implementationLabels(issue)
-	// Adding review is the first durable step; a retry can see both review and rework.
-	if state == workflow.NeedsHuman || state == workflow.ReadyForMerge || state == workflow.Ready || problem != "" && state != workflow.Rework && state != workflow.AwaitingReview {
-		return workflow.Refuse("Submission lifecycle contradicts review handoff; repair its projections")
+	if err := workflow.PermitImplementationReview(implementationLifecycle(issue)); err != nil {
+		return err
 	}
 	if err := b.implementationLabelMutation(ctx, repository, submissionNumber, []string{"review"}, []string{"rework", "wip", "sync"}, guard); err != nil {
 		return err
@@ -335,20 +334,15 @@ func (b *GitHubBackend) AwaitImplementationReview(ctx context.Context, repositor
 	return b.implementationLabelMutation(ctx, repository, itemNumber, nil, []string{"ready", "wip"}, guard)
 }
 
-func (b *GitHubBackend) PauseImplementation(ctx context.Context, repository github.RepositoryID, item workflow.ImplementationItem, decision string, guard func() error) (err error) {
+func (b *GitHubBackend) PauseImplementation(ctx context.Context, item workflow.ImplementationItem, decision string, guard func() error) error {
+	if err := b.requireRepository(); err != nil {
+		return err
+	}
+	repository := b.repository
 	itemNumber, submissionNumber, err := githubImplementationNumbers(item)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if err != nil {
-			number := itemNumber
-			if item.State == workflow.Rework && item.Submission != nil {
-				number = submissionNumber
-			}
-			err = errors.Join(err, b.implementationLabelMutation(ctx, repository, number, []string{"wip"}, nil, nil))
-		}
-	}()
 	if err := guard(); err != nil {
 		return err
 	}
@@ -370,7 +364,11 @@ func (b *GitHubBackend) PauseImplementation(ctx context.Context, repository gith
 	return b.implementationLabelMutation(ctx, repository, itemNumber, []string{"needs-human"}, []string{"ready", "wip"}, guard)
 }
 
-func (b *GitHubBackend) RecordImplementationTransition(ctx context.Context, repository github.RepositoryID, item workflow.ImplementationItem, transition workflow.ImplementationTransition) error {
+func (b *GitHubBackend) RecordImplementationTransition(ctx context.Context, item workflow.ImplementationItem, transition workflow.ImplementationTransition) error {
+	if err := b.requireRepository(); err != nil {
+		return err
+	}
+	repository := b.repository
 	number, err := githubIssueNumber(item.ID)
 	if err != nil {
 		return err
@@ -378,7 +376,11 @@ func (b *GitHubBackend) RecordImplementationTransition(ctx context.Context, repo
 	return b.publishImplementationMetadata(ctx, repository, number, implementationMetadata{Transition: &transition})
 }
 
-func (b *GitHubBackend) RetainImplementationClaim(ctx context.Context, repository github.RepositoryID, item workflow.ImplementationItem) error {
+func (b *GitHubBackend) RetainImplementationClaim(ctx context.Context, item workflow.ImplementationItem) error {
+	if err := b.requireRepository(); err != nil {
+		return err
+	}
+	repository := b.repository
 	number, submissionNumber, err := githubImplementationNumbers(item)
 	if err != nil {
 		return err
@@ -458,7 +460,11 @@ func validDispatchRound(round workflow.DispatchRound) bool {
 	return round.ID != "" && round.Item != "" && (round.Lane == workflow.ImplementLane || round.Lane == workflow.WatchdogLane) && round.Directory != "" && round.Obligation != ""
 }
 
-func (b *GitHubBackend) RecordDispatchRound(ctx context.Context, repository github.RepositoryID, round workflow.DispatchRound) error {
+func (b *GitHubBackend) RecordDispatchRound(ctx context.Context, round workflow.DispatchRound) error {
+	if err := b.requireRepository(); err != nil {
+		return err
+	}
+	repository := b.repository
 	if !validDispatchRound(round) {
 		return workflow.Refuse("dispatch evidence has invalid or contradictory bindings")
 	}
@@ -512,7 +518,11 @@ func (b *GitHubBackend) RecordDispatchRound(ctx context.Context, repository gith
 	return errors.New("dispatch evidence publication not observed; explicitly inspect the retained Claim")
 }
 
-func (b *GitHubBackend) DispatchRounds(ctx context.Context, repository github.RepositoryID, item workflow.WorkItemID) ([]workflow.DispatchRound, error) {
+func (b *GitHubBackend) DispatchRounds(ctx context.Context, item workflow.WorkItemID) ([]workflow.DispatchRound, error) {
+	if err := b.requireRepository(); err != nil {
+		return nil, err
+	}
+	repository := b.repository
 	number, err := githubIssueNumber(item)
 	if err != nil {
 		return nil, err
@@ -578,7 +588,11 @@ func implementationBranchOwners(issues []githubIssue) map[string]int {
 	return owners
 }
 
-func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository github.RepositoryID) ([]workflow.ImplementationItem, error) {
+func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.ImplementationItem, error) {
+	if err := b.requireRepository(); err != nil {
+		return nil, err
+	}
+	repository := b.repository
 	issues, err := b.listIssues(ctx, repository)
 	if err != nil {
 		return nil, err
@@ -610,37 +624,21 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository gith
 			continue
 		}
 		state, claimed, problem := implementationLabels(issue)
-		item := workflow.ImplementationItem{ID: workflow.WorkItemID(strconv.Itoa(issue.Number)), Order: issue.Number, ClosingReference: fmt.Sprintf("Closes #%d", issue.Number), Branch: issue.Title, CreatedAt: issue.CreatedAt, State: state, Claimed: claimed, Problem: problem}
+		item := workflow.ImplementationItem{ID: workflow.WorkItemID(strconv.Itoa(issue.Number)), Order: issue.Number, Branch: issue.Title, CreatedAt: issue.CreatedAt, State: state, Claimed: claimed, Problem: problem}
+		item.Source = implementationLifecycle(issue)
 		if len(matches) > 1 {
 			item.Problem = "multiple Submissions share the conventional branch"
 		}
 		if len(matches) == 1 {
 			pull := matches[0]
-			prState, prClaimed, prProblem := implementationLabels(pull.githubIssue)
+			prState, prClaimed, _ := implementationLabels(pull.githubIssue)
 			item.Submission = &workflow.Submission{ID: workflow.SubmissionID(strconv.Itoa(pull.Number)), Head: pull.Head.SHA, Base: pull.Base.Ref, Draft: pull.Draft, Body: pull.Body, State: prState, Claimed: prClaimed, CreatedAt: pull.CreatedAt}
+			item.Submission.Lifecycle = implementationLifecycle(pull.githubIssue)
+			item.Submission.Lifecycle.Merged = pull.MergedAt != ""
 			for _, label := range pull.Labels {
 				item.Synchronization = item.Synchronization || label.Name == "sync"
 			}
-			item.Claimed = item.Claimed || prClaimed
-			if prProblem != "" {
-				item.Problem = prProblem
-			}
-			if state == workflow.NeedsHuman && (prState == workflow.Rework || prState == workflow.AwaitingReview) && prProblem == "" {
-				item.State = prState
-			} else if state == workflow.NeedsHuman || prState == workflow.NeedsHuman {
-				item.State = workflow.NeedsHuman
-			} else if prState != "" {
-				if state == workflow.Ready && prState != workflow.AwaitingReview {
-					item.Problem = "source Ready contradicts Submission lifecycle"
-				} else if state != workflow.Ready {
-					item.State = prState
-				}
-			}
-			if pull.MergedAt != "" {
-				item.State = workflow.Merged
-			} else if pull.State == "closed" {
-				item.State = workflow.Superseded
-			}
+			item = workflow.ReconcileImplementation(item)
 			if item.State == workflow.Rework || item.State == workflow.AwaitingReview || item.State == workflow.NeedsHuman || item.State == workflow.ReadyForMerge {
 				// Only issue-level publications carry the transport framing;
 				// inline findings are posted and observed as authored bytes.
@@ -677,7 +675,16 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository gith
 						return nil, err
 					}
 					for _, review := range reviews {
-						item.Submission.Comments = append(item.Submission.Comments, skilldist.ReviewComment{Body: review.Body, Author: review.User.Login, Association: review.Association, Commit: review.Commit, CreatedAt: review.SubmittedAt})
+						verdict := map[string]string{"CHANGES_REQUESTED": "rework", "APPROVED": "pass", "COMMENTED": "needs-human"}[review.State]
+						body := review.Body
+						reviewNumber := uint64(0)
+						if strings.HasPrefix(body, reviewSummaryPrefix) {
+							verdict = ""
+							if metadata, summary, ok := parseReviewSummary(body); ok && review.State == "COMMENTED" {
+								body, verdict, reviewNumber = summary, metadata.Verdict, metadata.ReviewNumber
+							}
+						}
+						item.Submission.Comments = append(item.Submission.Comments, skilldist.ReviewComment{Body: body, Author: review.User.Login, Association: review.Association, Commit: review.Commit, CreatedAt: review.SubmittedAt, Verdict: verdict, ReviewNumber: reviewNumber})
 					}
 					if len(reviews) < 100 {
 						break
@@ -685,9 +692,7 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository gith
 				}
 			}
 		}
-		if issue.State == "closed" && item.State != workflow.Merged && item.State != workflow.ReadyForMerge && item.State != workflow.Superseded {
-			item.Problem = "source issue is closed without a merged Submission"
-		}
+		item = workflow.ReconcileImplementation(item)
 		if item.State == workflow.Ready {
 			for page := 1; ; page++ {
 				var blockers []githubIssue
@@ -755,9 +760,6 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository gith
 				if metadata.ResumeState != "" {
 					item.ResumeState = metadata.ResumeState
 				}
-				if metadata.WatchdogHead != "" && item.Submission != nil {
-					item.Submission.ReviewedHead = metadata.WatchdogHead
-				}
 				if metadata.Transition != nil {
 					item.Transition = metadata.Transition
 				}
@@ -770,64 +772,30 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository gith
 			item.Problem = roundErr.Error()
 		}
 		for _, round := range rounds {
-			if round.Lane == workflow.ImplementLane && round.Outcome == "" && !round.Synchronization && round.Submission != "" && item.Submission != nil && round.Submission == item.Submission.ID {
+			if round.Outcome != "" || round.Submission == "" || item.Submission == nil || round.Submission != item.Submission.ID {
+				continue
+			}
+			if round.Lane == workflow.ImplementLane && !round.Synchronization {
 				if item.Submission.PreviousReviewedHead != "" && item.Submission.PreviousReviewedHead != round.Obligation {
 					item.Problem = "active dispatch contradicts the reviewed obligation"
 				} else {
 					item.Submission.PreviousReviewedHead = round.Obligation
 				}
 			}
-		}
-		if transition := item.Transition; transition != nil && !transition.Completed {
-			allowed := func(record githubIssue, states []workflow.State) bool {
-				for _, label := range record.Labels {
-					single := githubIssue{Labels: []struct {
-						Name string `json:"name"`
-					}{label}}
-					state, _, _ := implementationLabels(single)
-					if state != "" && !slices.Contains(states, state) {
-						return false
-					}
-				}
-				return true
-			}
-			sourceStates := []workflow.State{}
-			prStates := []workflow.State{}
-			if transition.From == workflow.Ready {
-				sourceStates = append(sourceStates, workflow.Ready)
-			} else if transition.From == workflow.Rework {
-				prStates = append(prStates, workflow.Rework)
-			}
-			prStates = append(prStates, transition.Target)
-			if transition.Target == workflow.NeedsHuman {
-				sourceStates = append(sourceStates, workflow.NeedsHuman)
-			}
-			valid := issue.State == "open" && allowed(issue, sourceStates) && (len(matches) == 0 || len(matches) == 1 && matches[0].State == "open" && allowed(matches[0].githubIssue, prStates))
-			if !valid {
-				item.Problem = "projections contradict the pending implementation transition"
-			}
-			if valid && (item.Problem == "" || item.Problem == "contradictory lifecycle projections" || item.Problem == "source Ready contradicts Submission lifecycle") {
-				item.Problem = ""
-				sourceState, sourceClaimed, sourceProblem := implementationLabels(issue)
-				final := !sourceClaimed && sourceProblem == ""
-				if transition.Target == workflow.AwaitingReview {
-					final = final && sourceState == "" && item.Submission != nil && item.Submission.State == workflow.AwaitingReview && !item.Submission.Claimed
+			if round.Lane == workflow.WatchdogLane {
+				if item.Submission.ReviewedHead != "" && item.Submission.ReviewedHead != round.Obligation {
+					item.Problem = "active dispatch contradicts the reviewed Submission head"
 				} else {
-					final = final && sourceState == workflow.NeedsHuman && (item.Submission == nil || item.Submission.State == workflow.NeedsHuman && !item.Submission.Claimed)
-				}
-				item.State = transition.From
-				if final {
-					item.State = transition.Target
-				} else {
-					item.ResumeState = transition.From
+					item.Submission.ReviewedHead = round.Obligation
 				}
 			}
 		}
+		item = workflow.ReconcileImplementation(item)
 		if owners[item.Branch] != issue.Number {
 			item.Problem = "multiple source issues own the conventional branch"
 		}
 		if len(matches) == 1 && (item.Problem == "contradictory lifecycle projections" || item.Problem == "" && item.Claimed && (item.State == workflow.ReadyForMerge || item.State == workflow.NeedsHuman || item.State == workflow.Rework)) && (item.Transition == nil || item.Transition.Completed) {
-			observation, err := b.ReviewSubmission(ctx, repository, item.Submission.ID)
+			observation, err := b.ReviewSubmission(ctx, item.Submission.ID)
 			if err != nil {
 				return nil, err
 			}
@@ -842,8 +810,11 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context, repository gith
 	return items, nil
 }
 
-func (b *GitHubBackend) ImplementationTarget(ctx context.Context, repository github.RepositoryID) (string, error) {
-	return b.validate(ctx, repository)
+func (b *GitHubBackend) ImplementationTarget(ctx context.Context) (string, error) {
+	if err := b.requireRepository(); err != nil {
+		return "", err
+	}
+	return b.validate(ctx, b.repository)
 }
 
 func implementationLabels(issue githubIssue) (workflow.State, bool, string) {
@@ -883,6 +854,18 @@ func implementationLabels(issue githubIssue) (workflow.State, bool, string) {
 	return state, claimed, problem
 }
 
+func implementationLifecycle(issue githubIssue) *workflow.LifecycleObservation {
+	observation := &workflow.LifecycleObservation{Open: issue.State == "open"}
+	for i := range issue.Labels {
+		state, claimed, _ := implementationLabels(githubIssue{Labels: issue.Labels[i : i+1]})
+		if state != "" {
+			observation.States = append(observation.States, state)
+		}
+		observation.Claimed = observation.Claimed || claimed
+	}
+	return observation
+}
+
 func (b *GitHubBackend) implementationComments(ctx context.Context, repository github.RepositoryID, stream string) ([]skilldist.ReviewComment, error) {
 	var comments []skilldist.ReviewComment
 	for page := 1; ; page++ {
@@ -910,7 +893,11 @@ func (b *GitHubBackend) implementationComments(ctx context.Context, repository g
 	}
 }
 
-func (b *GitHubBackend) ImplementationHead(ctx context.Context, repository github.RepositoryID, branch string) (string, error) {
+func (b *GitHubBackend) ImplementationHead(ctx context.Context, branch string) (string, error) {
+	if err := b.requireRepository(); err != nil {
+		return "", err
+	}
+	repository := b.repository
 	var ref struct {
 		Object struct {
 			SHA string `json:"sha"`
@@ -921,4 +908,20 @@ func (b *GitHubBackend) ImplementationHead(ctx context.Context, repository githu
 		return "", err
 	}
 	return ref.Object.SHA, nil
+}
+
+func (b *GitHubBackend) SubmissionBodyMatches(id workflow.WorkItemID, actual, supplied string) (bool, error) {
+	number, err := githubIssueNumber(id)
+	if err != nil {
+		return false, err
+	}
+	return actual == withClosingReference(supplied, number), nil
+}
+
+func withClosingReference(body string, number int) string {
+	footer := fmt.Sprintf("\n\nCloses #%d\n", number)
+	if !strings.HasSuffix(body, footer) {
+		body += footer
+	}
+	return body
 }
