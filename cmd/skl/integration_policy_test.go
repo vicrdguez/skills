@@ -694,3 +694,243 @@ func TestNeedsHumanPreservesDraftMainSubmissionThroughGitHub(t *testing.T) {
 		t.Fatalf("draft preservation: %#v, %v unwanted=%q", result, err, unwanted)
 	}
 }
+
+func TestSubmitRefusesLateRetargetThroughGitHub(t *testing.T) {
+	root := proposalRepository(t)
+	baseline := prepareSlice(t, root, "widget")
+	sourceLabels := []string{"ready"}
+	var pullLabels []string
+	branchHead := baseline
+	base := ""
+	prBody := ""
+	createdBody := ""
+	prExists := false
+	completed := 0
+	metadata := []map[string]any{}
+	unwanted := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets")
+		toLabels := func(values []string) []map[string]string {
+			labels := make([]map[string]string, 0, len(values))
+			for _, value := range values {
+				labels = append(labels, map[string]string{"name": value})
+			}
+			return labels
+		}
+		source := map[string]any{"number": 7, "title": "widget", "state": "open", "labels": toLabels(sourceLabels)}
+		pull := map[string]any{"number": 11, "state": "open", "body": prBody, "labels": toLabels(pullLabels), "head": map[string]any{"ref": "widget", "sha": branchHead, "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": base}}
+		var result any = []any{}
+		switch {
+		case path == "/issues":
+			result = []any{source}
+		case path == "/pulls":
+			if r.Method == http.MethodPost {
+				var payload map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				base, _ = payload["base"].(string)
+				prBody, _ = payload["body"].(string)
+				createdBody = prBody
+				prExists = true
+				pull["base"] = map[string]string{"ref": base}
+				pull["body"] = prBody
+				result = pull
+			} else if prExists {
+				result = []any{pull}
+			}
+		case path == "/issues/7/comments":
+			if r.Method == http.MethodPost {
+				var comment map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&comment); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				comment["author_association"] = "OWNER"
+				if body, _ := comment["body"].(string); strings.Contains(body, `"completed":true`) {
+					completed++
+				}
+				metadata = append(metadata, comment)
+			}
+			result = metadata
+		case path == "/issues/7/dependencies/blocked_by", path == "/issues/11/comments", path == "/pulls/11/comments", path == "/pulls/11/reviews", path == "/issues/11/timeline":
+		case path == "/issues/7":
+			result = source
+		case path == "/issues/7/labels" && r.Method == http.MethodPost:
+			var payload struct{ Labels []string }
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			for _, label := range payload.Labels {
+				if !slices.Contains(sourceLabels, label) {
+					sourceLabels = append(sourceLabels, label)
+				}
+			}
+		case strings.HasPrefix(path, "/issues/7/labels/") && r.Method == http.MethodDelete:
+			label := strings.TrimPrefix(path, "/issues/7/labels/")
+			sourceLabels = slices.DeleteFunc(sourceLabels, func(value string) bool { return value == label })
+		case path == "/git/ref/heads/widget":
+			if prExists {
+				// A human retargets the published Submission before its lifecycle labels move.
+				base = "release"
+			}
+			result = map[string]any{"object": map[string]string{"sha": branchHead}}
+		case path == "/pulls/11", path == "/issues/11":
+			result = pull
+		case path == "/issues/11/labels" && r.Method == http.MethodPost:
+			var payload struct{ Labels []string }
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			for _, label := range payload.Labels {
+				if !slices.Contains(pullLabels, label) {
+					pullLabels = append(pullLabels, label)
+				}
+			}
+		case strings.HasPrefix(path, "/issues/11/labels/") && r.Method == http.MethodDelete:
+			label := strings.TrimPrefix(path, "/issues/11/labels/")
+			pullLabels = slices.DeleteFunc(pullLabels, func(value string) bool { return value == label })
+		case path == "/graphql":
+			result = map[string]any{"data": map[string]any{}}
+		case path == "/git/ref/heads/main" || strings.Contains(path, "target"):
+			unwanted = r.Method + " " + path
+			http.Error(w, "integration target unavailable", http.StatusInternalServerError)
+			return
+		default:
+			unwanted = r.Method + " " + path
+			http.Error(w, "unexpected request", http.StatusNotFound)
+			return
+		}
+		json.NewEncoder(w).Encode(result)
+	}))
+	defer server.Close()
+	run := func(args ...string) ([]byte, error) {
+		t.Helper()
+		var output bytes.Buffer
+		app := newApp(func(github.RepositoryID) (setup.Backend, error) {
+			return setup.NewGitHubBackend(server.URL, "token", server.Client()), nil
+		}, bytes.NewReader(nil), &output, &output)
+		command := append([]string{"skl"}, args...)
+		command = append(command, "--repo", root)
+		err := app.Run(command)
+		return slices.Clone(output.Bytes()), err
+	}
+	mustRun := func(args ...string) []byte {
+		t.Helper()
+		output, err := run(args...)
+		if err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, output)
+		}
+		return output
+	}
+	var start setup.ImplementationOutput
+	if err := json.Unmarshal(mustRun("implement", "next"), &start); err != nil || start.Packet == nil {
+		t.Fatalf("start: %#v, %v", start, err)
+	}
+	directory := start.Packet.Facts.Implementation.ResultDirectory
+	t.Cleanup(func() { os.RemoveAll(directory) })
+	body := filepath.Join(directory, "submission.md")
+	if err := os.WriteFile(body, []byte("candidate"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "rm", "-r", ".changes/widget")
+	runGit(t, root, "commit", "-m", "retire")
+	branchHead = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	var result setup.ImplementationOutput
+	if err := json.Unmarshal(mustRun("implement", "submit", "--item", "7", "--body", body), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "fix_required" || !strings.Contains(result.Reason, "release") || !strings.Contains(result.Reason, "main") || completed != 0 || slices.Contains(pullLabels, "review") || !slices.Contains(sourceLabels, "wip") || base != "release" || createdBody == "" || prBody != createdBody || unwanted != "" || readFile(t, body) != "candidate" {
+		t.Fatalf("late retarget: %#v completed=%d source=%v pull=%v base=%q body=%q/%q unwanted=%q", result, completed, sourceLabels, pullLabels, base, createdBody, prBody, unwanted)
+	}
+}
+
+func TestStatusRefusesRetargetedPartialHandoffThroughGitHub(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "widget")
+	runGit(t, root, "rm", "-r", ".changes/widget")
+	runGit(t, root, "commit", "-m", "retire")
+	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	sourceLabels := []string{"ready", "wip"}
+	pullLabels := []string{"review"}
+	metadata := []map[string]any{{"body": fmt.Sprintf("<!-- skl.implement/v1\n{\"watchdog_head\":%q}\n-->", head), "author_association": "OWNER"}}
+	writes := 0
+	unwanted := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets")
+		if r.Method != http.MethodGet {
+			writes++
+		}
+		toLabels := func(values []string) []map[string]string {
+			labels := make([]map[string]string, 0, len(values))
+			for _, value := range values {
+				labels = append(labels, map[string]string{"name": value})
+			}
+			return labels
+		}
+		source := map[string]any{"number": 7, "title": "widget", "state": "open", "labels": toLabels(sourceLabels)}
+		pull := map[string]any{"number": 11, "state": "open", "body": "existing", "labels": toLabels(pullLabels), "head": map[string]any{"ref": "widget", "sha": head, "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": "release"}}
+		if strings.HasPrefix(path, "/issues/7/labels") || strings.HasPrefix(path, "/issues/11/labels") {
+			target, prefix := &sourceLabels, "/issues/7/labels/"
+			if strings.HasPrefix(path, "/issues/11/") {
+				target, prefix = &pullLabels, "/issues/11/labels/"
+			}
+			switch r.Method {
+			case http.MethodPost:
+				var payload struct{ Labels []string }
+				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				for _, label := range payload.Labels {
+					if !slices.Contains(*target, label) {
+						*target = append(*target, label)
+					}
+				}
+			case http.MethodDelete:
+				label := strings.TrimPrefix(path, prefix)
+				*target = slices.DeleteFunc(*target, func(value string) bool { return value == label })
+			}
+			json.NewEncoder(w).Encode([]any{})
+			return
+		}
+		var result any = []any{}
+		switch path {
+		case "/issues":
+			result = []any{source}
+		case "/pulls":
+			result = []any{pull}
+		case "/issues/7":
+			result = source
+		case "/issues/7/comments":
+			result = metadata
+		case "/issues/7/dependencies/blocked_by", "/issues/11/comments", "/pulls/11/comments", "/pulls/11/reviews", "/issues/11/timeline":
+		case "/pulls/11", "/issues/11":
+			result = pull
+		default:
+			unwanted = r.Method + " " + path
+			http.Error(w, "unexpected request", http.StatusNotFound)
+			return
+		}
+		json.NewEncoder(w).Encode(result)
+	}))
+	defer server.Close()
+	var output bytes.Buffer
+	app := newApp(func(github.RepositoryID) (setup.Backend, error) {
+		return setup.NewGitHubBackend(server.URL, "token", server.Client()), nil
+	}, bytes.NewReader(nil), &output, &output)
+	if err := app.Run([]string{"skl", "status", "--repo", root}); err != nil {
+		t.Fatal(err)
+	}
+	var result setup.ImplementationOutput
+	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "fix_required" || !strings.Contains(result.Reason, "release") || !strings.Contains(result.Reason, "main") || writes != 0 || !slices.Contains(sourceLabels, "wip") || len(pullLabels) != 1 || pullLabels[0] != "review" || unwanted != "" {
+		t.Fatalf("retargeted partial handoff: %#v writes=%d source=%v pull=%v unwanted=%q", result, writes, sourceLabels, pullLabels, unwanted)
+	}
+}
+

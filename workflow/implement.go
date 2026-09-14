@@ -88,6 +88,15 @@ type InvariantError struct{ Reason string }
 func (e *InvariantError) Error() string { return e.Reason }
 func Refuse(reason string) error        { return &InvariantError{Reason: reason} }
 
+// RefuseNonMainBase reports an observed Submission destination other than main.
+// An unobserved base keeps its existing meaning; earlier valid effects are never rolled back.
+func RefuseNonMainBase(id SubmissionID, base string) error {
+	if base == "" || base == "main" {
+		return nil
+	}
+	return Refuse("existing Submission " + string(id) + " targets " + base + "; inspect it and explicitly repair its base to main before retrying")
+}
+
 type ImplementationOutcome struct {
 	Ledger *LedgerHistory             `json:"ledger,omitempty"`
 	Head   string                     `json:"head,omitempty"`

@@ -59,8 +59,10 @@ func ObserveStatus(ctx context.Context, root, remote string, backend Implementat
 				if current.Head != item.Submission.Head || current.Merged {
 					return Refuse("Submission changed during status reconciliation")
 				}
-				if item.Submission.PendingReview == ReadyForMerge && current.Base != "main" {
-					return Refuse("existing Submission " + string(item.Submission.ID) + " targets " + current.Base + "; inspect it and explicitly repair its base to main before retrying status")
+				if item.Submission.PendingReview == ReadyForMerge {
+					if err := RefuseNonMainBase(item.Submission.ID, current.Base); err != nil {
+						return err
+					}
 				}
 				return nil
 			}
@@ -85,9 +87,10 @@ func ObserveStatus(ctx context.Context, root, remote string, backend Implementat
 					return err
 				}
 				for _, c := range current {
-					if c.ID == item.ID && c.Problem == "" && c.Submission != nil && c.Submission.Head == item.Submission.Head && c.Submission.State == AwaitingReview && !c.Submission.Claimed {
-						return nil
+					if c.ID != item.ID || c.Problem != "" || c.Submission == nil || c.Submission.Head != item.Submission.Head || c.Submission.State != AwaitingReview || c.Submission.Claimed {
+						continue
 					}
+					return RefuseNonMainBase(c.Submission.ID, c.Submission.Base)
 				}
 				return Refuse("partial Submission changed; inspect before reconciling")
 			}

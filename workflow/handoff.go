@@ -48,8 +48,10 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 	if item.ID == "" || item.Problem != "" {
 		return ImplementationOutcome{}, Refuse("Workflow State contradicts handoff: " + item.Problem + "; repair projections before retrying")
 	}
-	if bodyPath != "" && item.Submission != nil && item.Submission.Base != "main" {
-		return ImplementationOutcome{}, Refuse("existing Submission " + string(item.Submission.ID) + " targets " + item.Submission.Base + "; inspect it and explicitly repair its base to main before retrying")
+	if bodyPath != "" && item.Submission != nil {
+		if err := RefuseNonMainBase(item.Submission.ID, item.Submission.Base); err != nil {
+			return ImplementationOutcome{}, err
+		}
 	}
 	resultPath := bodyPath
 	if resultPath == "" {
@@ -65,13 +67,27 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 		if err != nil || local != head {
 			return Refuse("local head changed during handoff; commit and push a fixed head, then retry")
 		}
-		if bodyPath != "" {
-			remote, err := backend.ImplementationHead(ctx, repository, item.Branch)
-			if err != nil {
-				return err
-			}
-			if remote != head {
-				return Refuse("remote head changed or local and remote heads differ; push a fixed head and retry")
+		if bodyPath == "" {
+			return nil
+		}
+		remote, err := backend.ImplementationHead(ctx, repository, item.Branch)
+		if err != nil {
+			return err
+		}
+		if remote != head {
+			return Refuse("remote head changed or local and remote heads differ; push a fixed head and retry")
+		}
+		if item.Submission == nil {
+			return nil
+		}
+		// A retarget after publication must stop the handoff rather than move lifecycle labels.
+		observed, err := backend.ImplementationItems(ctx, repository)
+		if err != nil {
+			return err
+		}
+		for _, current := range observed {
+			if current.ID == id && current.Submission != nil {
+				return RefuseNonMainBase(current.Submission.ID, current.Submission.Base)
 			}
 		}
 		return nil
@@ -195,6 +211,11 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 	for _, current := range observed {
 		if current.ID != id {
 			continue
+		}
+		if current.Submission != nil {
+			if err := RefuseNonMainBase(current.Submission.ID, current.Submission.Base); err != nil {
+				return ImplementationOutcome{}, err
+			}
 		}
 		if current.Problem == "" && current.State == target && !current.Claimed && (bodyPath == "" || current.Submission != nil && current.Submission.Head == head && current.Submission.Draft == (target == NeedsHuman)) {
 			transition.Completed = true
