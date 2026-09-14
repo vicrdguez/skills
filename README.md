@@ -16,7 +16,7 @@ The only thing I'm bringing here is the way these ideas are remixed to work for 
 
 I think his skill repository is full of great ideas and skill implementations that I've benefited multiple times from. However I wanted mi pipeline to use different artifacts with different goals to aid Agent implementations, all while keeping a set of durable docs that persist across changes, even when those artifacts are deleted.
 
-`grill-with-docs` is pretty much that idea, I'm just adding the concept of *Capabilities*, which is similar to what OpenSpec does with delta specs. My overall pipeline is also different so everything adapts to fit.
+`grill-with-docs` is pretty much that idea. My overall pipeline is also different so everything adapts to fit.
 
 
 ## The staged workflow
@@ -41,18 +41,18 @@ flowchart LR
 | Watchdog | `watchdog` | A fresh-context verdict published through `skl watchdog`: Ready for Merge, Rework, or Needs Human. Only non-functional Debt Marker comments may change |
 | Merge | human | The acceptance gate |
 
-The rest are reference skills the stages pull in rather than stages of their own: `design` (deep modules and seams), `domain` (glossary, ADRs, capabilities), `tdd` (the red → green loop), `audit` (the two-axis review engine). `writing-for-agents` is a standalone reference for authoring skills and agent-facing docs.
+The rest are reference skills the stages pull in rather than stages of their own: `design` (deep modules and seams), `domain` (glossary, ADRs), `tdd` (the red → green loop), `audit` (the two-axis review engine). `writing-for-agents` is a standalone reference for authoring skills and agent-facing docs.
 
 Four rules hold it together:
 
 - **A fresh context per stage.** Handoff happens through the board and the filesystem, never through conversation history. The watchdog is the strict case: it never runs in the context that built the change, so a green suite it did not run itself does not count.
 - **The backend projects the queue.** GitHub issues and PRs project Workflow State through `ready`, `review`, `rework`, `needs-human`, and `done`; `wip` is an additive Claim, not a lifecycle state. `done` means Ready for Merge, not Merged. Each slice has one branch and one conventional worktree under `.worktrees/<slug>`.
-- **Two document lifetimes.** Implementation Ledgers (`intent.md`, `behavior.md`, and optional `plan.md` / `tasks.md`) live in `.changes/<slug>/` on the slice branch. The pushed publication head is marked `[baseline] <slug>`; after only existing non-manual boxes change to lowercase `[x]`, the still-present ledger is marked `[completion] <slug>`. A later commit removes it before review. Review and Rework compare those exact historical endpoints and ledger absence, not intermediate edits. Durable docs (`CONTEXT.md`, `docs/adr/`, `docs/capabilities/`) outlive the change.
+- **Two document lifetimes.** Implementation Ledgers (`intent.md`, `behavior.md`, and optional `plan.md` / `tasks.md`) live in `.changes/<slug>/` on the slice branch. The pushed publication head is marked `[baseline] <slug>`; after only existing non-manual boxes change to lowercase `[x]`, the still-present ledger is marked `[completion] <slug>`. A later commit removes it before review. Review and Rework compare those exact historical endpoints and ledger absence, not intermediate edits. Durable docs (`CONTEXT.md`, `docs/adr/`) outlive the change.
 - **Slices are tracer bullets.** Each one cuts a complete path through every layer, is demoable on its own, declares its blocking edges, and is sized to fit a single fresh context window.
 
 ### How this differs
 
-**From OpenSpec** (`explore` → `propose` → `apply` → `archive`): the first two stage names are borrowed outright. The divergence is that `apply` splits into `implement` plus an adversarial `watchdog` stage and then the human merge — review becomes a stage with its own trust boundary instead of a step inside implementation. There is also no spec store: durable knowledge is `CONTEXT.md`, ADRs and capability docs on `main`, and in-flight state lives on the issue board rather than in a change folder.
+**From OpenSpec** (`explore` → `propose` → `apply` → `archive`): the first two stage names are borrowed outright. The divergence is that `apply` splits into `implement` plus an adversarial `watchdog` stage and then the human merge — review becomes a stage with its own trust boundary instead of a step inside implementation. There is also no spec store: durable knowledge is `CONTEXT.md` and ADRs on `main`, and in-flight state lives on the issue board rather than in a change folder.
 
 **From Matt's skills**: his repo is a composable collection, you reach for whichever skill fits the moment. This is an ordered pipeline where each stage has entry and exit conditions, which is what makes the cold handoff between stages possible at all. Several skill files here are near-verbatim from his; the pipeline wrapped around them is the part I added.
 

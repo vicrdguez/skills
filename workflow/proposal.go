@@ -351,7 +351,7 @@ func preflight(request PublishRequest) ([]WorkItem, Outcome, error) {
 	if err != nil {
 		return nil, Outcome{}, err
 	}
-	dirty, err := git(mainWorktree, "status", "--porcelain", "--untracked-files=all", "--", "CONTEXT.md", "docs/adr", "docs/capabilities")
+	dirty, err := git(mainWorktree, "status", "--porcelain", "--untracked-files=all", "--", "CONTEXT.md", "docs/adr")
 	if err != nil {
 		return nil, Outcome{}, err
 	}

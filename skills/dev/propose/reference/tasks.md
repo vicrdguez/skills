@@ -5,7 +5,6 @@ This the coordination ledger for implementation. Write it when there's more than
 
 - One behavioral task per Gherkin scenario → each is one red-green TDD cycle.
 - Stable ids (B1, C1, D1…) so an orchestrator can dispatch and track.
-- When relevant include the capability-doc update as the final doc task (format: `skl skill --resource reference/CAPABILITIES-FORMAT.md domain`).
 
 Frozen at the `[baseline] <slice-slug>` commit: the `[completion] <slice-slug>` endpoint may only change an existing non-manual `[ ]` to lowercase `[x]`. No task is added during implementation or rework.
 -->
@@ -18,7 +17,7 @@ Frozen at the `[baseline] <slice-slug>` commit: the `[completion] <slice-slug>` 
 - [ ] C1  {chore}
 
 ## Docs
-- [ ] D1  Update docs/capabilities/{name}.md
+- [ ] D1  {documentation task}
 
 ---
 
@@ -35,7 +34,4 @@ Frozen at the `[baseline] <slice-slug>` commit: the `[completion] <slice-slug>` 
 ## Chores
 - [ ] C1  Migration: add orders.cancelled_at
 - [ ] C2  Wire OrderCancelled → refund handler
-
-## Docs
-- [ ] D1  Update docs/capabilities/orders.md
 ```
