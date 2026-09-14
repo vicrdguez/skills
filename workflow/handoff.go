@@ -9,6 +9,9 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
+
+	skilldist "github.com/vicrdguez/skills"
 )
 
 const implementationDecisionPrefix = "<!-- skl.implement.decision/v1 -->\n"
@@ -108,7 +111,11 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 	if item.Claimed && item.State == target && !implementationSourceClaim(item) {
 		return outcome, Refuse("claimed destination may belong to a later worker; inspect it without releasing or replacing its Claim")
 	}
-	if item.Problem != "" && !(item.Problem == "contradictory lifecycle projections" && implementationSourceClaim(item)) {
+	// A record-level contradiction can belong to either lane or a partial
+	// publication. Without direction proof no command may publish through it.
+	// The one provable partial is a pause whose source Claim still owns the
+	// Ready stage while only the pause projection overlaps.
+	if item.Problem != "" && !provableSourcePausePartial(item, target) {
 		return outcome, Refuse("Workflow State contradicts handoff: " + item.Problem + "; inspect projections before retrying")
 	}
 	from := item.State
@@ -123,17 +130,27 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 	if from == Rework && item.Submission == nil {
 		return outcome, Refuse("Rework has no existing Submission; repair its attachment before resubmitting")
 	}
-	if from == Ready && bodyPath != "" && item.Submission != nil && item.Submission.Head == head && !implementationBodyMatches(item.ID, item.Submission.Body, string(body)) {
-		return outcome, Refuse("published Submission differs from the supplied Result Document; restore the original body before retrying")
+	if bodyPath != "" && item.Submission != nil {
+		published := implementationBodyMatches(item.ID, item.Submission.Body, string(body))
+		if from == Ready && item.Submission.Head == head && !published {
+			return outcome, Refuse("published Submission differs from the supplied Result Document; restore the original body before retrying")
+		}
+		if from == Rework {
+			if !published {
+				if item.Submission.Body != "" && !reworkUpdateProven(root, item, head) {
+					return outcome, Refuse("published Rework Submission differs from the supplied Result Document; inspect and supply the current round's Result Document")
+				}
+			} else if reworkReviewedAtHead(item, head) {
+				return outcome, Refuse("published Rework Submission already belongs to a completed review at this head; push a new commit and supply the current round's Result Document")
+			}
+		}
 	}
-	if from == Rework && bodyPath != "" && item.Submission != nil && item.Submission.Lifecycle != nil && slices.Contains(item.Submission.Lifecycle.States, target) && !implementationBodyMatches(item.ID, item.Submission.Body, string(body)) {
-		return outcome, Refuse("published Rework Submission differs from the supplied Result Document; restore the original body before retrying")
+	claimAcquiredAt := ""
+	if item.Submission != nil {
+		claimAcquiredAt = item.Submission.ClaimAcquiredAt
 	}
-	if decisionPath != "" && implementationDecisionConflicts(item, string(decision)) {
+	if decisionPath != "" && implementationDecisionConflicts(item, string(decision), claimAcquiredAt) {
 		return outcome, Refuse("published decision differs from the supplied Result Document; restore the original decision before retrying")
-	}
-	if target == AwaitingReview && from == Rework && item.Submission != nil && implementationBodyMatches(item.ID, item.Submission.Body, string(body)) {
-		return outcome, Refuse("unchanged Rework Submission cannot distinguish a stale command from a new handoff; inspect and supply the current round's Result Document")
 	}
 
 	policy := RequireRetiredArtifacts
@@ -220,8 +237,29 @@ func implementationSourceClaim(item ImplementationItem) bool {
 	return item.Source != nil && item.Source.Claimed && slices.Contains(item.Source.States, Ready) || item.Submission != nil && item.Submission.Lifecycle != nil && item.Submission.Lifecycle.Claimed && slices.Contains(item.Submission.Lifecycle.States, Rework)
 }
 
+// provableSourcePausePartial recognizes the one lifecycle overlap this lane
+// creates itself: a Ready source Claim whose pause projection added Needs Human
+// before removing Ready and wip. Any destination-side contradiction stays
+// unprovable and is left for explicit inspection.
+func provableSourcePausePartial(item ImplementationItem, target State) bool {
+	if target != NeedsHuman || item.Problem != "contradictory lifecycle projections" || item.Source == nil || !item.Source.Claimed {
+		return false
+	}
+	if len(item.Source.States) != 2 || !slices.Contains(item.Source.States, Ready) || !slices.Contains(item.Source.States, NeedsHuman) {
+		return false
+	}
+	if item.Submission == nil {
+		return true
+	}
+	if item.Submission.Lifecycle == nil || item.Submission.Claimed {
+		return false
+	}
+	_, problem := item.Submission.Lifecycle.state()
+	return problem == ""
+}
+
 func implementationHandoffMatches(item ImplementationItem, target State, head, body string, bodySupplied bool, decision string, decisionSupplied bool) bool {
-	if item.Problem != "" || item.State != target || item.Claimed {
+	if !implementationDestinationFinal(item, target) {
 		return false
 	}
 	if bodySupplied && (item.Submission == nil || item.Submission.Head != head || item.Submission.Draft != (target == NeedsHuman) || !implementationBodyMatches(item.ID, item.Submission.Body, body)) {
@@ -246,21 +284,91 @@ func implementationHandoffMatches(item ImplementationItem, target State, head, b
 	return false
 }
 
-func implementationDecisionConflicts(item ImplementationItem, decision string) bool {
+// implementationDestinationFinal certifies an already-completed handoff from the
+// individual records, not the aggregate state. Stale source projections such as
+// needs-human or sync must be gone before a destination counts as final.
+func implementationDestinationFinal(item ImplementationItem, target State) bool {
+	if item.Problem != "" || item.Claimed || item.Synchronization || item.State != target {
+		return false
+	}
+	if item.Source == nil || !item.Source.Open || item.Source.Claimed {
+		return false
+	}
+	if target == AwaitingReview {
+		if len(item.Source.States) != 0 || item.Submission == nil || item.Submission.Lifecycle == nil || item.Submission.Claimed {
+			return false
+		}
+		return slices.Equal(item.Submission.Lifecycle.States, []State{AwaitingReview})
+	}
+	if target != NeedsHuman || !slices.Equal(item.Source.States, []State{NeedsHuman}) {
+		return false
+	}
+	if item.Submission == nil {
+		return true
+	}
+	if item.Submission.Lifecycle == nil || item.Submission.Claimed {
+		return false
+	}
+	return slices.Equal(item.Submission.Lifecycle.States, []State{NeedsHuman})
+}
+
+// latestReviewComment selects the newest retained review receipt, preferring the
+// review number when the transport supplied one.
+func latestReviewComment(item ImplementationItem) (skilldist.ReviewComment, bool) {
+	if item.Submission == nil {
+		return skilldist.ReviewComment{}, false
+	}
+	var latest skilldist.ReviewComment
+	found := false
+	for _, comment := range item.Submission.Comments {
+		if comment.Path != "" || comment.Verdict == "" || comment.Commit == "" {
+			continue
+		}
+		if !found || comment.ReviewNumber > latest.ReviewNumber || comment.ReviewNumber == latest.ReviewNumber && comment.CreatedAt > latest.CreatedAt {
+			latest, found = comment, true
+		}
+	}
+	return latest, found
+}
+
+// reworkUpdateProven reports whether a completed review at an older revision
+// proves a new source-stage update, so the published Rework body is historical
+// rather than evidence accepted for this handoff.
+func reworkUpdateProven(root string, item ImplementationItem, head string) bool {
+	review, found := latestReviewComment(item)
+	if !found || review.Commit == head {
+		return false
+	}
+	return gitOK(root, "merge-base", "--is-ancestor", review.Commit, head) == nil
+}
+
+func reworkReviewedAtHead(item ImplementationItem, head string) bool {
+	review, found := latestReviewComment(item)
+	return found && review.Commit == head
+}
+
+func implementationDecisionConflicts(item ImplementationItem, decision, claimAcquiredAt string) bool {
 	wanted := OpaqueImplementationDecision(decision)
+	current := func(comment skilldist.ReviewComment) bool {
+		if claimAcquiredAt == "" || comment.CreatedAt == "" {
+			return true
+		}
+		claim, claimErr := time.Parse(time.RFC3339Nano, claimAcquiredAt)
+		created, createdErr := time.Parse(time.RFC3339Nano, comment.CreatedAt)
+		if claimErr != nil || createdErr != nil {
+			return true
+		}
+		return !created.Before(claim)
+	}
 	for _, comment := range item.Feedback {
-		if strings.HasPrefix(comment.Body, implementationDecisionPrefix) {
-			if comment.Body != wanted {
-				return true
-			}
+		if strings.HasPrefix(comment.Body, implementationDecisionPrefix) && comment.Body != wanted && current(comment) {
+			return true
 		}
 	}
 	if item.Submission != nil {
 		for _, comment := range item.Submission.Comments {
-			if strings.HasPrefix(comment.Body, implementationDecisionPrefix) {
-				if comment.Body != wanted {
-					return true
-				}
+			if strings.HasPrefix(comment.Body, implementationDecisionPrefix) && comment.Body != wanted && current(comment) {
+				return true
 			}
 		}
 	}

@@ -94,6 +94,49 @@ func (b *GitHubBackend) CompleteReview(ctx context.Context, item workflow.Implem
 	return b.implementationLabelMutation(ctx, repository, submissionNumber, nil, append(remove, "wip"), guard)
 }
 
+// issueClaimAcquiredAt observes the latest unambiguous `wip` acquisition from a
+// record timeline. An empty result means no currently observed Claim or an
+// ambiguous one; it is never direction inference.
+func (b *GitHubBackend) issueClaimAcquiredAt(ctx context.Context, repository github.RepositoryID, number int) (string, error) {
+	labels := map[string]bool{}
+	claimAcquiredAt := ""
+	claimAmbiguous := false
+	for page := 1; ; page++ {
+		var events []struct {
+			Event     string `json:"event"`
+			CreatedAt string `json:"created_at"`
+			Label     struct {
+				Name string `json:"name"`
+			} `json:"label"`
+		}
+		if err := b.request(ctx, http.MethodGet, b.repositoryPath(repository)+fmt.Sprintf("/issues/%d/timeline?per_page=100&page=%d", number, page), nil, &events); err != nil {
+			return "", err
+		}
+		for _, event := range events {
+			if event.Event != "labeled" && event.Event != "unlabeled" {
+				continue
+			}
+			if event.Label.Name == "wip" {
+				if event.Event == "labeled" {
+					claimAmbiguous = claimAmbiguous || labels["wip"]
+					claimAcquiredAt = event.CreatedAt
+				} else {
+					claimAcquiredAt = ""
+					claimAmbiguous = false
+				}
+			}
+			labels[event.Label.Name] = event.Event == "labeled"
+		}
+		if len(events) < 100 {
+			break
+		}
+	}
+	if !labels["wip"] || claimAmbiguous {
+		return "", nil
+	}
+	return claimAcquiredAt, nil
+}
+
 func (b *GitHubBackend) ReviewSubmission(ctx context.Context, id workflow.SubmissionID) (workflow.Submission, error) {
 	if err := b.requireRepository(); err != nil {
 		return workflow.Submission{}, err
@@ -115,41 +158,11 @@ func (b *GitHubBackend) ReviewSubmission(ctx context.Context, id workflow.Submis
 			result.Mergeability = "mergeable"
 		}
 	}
-	labels := map[string]bool{}
-	claimAcquiredAt := ""
-	claimAmbiguous := false
-	for page := 1; ; page++ {
-		var events []struct {
-			Event     string `json:"event"`
-			CreatedAt string `json:"created_at"`
-			Label     struct {
-				Name string `json:"name"`
-			} `json:"label"`
-		}
-		if err := b.request(ctx, http.MethodGet, b.repositoryPath(repository)+fmt.Sprintf("/issues/%d/timeline?per_page=100&page=%d", number, page), nil, &events); err != nil {
+	if claimed {
+		result.ClaimAcquiredAt, err = b.issueClaimAcquiredAt(ctx, repository, number)
+		if err != nil {
 			return workflow.Submission{}, err
 		}
-		for _, event := range events {
-			if event.Event != "labeled" && event.Event != "unlabeled" {
-				continue
-			}
-			if event.Label.Name == "wip" {
-				if event.Event == "labeled" {
-					claimAmbiguous = claimAmbiguous || labels["wip"]
-					claimAcquiredAt = event.CreatedAt
-				} else {
-					claimAcquiredAt = ""
-					claimAmbiguous = false
-				}
-			}
-			labels[event.Label.Name] = event.Event == "labeled"
-		}
-		if len(events) < 100 {
-			break
-		}
-	}
-	if claimed && labels["wip"] && !claimAmbiguous {
-		result.ClaimAcquiredAt = claimAcquiredAt
 	}
 	return result, nil
 }

@@ -424,6 +424,12 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 			item.Submission = &workflow.Submission{ID: workflow.SubmissionID(strconv.Itoa(pull.Number)), Head: pull.Head.SHA, Base: pull.Base.Ref, Draft: pull.Draft, Body: pull.Body, State: prState, Claimed: prClaimed, CreatedAt: pull.CreatedAt}
 			item.Submission.Lifecycle = implementationLifecycle(pull.githubIssue)
 			item.Submission.Lifecycle.Merged = pull.MergedAt != ""
+			if prClaimed {
+				item.Submission.ClaimAcquiredAt, err = b.issueClaimAcquiredAt(ctx, repository, pull.Number)
+				if err != nil {
+					return nil, err
+				}
+			}
 			for _, label := range pull.Labels {
 				item.Synchronization = item.Synchronization || label.Name == "sync"
 			}

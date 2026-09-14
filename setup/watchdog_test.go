@@ -54,6 +54,11 @@ func TestGitHubWatchdogClaimsSubmissionAndReadsReviewFacts(t *testing.T) {
 			return
 		case "/issues/11/comments":
 			result = []any{map[string]any{"body": "raw human", "author_association": "OWNER"}}
+		case "/issues/11/timeline":
+			result = []any{
+				map[string]any{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": "review"}},
+				map[string]any{"event": "labeled", "created_at": "2026-01-01T00:00:02Z", "label": map[string]string{"name": "wip"}},
+			}
 		case "/pulls/11/comments":
 			result = []any{map[string]any{"body": "raw inline", "path": "main.go", "line": 12, "side": "RIGHT", "commit_id": "older"}}
 		case "/pulls/11/reviews":

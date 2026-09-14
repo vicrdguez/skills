@@ -21,44 +21,49 @@ import (
 )
 
 type reviewForge struct {
-	mu             sync.Mutex
-	head           string
-	branch         string
-	remoteHead     string
-	pullHead       string
-	body           string
-	draft          bool
-	noPull         bool
-	noOther        bool
-	labels         []string
-	sourceLabels   []string
-	summaries      []map[string]any
-	issueComments  []map[string]any
-	inlines        []map[string]any
-	sourceComments []map[string]any
-	timeline       []map[string]any
-	failSummary    bool
-	failHandoff    bool
-	failInline     bool
-	failInlinePost bool
-	failBody       bool
-	failBodyPost   bool
-	failReadback   bool
-	duplicateRead  bool
-	reviewReads    int
-	failPostRead   bool
-	failDelete     string
-	loseDelete     string
-	failItemsRead  bool
-	failFinalRead  bool
-	denyCleanup    string
-	mergeable      bool
-	checkpointPath string
-	atWipRelease   string
-	denyRename     string
-	renameDenied   bool
-	afterMutation  func()
-	clock          int
+	mu              sync.Mutex
+	head            string
+	branch          string
+	remoteHead      string
+	pullHead        string
+	body            string
+	draft           bool
+	noPull          bool
+	noOther         bool
+	labels          []string
+	sourceLabels    []string
+	summaries       []map[string]any
+	issueComments   []map[string]any
+	inlines         []map[string]any
+	sourceComments  []map[string]any
+	timeline        []map[string]any
+	failSummary     bool
+	failHandoff     bool
+	failInline      bool
+	failInlinePost  bool
+	failBody        bool
+	failBodyPost    bool
+	failReadback    bool
+	duplicateRead   bool
+	reviewReads     int
+	failPostRead    bool
+	failDelete      string
+	loseDelete      string
+	failItemsRead   bool
+	failFinalRead   bool
+	failPullRead    bool
+	failPullCreate  bool
+	failSourceLabel bool
+	denyCleanup     string
+	mergeable       bool
+	checkpointPath  string
+	atWipRelease    string
+	denyRename      string
+	renameDenied    bool
+	afterMutation   func()
+	clock           int
+	writes          int
+	pullCreations   int
 }
 
 func (f *reviewForge) timestamp() string {
@@ -72,6 +77,9 @@ func (f *reviewForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if r.Method != http.MethodGet {
+		f.writes++
+	}
 	path := strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets")
 	branch := f.branch
 	if branch == "" {
@@ -124,8 +132,19 @@ func (f *reviewForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.body, _ = value["body"].(string)
 		f.draft, _ = value["draft"].(bool)
 		f.noPull = false
+		f.pullCreations++
+		if f.failPullCreate {
+			f.failPullCreate = false
+			http.Error(w, "creation response lost", http.StatusInternalServerError)
+			return
+		}
 		write(pull())
 	case r.Method == http.MethodGet && path == "/pulls/11":
+		if f.failPullRead {
+			f.failPullRead = false
+			http.Error(w, "pull readback unavailable", http.StatusInternalServerError)
+			return
+		}
 		write(pull())
 	case r.Method == http.MethodGet && path == "/git/ref/heads/widget":
 		if f.denyRename != "" {
@@ -188,6 +207,7 @@ func (f *reviewForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var value map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&value)
 		value["author_association"] = "OWNER"
+		value["created_at"] = f.timestamp()
 		f.sourceComments = append(f.sourceComments, value)
 	case r.Method == http.MethodPost && path == "/pulls/11/comments":
 		var value map[string]any
@@ -206,6 +226,7 @@ func (f *reviewForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPost && path == "/issues/11/comments":
 		var value map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&value)
+		value["created_at"] = f.timestamp()
 		f.issueComments = append(f.issueComments, value)
 	case r.Method == http.MethodPatch && path == "/pulls/11":
 		var value map[string]string
@@ -232,6 +253,11 @@ func (f *reviewForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			write(issue(11, branch, f.labels, true))
 		}
 	case r.Method == http.MethodPost && strings.HasSuffix(path, "/labels"):
+		if f.failSourceLabel && strings.HasPrefix(path, "/issues/7/") {
+			f.failSourceLabel = false
+			http.Error(w, "source label projection unavailable", http.StatusInternalServerError)
+			return
+		}
 		if f.failHandoff && slices.Contains(f.labels, "review") {
 			f.failHandoff = false
 			http.Error(w, "handoff unavailable", http.StatusInternalServerError)
@@ -291,7 +317,7 @@ func TestImplementationHandoffProtectsDestinationThroughPublicHTTP(t *testing.T)
 		t.Fatalf("resume: %#v", start)
 	}
 	body := filepath.Join(start.Packet.Facts.Implementation.ResultDirectory, "submission.md")
-	if err := os.WriteFile(body, []byte("reworked\n"), 0600); err != nil {
+	if err := os.WriteFile(body, []byte("reworked"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -317,6 +343,9 @@ func TestImplementationHandoffProtectsDestinationThroughPublicHTTP(t *testing.T)
 		if got.Status != "no_work" {
 			t.Fatalf("destination became claimable before release: %#v labels=%v", got, f.forge.labels)
 		}
+		if slices.Contains(f.forge.labels, "review") && (f.forge.body != "reworked\n\nCloses #7\n" || f.forge.head != f.head) {
+			t.Errorf("protected destination lacked exact evidence: body=%q head=%q want=%q", f.forge.body, f.forge.head, f.head)
+		}
 	}
 
 	_, err := f.runResult(f.worktree, "implement", "submit", "--item", "7", "--body", body)
@@ -333,7 +362,7 @@ func TestFirstImplementationHandoffProtectsDestinationThroughPublicHTTP(t *testi
 	f.forge.sourceComments = []map[string]any{{"author_association": "OWNER", "body": "<!-- skl.implement/v1\n{\"target_snapshot\":\"" + f.head + "\",\"target_branch\":\"main\"}\n-->"}}
 	start := f.run(t, f.worktree, "implement", "resume", "--item", "7")
 	body := filepath.Join(start.Packet.Facts.Implementation.ResultDirectory, "submission.md")
-	if err := os.WriteFile(body, []byte("first\n"), 0600); err != nil {
+	if err := os.WriteFile(body, []byte("first"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	active, releaseObserved, claimed := false, false, false
@@ -346,6 +375,9 @@ func TestFirstImplementationHandoffProtectsDestinationThroughPublicHTTP(t *testi
 		unprotectedReview := slices.Contains(f.forge.labels, "review") && !slices.Contains(f.forge.labels, "wip")
 		got := f.run(t, f.root, "watchdog", "next")
 		if unprotectedReview {
+			if len(f.forge.sourceLabels) != 0 {
+				t.Errorf("source cleanup incomplete at release: %v", f.forge.sourceLabels)
+			}
 			releaseObserved = true
 			claimed = got.Status == "work_available" && got.Item != nil && got.Item.Number == 7
 			if !claimed {
@@ -381,7 +413,7 @@ func TestImplementationPausePublishesBeforeReleaseThroughPublicHTTP(t *testing.T
 			args := []string{"implement", "needs-human", "--item", "7", "--reason", "mandatory_rule", "--decision", decision}
 			if mode != "issue-only" {
 				body := filepath.Join(directory, "submission.md")
-				if err := os.WriteFile(body, []byte("draft\n"), 0600); err != nil {
+				if err := os.WriteFile(body, []byte("draft"), 0600); err != nil {
 					t.Fatal(err)
 				}
 				args = append(args, "--body", body)
@@ -396,6 +428,10 @@ func TestImplementationPausePublishesBeforeReleaseThroughPublicHTTP(t *testing.T
 				got := f.run(t, f.root, "watchdog", "next")
 				if got.Status == "work_available" && got.Item != nil && got.Item.Number == 7 {
 					t.Fatalf("paused destination became claimable: %#v", got)
+				}
+				paused := slices.Contains(f.forge.labels, "needs-human") && !slices.Contains(f.forge.labels, "wip")
+				if paused && !slices.Equal(f.forge.sourceLabels, []string{"needs-human"}) {
+					t.Errorf("pause released before source cleanup: source=%v destination=%v", f.forge.sourceLabels, f.forge.labels)
 				}
 			}
 			got := f.run(t, f.worktree, args...)
@@ -446,6 +482,9 @@ func TestWatchdogVerdictsReleaseLastThroughPublicHTTP(t *testing.T) {
 				unprotected := targetVisible && !slices.Contains(f.forge.labels, "wip")
 				got := f.run(t, f.root, "implement", "next")
 				if unprotected {
+					if len(f.forge.summaries) != 1 {
+						t.Errorf("verdict released without published evidence: summaries=%d labels=%v", len(f.forge.summaries), f.forge.labels)
+					}
 					released = true
 					claimedRework = got.Status == "work_available" && got.Item != nil && got.Item.Number == 7
 					if want != "rework" && got.Status != "no_work" {
@@ -492,7 +531,7 @@ func TestImplementationRetryRefusesChangedPublishedEvidenceThroughPublicHTTP(t *
 		t.Fatal(err)
 	}
 	got = f.run(t, f.worktree, "implement", "submit", "--item", "7", "--body", body)
-	if got.Status != "fix_required" || !strings.Contains(got.Reason, "published Rework Submission differs") || f.forge.body != "accepted\n\nCloses #7\n" || !slices.Equal(f.forge.labels, []string{"rework", "review", "wip"}) {
+	if got.Status != "fix_required" || !strings.Contains(got.Reason, "contradictory lifecycle projections") || f.forge.body != "accepted\n\nCloses #7\n" || !slices.Equal(f.forge.labels, []string{"rework", "review", "wip"}) {
 		t.Fatalf("changed Rework recovery evidence mutated handoff: %#v body=%q labels=%v", got, f.forge.body, f.forge.labels)
 	}
 
@@ -538,6 +577,560 @@ func TestImplementationCompletedHandoffVerifiesEmptyResultDocuments(t *testing.T
 				t.Fatalf("empty evidence verification: %#v", got)
 			}
 		})
+	}
+}
+
+func TestImplementationContradictoryLifecycleRefusesWithoutMutation(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		labels []string
+		target string
+	}{
+		{"review-then-rework submit", []string{"review", "rework", "wip"}, "submit"},
+		{"review-then-rework pause", []string{"review", "rework", "wip"}, "needs-human"},
+		{"rework-then-done submit", []string{"rework", "done", "wip"}, "submit"},
+		{"rework-then-done pause", []string{"rework", "done", "wip"}, "needs-human"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newReviewFixture(t)
+			f.forge.labels = slices.Clone(tc.labels)
+			f.forge.body = "accepted\n\nCloses #7\n"
+			directory := newImplementationResultDirectory(t)
+			body, decision := filepath.Join(directory, "submission.md"), filepath.Join(directory, "decision.md")
+			if err := os.WriteFile(body, []byte("replacement\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(decision, []byte("hold\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			writes, sourceComments, issueComments := f.forge.writes, len(f.forge.sourceComments), len(f.forge.issueComments)
+			args := []string{"implement", "submit", "--item", "7", "--body", body}
+			if tc.target == "needs-human" {
+				args = []string{"implement", "needs-human", "--item", "7", "--reason", "mandatory_rule", "--decision", decision, "--body", body}
+			}
+			got := f.run(t, f.worktree, args...)
+			if got.Status != "fix_required" || !strings.Contains(got.Reason, "contradictory lifecycle projections") {
+				t.Fatalf("contradictory observation was not refused: %#v", got)
+			}
+			if f.forge.body != "accepted\n\nCloses #7\n" || f.forge.draft || !slices.Equal(f.forge.labels, tc.labels) || f.forge.writes != writes || len(f.forge.sourceComments) != sourceComments || len(f.forge.issueComments) != issueComments || !fileExists(body) || !fileExists(decision) {
+				t.Fatalf("refusal mutated the ambiguous handoff: body=%q draft=%t labels=%v writes=%d", f.forge.body, f.forge.draft, f.forge.labels, f.forge.writes)
+			}
+			if !slices.Equal(f.forge.sourceLabels, []string(nil)) {
+				t.Fatalf("refusal mutated source labels: %v", f.forge.sourceLabels)
+			}
+		})
+	}
+}
+
+func TestReworkSubmitRefusesChangedBodyAfterAcceptedWriteThroughPublicHTTP(t *testing.T) {
+	f := newReviewFixture(t)
+	f.forge.labels = []string{"rework", "wip"}
+	directory := newImplementationResultDirectory(t)
+	body := filepath.Join(directory, "submission.md")
+	if err := os.WriteFile(body, []byte("first accepted body"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	f.forge.failBody, f.forge.failPullRead = true, true
+	if _, err := f.runResult(f.worktree, "implement", "submit", "--item", "7", "--body", body); err == nil {
+		t.Fatal("accepted body write with lost response and failed readback was not interrupted")
+	}
+	if f.forge.body != "first accepted body\n\nCloses #7\n" || !slices.Equal(f.forge.labels, []string{"rework", "wip"}) || f.forge.draft {
+		t.Fatalf("interruption did not leave accepted evidence: body=%q labels=%v draft=%t", f.forge.body, f.forge.labels, f.forge.draft)
+	}
+	writes := f.forge.writes
+	if err := os.WriteFile(body, []byte("changed retry body"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got := f.run(t, f.worktree, "implement", "submit", "--item", "7", "--body", body)
+	if got.Status != "fix_required" || !strings.Contains(got.Reason, "published Rework Submission differs") {
+		t.Fatalf("changed retry overwrote accepted evidence: %#v", got)
+	}
+	if f.forge.body != "first accepted body\n\nCloses #7\n" || !slices.Equal(f.forge.labels, []string{"rework", "wip"}) || f.forge.draft || f.forge.writes != writes || !fileExists(body) {
+		t.Fatalf("changed retry mutated the handoff: body=%q labels=%v writes=%d", f.forge.body, f.forge.labels, f.forge.writes)
+	}
+}
+
+func TestReworkSubmitRetriesExactAcceptedBodyThroughPublicHTTP(t *testing.T) {
+	f := newReviewFixture(t)
+	f.forge.labels = []string{"rework", "wip"}
+	directory := newImplementationResultDirectory(t)
+	body := filepath.Join(directory, "submission.md")
+	if err := os.WriteFile(body, []byte("first accepted body"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	f.forge.failBody, f.forge.failPullRead = true, true
+	if _, err := f.runResult(f.worktree, "implement", "submit", "--item", "7", "--body", body); err == nil {
+		t.Fatal("accepted body write with lost response and failed readback was not interrupted")
+	}
+	got := f.run(t, f.worktree, "implement", "submit", "--item", "7", "--body", body)
+	if got.Status != "awaiting_review" || f.forge.body != "first accepted body\n\nCloses #7\n" || !slices.Equal(f.forge.labels, []string{"review"}) {
+		t.Fatalf("exact accepted-body retry did not finish the handoff: %#v body=%q labels=%v", got, f.forge.body, f.forge.labels)
+	}
+}
+
+func TestReworkSubmitAcceptsProvenNewSourceStageUpdateThroughPublicHTTP(t *testing.T) {
+	f := newReviewFixture(t)
+	reviewed := f.head
+	runGit(t, f.worktree, "commit", "--allow-empty", "-m", "new rework work")
+	f.head = strings.TrimSpace(runGitOutput(t, f.worktree, "rev-parse", "HEAD"))
+	f.forge.head = f.head
+	f.forge.labels = []string{"rework", "wip"}
+	f.forge.body = "previous round\n\nCloses #7\n"
+	f.forge.summaries = []map[string]any{storedReviewSummary(1, "rework", "round 1", reviewed, "2026-01-01T00:00:02Z")}
+	directory := newImplementationResultDirectory(t)
+	body := filepath.Join(directory, "submission.md")
+	if err := os.WriteFile(body, []byte("legitimate update"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got := f.run(t, f.worktree, "implement", "submit", "--item", "7", "--body", body)
+	if got.Status != "awaiting_review" || f.forge.body != "legitimate update\n\nCloses #7\n" || !slices.Equal(f.forge.labels, []string{"review"}) {
+		t.Fatalf("proven new Rework update was not published: %#v body=%q labels=%v", got, f.forge.body, f.forge.labels)
+	}
+}
+
+func TestReworkSubmitRefusesStaleSameHeadCommandThroughPublicHTTP(t *testing.T) {
+	f := newReviewFixture(t)
+	f.forge.labels = []string{"rework", "wip"}
+	f.forge.body = "accepted\n\nCloses #7\n"
+	f.forge.summaries = []map[string]any{storedReviewSummary(1, "rework", "round 1", f.head, "2026-01-01T00:00:02Z")}
+	directory := newImplementationResultDirectory(t)
+	body := filepath.Join(directory, "submission.md")
+	if err := os.WriteFile(body, []byte("accepted"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	writes := f.forge.writes
+	got := f.run(t, f.worktree, "implement", "submit", "--item", "7", "--body", body)
+	if got.Status != "fix_required" || !strings.Contains(got.Reason, "completed review at this head") {
+		t.Fatalf("stale same-head command was accepted: %#v", got)
+	}
+	if f.forge.writes != writes || !slices.Equal(f.forge.labels, []string{"rework", "wip"}) || f.forge.body != "accepted\n\nCloses #7\n" || !fileExists(body) {
+		t.Fatalf("stale refusal mutated the handoff: labels=%v writes=%d", f.forge.labels, f.forge.writes)
+	}
+}
+
+func TestImplementationCompletedHandoffRequiresFinalSourceCleanup(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		sourceLabels []string
+		labels       []string
+	}{
+		{"stale source pause", []string{"needs-human"}, []string{"review"}},
+		{"stale source pause and sync", []string{"needs-human"}, []string{"review", "sync"}},
+		{"stale source ready", []string{"ready"}, []string{"review"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newReviewFixture(t)
+			f.forge.sourceLabels = slices.Clone(tc.sourceLabels)
+			f.forge.labels = slices.Clone(tc.labels)
+			f.forge.body = "\n\nCloses #7\n"
+			directory := newImplementationResultDirectory(t)
+			body := filepath.Join(directory, "submission.md")
+			if err := os.WriteFile(body, nil, 0600); err != nil {
+				t.Fatal(err)
+			}
+			writes := f.forge.writes
+			got := f.run(t, f.worktree, "implement", "submit", "--item", "7", "--body", body)
+			if got.Status != "fix_required" || !strings.Contains(got.Reason, "cannot prove") {
+				t.Fatalf("incomplete unclaimed destination was accepted: %#v", got)
+			}
+			if f.forge.writes != writes || f.forge.body != "\n\nCloses #7\n" || !slices.Equal(f.forge.labels, tc.labels) || !slices.Equal(f.forge.sourceLabels, tc.sourceLabels) || !fileExists(body) {
+				t.Fatalf("refusal mutated incomplete handoff: labels=%v source=%v writes=%d", f.forge.labels, f.forge.sourceLabels, f.forge.writes)
+			}
+		})
+	}
+	t.Run("completed unclaimed destination", func(t *testing.T) {
+		f := newReviewFixture(t)
+		f.forge.labels = []string{"review"}
+		f.forge.body = "\n\nCloses #7\n"
+		directory := newImplementationResultDirectory(t)
+		body := filepath.Join(directory, "submission.md")
+		if err := os.WriteFile(body, nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+		writes := f.forge.writes
+		got := f.run(t, f.worktree, "implement", "submit", "--item", "7", "--body", body)
+		if got.Status != "awaiting_review" || f.forge.writes != writes || fileExists(body) {
+			t.Fatalf("verified completed handoff was not a no-mutation success: %#v writes=%d", got, f.forge.writes)
+		}
+	})
+}
+
+func TestImplementationPausePublishesDistinctDecisionAfterRequeueThroughPublicHTTP(t *testing.T) {
+	f := newReviewFixture(t)
+	f.forge.labels = []string{"rework", "wip"}
+	firstDirectory := newImplementationResultDirectory(t)
+	body, decision := filepath.Join(firstDirectory, "submission.md"), filepath.Join(firstDirectory, "decision.md")
+	if err := os.WriteFile(body, []byte("draft"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(decision, []byte("first decision\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	first := f.run(t, f.worktree, "implement", "needs-human", "--item", "7", "--reason", "mandatory_rule", "--decision", decision, "--body", body)
+	if first.Status != "needs_human" || !f.forge.draft || !slices.Equal(f.forge.labels, []string{"needs-human"}) || len(f.forge.issueComments) != 1 {
+		t.Fatalf("first pause: %#v labels=%v draft=%t", first, f.forge.labels, f.forge.draft)
+	}
+	// Explicit human requeue opens a new implementation stage.
+	f.forge.labels = []string{"rework"}
+	f.forge.sourceLabels = nil
+	resumed := f.run(t, f.worktree, "implement", "next")
+	if resumed.Status != "work_available" || resumed.Packet.Facts.Implementation.Branch != "widget" {
+		t.Fatalf("requeued stage was not claimable: %#v", resumed)
+	}
+	runGit(t, f.worktree, "commit", "--allow-empty", "-m", "requeued work")
+	f.head = strings.TrimSpace(runGitOutput(t, f.worktree, "rev-parse", "HEAD"))
+	f.forge.head = f.head
+	secondDirectory := newImplementationResultDirectory(t)
+	secondBody, secondDecision := filepath.Join(secondDirectory, "submission.md"), filepath.Join(secondDirectory, "decision.md")
+	if err := os.WriteFile(secondBody, []byte("draft"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(secondDecision, []byte("second decision\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	second := f.run(t, f.worktree, "implement", "needs-human", "--item", "7", "--reason", "mandatory_rule", "--decision", secondDecision, "--body", secondBody)
+	if second.Status != "needs_human" || !f.forge.draft || !slices.Equal(f.forge.labels, []string{"needs-human"}) || len(f.forge.issueComments) != 2 {
+		t.Fatalf("second pause: %#v labels=%v comments=%d", second, f.forge.labels, len(f.forge.issueComments))
+	}
+	if f.forge.issueComments[0]["body"] != workflow.OpaqueImplementationDecision("first decision\n") || f.forge.issueComments[1]["body"] != workflow.OpaqueImplementationDecision("second decision\n") {
+		t.Fatalf("historical decision was replaced: %#v", f.forge.issueComments)
+	}
+}
+
+func TestImplementationCleanupFailuresKeepDestinationProtectedThroughPublicHTTP(t *testing.T) {
+	t.Run("first submit source cleanup", func(t *testing.T) {
+		f := newReviewFixture(t)
+		f.forge.noPull = true
+		f.forge.labels = nil
+		f.forge.sourceLabels = []string{"ready", "wip"}
+		f.forge.sourceComments = []map[string]any{{"author_association": "OWNER", "body": "<!-- skl.implement/v1\n{\"target_snapshot\":\"" + f.head + "\",\"target_branch\":\"main\"}\n-->"}}
+		start := f.run(t, f.worktree, "implement", "resume", "--item", "7")
+		body := filepath.Join(start.Packet.Facts.Implementation.ResultDirectory, "submission.md")
+		if err := os.WriteFile(body, []byte("first"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		f.forge.failDelete = "ready"
+		f.forge.afterMutation = func() {
+			if slices.Contains(f.forge.labels, "review") && !slices.Contains(f.forge.labels, "wip") {
+				t.Errorf("destination exposed without protection during source cleanup: labels=%v", f.forge.labels)
+			}
+		}
+		if _, err := f.runResult(f.worktree, "implement", "submit", "--item", "7", "--body", body); err == nil {
+			t.Fatal("source cleanup failure was not reported")
+		}
+		if f.forge.body != "first\n\nCloses #7\n" || !slices.Contains(f.forge.labels, "wip") || !slices.Contains(f.forge.labels, "review") || !fileExists(body) {
+			t.Fatalf("evidence or protection lost: body=%q labels=%v", f.forge.body, f.forge.labels)
+		}
+		if got := f.run(t, f.root, "watchdog", "next"); got.Status != "no_work" {
+			t.Fatalf("failed cleanup exposed the destination: %#v labels=%v", got, f.forge.labels)
+		}
+	})
+	t.Run("rework submit label cleanup", func(t *testing.T) {
+		f := newReviewFixture(t)
+		f.forge.labels = []string{"rework", "wip"}
+		directory := newImplementationResultDirectory(t)
+		body := filepath.Join(directory, "submission.md")
+		if err := os.WriteFile(body, []byte("rework"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		f.forge.failDelete = "rework"
+		if _, err := f.runResult(f.worktree, "implement", "submit", "--item", "7", "--body", body); err == nil {
+			t.Fatal("Rework label cleanup failure was not reported")
+		}
+		if f.forge.body != "rework\n\nCloses #7\n" || !slices.Contains(f.forge.labels, "review") || !slices.Contains(f.forge.labels, "wip") || !fileExists(body) {
+			t.Fatalf("Rework evidence or protection lost: body=%q labels=%v", f.forge.body, f.forge.labels)
+		}
+		if got := f.run(t, f.root, "watchdog", "next"); got.Status != "no_work" {
+			t.Fatalf("failed Rework cleanup exposed the destination: %#v labels=%v", got, f.forge.labels)
+		}
+	})
+	t.Run("sync label cleanup", func(t *testing.T) {
+		f := newReviewFixture(t)
+		f.forge.labels = []string{"rework", "sync", "wip"}
+		directory := newImplementationResultDirectory(t)
+		body := filepath.Join(directory, "submission.md")
+		if err := os.WriteFile(body, []byte("rework"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		f.forge.failDelete = "sync"
+		if _, err := f.runResult(f.worktree, "implement", "submit", "--item", "7", "--body", body); err == nil {
+			t.Fatal("sync label cleanup failure was not reported")
+		}
+		if f.forge.body != "rework\n\nCloses #7\n" || !slices.Contains(f.forge.labels, "review") || !slices.Contains(f.forge.labels, "wip") || !fileExists(body) {
+			t.Fatalf("sync evidence or protection lost: body=%q labels=%v", f.forge.body, f.forge.labels)
+		}
+		if got := f.run(t, f.root, "watchdog", "next"); got.Status != "no_work" {
+			t.Fatalf("failed sync cleanup exposed the destination: %#v labels=%v", got, f.forge.labels)
+		}
+	})
+	t.Run("pause label cleanup", func(t *testing.T) {
+		f := newReviewFixture(t)
+		f.forge.labels = []string{"rework", "wip"}
+		directory := newImplementationResultDirectory(t)
+		body, decision := filepath.Join(directory, "submission.md"), filepath.Join(directory, "decision.md")
+		if err := os.WriteFile(body, []byte("draft"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(decision, []byte("hold\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		f.forge.failDelete = "rework"
+		if _, err := f.runResult(f.worktree, "implement", "needs-human", "--item", "7", "--reason", "mandatory_rule", "--decision", decision, "--body", body); err == nil {
+			t.Fatal("pause label cleanup failure was not reported")
+		}
+		if !slices.Contains(f.forge.labels, "needs-human") || !slices.Contains(f.forge.labels, "wip") || !f.forge.draft || !fileExists(body) || !fileExists(decision) {
+			t.Fatalf("pause evidence or protection lost: labels=%v draft=%t", f.forge.labels, f.forge.draft)
+		}
+		if got := f.run(t, f.root, "watchdog", "next"); got.Status != "no_work" {
+			t.Fatalf("failed pause cleanup exposed the destination: %#v labels=%v", got, f.forge.labels)
+		}
+	})
+}
+
+func TestFirstImplementationSubmitRecoversCreatedPullWithoutDuplicateThroughPublicHTTP(t *testing.T) {
+	f := newReviewFixture(t)
+	f.forge.noPull = true
+	f.forge.labels = nil
+	f.forge.sourceLabels = []string{"ready", "wip"}
+	f.forge.sourceComments = []map[string]any{{"author_association": "OWNER", "body": "<!-- skl.implement/v1\n{\"target_snapshot\":\"" + f.head + "\",\"target_branch\":\"main\"}\n-->"}}
+	start := f.run(t, f.worktree, "implement", "resume", "--item", "7")
+	body := filepath.Join(start.Packet.Facts.Implementation.ResultDirectory, "submission.md")
+	if err := os.WriteFile(body, []byte("first"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	f.forge.failPullCreate, f.forge.failPullRead = true, true
+	if _, err := f.runResult(f.worktree, "implement", "submit", "--item", "7", "--body", body); err == nil {
+		t.Fatal("lost creation response was not interrupted")
+	}
+	if f.forge.pullCreations != 1 || f.forge.body != "first\n\nCloses #7\n" || len(f.forge.labels) != 0 {
+		t.Fatalf("partial first publication state: creations=%d body=%q labels=%v", f.forge.pullCreations, f.forge.body, f.forge.labels)
+	}
+	got := f.run(t, f.worktree, "implement", "submit", "--item", "7", "--body", body)
+	if got.Status != "awaiting_review" || f.forge.pullCreations != 1 || f.forge.body != "first\n\nCloses #7\n" || !slices.Equal(f.forge.labels, []string{"review"}) {
+		t.Fatalf("fresh retry duplicated or lost publication: %#v creations=%d body=%q labels=%v", got, f.forge.pullCreations, f.forge.body, f.forge.labels)
+	}
+}
+
+func TestWatchdogReleaseRecoveryNeverReleasesLaterClaimThroughPublicHTTP(t *testing.T) {
+	f := newReviewFixture(t)
+	f.forge.noOther = true
+	f.start(t, f.root)
+	f.forge.loseDelete, f.forge.failFinalRead = "wip", true
+	directory := t.TempDir()
+	summary := filepath.Join(directory, "summary.md")
+	if err := os.WriteFile(summary, []byte("round 1"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"watchdog", "submit", "--item", "7", "--review-number", "1", "--reviewed-head", f.head, "--verdict", "rework", "--summary", summary}
+	if _, err := f.runResult(f.worktree, args...); err == nil {
+		t.Fatal("lost release response was not interrupted")
+	}
+	if !slices.Contains(f.forge.labels, "rework") || slices.Contains(f.forge.labels, "wip") {
+		t.Fatalf("lost release did not finish: %v", f.forge.labels)
+	}
+	claimed := f.run(t, f.root, "implement", "next")
+	if claimed.Status != "work_available" || !slices.Contains(f.forge.labels, "wip") {
+		t.Fatalf("later implementation Claim not acquired: %#v labels=%v", claimed, f.forge.labels)
+	}
+	labels, summaries, checkpoint := slices.Clone(f.forge.labels), len(f.forge.summaries), checkpointSnapshot(f.checkpoint)
+	if got := f.run(t, f.root, "watchdog", "submit", "--item", "7", "--review-number", "1", "--reviewed-head", f.head, "--verdict", "rework", "--summary", summary); got.Status != "fix_required" {
+		t.Fatalf("old command consumed the later Claim: %#v", got)
+	}
+	if !slices.Equal(f.forge.labels, labels) || len(f.forge.summaries) != summaries || checkpointSnapshot(f.checkpoint) != checkpoint {
+		t.Fatalf("old command mutated the later Claim: labels=%v", f.forge.labels)
+	}
+	if resumed := f.run(t, f.root, "watchdog", "resume", "--item", "7"); resumed.Status != "fix_required" {
+		t.Fatalf("old lane resumed the later Claim: %#v", resumed)
+	}
+	if status := f.run(t, f.root, "status"); status.Status != "observed" {
+		t.Fatalf("status did not observe the later Claim: %#v", status)
+	}
+	if !slices.Equal(f.forge.labels, labels) || checkpointSnapshot(f.checkpoint) != checkpoint {
+		t.Fatalf("resume or status released the later Claim: labels=%v", f.forge.labels)
+	}
+}
+
+func TestImplementationCleanupWarningsThroughPublicHTTP(t *testing.T) {
+	t.Run("submit", func(t *testing.T) {
+		f := newReviewFixture(t)
+		f.forge.noPull = true
+		f.forge.labels = nil
+		f.forge.sourceLabels = []string{"ready", "wip"}
+		f.forge.sourceComments = []map[string]any{{"author_association": "OWNER", "body": "<!-- skl.implement/v1\n{\"target_snapshot\":\"" + f.head + "\",\"target_branch\":\"main\"}\n-->"}}
+		start := f.run(t, f.worktree, "implement", "resume", "--item", "7")
+		directory := start.Packet.Facts.Implementation.ResultDirectory
+		body := filepath.Join(directory, "submission.md")
+		if err := os.WriteFile(body, []byte("final\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		f.forge.denyCleanup = directory
+		got := f.run(t, f.worktree, "implement", "submit", "--item", "7", "--body", body)
+		_ = os.Chmod(directory, 0700)
+		if got.Status != "awaiting_review" || !strings.Contains(got.Reason, "cleanup failed") || !fileExists(body) || !slices.Equal(f.forge.labels, []string{"review"}) {
+			t.Fatalf("submit cleanup warning: %#v labels=%v", got, f.forge.labels)
+		}
+		writes := f.forge.writes
+		retry := f.run(t, f.worktree, "implement", "submit", "--item", "7", "--body", body)
+		if retry.Status != "awaiting_review" || f.forge.writes != writes || fileExists(body) {
+			t.Fatalf("cleanup-only retry mutated the handoff: %#v writes=%d", retry, f.forge.writes)
+		}
+	})
+	t.Run("pause", func(t *testing.T) {
+		f := newReviewFixture(t)
+		f.forge.labels = []string{"rework", "wip"}
+		directory := newImplementationResultDirectory(t)
+		body, decision := filepath.Join(directory, "submission.md"), filepath.Join(directory, "decision.md")
+		if err := os.WriteFile(body, []byte("draft"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(decision, []byte("hold\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		f.forge.denyCleanup = directory
+		got := f.run(t, f.worktree, "implement", "needs-human", "--item", "7", "--reason", "mandatory_rule", "--decision", decision, "--body", body)
+		_ = os.Chmod(directory, 0700)
+		if got.Status != "needs_human" || !strings.Contains(got.Reason, "cleanup failed") || !fileExists(body) || !fileExists(decision) || !slices.Equal(f.forge.labels, []string{"needs-human"}) {
+			t.Fatalf("pause cleanup warning: %#v labels=%v", got, f.forge.labels)
+		}
+	})
+}
+
+func TestImplementationDecisionTransportStaysOpaqueThroughPublicCLI(t *testing.T) {
+	f := newReviewFixture(t)
+	f.forge.noPull = true
+	f.forge.labels = nil
+	f.forge.sourceLabels = []string{"ready", "wip"}
+	f.forge.sourceComments = []map[string]any{
+		{"author_association": "OWNER", "body": "<!-- skl.implement/v1\n{\"target_snapshot\":\"" + f.head + "\",\"target_branch\":\"main\",\"transition\":{\"from\":\"ready_for_implementation\",\"target\":\"needs_human\",\"head\":\"" + f.head + "\"},\"resume_state\":\"stale\"}\n-->"},
+		{"author_association": "OWNER", "body": "malformed retired envelope"},
+	}
+	start := f.run(t, f.worktree, "implement", "resume", "--item", "7")
+	directory := start.Packet.Facts.Implementation.ResultDirectory
+	decision := filepath.Join(directory, "decision.md")
+	prose := "<!-- skl.implement/v1\n{\"target_snapshot\":\"agent-prose\",\"transition\":{\"from\":\"x\"},\"resume_state\":\"resume\"}\n-->\nmalformed {not json\n"
+	if err := os.WriteFile(decision, []byte(prose), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got := f.run(t, f.worktree, "implement", "needs-human", "--item", "7", "--reason", "mandatory_rule", "--decision", decision)
+	if got.Status != "needs_human" || !slices.Equal(f.forge.sourceLabels, []string{"needs-human"}) {
+		t.Fatalf("pause with opaque decision: %#v source=%v", got, f.forge.sourceLabels)
+	}
+	transported := workflow.OpaqueImplementationDecision(prose)
+	transportedComments := 0
+	for _, comment := range f.forge.sourceComments {
+		if comment["body"] == transported {
+			transportedComments++
+		}
+	}
+	if transportedComments != 1 {
+		t.Fatalf("decision transport changed bytes: %#v", f.forge.sourceComments)
+	}
+	if status := f.run(t, f.root, "status"); status.Status != "observed" {
+		t.Fatalf("status consumed opaque decision prose: %#v", status)
+	}
+	if resumed := f.run(t, f.root, "implement", "resume", "--item", "7"); resumed.Status != "fix_required" {
+		t.Fatalf("resume consumed opaque decision prose: %#v", resumed)
+	}
+	for _, comment := range f.forge.sourceComments {
+		if comment["body"] == transported {
+			transportedComments--
+		}
+	}
+	if transportedComments != 0 {
+		t.Fatalf("status or resume rewrote the opaque decision: %#v", f.forge.sourceComments)
+	}
+}
+
+func TestImplementationReadyResumePreservesWorktreeThroughPublicHTTP(t *testing.T) {
+	f := newReviewFixture(t)
+	f.forge.sourceLabels = []string{"ready", "wip"}
+	f.forge.sourceComments = []map[string]any{{"author_association": "OWNER", "body": "<!-- skl.implement/v1\n{\"target_snapshot\":\"" + f.head + "\",\"target_branch\":\"main\"}\n-->"}}
+	uncommitted := filepath.Join(f.worktree, "uncommitted.txt")
+	if err := os.WriteFile(uncommitted, []byte("work in progress"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	start := f.run(t, f.worktree, "implement", "resume")
+	if start.Status != "work_available" || start.Packet.Facts.Implementation.Branch != "widget" || start.Packet.Facts.Implementation.WorkItem != 7 || !strings.Contains(start.Packet.Facts.Implementation.Worktree, "widget") {
+		t.Fatalf("resume packet: %#v", start.Packet.Facts.Implementation)
+	}
+	if readFile(t, uncommitted) != "work in progress" || !slices.Equal(f.forge.sourceLabels, []string{"ready", "wip"}) {
+		t.Fatalf("resume did not preserve the selected Work Item: source=%v", f.forge.sourceLabels)
+	}
+	explicit := f.run(t, f.root, "implement", "resume", "--item", "7")
+	if explicit.Status != "work_available" || explicit.Packet.Facts.Implementation.Branch != "widget" {
+		t.Fatalf("explicit resume selected another Work Item: %#v", explicit)
+	}
+}
+
+func TestWatchdogCleanupFailuresKeepDestinationsProtectedThroughPublicHTTP(t *testing.T) {
+	for _, verdict := range []string{"rework", "pass", "needs-human"} {
+		t.Run(verdict, func(t *testing.T) {
+			f := newReviewFixture(t)
+			f.forge.noOther = true
+			f.start(t, f.root)
+			f.forge.failDelete = "review"
+			directory := t.TempDir()
+			summary := filepath.Join(directory, "summary.md")
+			if err := os.WriteFile(summary, []byte("verdict"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			args := []string{"watchdog", "submit", "--item", "7", "--review-number", "1", "--reviewed-head", f.head, "--verdict", verdict, "--summary", summary}
+			if verdict == "pass" {
+				body := filepath.Join(directory, "submission.md")
+				if err := os.WriteFile(body, []byte("final"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				args = append(args, "--body", body)
+			}
+			active := false
+			f.forge.afterMutation = func() {
+				if active {
+					return
+				}
+				active = true
+				defer func() { active = false }()
+				if got := f.run(t, f.root, "implement", "next"); got.Status != "no_work" {
+					t.Errorf("implementation accepted protected %s destination: %#v labels=%v", verdict, got, f.forge.labels)
+				}
+			}
+			if _, err := f.runResult(f.worktree, args...); err == nil {
+				t.Fatal("cleanup failure was not reported")
+			}
+			if len(f.forge.summaries) != 1 || !slices.Contains(f.forge.labels, "wip") || !fileExists(f.checkpoint) {
+				t.Fatalf("verdict evidence, protection, or checkpoint lost: summaries=%d labels=%v", len(f.forge.summaries), f.forge.labels)
+			}
+			f.forge.afterMutation = nil
+			wantLabel := map[string]string{"rework": "rework", "pass": "done", "needs-human": "needs-human"}[verdict]
+			if got := f.run(t, f.worktree, args...); got.Status != map[string]string{"rework": "rework", "pass": "ready_for_merge", "needs-human": "needs_human"}[verdict] || !slices.Equal(f.forge.labels, []string{wantLabel}) {
+				t.Fatalf("cleanup-only retry did not finish the verdict: %#v labels=%v", got, f.forge.labels)
+			}
+		})
+	}
+}
+
+func TestImplementationPauseRetryRepublishesNothingThroughPublicHTTP(t *testing.T) {
+	f := newReviewFixture(t)
+	f.forge.noPull = true
+	f.forge.labels = nil
+	f.forge.sourceLabels = []string{"ready", "wip"}
+	f.forge.sourceComments = []map[string]any{{"author_association": "OWNER", "body": "<!-- skl.implement/v1\n{\"target_snapshot\":\"" + f.head + "\",\"target_branch\":\"main\"}\n-->"}}
+	start := f.run(t, f.worktree, "implement", "resume", "--item", "7")
+	directory := start.Packet.Facts.Implementation.ResultDirectory
+	decision := filepath.Join(directory, "decision.md")
+	if err := os.WriteFile(decision, []byte("hold\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	f.forge.failSourceLabel = true
+	args := []string{"implement", "needs-human", "--item", "7", "--reason", "mandatory_rule", "--decision", decision}
+	if _, err := f.runResult(f.worktree, args...); err == nil {
+		t.Fatal("unapplied pause projection was not reported")
+	}
+	if len(f.forge.sourceComments) != 2 || !slices.Equal(f.forge.sourceLabels, []string{"ready", "wip"}) {
+		t.Fatalf("partial pause state: comments=%d source=%v", len(f.forge.sourceComments), f.forge.sourceLabels)
+	}
+	got := f.run(t, f.worktree, args...)
+	if got.Status != "needs_human" || len(f.forge.sourceComments) != 2 || !slices.Equal(f.forge.sourceLabels, []string{"needs-human"}) {
+		t.Fatalf("fresh pause retry duplicated or lost evidence: %#v comments=%d source=%v", got, len(f.forge.sourceComments), f.forge.sourceLabels)
 	}
 }
 

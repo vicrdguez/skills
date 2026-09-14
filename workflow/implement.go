@@ -172,13 +172,17 @@ func (observation LifecycleObservation) state() (State, string) {
 }
 
 // PermitImplementationReview checks the fresh Submission observation before its
-// review projection is written, including the shipped overlap acceptance rules.
+// review projection is written. Any unresolved lifecycle contradiction must stop
+// the handoff; a normalized first state is not direction proof.
 func PermitImplementationReview(observation *LifecycleObservation) error {
 	if observation == nil {
 		return Refuse("review requires a durable Submission; publish it before retrying")
 	}
 	state, problem := observation.state()
-	if state == NeedsHuman || state == ReadyForMerge || state == Ready || problem != "" && state != Rework && state != AwaitingReview {
+	if problem != "" {
+		return Refuse("Submission lifecycle contradicts review handoff: " + problem + "; repair its projections")
+	}
+	if state == NeedsHuman || state == ReadyForMerge || state == Ready {
 		return Refuse("Submission lifecycle contradicts review handoff; repair its projections")
 	}
 	return nil

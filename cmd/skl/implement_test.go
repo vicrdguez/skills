@@ -1860,16 +1860,16 @@ func TestImplementationReviewProjectionBackendParity(t *testing.T) {
 	}{
 		{nil, nil, true},
 		{[]string{"rework", "wip"}, []workflow.State{workflow.Rework}, true},
-		{[]string{"rework", "review"}, []workflow.State{workflow.Rework, workflow.AwaitingReview}, true},
-		{[]string{"review", "rework"}, []workflow.State{workflow.AwaitingReview, workflow.Rework}, true},
+		{[]string{"rework", "review"}, []workflow.State{workflow.Rework, workflow.AwaitingReview}, false},
+		{[]string{"review", "rework"}, []workflow.State{workflow.AwaitingReview, workflow.Rework}, false},
 		{[]string{"ready"}, []workflow.State{workflow.Ready}, false},
 		{[]string{"done"}, []workflow.State{workflow.ReadyForMerge}, false},
 		{[]string{"needs-human"}, []workflow.State{workflow.NeedsHuman}, false},
 		{[]string{"review", "needs-human"}, []workflow.State{workflow.AwaitingReview, workflow.NeedsHuman}, false},
-		// Preserve the existing first-state policy, even for these unusual overlaps.
-		{[]string{"review", "done"}, []workflow.State{workflow.AwaitingReview, workflow.ReadyForMerge}, true},
+		// Contradictory lifecycle projections are never direction proof.
+		{[]string{"review", "done"}, []workflow.State{workflow.AwaitingReview, workflow.ReadyForMerge}, false},
 		{[]string{"done", "review"}, []workflow.State{workflow.ReadyForMerge, workflow.AwaitingReview}, false},
-		{[]string{"review", "ready"}, []workflow.State{workflow.AwaitingReview, workflow.Ready}, true},
+		{[]string{"review", "ready"}, []workflow.State{workflow.AwaitingReview, workflow.Ready}, false},
 		{[]string{"ready", "review"}, []workflow.State{workflow.Ready, workflow.AwaitingReview}, false},
 	} {
 		t.Run(fmt.Sprint(tt.labels), func(t *testing.T) {

@@ -232,6 +232,8 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 			return
 		case path == "/pulls/11/reviews":
 			result = []any{}
+		case path == "/issues/11/timeline":
+			result = []any{}
 		case path == "/pulls/11" && r.Method == http.MethodPatch:
 			var payload map[string]any
 			json.NewDecoder(r.Body).Decode(&payload)
