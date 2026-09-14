@@ -79,9 +79,14 @@ func (b *GitHubBackend) ClaimImplementation(ctx context.Context, item workflow.I
 				return err
 			}
 		}
+		if item.Submission != nil && item.Submission.PreviousReviewedHead != "" {
+			if err := b.publishImplementationMetadata(ctx, repository, itemNumber, implementationMetadata{ReviewedHead: item.Submission.PreviousReviewedHead, ReviewRoundHead: item.Submission.Head}); err != nil {
+				return err
+			}
+		}
 		if item.State == workflow.AwaitingReview {
-			if item.Submission == nil || current.Submission == nil || current.Submission.Head != item.Submission.Head || current.Submission.ID != item.Submission.ID {
-				return workflow.Refuse("Submission changed before Watchdog Claim; retry with the current head")
+			if item.Submission == nil || current.Submission == nil || current.Submission.Head != item.Submission.ReviewedHead || current.Submission.ID != item.Submission.ID || current.Claimed && current.Submission.ReviewedHead != "" && current.Submission.ReviewedHead != item.Submission.ReviewedHead {
+				return workflow.Refuse("Submission changed before Watchdog Claim; restore the fixed head")
 			}
 		}
 		if current.Claimed {
@@ -104,15 +109,23 @@ func (b *GitHubBackend) publishImplementationMetadata(ctx context.Context, repos
 	if err != nil {
 		return err
 	}
-	return b.implementationComment(ctx, repository, number, "<!-- skl.implement/v1\n"+string(payload)+"\n-->", true)
+	return b.implementationComment(ctx, repository, number, "<!-- skl.implement/v2\n"+string(payload)+"\n-->", true)
 }
 
+const decisionFraming = "<!-- skl.decision/v1 -->\n"
+
 func (b *GitHubBackend) implementationComment(ctx context.Context, repository github.RepositoryID, number int, body string, metadata bool) error {
+	if !metadata {
+		body = decisionFraming + body
+	}
 	published := func(comments []skilldist.ReviewComment) bool {
+		if metadata {
+			comments = implementationEvidence(comments)
+		}
 		latest := ""
 		for _, comment := range comments {
 			if metadata {
-				if strings.HasPrefix(comment.Body, "<!-- skl.implement/v1\n") && trustedMetadata(comment) {
+				if _, ok := implementationPayload(comment.Body); ok {
 					latest = comment.Body
 				}
 			} else if comment.Body == body {
@@ -382,12 +395,183 @@ func trustedMetadata(comment skilldist.ReviewComment) bool {
 	return slices.Contains([]string{"OWNER", "MEMBER", "COLLABORATOR"}, comment.Association)
 }
 
+func implementationPayload(body string) (string, bool) {
+	if payload, ok := strings.CutPrefix(body, "<!-- skl.implement/v2\n"); ok {
+		return payload, true
+	}
+	return strings.CutPrefix(body, "<!-- skl.implement/v1\n")
+}
+
+// implementationDocument exposes the opaque Result Document bytes beneath the
+// transport-only decision framing, so exact-document recovery compares authored
+// prose rather than its publication envelope.
+func implementationDocument(body string) string {
+	return strings.TrimPrefix(body, decisionFraming)
+}
+
+// New decisions always have a non-metadata outer prefix, even when their opaque
+// contents are an entire metadata publication. Only legacy v1 transitions need
+// digest-based exclusion. A metadata-shaped unframed decision makes that legacy
+// stream ambiguous: retain its safe prefix, never reinterpret later publications
+// (including apparent v2 upgrades) as proof. Such history needs human resolution.
+func implementationEvidence(comments []skilldist.ReviewComment) []skilldist.ReviewComment {
+	var evidence []skilldist.ReviewComment
+	legacyDecisions := make(map[string]bool)
+	for _, comment := range comments {
+		if !trustedMetadata(comment) {
+			continue
+		}
+		if legacyDecisions[fmt.Sprintf("%x", sha256.Sum256([]byte(comment.Body)))] {
+			if _, metadata := implementationPayload(comment.Body); metadata {
+				break
+			}
+			continue
+		}
+		if strings.HasPrefix(comment.Body, "<!-- skl.implement/v2\n") {
+			evidence = append(evidence, comment)
+			continue
+		}
+		body, ok := strings.CutPrefix(comment.Body, "<!-- skl.implement/v1\n")
+		if !ok {
+			continue
+		}
+		evidence = append(evidence, comment)
+		var metadata implementationMetadata
+		if json.Unmarshal([]byte(strings.TrimSuffix(body, "\n-->")), &metadata) == nil && metadata.Transition != nil && metadata.Transition.DecisionDigest != "" && !metadata.Transition.Completed {
+			legacyDecisions[metadata.Transition.DecisionDigest] = true
+		}
+	}
+	return evidence
+}
+
 type implementationMetadata struct {
 	SynchronizationTarget string                             `json:"synchronization_target,omitempty"`
+	WatchdogHead          string                             `json:"watchdog_head,omitempty"`
 	Transition            *workflow.ImplementationTransition `json:"transition,omitempty"`
 	TargetSnapshot        string                             `json:"target_snapshot,omitempty"`
 	TargetBranch          string                             `json:"target_branch,omitempty"`
+	ReviewedHead          string                             `json:"reviewed_head,omitempty"`
+	ReviewRoundHead       string                             `json:"review_round_head,omitempty"`
 	ResumeState           workflow.State                     `json:"resume_state,omitempty"`
+	Round                 *workflow.DispatchRound            `json:"round,omitempty"`
+}
+
+func validDispatchRound(round workflow.DispatchRound) bool {
+	return round.ID != "" && round.Item != "" && (round.Lane == workflow.ImplementLane || round.Lane == workflow.WatchdogLane) && round.Directory != "" && round.Obligation != ""
+}
+
+func (b *GitHubBackend) RecordDispatchRound(ctx context.Context, round workflow.DispatchRound) error {
+	if err := b.requireRepository(); err != nil {
+		return err
+	}
+	repository := b.repository
+	if !validDispatchRound(round) {
+		return workflow.Refuse("dispatch evidence has invalid or contradictory bindings")
+	}
+	number, err := githubIssueNumber(round.Item)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(implementationMetadata{Round: &round})
+	if err != nil {
+		return err
+	}
+	body := "<!-- skl.implement/v2\n" + string(payload) + "\n-->"
+	published := func(comments []skilldist.ReviewComment) bool {
+		for _, comment := range implementationEvidence(comments) {
+			observed, ok := implementationPayload(comment.Body)
+			if ok && observed == string(payload)+"\n-->" {
+				return true
+			}
+		}
+		return false
+	}
+	stream := fmt.Sprintf("/issues/%d/comments", number)
+	comments, err := b.implementationComments(ctx, repository, stream)
+	if err != nil || published(comments) {
+		return err
+	}
+	if round.Outcome != "" && round.Lane == workflow.ImplementLane {
+		var pending bool
+		for _, comment := range implementationEvidence(comments) {
+			payload, _ := implementationPayload(comment.Body)
+			var metadata implementationMetadata
+			if json.Unmarshal([]byte(strings.TrimSuffix(payload, "\n-->")), &metadata) == nil && metadata.Transition != nil && metadata.Transition.Directory == round.Directory {
+				pending = !metadata.Transition.Completed
+			}
+		}
+		if pending {
+			return workflow.Refuse("dispatch receipt requires a completed implementation transition")
+		}
+	}
+	writeErr := b.request(ctx, http.MethodPost, b.repositoryPath(repository)+stream, map[string]string{"body": body}, nil)
+	comments, err = b.implementationComments(ctx, repository, stream)
+	if err != nil {
+		return err
+	}
+	if published(comments) {
+		return nil
+	}
+	if writeErr != nil {
+		return writeErr
+	}
+	return errors.New("dispatch evidence publication not observed; explicitly inspect the retained Claim")
+}
+
+func (b *GitHubBackend) DispatchRounds(ctx context.Context, item workflow.WorkItemID) ([]workflow.DispatchRound, error) {
+	if err := b.requireRepository(); err != nil {
+		return nil, err
+	}
+	repository := b.repository
+	number, err := githubIssueNumber(item)
+	if err != nil {
+		return nil, err
+	}
+	comments, err := b.implementationComments(ctx, repository, fmt.Sprintf("/issues/%d/comments", number))
+	if err != nil {
+		return nil, err
+	}
+	return dispatchRoundsFromComments(comments, item)
+}
+
+func dispatchRoundsFromComments(comments []skilldist.ReviewComment, item workflow.WorkItemID) ([]workflow.DispatchRound, error) {
+	positions := make(map[string]int)
+	var rounds []workflow.DispatchRound
+	for _, comment := range implementationEvidence(comments) {
+		body, ok := implementationPayload(comment.Body)
+		if !ok {
+			continue
+		}
+		if !strings.HasSuffix(body, "\n-->") {
+			return nil, workflow.Refuse("invalid trusted dispatch metadata")
+		}
+		var metadata implementationMetadata
+		if err := json.Unmarshal([]byte(strings.TrimSuffix(body, "\n-->")), &metadata); err != nil {
+			return nil, workflow.Refuse("invalid trusted dispatch metadata")
+		}
+		if metadata.Round == nil {
+			continue
+		}
+		round := *metadata.Round
+		if !validDispatchRound(round) || round.Item != item {
+			return nil, workflow.Refuse("dispatch evidence has invalid or contradictory bindings")
+		}
+		index, exists := positions[round.ID]
+		if !exists {
+			positions[round.ID] = len(rounds)
+			rounds = append(rounds, round)
+			continue
+		}
+		previous := rounds[index]
+		sameBinding := previous.ID == round.ID && previous.Lane == round.Lane && previous.Item == round.Item && previous.Submission == round.Submission && previous.Obligation == round.Obligation && previous.Directory == round.Directory && previous.Synchronization == round.Synchronization
+		if !sameBinding || previous.Outcome != "" && previous != round || previous.Outcome == "" && round.Outcome == "" && previous != round {
+			return nil, workflow.Refuse("conflicting trusted dispatch evidence")
+		}
+		if round.Outcome != "" {
+			rounds[index] = round
+		}
+	}
+	return rounds, nil
 }
 
 func implementationBranchOwners(issues []githubIssue) map[string]int {
@@ -456,12 +640,25 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 			}
 			item = workflow.ReconcileImplementation(item)
 			if item.State == workflow.Rework || item.State == workflow.AwaitingReview || item.State == workflow.NeedsHuman || item.State == workflow.ReadyForMerge {
-				for _, stream := range []string{fmt.Sprintf("/issues/%d/comments", pull.Number), fmt.Sprintf("/pulls/%d/comments", pull.Number)} {
-					comments, err := b.implementationComments(ctx, repository, stream)
+				// Only issue-level publications carry the transport framing;
+				// inline findings are posted and observed as authored bytes.
+				for _, stream := range []struct {
+					path   string
+					framed bool
+				}{
+					{fmt.Sprintf("/issues/%d/comments", pull.Number), true},
+					{fmt.Sprintf("/pulls/%d/comments", pull.Number), false},
+				} {
+					comments, err := b.implementationComments(ctx, repository, stream.path)
 					if err != nil {
 						return nil, err
 					}
-					item.Submission.Comments = append(item.Submission.Comments, comments...)
+					for _, comment := range comments {
+						if stream.framed {
+							comment.Body = implementationDocument(comment.Body)
+						}
+						item.Submission.Comments = append(item.Submission.Comments, comment)
+					}
 				}
 				for page := 1; ; page++ {
 					var reviews []struct {
@@ -529,14 +726,13 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 			return nil, err
 		}
 		for _, comment := range comments {
-			if item.Submission != nil && !strings.HasPrefix(comment.Body, "<!-- skl.implement/v1\n") {
+			if _, metadata := implementationPayload(comment.Body); item.Submission != nil && !metadata {
+				comment.Body = implementationDocument(comment.Body)
 				item.Submission.Comments = append(item.Submission.Comments, comment)
 			}
-			// The operation identifies opaque prose before that prose is published.
-			if item.Transition != nil && fmt.Sprintf("%x", sha256.Sum256([]byte(comment.Body))) == item.Transition.DecisionDigest {
-				continue
-			}
-			if body, ok := strings.CutPrefix(comment.Body, "<!-- skl.implement/v1\n"); ok && strings.HasSuffix(body, "\n-->") {
+		}
+		for _, comment := range implementationEvidence(comments) {
+			if body, ok := implementationPayload(comment.Body); ok && strings.HasSuffix(body, "\n-->") {
 				if !trustedMetadata(comment) {
 					continue
 				}
@@ -556,13 +752,45 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 					item.TargetBranch = metadata.TargetBranch
 				}
 				if metadata.SynchronizationTarget != "" {
+					if item.TargetSnapshot != "" && item.TargetSnapshot != metadata.SynchronizationTarget {
+						item.Problem = "conflicting Synchronization Target metadata"
+						continue
+					}
 					item.TargetSnapshot = metadata.SynchronizationTarget
+				}
+				if metadata.ReviewedHead != "" && item.Submission != nil && metadata.ReviewRoundHead == item.Submission.Head {
+					item.Submission.PreviousReviewedHead = metadata.ReviewedHead
 				}
 				if metadata.ResumeState != "" {
 					item.ResumeState = metadata.ResumeState
 				}
 				if metadata.Transition != nil {
 					item.Transition = metadata.Transition
+				}
+			}
+		}
+		// A Rework push changes the Submission head, not the active round's
+		// fixed reviewed obligation. Legacy metadata remains head-scoped.
+		rounds, roundErr := dispatchRoundsFromComments(comments, item.ID)
+		if roundErr != nil {
+			item.Problem = roundErr.Error()
+		}
+		for _, round := range rounds {
+			if round.Outcome != "" || round.Submission == "" || item.Submission == nil || round.Submission != item.Submission.ID {
+				continue
+			}
+			if round.Lane == workflow.ImplementLane && !round.Synchronization {
+				if item.Submission.PreviousReviewedHead != "" && item.Submission.PreviousReviewedHead != round.Obligation {
+					item.Problem = "active dispatch contradicts the reviewed obligation"
+				} else {
+					item.Submission.PreviousReviewedHead = round.Obligation
+				}
+			}
+			if round.Lane == workflow.WatchdogLane {
+				if item.Submission.ReviewedHead != "" && item.Submission.ReviewedHead != round.Obligation {
+					item.Problem = "active dispatch contradicts the reviewed Submission head"
+				} else {
+					item.Submission.ReviewedHead = round.Obligation
 				}
 			}
 		}

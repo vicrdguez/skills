@@ -166,19 +166,26 @@ func TestWatchdogPausesSecondFailure(t *testing.T) {
 	prepareSlice(t, root, "widget")
 	completeAndRetireSlice(t, root, "widget")
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
-	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Claimed: true, Submission: &workflow.Submission{ID: "11", Head: head}}}, remoteHeads: map[string]string{"widget": head}}
-	watchdogCLI(t, root, b, "next")
+
+	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Submission: &workflow.Submission{ID: "11", Head: head}}}, remoteHeads: map[string]string{"widget": head}}
+	dispatch := watchdogCLI(t, root, b, "next")
 	checkpoint := strings.TrimSpace(runGitOutput(t, filepath.Join(root, ".worktrees", "widget"), "rev-parse", "--absolute-git-dir"))
 	if err := os.WriteFile(filepath.Join(checkpoint, ".watchdog"), []byte("1:"+head+"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	summary := filepath.Join(t.TempDir(), "summary.md")
+	summary := filepath.Join(dispatch.Packet.Facts.Watchdog.ResultDirectory, "summary.md")
+
 	if err := os.WriteFile(summary, []byte("current W1 BLOCK"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	got := watchdogCLI(t, root, b, "submit", "--item", "7", "--review-number", "2", "--reviewed-head", head, "--verdict", "rework", "--summary", summary)
 	if got.Status != "needs_human" || got.Item.Claimed || got.Item.ResumeState != workflow.Rework || got.Item.Submission.Comments[0].Body != "current W1 BLOCK" {
 		t.Fatalf("second failure: %#v", got)
+	}
+	reference := strings.Trim(strings.Fields(dispatch.ContinuationCommand)[4], "'")
+	continued := watchdogCLI(t, root, b, "next", "--after", reference)
+	if continued.Status != "no_work" || continued.PreviousHandoff == nil || continued.PreviousHandoff.Outcome != workflow.NeedsHuman {
+		t.Fatalf("second-failure continuation: %#v", continued)
 	}
 }
 
@@ -187,8 +194,11 @@ func TestWatchdogPassReachesHumanMergeBoundary(t *testing.T) {
 	prepareSlice(t, root, "widget")
 	completeAndRetireSlice(t, root, "widget")
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
-	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Claimed: true, Submission: &workflow.Submission{ID: "11", Head: head, Base: "main", Mergeability: "mergeable"}}}, remoteHeads: map[string]string{"widget": head}}
-	dir := t.TempDir()
+
+	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Submission: &workflow.Submission{ID: "11", Head: head, Base: "main", Mergeability: "mergeable"}}}, remoteHeads: map[string]string{"widget": head}}
+	start := watchdogCLI(t, root, b, "next")
+	dir := start.Packet.Facts.Watchdog.ResultDirectory
+
 	summary := filepath.Join(dir, "summary.md")
 	body := filepath.Join(dir, "body.md")
 	for path, content := range map[string]string{summary: "W1 NOTE opaque", body: "opaque final\n## Manual verification\n- [ ] human check\n"} {
@@ -203,6 +213,11 @@ func TestWatchdogPassReachesHumanMergeBoundary(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, ".changes/archive")); !os.IsNotExist(err) {
 		t.Fatalf("archive created: %v", err)
 	}
+	reference := strings.Trim(strings.Fields(start.ContinuationCommand)[4], "'")
+	continued := watchdogCLI(t, root, b, "next", "--after", reference)
+	if continued.Status != "no_work" || continued.PreviousHandoff == nil || continued.PreviousHandoff.Outcome != workflow.ReadyForMerge {
+		t.Fatalf("pass continuation: %#v", continued)
+	}
 }
 
 func TestWatchdogConflictPinsSynchronizationReworkWithoutBounce(t *testing.T) {
@@ -214,8 +229,11 @@ func TestWatchdogConflictPinsSynchronizationReworkWithoutBounce(t *testing.T) {
 	runGit(t, root, "commit", "--allow-empty", "-m", "target moved")
 	target := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	runGit(t, root, "switch", "widget")
-	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Claimed: true, Submission: &workflow.Submission{ID: "11", Head: head, Base: "main", Mergeability: "conflicting"}}}, remoteHeads: map[string]string{"widget": head, "main": target}}
-	summary := filepath.Join(t.TempDir(), "summary.md")
+
+	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Submission: &workflow.Submission{ID: "11", Head: head, Base: "main", Mergeability: "conflicting"}}}, remoteHeads: map[string]string{"widget": head, "main": target}}
+	dispatch := watchdogCLI(t, root, b, "next")
+	summary := filepath.Join(dispatch.Packet.Facts.Watchdog.ResultDirectory, "summary.md")
+
 	os.WriteFile(summary, []byte("pass"), 0600)
 	got := watchdogCLI(t, root, b, "submit", "--item", "7", "--reviewed-head", head, "--verdict", "pass", "--summary", summary, "--body", summary)
 	if got.Status != "rework" || !got.Item.Synchronization || got.Item.TargetSnapshot != target {
@@ -225,6 +243,23 @@ func TestWatchdogConflictPinsSynchronizationReworkWithoutBounce(t *testing.T) {
 	if start.Packet == nil || start.Packet.Facts.Implementation.TargetSnapshot != target || !strings.Contains(start.Packet.Markdown(), "git merge "+target) || strings.Contains(start.Packet.Markdown(), "Finding-driven Rework: sync nothing") {
 		t.Fatalf("synchronization packet: %#v", start)
 	}
+	if round := b.rounds["7"][1]; round.Obligation != target || !round.Synchronization {
+		t.Fatalf("sync bound reviewed head instead of target: %+v", round)
+	}
+	worktree := start.Packet.Facts.Implementation.Worktree
+	runGit(t, worktree, "merge", target, "--no-edit")
+	b.remoteHeads["widget"] = strings.TrimSpace(runGitOutput(t, worktree, "rev-parse", "HEAD"))
+	body := filepath.Join(start.Packet.Facts.Implementation.ResultDirectory, "submission.md")
+	os.WriteFile(body, []byte("sync fixes"), 0600)
+	b.afterPublish = func() { b.work[0].Synchronization = false }
+	if got := returnedCLI(t, b, start.Packet.Facts.Implementation.SubmitCommand); got.Status != "awaiting_review" {
+		t.Fatalf("sync completion: %+v", got)
+	}
+	reference := strings.Trim(strings.Fields(dispatch.ContinuationCommand)[4], "'")
+	continued := watchdogCLI(t, root, b, "next", "--after", reference)
+	if continued.PreviousHandoff == nil || continued.PreviousHandoff.Outcome != workflow.Rework {
+		t.Fatalf("synchronization continuation: %#v", continued)
+	}
 }
 
 func TestWatchdogPassAcceptsPushedDebtMarkerHead(t *testing.T) {
@@ -232,14 +267,19 @@ func TestWatchdogPassAcceptsPushedDebtMarkerHead(t *testing.T) {
 	prepareSlice(t, root, "widget")
 	completeAndRetireSlice(t, root, "widget")
 	reviewed := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
-	if err := os.WriteFile(filepath.Join(root, "debt.go"), []byte("package widget\n// DEBT(#11/W1): retained note\n"), 0600); err != nil {
+	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Submission: &workflow.Submission{ID: "11", Head: reviewed, Base: "main", Mergeability: "mergeable"}}}, remoteHeads: map[string]string{"widget": reviewed}}
+	dispatch := watchdogCLI(t, root, b, "next")
+	worktree := dispatch.Packet.Facts.Watchdog.Worktree
+	if err := os.WriteFile(filepath.Join(worktree, "debt.go"), []byte("package widget\n// DEBT(#11/W1): retained note\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, root, "add", "debt.go")
-	runGit(t, root, "commit", "-m", "record debt")
-	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
-	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Claimed: true, Submission: &workflow.Submission{ID: "11", Head: head, Base: "main", Mergeability: "mergeable"}}}, remoteHeads: map[string]string{"widget": reviewed}}
-	summary := filepath.Join(t.TempDir(), "summary.md")
+	runGit(t, worktree, "add", "debt.go")
+	runGit(t, worktree, "commit", "-m", "record debt")
+	head := strings.TrimSpace(runGitOutput(t, worktree, "rev-parse", "HEAD"))
+
+	b.work[0].Submission.Head = head
+	summary := filepath.Join(dispatch.Packet.Facts.Watchdog.ResultDirectory, "summary.md")
+
 	os.WriteFile(summary, []byte("opaque pass"), 0600)
 	args := []string{"submit", "--item", "7", "--reviewed-head", reviewed, "--head", head, "--verdict", "pass", "--summary", summary, "--body", summary}
 	if got := watchdogCLI(t, root, b, args...); got.Status != "fix_required" || !b.work[0].Claimed {
@@ -250,6 +290,11 @@ func TestWatchdogPassAcceptsPushedDebtMarkerHead(t *testing.T) {
 	if got.Status != "ready_for_merge" || got.Head != head {
 		t.Fatalf("post-marker pass: %#v", got)
 	}
+	reference := strings.Trim(strings.Fields(dispatch.ContinuationCommand)[4], "'")
+	continued := watchdogCLI(t, root, b, "next", "--after", reference)
+	if continued.Status != "no_work" || continued.PreviousHandoff == nil || continued.PreviousHandoff.Outcome != workflow.ReadyForMerge {
+		t.Fatalf("post-marker continuation: %#v", continued)
+	}
 }
 
 func TestWatchdogHumanDirectionRequiresExplicitRequeue(t *testing.T) {
@@ -258,12 +303,20 @@ func TestWatchdogHumanDirectionRequiresExplicitRequeue(t *testing.T) {
 		prepareSlice(t, root, "widget")
 		completeAndRetireSlice(t, root, "widget")
 		head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
-		b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Claimed: true, Submission: &workflow.Submission{ID: "11", Head: head}}}, remoteHeads: map[string]string{"widget": head}}
-		summary := filepath.Join(t.TempDir(), "summary.md")
+
+		b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Submission: &workflow.Submission{ID: "11", Head: head, PreviousReviewedHead: head}}}, remoteHeads: map[string]string{"widget": head}}
+		dispatch := watchdogCLI(t, root, b, "next")
+		summary := filepath.Join(dispatch.Packet.Facts.Watchdog.ResultDirectory, "summary.md")
+
 		os.WriteFile(summary, []byte("W1 HUMAN"), 0600)
 		got := watchdogCLI(t, root, b, "submit", "--item", "7", "--reviewed-head", head, "--verdict", "needs-human", "--summary", summary)
 		if got.Status != "needs_human" || got.Item.ResumeState != workflow.AwaitingReview {
 			t.Fatalf("human verdict: %#v", got)
+		}
+		reference := strings.Trim(strings.Fields(dispatch.ContinuationCommand)[4], "'")
+		continued := watchdogCLI(t, root, b, "next", "--after", reference)
+		if continued.Status != "no_work" || continued.PreviousHandoff == nil || continued.PreviousHandoff.Outcome != workflow.NeedsHuman {
+			t.Fatalf("explicit Needs Human continuation: %#v", continued)
 		}
 		human := skilldist.ReviewComment{Body: "W1 resolved [no parsing\n", Association: "OWNER"}
 		b.work[0].Submission.Comments = append(b.work[0].Submission.Comments, human)
@@ -512,18 +565,25 @@ func TestWatchdogResumesFixedClaim(t *testing.T) {
 	prepareSlice(t, root, "widget")
 	completeAndRetireSlice(t, root, "widget")
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
-	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Claimed: true, Submission: &workflow.Submission{ID: "11", Head: head}}, {ID: "1", State: workflow.AwaitingReview}}}
-	got := watchdogCLI(t, root, b, "resume", "--item", "7")
-	if got.Status != "work_available" || got.Packet.Facts.Watchdog.ReviewedHead != head || b.work[1].Claimed {
+
+	runGit(t, root, "remote", "rename", "origin", "upstream")
+	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Claimed: true, Submission: &workflow.Submission{ID: "11", Head: head, ReviewedHead: head}}, {ID: "1", State: workflow.AwaitingReview}}}
+	got := watchdogCLI(t, root, b, "resume", "--item", "7", "--remote", "upstream")
+	if got.Status != "work_available" || got.Packet.Facts.Watchdog.ReviewedHead != head || b.work[1].Claimed || !strings.Contains(got.WorkerCommand, "skl watchdog resume --item 7") || !strings.Contains(got.ContinuationCommand, "skl watchdog next --after '") {
 		t.Fatalf("resume: %#v", got)
 	}
-	worktree := filepath.Join(root, ".worktrees", "widget")
-	runGit(t, worktree, "commit", "--allow-empty", "-m", "fresh review head")
-	fresh := strings.TrimSpace(runGitOutput(t, worktree, "rev-parse", "HEAD"))
-	b.work[0].Submission.Head = fresh
-	got = watchdogCLI(t, root, b, "resume", "--item", "7")
-	if got.Status != "work_available" || got.Packet.Facts.Watchdog.ReviewedHead != fresh {
-		t.Fatalf("resume did not refresh current head: %#v", got)
+	directory, continuation := got.Packet.Facts.Watchdog.ResultDirectory, got.ContinuationCommand
+	worktree := got.Packet.Facts.Watchdog.Worktree
+	got = returnedCLI(t, b, got.WorkerCommand)
+	if got.Packet.Facts.Watchdog.ResultDirectory != directory || got.ContinuationCommand != continuation {
+		t.Fatalf("resume minted another Watchdog dispatch: %#v", got)
+	}
+	runGit(t, worktree, "commit", "--allow-empty", "-m", "move claimed Submission head")
+	b.work[0].Submission.Head = strings.TrimSpace(runGitOutput(t, worktree, "rev-parse", "HEAD"))
+	got = returnedCLI(t, b, got.WorkerCommand)
+	if got.Status != "fix_required" || b.work[0].Submission.ReviewedHead != head {
+		t.Fatalf("resume moved fixed point: %#v", got)
+
 	}
 }
 
@@ -583,6 +643,52 @@ func TestWatchdogCleansPrivateResultsOnlyAfterVerifiedHandoff(t *testing.T) {
 	}
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Fatalf("successful private results retained: %v", err)
+	}
+}
+
+func TestWatchdogContinuationVerifiesItsCompletedRound(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "widget")
+	completeAndRetireSlice(t, root, "widget")
+	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Submission: &workflow.Submission{ID: "11", Head: head}}}, remoteHeads: map[string]string{"widget": head}}
+
+	start := watchdogCLI(t, root, b, "next")
+	summary := filepath.Join(start.Packet.Facts.Watchdog.ResultDirectory, "summary.md")
+	if err := os.WriteFile(summary, []byte("W1 BLOCK"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := watchdogCLI(t, root, b, "submit", "--item", "7", "--reviewed-head", head, "--verdict", "rework", "--summary", summary); got.Status != "rework" {
+		t.Fatalf("handoff: %#v", got)
+	}
+	parts := strings.Fields(start.ContinuationCommand)
+	reference := strings.Trim(parts[4], "'")
+	continued := watchdogCLI(t, root, b, "next", "--after", reference)
+	if continued.Status != "no_work" || continued.PreviousHandoff == nil || continued.PreviousHandoff.Number != 7 || continued.PreviousHandoff.Outcome != workflow.Rework {
+		t.Fatalf("continuation: %#v", continued)
+	}
+}
+
+func TestEarlierWatchdogCompletionCannotAuthorizeLaterEqualHeadRound(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "widget")
+	completeAndRetireSlice(t, root, "widget")
+	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Submission: &workflow.Submission{ID: "11", Head: head}}}, remoteHeads: map[string]string{"widget": head}}
+	first := watchdogCLI(t, root, b, "next")
+	summary := filepath.Join(first.Packet.Facts.Watchdog.ResultDirectory, "summary.md")
+	os.WriteFile(summary, []byte("W1 BLOCK"), 0600)
+	watchdogCLI(t, root, b, "submit", "--item", "7", "--reviewed-head", head, "--verdict", "rework", "--summary", summary)
+	b.work[0].State, b.work[0].Claimed = workflow.AwaitingReview, false
+	b.work[0].Source = &workflow.LifecycleObservation{Open: true}
+	b.work[0].Submission.State, b.work[0].Submission.Claimed = workflow.AwaitingReview, false
+	b.work[0].Submission.Lifecycle = &workflow.LifecycleObservation{States: []workflow.State{workflow.AwaitingReview}, Open: true}
+	b.work[0].Submission.Head, b.work[0].Submission.ReviewedHead = head, ""
+	second := watchdogCLI(t, root, b, "next")
+	reference := strings.Trim(strings.Fields(second.ContinuationCommand)[4], "'")
+	got := watchdogCLI(t, root, b, "next", "--after", reference)
+	if got.Status != "fix_required" || got.PreviousHandoff != nil || !b.work[0].Claimed {
+		t.Fatalf("earlier Watchdog receipt authorized equal-head round: %#v %#v", got, b.rounds["7"])
 	}
 }
 

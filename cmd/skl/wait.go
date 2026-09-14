@@ -2,14 +2,45 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/vicrdguez/skills/setup"
+	"io"
 	"strings"
 	"time"
 
 	"github.com/urfave/cli/v2"
 	"github.com/vicrdguez/skills/workflow"
 )
+
+const dispatchCallingConvention = "Selection is mutating, not replayable. On a lost or ambiguous response (including idle_timeout), stop; inspect Claims and explicitly resume --item <id>. Never automatically repeat next or next --after. Missing identity requires manual inspection."
+
+func selectionError(lane workflow.DispatchLane, item workflow.WorkItemID, err error) error {
+	recovery := "stop; inspect Claims before explicitly resuming; do not replay next or next --after"
+	if item != "" {
+		recovery = fmt.Sprintf("stop; inspect and explicitly run %s resume --item %s; do not replay next or next --after", lane, item)
+	}
+	return fmt.Errorf("%s: %w", recovery, err)
+}
+
+func writeWorkOutput(stdout io.Writer, outcome workflow.ImplementationOutcome, lane workflow.DispatchLane) error {
+	output, err := setup.PresentImplementation(outcome)
+	if err == nil {
+		err = json.NewEncoder(stdout).Encode(output)
+	}
+	if err != nil && outcome.Dispatch != nil {
+		item := workflow.WorkItemID("")
+		if outcome.Item != nil {
+			item = outcome.Item.ID
+		}
+		return selectionError(lane, item, err)
+	}
+	if err != nil && (outcome.PreviousHandoff != nil || outcome.Status == "no_work" || outcome.Status == "idle_timeout") {
+		return selectionError(lane, "", err)
+	}
+	return err
+}
 
 type stageApp struct{ *cli.App }
 
@@ -114,4 +145,35 @@ func nextWork(ctx context.Context, wait, poll time.Duration, selectWork func() (
 			}
 		}
 	}
+}
+
+func continuedWork(ctx context.Context, root, remote, reference string, lane workflow.DispatchLane, wait, poll time.Duration, pollSet bool, backend workflow.ImplementationBackend, selectWork func() (workflow.ImplementationOutcome, error)) (workflow.ImplementationOutcome, error) {
+	var previous workflow.CompletedHandoff
+	if reference != "" {
+		var err error
+		previous, err = workflow.VerifyDispatch(ctx, root, remote, lane, reference, backend)
+		var violation *workflow.InvariantError
+		if errors.As(err, &violation) {
+			reason := fmt.Sprintf("%s; stop; inspect the reference's repository, lane and Work Item --item %s, then explicitly resume the intended Claim after resolving the problem; do not replay next or next --after", violation.Reason, previous.Item)
+			return workflow.ImplementationOutcome{Status: "fix_required", Reason: reason, Item: &workflow.ImplementationItem{ID: previous.Item}}, nil
+		}
+		if err != nil {
+			return workflow.ImplementationOutcome{}, selectionError(lane, previous.Item, err)
+		}
+	}
+	outcome, err := nextWork(ctx, wait, poll, selectWork)
+	if err != nil {
+		return outcome, selectionError(lane, "", err)
+	}
+	if reference != "" {
+		outcome.PreviousHandoff = &previous
+	}
+	if outcome.Dispatch != nil {
+		if wait != 0 {
+			outcome.Dispatch.Wait, outcome.Dispatch.Poll = wait.String(), poll.String()
+		} else if pollSet {
+			outcome.Dispatch.Poll = poll.String()
+		}
+	}
+	return outcome, nil
 }

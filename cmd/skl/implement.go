@@ -16,10 +16,13 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 	var commands []*cli.Command
 	for _, name := range []string{"next", "resume", "inspect", "submit", "needs-human"} {
 		commands = append(commands, &cli.Command{Name: name,
-			Flags: []cli.Flag{&cli.PathFlag{Name: "repo", Value: "."}, &cli.StringFlag{Name: "remote"}, &cli.IntFlag{Name: "item"}, &cli.PathFlag{Name: "body"}, &cli.PathFlag{Name: "decision"}, &cli.StringFlag{Name: "reason"}, &cli.StringFlag{Name: "target-snapshot"}, &cli.StringFlag{Name: "artifact-baseline"}, &cli.StringFlag{Name: "artifact-completion"}},
+			Flags: []cli.Flag{&cli.PathFlag{Name: "repo", Value: "."}, &cli.StringFlag{Name: "remote"}, &cli.IntFlag{Name: "item"}, &cli.PathFlag{Name: "body"}, &cli.PathFlag{Name: "decision"}, &cli.StringFlag{Name: "reason"}, &cli.StringFlag{Name: "target-snapshot"}, &cli.StringFlag{Name: "reviewed-head"}, &cli.StringFlag{Name: "artifact-baseline"}, &cli.StringFlag{Name: "artifact-completion"}},
 			Action: func(command *cli.Context) error {
-				if command.Int("item") < 0 || command.NArg() != 0 {
+				if command.Int("item") < 0 || command.NArg() != 0 || command.IsSet("after") && (name != "next" || command.IsSet("item") || command.IsSet("target-snapshot") || command.IsSet("reviewed-head") || command.IsSet("body") || command.IsSet("decision") || command.IsSet("reason")) {
 					return fmt.Errorf("invalid implementation invocation: use flags and a positive Work Item identity")
+				}
+				if command.IsSet("after") && command.String("after") == "" {
+					return errors.New("--after requires a supported opaque dispatch reference")
 				}
 				repository, err := setup.ResolveRepository(command.Path("repo"), command.String("remote"))
 				if err != nil {
@@ -49,8 +52,8 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 					if name == "resume" && id == "" {
 						id = workflow.CurrentWorktree
 					}
-					outcome, err = nextWork(command.Context, command.Duration("wait"), command.Duration("poll"), func() (workflow.ImplementationOutcome, error) {
-						return workflow.StartImplementation(command.Context, repository.Root, repository.Remote, id, command.String("target-snapshot"), endpoints, port)
+					outcome, err = continuedWork(command.Context, repository.Root, repository.Remote, command.String("after"), workflow.ImplementLane, command.Duration("wait"), command.Duration("poll"), command.IsSet("poll"), port, func() (workflow.ImplementationOutcome, error) {
+						return workflow.StartImplementation(command.Context, repository.Root, repository.Remote, id, command.String("target-snapshot"), command.String("reviewed-head"), endpoints, port)
 					})
 				}
 				if err != nil {
@@ -60,15 +63,13 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 					}
 					return err
 				}
-				output, err := setup.PresentImplementation(outcome)
-				if err != nil {
-					return err
-				}
-				return json.NewEncoder(stdout).Encode(output)
+				return writeWorkOutput(stdout, outcome, workflow.ImplementLane)
 			},
 		})
 	}
 	commands[0].Aliases = []string{"start"}
+	commands[0].Description = dispatchCallingConvention
+	commands[0].Flags = append(commands[0].Flags, &cli.StringFlag{Name: "after", Usage: "verify one completed dispatch before selecting again; use once and stop for explicit recovery if the response is uncertain"})
 	commands[0].Flags = append(commands[0].Flags, waitFlags()...)
 	return commands
 }

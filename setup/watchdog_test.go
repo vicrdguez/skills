@@ -73,6 +73,7 @@ func TestGitHubWatchdogClaimsSubmissionAndReadsReviewFacts(t *testing.T) {
 		t.Fatalf("items: %#v %v", items, err)
 	}
 	item := items[0]
+	item.Submission.ReviewedHead = item.Submission.Head
 	if item.ID != "7" || item.Order != 7 || item.Submission.ID != "11" || item.Submission.CreatedAt != "2026-01-01" || len(item.Submission.Comments) != 3 {
 		t.Fatalf("review facts: %#v", item.Submission)
 	}

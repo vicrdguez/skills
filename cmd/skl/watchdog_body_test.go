@@ -120,6 +120,9 @@ func TestGitHubWatchdogBodyObservation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			// Packet startup intentionally claims the review and persists its fixed
+			// checkpoint; only the observation paths above must remain read-only.
+			f.server.Config.Handler = f.forge
 			started, err := workflow.StartWatchdog(ctx, f.root, "origin", "7", workflow.ArtifactEndpoints{}, backend)
 			if err != nil || started.Facts == nil {
 				t.Fatalf("Watchdog resume: %#v, %v", started, err)

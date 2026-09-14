@@ -65,6 +65,7 @@ type ImplementationFacts struct {
 	Branch                     string          `json:"branch"`
 	Worktree                   string          `json:"worktree"`
 	TargetSnapshot             string          `json:"target_snapshot,omitempty"`
+	PreviousReviewedHead       string          `json:"previous_reviewed_head,omitempty"`
 	ArtifactBaseline           string          `json:"artifact_baseline,omitempty"`
 	ArtifactCompletion         string          `json:"artifact_completion,omitempty"`
 	SuppliedArtifactBaseline   string          `json:"supplied_artifact_baseline,omitempty"`

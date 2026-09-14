@@ -42,7 +42,7 @@ func TestB13CarryExplicitEndpointsThroughGeneratedCommands(t *testing.T) {
 		}},
 		{"markerless implementation Rework", func(t *testing.T) *skilldist.Packet {
 			root, baseline, completion, head := markerless(t, true)
-			b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Rework, Submission: &workflow.Submission{ID: "11", Head: head}}}}
+			b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Rework, Submission: &workflow.Submission{ID: "11", Head: head, PreviousReviewedHead: head}}}}
 			got := implementCLI(t, root, b, "next", "--artifact-baseline", baseline, "--artifact-completion", completion)
 			if got.Packet == nil {
 				t.Fatalf("rework = %#v", got)

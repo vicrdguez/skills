@@ -9,9 +9,20 @@ import (
 	"slices"
 
 	skilldist "github.com/vicrdguez/skills"
+	"github.com/vicrdguez/skills/github"
 )
 
-func StartWatchdog(ctx context.Context, root, remote string, id WorkItemID, endpoints ArtifactEndpoints, backend ImplementationBackend) (ImplementationOutcome, error) {
+func StartWatchdog(ctx context.Context, root, remote string, id WorkItemID, endpoints ArtifactEndpoints, backend ImplementationBackend) (outcome ImplementationOutcome, err error) {
+	var selected *ImplementationItem
+	defer func() { dispatchRecovery(WatchdogLane, selected, &outcome, &err) }()
+	url, err := git(root, "remote", "get-url", remote)
+	if err != nil {
+		return ImplementationOutcome{}, err
+	}
+	repository, err := github.ParseGitHubRemote(url)
+	if err != nil {
+		return ImplementationOutcome{}, err
+	}
 	items, err := loadImplementation(ctx, backend)
 	if err != nil {
 		return ImplementationOutcome{}, err
@@ -47,6 +58,10 @@ func StartWatchdog(ctx context.Context, root, remote string, id WorkItemID, endp
 		if history.Phase != "retired" || len(history.Violations) != 0 {
 			return ImplementationOutcome{Status: "fix_required", Reason: fmt.Sprint(history.Violations) + "; fetch and restore retired ledger history"}, nil
 		}
+		submission := *item.Submission
+		submission.ReviewedHead = submission.Head
+		item.Submission = &submission
+		selected = &item
 		if err := backend.ClaimImplementation(ctx, item); err != nil {
 			return ImplementationOutcome{}, err
 		}
@@ -58,6 +73,9 @@ func StartWatchdog(ctx context.Context, root, remote string, id WorkItemID, endp
 			if current.ID != item.ID || !current.Claimed || current.State != AwaitingReview || current.Problem != "" || current.Submission == nil || current.Submission.Head != item.Submission.Head {
 				continue
 			}
+			submission := *current.Submission
+			submission.ReviewedHead = item.Submission.ReviewedHead
+			current.Submission = &submission
 			facts := skilldist.WatchdogFacts{Branch: item.Branch, ReviewedHead: current.Submission.Head, ArtifactBaseline: history.Baseline, ArtifactCompletion: history.Completion, SuppliedArtifactBaseline: endpoints.Baseline, SuppliedArtifactCompletion: endpoints.Completion, AuditBody: current.Submission.Body, Comments: current.Submission.Comments, ReviewCount: checkpoint.Count, ReviewNumber: checkpoint.Count + 1, ReviewScope: skilldist.FullReview}
 			facts.BaselineFiles, err = endpointFiles(root, history.Baseline, item.Branch)
 			if err != nil {
@@ -80,6 +98,10 @@ func StartWatchdog(ctx context.Context, root, remote string, id WorkItemID, endp
 					return ImplementationOutcome{Status: "fix_required", Reason: "review publication already started under this Claim; replay the original fixed-number watchdog submit command and Result Documents"}, nil
 				}
 			}
+			round, reference, err := prepareDispatch(ctx, repository, current, WatchdogLane, id != "", backend)
+			if err != nil {
+				return ImplementationOutcome{}, err
+			}
 			main, err := primaryWorktree(root)
 			if err != nil {
 				return ImplementationOutcome{}, err
@@ -90,15 +112,8 @@ func StartWatchdog(ctx context.Context, root, remote string, id WorkItemID, endp
 				facts.PreviousReviewedHead = checkpoint.Head
 			}
 			facts.Remote = remote
-			facts.ResultDirectory, err = os.MkdirTemp("", "skl-watchdog-")
-			if err != nil {
-				return ImplementationOutcome{}, err
-			}
-			if err := os.WriteFile(filepath.Join(facts.ResultDirectory, ".skl-result"), []byte("skl.watchdog/v1\n"), 0600); err != nil {
-				os.RemoveAll(facts.ResultDirectory)
-				return ImplementationOutcome{}, err
-			}
-			return ImplementationOutcome{Status: "work_available", Item: &current, Facts: &skilldist.InvocationFacts{Watchdog: &facts}}, nil
+			facts.ResultDirectory = filepath.Join(os.TempDir(), round.Directory)
+			return ImplementationOutcome{Status: "work_available", Item: &current, Facts: &skilldist.InvocationFacts{Watchdog: &facts}, Dispatch: &DispatchFacts{Reference: reference, Lane: WatchdogLane, Root: main, Remote: remote}}, nil
 		}
 		return ImplementationOutcome{Status: "fix_required", Reason: "Watchdog Claim changed; inspect and explicitly resume"}, nil
 	}

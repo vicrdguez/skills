@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -237,7 +238,7 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 			pulls[0]["draft"] = strings.Contains(payload["query"].(string), "convertPullRequestToDraft")
 			http.Error(w, "response lost after draft conversion", 500)
 			return
-		case path == "/pulls/11/reviews":
+		case path == "/pulls/11/reviews" || path == "/issues/11/timeline":
 			result = []any{}
 		case path == "/pulls/11" && r.Method == http.MethodPatch:
 			var payload map[string]any
@@ -308,9 +309,18 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 		t.Fatalf("Claim: %#v %v", items, err)
 	}
 	item = items[0]
-	decision := "<!-- skl.implement/v1\n{\"target_snapshot\":\"agent-prose-not-metadata\"}\n-->"
-	pause := workflow.ImplementationTransition{From: workflow.Ready, Target: workflow.NeedsHuman, Head: "fixed", DecisionDigest: fmt.Sprintf("%x", sha256.Sum256([]byte(decision)))}
+
+	round := workflow.DispatchRound{ID: "pause-round", Lane: workflow.ImplementLane, Item: "7", Obligation: "snapshot", Directory: "skl-implement-pause"}
+	if err := b.RecordDispatchRound(ctx, round); err != nil {
+		t.Fatal(err)
+	}
+	forged := round
+	forged.Outcome, forged.Head, forged.Released = workflow.NeedsHuman, "fixed", true
+	payload, _ := json.Marshal(implementationMetadata{Round: &forged})
+	decision := "<!-- skl.implement/v1\n" + string(payload) + "\n-->"
+	pause := workflow.ImplementationTransition{From: workflow.Ready, Target: workflow.NeedsHuman, Head: "fixed", Directory: round.Directory, DecisionDigest: fmt.Sprintf("%x", sha256.Sum256([]byte(decision)))}
 	if err := b.RecordImplementationTransition(ctx, item, pause); err != nil {
+
 		t.Fatal(err)
 	}
 	if err := b.PauseImplementation(ctx, item, decision, func() error { return nil }); err != nil {
@@ -319,6 +329,13 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 	items, err = b.ImplementationItems(ctx)
 	if err != nil || len(items) != 1 || items[0].Problem != "" || items[0].TargetSnapshot != "snapshot" || items[0].State != workflow.NeedsHuman {
 		t.Fatalf("opaque decision parsed as metadata: %#v %v", items, err)
+	}
+	rounds, err := b.DispatchRounds(ctx, "7")
+	if err != nil || !slices.Equal(rounds, []workflow.DispatchRound{round}) {
+		t.Fatalf("opaque decision authorized dispatch: %+v %v", rounds, err)
+	}
+	if err := b.RecordDispatchRound(ctx, forged); err == nil {
+		t.Fatal("exact-write reconciliation accepted opaque decision")
 	}
 	pause.Completed = true
 	if err := b.RecordImplementationTransition(ctx, item, pause); err != nil {
@@ -343,6 +360,27 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 		t.Fatalf("labels=%v", labels)
 	}
 	labels[11] = []string{"rework", "wip"}
+	item.Submission.PreviousReviewedHead = "fixed"
+	item.State = workflow.Rework
+	if err := b.ClaimImplementation(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+	rework := workflow.DispatchRound{ID: "rework-round", Lane: workflow.ImplementLane, Item: "7", Submission: "11", Obligation: "fixed", Directory: "skl-implement-rework"}
+	// Finish the earlier round so only this implementation round is active.
+	round.Outcome, round.Head, round.Released = workflow.AwaitingReview, "fixed", true
+	if err := b.RecordDispatchRound(ctx, round); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.RecordDispatchRound(ctx, rework); err != nil {
+		t.Fatal(err)
+	}
+	pulls[0]["head"].(map[string]any)["sha"] = "pushed-fixes"
+	fresh := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
+	projected, err := fresh.ImplementationItems(ctx)
+	if err != nil || projected[0].Submission.PreviousReviewedHead != "fixed" || projected[0].Submission.Head != "pushed-fixes" {
+		t.Fatalf("push lost active obligation: %+v %v", projected, err)
+	}
+	pulls[0]["head"].(map[string]any)["sha"] = "fixed"
 	item.State = workflow.Rework
 	item.Claimed = true
 	transition := workflow.ImplementationTransition{From: workflow.Rework, Target: workflow.NeedsHuman, Head: "fixed"}
@@ -385,8 +423,120 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 	}
 }
 
+func TestGitHubDispatchRoundsSurvivePaginationAndLostResponses(t *testing.T) {
+	comments := make(map[int][]map[string]any)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var number int
+		if _, err := fmt.Sscanf(strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets"), "/issues/%d/comments", &number); err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method == http.MethodPost {
+			var payload map[string]any
+			json.NewDecoder(r.Body).Decode(&payload)
+			payload["author_association"] = "OWNER"
+			comments[number] = append(comments[number], payload)
+			http.Error(w, "response lost after durable comment", http.StatusInternalServerError)
+			return
+		}
+		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		if page < 1 {
+			page = 1
+		}
+		start := (page - 1) * 100
+		if start >= len(comments[number]) {
+			json.NewEncoder(w).Encode([]any{})
+			return
+		}
+		end := min(start+100, len(comments[number]))
+		json.NewEncoder(w).Encode(comments[number][start:end])
+	}))
+	defer server.Close()
+	ctx := context.Background()
+	for _, tc := range []struct {
+		item       workflow.WorkItemID
+		lane       workflow.DispatchLane
+		submission workflow.SubmissionID
+		outcome    workflow.State
+	}{{"7", workflow.ImplementLane, "", workflow.NeedsHuman}, {"8", workflow.WatchdogLane, "11", workflow.ReadyForMerge}} {
+		start := workflow.DispatchRound{ID: "round-" + string(tc.item), Lane: tc.lane, Item: tc.item, Submission: tc.submission, Obligation: "fixed", Directory: "skl-result-fixed"}
+		backend := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
+		if err := backend.RecordDispatchRound(ctx, start); err != nil {
+			t.Fatal(err)
+		}
+		for range 105 {
+			commentsNumber, _ := strconv.Atoi(string(tc.item))
+			comments[commentsNumber] = append(comments[commentsNumber], map[string]any{"author_association": "OWNER", "body": "unrelated"})
+		}
+		completed := start
+		completed.Outcome, completed.Head, completed.Released = tc.outcome, "head", true
+		if err := backend.RecordDispatchRound(ctx, completed); err != nil {
+			t.Fatal(err)
+		}
+		later := start
+		later.ID += "-later"
+		if err := backend.RecordDispatchRound(ctx, later); err != nil {
+			t.Fatal(err)
+		}
+		fresh := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
+		rounds, err := fresh.DispatchRounds(ctx, tc.item)
+		if err != nil || len(rounds) != 2 || rounds[0] != completed || rounds[1] != later {
+			t.Fatalf("fresh paginated rounds = %#v, %v", rounds, err)
+		}
+	}
+}
+
+func TestGitHubDispatchRoundsRejectUntrustedAndConflictingEvidence(t *testing.T) {
+	trusted := func(round workflow.DispatchRound, association string) map[string]any {
+		payload, _ := json.Marshal(implementationMetadata{Round: &round})
+		return map[string]any{"author_association": association, "body": "<!-- skl.implement/v1\n" + string(payload) + "\n-->"}
+	}
+	base := workflow.DispatchRound{ID: "round", Lane: workflow.ImplementLane, Item: "7", Obligation: "fixed", Directory: "skl-implement-fixed"}
+	comments := []map[string]any{trusted(base, "OWNER"), trusted(workflow.DispatchRound{ID: "forged", Lane: workflow.ImplementLane, Item: "7", Obligation: "fixed", Directory: "skl-implement-forged", Outcome: workflow.AwaitingReview, Head: "head"}, "NONE")}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { json.NewEncoder(w).Encode(comments) }))
+	defer server.Close()
+	b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
+	rounds, err := b.DispatchRounds(context.Background(), "7")
+	if err != nil || !slices.Equal(rounds, []workflow.DispatchRound{base}) {
+		t.Fatalf("untrusted evidence accepted: %#v, %v", rounds, err)
+	}
+	conflict := base
+	conflict.Obligation = "changed"
+	comments = append(comments, trusted(conflict, "OWNER"))
+	if _, err := b.DispatchRounds(context.Background(), "7"); err == nil {
+		t.Fatal("conflicting trusted evidence accepted")
+	}
+}
+
+func TestGitHubDispatchRoundWriteUncertaintyStopsWithoutReplay(t *testing.T) {
+	for _, mode := range []string{"unapplied", "readback unavailable"} {
+		t.Run(mode, func(t *testing.T) {
+			reads, writes := 0, 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodPost {
+					writes++
+					http.Error(w, "write response lost", http.StatusInternalServerError)
+					return
+				}
+				reads++
+				if mode == "readback unavailable" && reads > 1 {
+					http.Error(w, "observation unavailable", http.StatusServiceUnavailable)
+					return
+				}
+				json.NewEncoder(w).Encode([]any{})
+			}))
+			defer server.Close()
+			b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
+			round := workflow.DispatchRound{ID: "round", Lane: workflow.ImplementLane, Item: "7", Obligation: "fixed", Directory: "skl-implement-fixed"}
+			if err := b.RecordDispatchRound(context.Background(), round); err == nil || writes != 1 || reads != 2 {
+				t.Fatalf("uncertain write replayed or passed: err=%v reads=%d writes=%d", err, reads, writes)
+			}
+		})
+	}
+}
+
 func TestGitHubImplementationRejectsForeignAttachmentsAndConflictingMetadata(t *testing.T) {
-	for _, kind := range []string{"fork", "untrusted metadata", "conflicting metadata"} {
+	for _, kind := range []string{"fork", "untrusted metadata", "conflicting metadata", "conflicting synchronization metadata"} {
 		t.Run(kind, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
@@ -403,12 +553,16 @@ func TestGitHubImplementationRejectsForeignAttachmentsAndConflictingMetadata(t *
 				case "/repos/acme/widgets/issues/7/comments":
 					comments := []map[string]string{}
 					if kind != "fork" {
-						comments = append(comments, map[string]string{"author_association": "OWNER", "body": "<!-- skl.implement/v1\n{\"target_snapshot\":\"original\"}\n-->"})
+						field := "target_snapshot"
+						if kind == "conflicting synchronization metadata" {
+							field = "synchronization_target"
+						}
+						comments = append(comments, map[string]string{"author_association": "OWNER", "body": "<!-- skl.implement/v1\n{\"" + field + "\":\"original\"}\n-->"})
 						association := "NONE"
-						if kind == "conflicting metadata" {
+						if kind == "conflicting metadata" || kind == "conflicting synchronization metadata" {
 							association = "OWNER"
 						}
-						comments = append(comments, map[string]string{"author_association": association, "body": "<!-- skl.implement/v1\n{\"target_snapshot\":\"replacement\"}\n-->"})
+						comments = append(comments, map[string]string{"author_association": association, "body": "<!-- skl.implement/v1\n{\"" + field + "\":\"replacement\"}\n-->"})
 					}
 					json.NewEncoder(w).Encode(comments)
 				default:
@@ -423,8 +577,353 @@ func TestGitHubImplementationRejectsForeignAttachmentsAndConflictingMetadata(t *
 				t.Fatalf("items = %#v %v", items, err)
 			}
 			item := items[0]
-			if kind == "fork" && (item.Submission != nil || item.State == workflow.Merged) || kind == "untrusted metadata" && item.TargetSnapshot != "original" || kind == "conflicting metadata" && item.Problem == "" {
+			if kind == "fork" && (item.Submission != nil || item.State == workflow.Merged) || kind == "untrusted metadata" && item.TargetSnapshot != "original" || strings.HasPrefix(kind, "conflicting") && item.Problem == "" {
 				t.Fatalf("unsafe adoption: %#v", item)
+			}
+		})
+	}
+}
+
+func TestGitHubObservationDecodesPublicationsWithoutAlteringInlineFindings(t *testing.T) {
+	summary := "<!-- skl.decision/v1 -->\n## Summary\n"
+	inline := "<!-- skl.decision/v1 -->\nW1 inline\n"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/acme/widgets/issues":
+			fmt.Fprint(w, `[{"number":7,"title":"widget","state":"open"}]`)
+		case "/repos/acme/widgets/pulls":
+			fmt.Fprint(w, `[{"number":11,"state":"open","labels":[{"name":"review"}],"head":{"sha":"fixed","ref":"widget","repo":{"full_name":"acme/widgets"}}}]`)
+		case "/repos/acme/widgets/issues/11/comments":
+			json.NewEncoder(w).Encode([]map[string]any{{"body": summary, "author_association": "OWNER"}})
+		case "/repos/acme/widgets/pulls/11/comments":
+			json.NewEncoder(w).Encode([]map[string]any{{"body": inline, "path": "main.go", "line": 12, "side": "RIGHT", "commit_id": "fixed", "author_association": "OWNER"}})
+		default:
+			fmt.Fprint(w, `[]`)
+		}
+	}))
+	defer server.Close()
+	b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
+	items, err := boundGitHubBackend(b).ImplementationItems(context.Background())
+	if err != nil || len(items) != 1 {
+		t.Fatalf("items: %#v %v", items, err)
+	}
+	comments := items[0].Submission.Comments
+	if len(comments) != 2 || comments[0].Body != "## Summary\n" || comments[1].Body != inline || comments[1].Path != "main.go" {
+		t.Fatalf("observation altered documents: %#v", comments)
+	}
+}
+
+func TestGitHubDispatchWriterRejectsMissingObligationBeforePublication(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests++; fmt.Fprint(w, `[]`) }))
+	defer server.Close()
+	b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
+	round := workflow.DispatchRound{ID: "unrecoverable", Lane: workflow.ImplementLane, Item: "7", Submission: "11", Directory: "skl-implement-invalid"}
+	if err := b.RecordDispatchRound(t.Context(), round); err == nil || requests != 0 {
+		t.Fatalf("invalid obligation appended: %v requests=%d", err, requests)
+	}
+}
+
+func TestGitHubIdenticalDecisionAndReceiptRemainDistinctOccurrences(t *testing.T) {
+	for _, repaired := range []bool{false, true} {
+		for _, fault := range []string{"none", "lost response", "unreadable readback"} {
+			t.Run(fmt.Sprintf("repaired=%t/%s", repaired, fault), func(t *testing.T) {
+				comments := []map[string]any{}
+				labels := []string{"ready", "wip"}
+				receiptPhase, unreadable := false, false
+				writes := 0
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					switch {
+					case strings.HasSuffix(r.URL.Path, "/comments"):
+						if r.Method == http.MethodPost {
+							writes++
+							var p map[string]any
+							json.NewDecoder(r.Body).Decode(&p)
+							p["author_association"] = "OWNER"
+							comments = append(comments, p)
+							if receiptPhase && fault == "unreadable readback" {
+								unreadable = true
+							}
+							if receiptPhase && fault == "lost response" {
+								http.Error(w, "applied but response lost", 500)
+								return
+							}
+						} else if unreadable {
+							http.Error(w, "readback unavailable", 503)
+							return
+						}
+						json.NewEncoder(w).Encode(comments)
+					case r.Method == http.MethodGet:
+						ls := []map[string]string{}
+						for _, label := range labels {
+							ls = append(ls, map[string]string{"name": label})
+						}
+						json.NewEncoder(w).Encode(map[string]any{"number": 7, "state": "open", "labels": ls})
+					case r.Method == http.MethodPost:
+						var p struct {
+							Labels []string `json:"labels"`
+						}
+						json.NewDecoder(r.Body).Decode(&p)
+						labels = append(labels, p.Labels...)
+						fmt.Fprint(w, `[]`)
+					case r.Method == http.MethodDelete:
+						label := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+						labels = slices.DeleteFunc(labels, func(v string) bool { return v == label })
+						w.WriteHeader(204)
+					}
+				}))
+				defer server.Close()
+				ctx := t.Context()
+				b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
+				round := workflow.DispatchRound{ID: "pause", Lane: workflow.ImplementLane, Item: "7", Obligation: "target", Directory: "skl-implement-pause"}
+				if err := b.RecordDispatchRound(ctx, round); err != nil {
+					t.Fatal(err)
+				}
+				receipt := round
+				receipt.Outcome, receipt.Head, receipt.Released = workflow.NeedsHuman, "fixed", true
+				p, _ := json.Marshal(implementationMetadata{Round: &receipt})
+				decision := "<!-- skl.implement/v2\n" + string(p) + "\n-->"
+				item := workflow.ImplementationItem{ID: "7", State: workflow.Ready, Claimed: true}
+				transition := workflow.ImplementationTransition{From: workflow.Ready, Target: workflow.NeedsHuman, Head: "fixed", Directory: round.Directory, DecisionDigest: fmt.Sprintf("%x", sha256.Sum256([]byte(decision)))}
+				if err := b.RecordImplementationTransition(ctx, item, transition); err != nil {
+					t.Fatal(err)
+				}
+				guard := func() error {
+					for _, comment := range comments {
+						if comment["body"] == "<!-- skl.decision/v1 -->\n"+decision {
+							return errors.New("interrupted after opaque publication")
+						}
+					}
+					return nil
+				}
+				if err := b.PauseImplementation(ctx, item, decision, guard); err == nil {
+					t.Fatal("pause not interrupted")
+				}
+				if rounds, err := b.DispatchRounds(ctx, "7"); err != nil || !slices.Equal(rounds, []workflow.DispatchRound{round}) || !slices.Contains(labels, "wip") {
+					t.Fatalf("opaque publication forged receipt: %+v %v labels=%v", rounds, err, labels)
+				}
+				originalDecision := decision
+				if repaired {
+					decision = "Repaired decision after interrupted publication"
+					transition.DecisionDigest = fmt.Sprintf("%x", sha256.Sum256([]byte(decision)))
+					if err := b.RecordImplementationTransition(ctx, item, transition); err != nil {
+						t.Fatal(err)
+					}
+					// Unrelated completed history must not close this pending handoff.
+					unrelated := transition
+					unrelated.Directory, unrelated.Head, unrelated.Completed = "skl-implement-earlier", "earlier", true
+					if err := b.RecordImplementationTransition(ctx, item, unrelated); err != nil {
+						t.Fatal(err)
+					}
+					if err := b.RecordDispatchRound(ctx, receipt); err == nil {
+						t.Fatal("superseded opaque bytes became proof before the repaired handoff completed")
+					}
+					if err := b.RecordImplementationTransition(ctx, item, transition); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := b.PauseImplementation(ctx, item, decision, func() error { return nil }); err != nil {
+					t.Fatal(err)
+				}
+				transition.Completed = true
+				if err := b.RecordImplementationTransition(ctx, item, transition); err != nil {
+					t.Fatal(err)
+				}
+				freshBeforeReceipt := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
+				if rounds, err := freshBeforeReceipt.DispatchRounds(ctx, "7"); err != nil || !slices.Equal(rounds, []workflow.DispatchRound{round}) {
+					t.Fatalf("completion reinterpreted an earlier opaque occurrence: %+v %v", rounds, err)
+				}
+				receiptPhase = true
+				err := b.RecordDispatchRound(ctx, receipt)
+				if (fault == "unreadable readback") != (err != nil) {
+					t.Fatalf("receipt result: %v", err)
+				}
+				unreadable = false
+				before := writes
+				fresh := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
+				if err := fresh.RecordDispatchRound(ctx, receipt); err != nil {
+					t.Fatal(err)
+				}
+				rounds, err := fresh.DispatchRounds(ctx, "7")
+				occurrences := 0
+				for _, comment := range comments {
+					if comment["body"] == originalDecision || comment["body"] == "<!-- skl.decision/v1 -->\n"+originalDecision {
+						occurrences++
+					}
+				}
+				if err != nil || !slices.Equal(rounds, []workflow.DispatchRound{receipt}) || writes != before || occurrences != 2 || slices.Contains(labels, "wip") {
+					t.Fatalf("genuine receipt lost or duplicated: %+v %v writes=%d/%d identical=%d labels=%v", rounds, err, before, writes, occurrences, labels)
+				}
+			})
+		}
+	}
+}
+
+func TestGitHubDispatchRoundsRefuseMalformedAndWrongItemHistory(t *testing.T) {
+	for _, lane := range []workflow.DispatchLane{workflow.ImplementLane, workflow.WatchdogLane} {
+		for _, defect := range []string{"truncated envelope", "invalid JSON", "missing ID", "missing item", "unknown lane", "missing directory", "missing obligation", "wrong item"} {
+			t.Run(string(lane)+"/"+defect, func(t *testing.T) {
+				round := workflow.DispatchRound{ID: "round", Lane: lane, Item: "7", Submission: "11", Obligation: "head", Directory: "skl-result-round", Head: "head", Released: true, Outcome: workflow.NeedsHuman}
+				valid, _ := json.Marshal(implementationMetadata{Round: &round})
+				malformed := round
+				switch defect {
+				case "missing ID":
+					malformed.ID = ""
+				case "missing item":
+					malformed.Item = ""
+				case "unknown lane":
+					malformed.Lane = "unknown"
+				case "missing directory":
+					malformed.Directory = ""
+				case "missing obligation":
+					malformed.Obligation = ""
+				case "wrong item":
+					malformed.Item = "8"
+				}
+				payload, _ := json.Marshal(implementationMetadata{Round: &malformed})
+				if defect == "invalid JSON" {
+					payload = []byte(`{"round":`)
+				}
+				comments := []map[string]string{{"body": "<!-- skl.implement/v1\n" + string(valid) + "\n-->", "author_association": "OWNER"}, {"body": "<!-- skl.implement/v1\n" + string(payload) + "\n-->", "author_association": "OWNER"}}
+				if defect == "truncated envelope" {
+					comments[1]["body"] = strings.TrimSuffix(comments[1]["body"], "\n-->")
+				}
+				reads, writes := 0, 0
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.Method != http.MethodGet {
+						writes++
+					} else {
+						reads++
+					}
+					json.NewEncoder(w).Encode(comments)
+				}))
+				defer server.Close()
+				b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
+				_, err := b.DispatchRounds(t.Context(), "7")
+				var refusal *workflow.InvariantError
+				if !errors.As(err, &refusal) || reads != 1 || writes != 0 {
+					t.Fatalf("hostile persisted history accepted or repaired: %v reads=%d writes=%d", err, reads, writes)
+				}
+			})
+		}
+	}
+}
+
+func TestGitHubLegacyDispatchHistoryAndExplicitPauseRecovery(t *testing.T) {
+	ctx := t.Context()
+	old := workflow.DispatchRound{ID: "old", Lane: workflow.ImplementLane, Item: "7", Obligation: "head", Directory: "skl-implement-old", Head: "head", Outcome: workflow.NeedsHuman, Released: true}
+	active := workflow.DispatchRound{ID: "active", Lane: workflow.ImplementLane, Item: "7", Obligation: "head", Directory: "skl-implement-active"}
+	receipt := active
+	receipt.Outcome, receipt.Head, receipt.Released = workflow.NeedsHuman, "head", true
+	legacy := func(v any) map[string]any {
+		p, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return map[string]any{"body": "<!-- skl.implement/v1\n" + string(p) + "\n-->", "author_association": "OWNER"}
+	}
+	oldDecision := "completed legacy decision"
+	oldTransition := workflow.ImplementationTransition{From: workflow.Ready, Target: workflow.NeedsHuman, Directory: old.Directory, Head: "head", DecisionDigest: fmt.Sprintf("%x", sha256.Sum256([]byte(oldDecision)))}
+	comments := []map[string]any{legacy(map[string]any{"transition": oldTransition}), {"body": oldDecision, "author_association": "OWNER"}}
+	oldTransition.Completed = true
+	comments = append(comments, legacy(map[string]any{"transition": oldTransition}), legacy(map[string]any{"round": old}), legacy(map[string]any{"target_snapshot": "head"}), legacy(map[string]any{"round": active}))
+	writes := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			writes++
+			var p map[string]any
+			json.NewDecoder(r.Body).Decode(&p)
+			p["author_association"] = "OWNER"
+			comments = append(comments, p)
+		}
+		json.NewEncoder(w).Encode(comments)
+	}))
+	defer server.Close()
+	b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
+	if err := b.RecordDispatchRound(ctx, old); err != nil || writes != 0 {
+		t.Fatalf("legacy receipt was duplicated: %v writes=%d", err, writes)
+	}
+	decision := "ordinary legacy decision"
+	transition := workflow.ImplementationTransition{From: workflow.Ready, Target: workflow.NeedsHuman, Directory: active.Directory, Head: "head", DecisionDigest: fmt.Sprintf("%x", sha256.Sum256([]byte(decision)))}
+	comments = append(comments, legacy(map[string]any{"transition": transition}))
+	comments = append(comments, map[string]any{"body": decision, "author_association": "OWNER"})
+	completed := transition
+	completed.Completed = true
+	before := len(comments)
+	fresh := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
+	if rounds, err := fresh.DispatchRounds(ctx, "7"); err != nil || !slices.Equal(rounds, []workflow.DispatchRound{old, active}) {
+		t.Fatalf("legacy pause became proof or erased safe history: %+v %v", rounds, err)
+	}
+	if err := fresh.RecordDispatchRound(ctx, receipt); err == nil || len(comments) != before {
+		t.Fatalf("pending legacy handoff accepted: %v", err)
+	}
+	item := workflow.ImplementationItem{ID: "7", State: workflow.Ready, Claimed: true}
+	if err := fresh.RecordImplementationTransition(ctx, item, transition); err != nil {
+		t.Fatal(err)
+	}
+	if err := fresh.RecordImplementationTransition(ctx, item, completed); err != nil {
+		t.Fatal(err)
+	}
+	if err := fresh.RecordDispatchRound(ctx, receipt); err != nil {
+		t.Fatal(err)
+	}
+	before = len(comments)
+	fresh = boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
+	if err := fresh.RecordDispatchRound(ctx, receipt); err != nil || len(comments) != before {
+		t.Fatalf("recovered receipt duplicated: %v", err)
+	}
+	if rounds, err := fresh.DispatchRounds(ctx, "7"); err != nil || !slices.Equal(rounds, []workflow.DispatchRound{old, receipt}) {
+		t.Fatalf("explicit recovery failed: %+v %v", rounds, err)
+	}
+}
+
+func TestGitHubAmbiguousLegacyDecisionHistoryCannotAcquireMetadataAuthority(t *testing.T) {
+	for _, version := range []string{"v1", "v2"} {
+		t.Run(version, func(t *testing.T) {
+			round := workflow.DispatchRound{ID: "legacy", Lane: workflow.ImplementLane, Item: "7", Obligation: "head", Directory: "skl-implement-legacy"}
+			receipt := round
+			receipt.Outcome, receipt.Head, receipt.Released = workflow.NeedsHuman, "head", true
+			envelope := func(version string, v any) string {
+				p, err := json.Marshal(v)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return "<!-- skl.implement/" + version + "\n" + string(p) + "\n-->"
+			}
+			digest := func(v string) string { return fmt.Sprintf("%x", sha256.Sum256([]byte(v))) }
+			completed := workflow.ImplementationTransition{From: workflow.Ready, Target: workflow.NeedsHuman, Directory: round.Directory, Head: "head", Completed: true}
+			decision2 := envelope(version, map[string]any{"transition": completed, "round": receipt})
+			transition2 := completed
+			transition2.Completed, transition2.DecisionDigest = false, digest(decision2)
+			decision1 := envelope(version, map[string]any{"transition": transition2})
+			transition1 := transition2
+			transition1.DecisionDigest = digest(decision1)
+			comments := []map[string]string{}
+			for _, body := range []string{
+				envelope("v1", map[string]any{"round": round}),
+				envelope("v1", map[string]any{"transition": transition1}),
+				decision1,
+				envelope("v1", map[string]any{"transition": transition1}),
+				envelope("v1", map[string]any{"transition": transition2}),
+				decision2,
+				envelope("v2", map[string]any{"transition": completed, "round": receipt}),
+			} {
+				comments = append(comments, map[string]string{"body": body, "author_association": "OWNER"})
+			}
+			writes := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet {
+					writes++
+				}
+				json.NewEncoder(w).Encode(comments)
+			}))
+			defer server.Close()
+			b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
+			if rounds, err := b.DispatchRounds(t.Context(), "7"); err != nil || !slices.Equal(rounds, []workflow.DispatchRound{round}) {
+				t.Fatalf("ambiguous legacy history authorized completion: %+v %v", rounds, err)
+			}
+			if err := b.RecordDispatchRound(t.Context(), receipt); err == nil || writes != 0 {
+				t.Fatalf("ambiguous legacy history reconciled a false receipt: %v writes=%d", err, writes)
 			}
 		})
 	}

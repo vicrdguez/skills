@@ -259,7 +259,17 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	}
 	if item.State != AwaitingReview {
 		if item.Claimed && item.Submission.PendingReview == "" {
-			return ImplementationOutcome{}, Refuse("target-only Claim cannot prove it belongs to this review handoff; inspect before replaying the original fixed-number command")
+			rounds, roundErr := backend.DispatchRounds(ctx, item.ID)
+			if roundErr != nil {
+				return ImplementationOutcome{}, roundErr
+			}
+			active, activeErr := activeDispatch(rounds, item, WatchdogLane)
+			if activeErr != nil {
+				return ImplementationOutcome{}, activeErr
+			}
+			if active == nil {
+				return ImplementationOutcome{}, Refuse("target-only Claim cannot prove it belongs to this review handoff; inspect before replaying the original fixed-number command")
+			}
 		}
 		completedEvidence := bodyMatches && reviewEvidenceMatches(item, comments)
 		if item.Claimed && submission.ClaimAcquiredAt != "" {
@@ -271,7 +281,13 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 			return ImplementationOutcome{}, Refuse("completed or partial review differs from supplied verdict; restore its exact Result Documents")
 		}
 		if completedDone {
-			return ImplementationOutcome{Status: string(item.State), Item: &item, Head: head}, guard()
+			if err := guard(); err != nil {
+				return ImplementationOutcome{}, err
+			}
+			if err := completeDispatch(ctx, item, WatchdogLane, item.State, head, backend); err != nil {
+				return ImplementationOutcome{}, err
+			}
+			return completedReviewOutcome(item, head, checkpoint), nil
 		}
 		if verdict != "pass" {
 			target = item.State
@@ -289,14 +305,23 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 			}
 			for _, c := range current {
 				if c.ID == item.ID && c.Problem == "" && !c.Claimed && c.State == target {
+					if err := completeDispatch(ctx, c, WatchdogLane, target, head, backend); err != nil {
+						return ImplementationOutcome{}, err
+					}
 					result := completedReviewOutcome(c, head, checkpoint)
 					return result, guard()
 				}
 			}
 			return ImplementationOutcome{}, Refuse("review handoff still incomplete; retain Claim and retry")
 		}
+		if err := guard(); err != nil {
+			return ImplementationOutcome{}, err
+		}
+		if err := completeDispatch(ctx, item, WatchdogLane, target, head, backend); err != nil {
+			return ImplementationOutcome{}, err
+		}
 		result := completedReviewOutcome(item, head, checkpoint)
-		return result, guard()
+		return result, nil
 	}
 	if err := backend.PublishReview(ctx, item, comments, guard); err != nil {
 		return ImplementationOutcome{}, err
@@ -352,6 +377,9 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	}
 	for _, current := range observed {
 		if current.ID == id && current.Problem == "" && current.State == target && !current.Claimed {
+			if err := completeDispatch(ctx, current, WatchdogLane, target, head, backend); err != nil {
+				return ImplementationOutcome{}, err
+			}
 			result := completedReviewOutcome(current, head, checkpoint)
 			return result, nil
 		}

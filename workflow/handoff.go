@@ -72,6 +72,9 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 	}
 	prior := item.Transition
 	if prior != nil && prior.Completed && prior.Target == target && prior.Directory == directory && prior.Head == head && item.State == target && !item.Claimed {
+		if err := completeDispatch(ctx, item, ImplementLane, target, head, backend); err != nil {
+			return ImplementationOutcome{}, err
+		}
 		if _, err := os.Lstat(filepath.Dir(resultPath)); err == nil {
 			if err := removeResultDirectory(resultPath); err != nil {
 				return ImplementationOutcome{}, err
@@ -150,8 +153,9 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 		return ImplementationOutcome{}, err
 	}
 	item.Transition = &transition
+	handedOff := false
 	defer func() {
-		if err != nil {
+		if err != nil && !handedOff {
 			transition.Completed = false
 			err = errors.Join(err, backend.RecordImplementationTransition(ctx, item, transition), backend.RetainImplementationClaim(ctx, item))
 		}
@@ -204,6 +208,12 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 				return ImplementationOutcome{}, err
 			}
 			if err := guard(); err != nil {
+				return ImplementationOutcome{}, err
+			}
+			// Publication, release readback, transition and every Git guard are final.
+			// Receipt observation or local cleanup failure must not restore this Claim.
+			handedOff = true
+			if err := completeDispatch(ctx, current, ImplementLane, target, head, backend); err != nil {
 				return ImplementationOutcome{}, err
 			}
 			current.Transition = &transition

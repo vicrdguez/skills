@@ -460,7 +460,7 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 		})
 	})
 
-	t.Run("B3 resume refreshes PR head", func(t *testing.T) {
+	t.Run("B3 resume refuses PR head drift after fixed dispatch", func(t *testing.T) {
 		f := newReviewFixture(t)
 		prior := strings.TrimSpace(runGitOutput(t, f.root, "rev-parse", "main"))
 		_ = os.WriteFile(f.checkpoint, []byte("1:"+prior+"\n"), 0600)
@@ -471,17 +471,21 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 		})
 		before := checkpointSnapshot(f.checkpoint)
 		started := f.start(t, f.root)
+		if started.Packet == nil || started.Packet.Facts.Watchdog == nil {
+			t.Fatalf("initial checkpoint packet: %+v", started)
+		}
 		first := started.Packet.Facts.Watchdog
 		if first.ReviewedHead != f.head || first.ReviewCount != 1 || first.ReviewNumber != 2 || first.PreviousReviewedHead != prior || started.Packet.Facts.Watchdog.WorkItem != 7 || checkpointSnapshot(f.checkpoint) != before || len(first.Comments) != 0 {
 			t.Fatalf("stale forge metadata affected local checkpoint: %#v", first)
 		}
+		commentCount := len(f.forge.sourceComments)
 		runGit(t, f.worktree, "commit", "--allow-empty", "-m", "move")
 		f.forge.head = strings.TrimSpace(runGitOutput(t, f.worktree, "rev-parse", "HEAD"))
-		resumed := f.run(t, f.root, "watchdog", "resume", "--item", "7").Packet.Facts.Watchdog
-		if resumed.ReviewedHead != f.forge.head || resumed.ReviewNumber != first.ReviewNumber || resumed.ReviewCount != 1 || !strings.Contains(resumed.SubmitCommand, "--reviewed-head "+f.forge.head) || checkpointSnapshot(f.checkpoint) != before {
-			t.Fatalf("resume facts = %#v", resumed)
+		resumed := f.run(t, f.root, "watchdog", "resume", "--item", "7")
+		if resumed.Status != "fix_required" || !strings.Contains(resumed.Reason, "fixed") || checkpointSnapshot(f.checkpoint) != before {
+			t.Fatalf("head drift did not preserve the fixed review dispatch: %#v", resumed)
 		}
-		if first.ReviewedHead == f.forge.head || len(f.forge.sourceComments) != 1 || f.forge.sourceComments[0]["body"] != stale || !slices.Equal(f.forge.labels, []string{"review", "wip"}) {
+		if first.ReviewedHead == f.forge.head || len(f.forge.sourceComments) != commentCount || f.forge.sourceComments[0]["body"] != stale || !slices.Equal(f.forge.labels, []string{"review", "wip"}) {
 			t.Fatal("resume mutated prior packet, source metadata, or unrelated Workflow State")
 		}
 	})
@@ -1340,21 +1344,23 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 		}
 	})
 
-	t.Run("B12 implementation and Audit need no previous review cache", func(t *testing.T) {
+	t.Run("B12 implementation uses an explicit reviewed head without a cache", func(t *testing.T) {
 		f := newReviewFixture(t)
 		f.forge.labels = []string{"rework"}
 		f.forge.summaries = []map[string]any{{"body": "visible review feedback", "commit_id": f.head, "state": "CHANGES_REQUESTED"}}
-		got := f.run(t, f.worktree, "implement", "next")
-		if got.Status != "work_available" || len(got.Packet.Facts.Implementation.Comments) == 0 || got.Packet.Facts.Implementation.Comments[0].Body != "visible review feedback" || strings.Contains(got.Packet.Instructions, "previous-reviewed-head") || strings.Contains(got.Packet.Instructions, "--reviewed-head") {
+		initial := f.run(t, f.worktree, "implement", "next")
+		if initial.Status != "fix_required" || !strings.Contains(initial.Reason, "--reviewed-head") {
+			t.Fatalf("missing explicit reviewed-head recovery: %#v", initial)
+		}
+		got := f.run(t, f.root, "implement", "resume", "--item", "7", "--reviewed-head", f.head)
+		if got.Status != "work_available" || len(got.Packet.Facts.Implementation.Comments) == 0 || got.Packet.Facts.Implementation.Comments[0].Body != "visible review feedback" {
 			t.Fatalf("rework packet: %#v", got)
 		}
-		resumed := f.run(t, f.root, "implement", "resume", "--item", "7")
-		for _, instructions := range []string{got.Packet.Instructions, resumed.Packet.Instructions} {
-			required := []string{"ordinary PR comparison", "user provides a fixed point", "Two-axis review", "Standards", "Artifacts", "full suite", "documented gate", "Artifact integrity", "complete final implementation"}
-			missing := slices.DeleteFunc(required, func(text string) bool { return strings.Contains(instructions, text) })
-			if strings.Contains(instructions, "previous-reviewed-head") || strings.Contains(instructions, "cache repair") || strings.Contains(instructions, "required previous-review") || !strings.Contains(instructions, "## Included Skill: audit") || len(missing) != 0 {
-				t.Fatalf("implementation/Audit fallback missing %v: %q", missing, instructions)
-			}
+		instructions := got.Packet.Instructions
+		required := []string{"ordinary PR comparison", "user provides a fixed point", "Two-axis review", "Standards", "Artifacts", "full suite", "documented gate", "Artifact integrity", "complete final implementation"}
+		missing := slices.DeleteFunc(required, func(text string) bool { return strings.Contains(instructions, text) })
+		if strings.Contains(instructions, "previous-reviewed-head") || strings.Contains(instructions, "cache repair") || strings.Contains(instructions, "required previous-review") || !strings.Contains(instructions, "## Included Skill: audit") || len(missing) != 0 {
+			t.Fatalf("implementation/Audit fallback missing %v: %q", missing, instructions)
 		}
 	})
 
