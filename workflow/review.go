@@ -88,6 +88,9 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	if item.Problem != "" || item.Submission == nil || item.State == AwaitingReview && !item.Claimed {
 		return ImplementationOutcome{}, Refuse("verdict requires the selected review Claim or an exactly observable fixed-number retry")
 	}
+	if item.Submission.ReviewedHead != "" && item.Submission.ReviewedHead != reviewed {
+		return ImplementationOutcome{}, Refuse("reviewed head contradicts this dispatch's fixed reviewed obligation; replay the original fixed-number command at " + item.Submission.ReviewedHead)
+	}
 	checkpoint, err := loadReviewCheckpoint(root, item.Branch)
 	if err != nil {
 		return ImplementationOutcome{}, Refuse(err.Error())

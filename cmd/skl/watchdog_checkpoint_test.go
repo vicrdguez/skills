@@ -1559,6 +1559,69 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 	})
 }
 
+func TestWatchdogSubmitRefusesChangedReviewedObligation(t *testing.T) {
+	f := newReviewFixture(t)
+	start := f.start(t, f.root)
+	if start.Status != "work_available" || start.Packet == nil || start.ContinuationCommand == "" {
+		t.Fatalf("dispatch fixture: %+v", start)
+	}
+	reviewed := f.head
+	backend := setup.NewGitHubBackend(f.server.URL, "token", f.server.Client())
+	backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
+	rounds, err := backend.DispatchRounds(t.Context(), "7")
+	if err != nil || len(rounds) != 1 || rounds[0].Obligation != reviewed || rounds[0].Outcome != "" {
+		t.Fatalf("original dispatch binding: %#v err=%v", rounds, err)
+	}
+	runGit(t, f.worktree, "commit", "--allow-empty", "-m", "reviewed obligation drift")
+	changed := strings.TrimSpace(runGitOutput(t, f.worktree, "rev-parse", "HEAD"))
+	if changed == reviewed {
+		t.Fatal("fixture did not advance")
+	}
+	f.forge.head = changed
+	observed, err := backend.ImplementationItems(t.Context())
+	found, claimed, head, reviewedHead := false, false, "", ""
+	for _, item := range observed {
+		if item.ID == "7" {
+			found, claimed = true, item.Claimed
+			if item.Submission != nil {
+				head, reviewedHead = item.Submission.Head, item.Submission.ReviewedHead
+			}
+		}
+	}
+	if err != nil || !found || !claimed || head != changed || reviewedHead != reviewed {
+		t.Fatalf("fixed reviewed obligation lost: %#v err=%v", observed, err)
+	}
+	summary := filepath.Join(t.TempDir(), "summary.md")
+	if err := os.WriteFile(summary, []byte("changed reviewed head\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	checkpoint, labels := checkpointSnapshot(f.checkpoint), slices.Clone(f.forge.labels)
+	got, err := f.runResult(f.worktree, "watchdog", "submit", "--item", "7", "--review-number", "1", "--reviewed-head", changed, "--head", changed, "--verdict", "rework", "--summary", summary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "fix_required" || !strings.Contains(got.Reason, "reviewed head") {
+		t.Fatalf("changed reviewed obligation accepted: %+v", got)
+	}
+	if checkpointSnapshot(f.checkpoint) != checkpoint || !slices.Equal(f.forge.labels, labels) || len(f.forge.summaries) != 0 {
+		t.Fatalf("refusal published or released: checkpoint=%q labels=%v summaries=%d", checkpointSnapshot(f.checkpoint), f.forge.labels, len(f.forge.summaries))
+	}
+	reference := strings.Trim(strings.Fields(start.ContinuationCommand)[4], "'")
+	continued, err := f.runResult(f.root, "watchdog", "next", "--after", reference)
+	if err != nil || continued.Status != "fix_required" || continued.PreviousHandoff != nil {
+		t.Fatalf("original continuation authorized: %#v err=%v", continued, err)
+	}
+	// The dispatched reviewed obligation still admits a descending post-marker pass.
+	body := filepath.Join(t.TempDir(), "submission.md")
+	if err := os.WriteFile(body, []byte("final body\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got, err = f.runResult(f.worktree, "watchdog", "submit", "--item", "7", "--review-number", "1", "--reviewed-head", reviewed, "--head", changed, "--verdict", "pass", "--summary", summary, "--body", body)
+	if err != nil || got.Status != "ready_for_merge" {
+		t.Fatalf("descending post-marker pass refused: %#v err=%v", got, err)
+	}
+}
+
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
