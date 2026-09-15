@@ -1236,9 +1236,13 @@ func TestImplementBundlesInstructionsWithoutTargetPin(t *testing.T) {
 		t.Fatalf("implementation help retained target flag: %v\n%s", err, &output)
 	}
 	for skill, required := range map[string][]string{
-		"implement": {"Submission targets `main`", "merge-base with `main`", "Artifact Baseline"},
-		"watchdog":  {"Workflow Submissions target `main`", "mergeability is mergeable, conflicting, or unknown", "Artifact Baseline"},
-		"audit":     {"merge-base with `main`", "explicitly supplies", "Artifact Baseline"},
+		"implement": {
+			"Submission targets `main`", "merge-base with `main`", "Artifact Baseline",
+			"integration with `main`, conflict resolution, and merge belong to the human Merge Authority after review",
+			"Apply its findings yourself.",
+		},
+		"watchdog": {"Workflow Submissions target `main`", "mergeability is mergeable, conflicting, or unknown", "Artifact Baseline"},
+		"audit":    {"merge-base with `main`", "explicitly supplies", "Artifact Baseline"},
 	} {
 		output.Reset()
 		err := app.Run([]string{"skl", "skill", skill})
@@ -1248,7 +1252,7 @@ func TestImplementBundlesInstructionsWithoutTargetPin(t *testing.T) {
 				missing = text
 			}
 		}
-		if err != nil || strings.Contains(output.String(), "--target-snapshot") || missing != "" {
+		if err != nil || strings.Contains(output.String(), "--target-snapshot") || strings.Contains(output.String(), "resolve merge conflicts with `main`") || missing != "" {
 			t.Fatalf("%s guidance retained integration obligation or lacks %q: %v\n%s", skill, missing, err, &output)
 		}
 	}
