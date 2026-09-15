@@ -435,6 +435,12 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 				if err != nil {
 					return nil, err
 				}
+				if prState == workflow.Rework && pull.Body != "" && pull.NodeID != "" {
+					item.Submission.BodyUpdatedAt, err = b.implementationBodyUpdatedAt(ctx, pull)
+					if err != nil {
+						return nil, err
+					}
+				}
 			}
 			for _, label := range pull.Labels {
 				item.Synchronization = item.Synchronization || label.Name == "sync"
@@ -466,7 +472,9 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 						verdict := map[string]string{"CHANGES_REQUESTED": "rework", "APPROVED": "pass", "COMMENTED": "needs-human"}[review.State]
 						body := review.Body
 						reviewNumber := uint64(0)
-						if strings.HasPrefix(body, reviewSummaryPrefix) {
+						if !trustedMetadata(skilldist.ReviewComment{Association: review.Association}) {
+							verdict = ""
+						} else if strings.HasPrefix(body, reviewSummaryPrefix) {
 							verdict = ""
 							if metadata, summary, ok := parseReviewSummary(body); ok && review.State == "COMMENTED" {
 								body, verdict, reviewNumber = summary, metadata.Verdict, metadata.ReviewNumber
@@ -553,6 +561,31 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 	return items, nil
 }
 
+func (b *GitHubBackend) implementationBodyUpdatedAt(ctx context.Context, pull githubPull) (string, error) {
+	var response struct {
+		Data struct {
+			Node *struct {
+				Body, CreatedAt, LastEditedAt string
+			}
+		}
+		Errors []struct{ Message string }
+	}
+	query := "query($id:ID!){node(id:$id){... on PullRequest{body createdAt lastEditedAt}}}"
+	if err := b.request(ctx, http.MethodPost, "/graphql", map[string]any{"query": query, "variables": map[string]string{"id": pull.NodeID}}, &response); err != nil {
+		return "", err
+	}
+	if len(response.Errors) != 0 {
+		return "", errors.New(response.Errors[0].Message)
+	}
+	if response.Data.Node == nil || response.Data.Node.Body != pull.Body {
+		return "", workflow.Refuse("Submission content-edit evidence unavailable or changed; inspect the current body before retrying")
+	}
+	if response.Data.Node.LastEditedAt != "" {
+		return response.Data.Node.LastEditedAt, nil
+	}
+	return response.Data.Node.CreatedAt, nil
+}
+
 func (b *GitHubBackend) ImplementationTarget(ctx context.Context) (string, error) {
 	if err := b.requireRepository(); err != nil {
 		return "", err
@@ -628,7 +661,9 @@ func (b *GitHubBackend) implementationComments(ctx context.Context, repository g
 			return nil, err
 		}
 		for _, comment := range batch {
-			comments = append(comments, skilldist.ReviewComment{Body: comment.Body, Author: comment.User.Login, Association: comment.Association, Commit: comment.Commit, Path: comment.Path, CreatedAt: comment.CreatedAt, Line: comment.Line, Side: comment.Side})
+			observed := skilldist.ReviewComment{Body: comment.Body, Author: comment.User.Login, Association: comment.Association, Commit: comment.Commit, Path: comment.Path, CreatedAt: comment.CreatedAt, Line: comment.Line, Side: comment.Side}
+			observed.InlineAuthorized = observed.Path != "" && trustedMetadata(observed)
+			comments = append(comments, observed)
 		}
 		if len(batch) < 100 {
 			return comments, nil

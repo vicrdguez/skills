@@ -48,6 +48,7 @@ type ImplementationItem struct {
 type Submission struct {
 	Lifecycle       *LifecycleObservation
 	ClaimAcquiredAt string
+	BodyUpdatedAt   string
 	Merged          bool
 	Mergeability    string
 	CreatedAt       string

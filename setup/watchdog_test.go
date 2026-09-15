@@ -110,6 +110,7 @@ func TestGitHubWatchdogPublishesOpaqueAnchorsOnceAfterLostResponse(t *testing.T)
 		if r.Method == "POST" {
 			var p map[string]any
 			json.NewDecoder(r.Body).Decode(&p)
+			p["author_association"] = "OWNER"
 			*stream = append(*stream, p)
 			posts++
 			http.Error(w, "lost response", 500)

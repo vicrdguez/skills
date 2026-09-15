@@ -136,12 +136,17 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 			return outcome, Refuse("published Submission differs from the supplied Result Document; restore the original body before retrying")
 		}
 		if from == Rework {
-			if !published {
-				if item.Submission.Body != "" && !reworkUpdateProven(root, item, head) {
-					return outcome, Refuse("published Rework Submission differs from the supplied Result Document; inspect and supply the current round's Result Document")
-				}
-			} else if reworkReviewedAtHead(item, head) {
+			if reworkReviewedAtHead(item, head) {
 				return outcome, Refuse("published Rework Submission already belongs to a completed review at this head; push a new commit and supply the current round's Result Document")
+			}
+			if !published && item.Submission.Body != "" {
+				updated, updatedErr := time.Parse(time.RFC3339Nano, item.Submission.BodyUpdatedAt)
+				claim, claimErr := time.Parse(time.RFC3339Nano, item.Submission.ClaimAcquiredAt)
+				// Native content-edit evidence must precede this Claim. An older
+				// review alone remains true even after an accepted body write.
+				if updatedErr != nil || claimErr != nil || !updated.Before(claim) {
+					return outcome, Refuse("published Rework Submission differs from the supplied Result Document; body does not provably predate this Claim; inspect and supply the accepted Result Document")
+				}
 			}
 		}
 	}
@@ -323,7 +328,7 @@ func latestReviewComment(item ImplementationItem) (skilldist.ReviewComment, bool
 	var latest skilldist.ReviewComment
 	found := false
 	for _, comment := range item.Submission.Comments {
-		if comment.Path != "" || comment.Verdict == "" || comment.Commit == "" {
+		if comment.Path != "" || comment.Verdict == "" || comment.Commit == "" || comment.ReviewNumber == 0 {
 			continue
 		}
 		if !found || comment.ReviewNumber > latest.ReviewNumber || comment.ReviewNumber == latest.ReviewNumber && comment.CreatedAt > latest.CreatedAt {
@@ -331,17 +336,6 @@ func latestReviewComment(item ImplementationItem) (skilldist.ReviewComment, bool
 		}
 	}
 	return latest, found
-}
-
-// reworkUpdateProven reports whether a completed review at an older revision
-// proves a new source-stage update, so the published Rework body is historical
-// rather than evidence accepted for this handoff.
-func reworkUpdateProven(root string, item ImplementationItem, head string) bool {
-	review, found := latestReviewComment(item)
-	if !found || review.Commit == head {
-		return false
-	}
-	return gitOK(root, "merge-base", "--is-ancestor", review.Commit, head) == nil
 }
 
 func reworkReviewedAtHead(item ImplementationItem, head string) bool {

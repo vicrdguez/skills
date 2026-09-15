@@ -84,6 +84,9 @@ type ReviewComment struct {
 	Verdict         string `json:"verdict,omitempty"`
 	ReviewNumber    uint64 `json:"review_number,omitempty"`
 	ClaimAcquiredAt string `json:"claim_acquired_at,omitempty"`
+
+	// InlineAuthorized is the backend's assertion that anchored feedback may count as published review evidence.
+	InlineAuthorized bool `json:"inline_authorized,omitempty"`
 }
 
 type Packet struct {

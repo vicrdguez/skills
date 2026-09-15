@@ -199,7 +199,7 @@ func (b *GitHubBackend) PublishReview(ctx context.Context, item workflow.Impleme
 		published := func() (bool, error) {
 			current, err := b.implementationComments(ctx, repository, stream)
 			for _, c := range current {
-				if c.Body == comment.Body && c.Commit == comment.Commit && c.Path == comment.Path && c.Line == comment.Line && c.Side == comment.Side && afterClaim(comment.ClaimAcquiredAt, c.CreatedAt) {
+				if c.InlineAuthorized && c.Body == comment.Body && c.Commit == comment.Commit && c.Path == comment.Path && c.Line == comment.Line && c.Side == comment.Side && afterClaim(comment.ClaimAcquiredAt, c.CreatedAt) {
 					return true, err
 				}
 			}
@@ -235,6 +235,7 @@ func (b *GitHubBackend) publishReviewSummary(ctx context.Context, repository git
 			Commit      string `json:"commit_id"`
 			State       string `json:"state"`
 			SubmittedAt string `json:"submitted_at"`
+			Association string `json:"author_association"`
 		}
 		matches := 0
 		for page := 1; ; page++ {
@@ -243,7 +244,7 @@ func (b *GitHubBackend) publishReviewSummary(ctx context.Context, repository git
 				return 0, err
 			}
 			for _, review := range reviews {
-				if review.Body == body && review.Commit == wanted.Commit && review.State == "COMMENTED" && afterClaim(wanted.ClaimAcquiredAt, review.SubmittedAt) {
+				if trustedMetadata(skilldist.ReviewComment{Association: review.Association}) && review.Body == body && review.Commit == wanted.Commit && review.State == "COMMENTED" && afterClaim(wanted.ClaimAcquiredAt, review.SubmittedAt) {
 					matches++
 				}
 			}

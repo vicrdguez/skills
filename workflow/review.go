@@ -365,6 +365,9 @@ func reviewEvidenceMatches(item ImplementationItem, wanted []skilldist.ReviewCom
 	for _, comment := range wanted {
 		matches := 0
 		for _, existing := range item.Submission.Comments {
+			if existing.Path != "" && !existing.InlineAuthorized {
+				continue
+			}
 			if reviewCommentsMatch(comment, existing) {
 				matches++
 			}
@@ -381,7 +384,7 @@ func reviewEvidenceCompatible(item ImplementationItem, wanted []skilldist.Review
 		return false
 	}
 	for _, existing := range item.Submission.Comments {
-		if existing.Path == "" || existing.Commit != wanted[0].Commit {
+		if !existing.InlineAuthorized || existing.Path == "" || existing.Commit != wanted[0].Commit {
 			continue
 		}
 		after, unambiguous := receiptAfterClaim(claimedAt, existing.CreatedAt)
@@ -415,7 +418,7 @@ func reviewEvidenceMatchesForClaim(item ImplementationItem, wanted []skilldist.R
 	for _, comment := range wanted[1:] {
 		matches := 0
 		for _, existing := range item.Submission.Comments {
-			if existing.Path == "" || existing.Commit != comment.Commit {
+			if !existing.InlineAuthorized || existing.Path == "" || existing.Commit != comment.Commit {
 				continue
 			}
 			after, unambiguous := receiptAfterClaim(claimedAt, existing.CreatedAt)
