@@ -315,7 +315,7 @@ func (b *GitHubBackend) AwaitImplementationReview(ctx context.Context, item work
 	if err := b.implementationLabelMutation(ctx, repository, submissionNumber, []string{"review"}, []string{"rework", "wip", "sync"}, guard); err != nil {
 		return err
 	}
-	return b.implementationLabelMutation(ctx, repository, itemNumber, nil, []string{"ready", "wip"}, guard)
+	return b.implementationLabelMutation(ctx, repository, itemNumber, nil, []string{"ready", "wip", "needs-human"}, guard)
 }
 
 func (b *GitHubBackend) PauseImplementation(ctx context.Context, item workflow.ImplementationItem, decision string, guard func() error) error {

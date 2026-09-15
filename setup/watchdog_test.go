@@ -663,6 +663,14 @@ func TestGitHubReviewRecoverySourceDeletionFailsUnapplied(t *testing.T) {
 	}
 }
 
+func TestGitHubBackendAnchorSideAcceptsNativeSides(t *testing.T) {
+	for side, accepted := range map[string]bool{"LEFT": true, "RIGHT": true, "MIDDLE": false, "": false, "left": false, "right": false} {
+		if got := (&GitHubBackend{}).AnchorSide(side); got != accepted {
+			t.Errorf("AnchorSide(%q) = %t, want %t", side, got, accepted)
+		}
+	}
+}
+
 func TestGitHubStatusRecognizesMergedAndSupersededReferences(t *testing.T) {
 	for _, mergedAt := range []string{"", "2026-09-08T12:00:00Z"} {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

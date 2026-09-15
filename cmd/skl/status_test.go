@@ -171,17 +171,20 @@ func TestStatusRefusesClaimLossDuringPartialPass(t *testing.T) {
 func TestStatusRecoversOnlyTheCandidateAcceptedByInterruptedPassThroughGitHub(t *testing.T) {
 	for _, tc := range []struct {
 		name, failDelete, evidence string
-		marker                     bool
+		marker, mergeable          bool
 	}{
-		{"replaced during overlap", "review", "replaced", false},
-		{"replaced after review cleanup", "wip", "replaced", false},
-		{"unchanged reviewed head", "wip", "unchanged", false},
-		{"unchanged final marker head", "review", "unchanged", true},
-		{"replaced final marker head", "wip", "replaced", true},
-		{"missing receipt", "review", "missing", false},
-		{"receipt omits final head", "wip", "legacy", false},
-		{"duplicate receipt", "wip", "duplicate", false},
-		{"receipt predates claim", "wip", "stale", false},
+		{"replaced during overlap", "review", "replaced", false, false},
+		{"replaced after review cleanup", "wip", "replaced", false, false},
+		{"unchanged reviewed head", "wip", "unchanged", false, false},
+		{"unchanged final marker head", "review", "unchanged", true, false},
+		{"replaced final marker head", "wip", "replaced", true, false},
+		{"replaced mergeable marker head", "review", "replaced", true, true},
+		{"unchanged mergeable head", "wip", "unchanged", false, true},
+		{"missing receipt", "review", "missing", false, false},
+		{"missing mergeable receipt", "review", "missing", false, true},
+		{"receipt omits final head", "wip", "legacy", false, false},
+		{"duplicate receipt", "wip", "duplicate", false, false},
+		{"receipt predates claim", "wip", "stale", false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newReviewFixture(t)
@@ -195,7 +198,7 @@ func TestStatusRecoversOnlyTheCandidateAcceptedByInterruptedPassThroughGitHub(t 
 				final = strings.TrimSpace(runGitOutput(t, f.worktree, "rev-parse", "HEAD"))
 				f.forge.head = final
 			}
-			f.forge.mergeable = false
+			f.forge.mergeable = tc.mergeable
 			dir := packet.Facts.Watchdog.ResultDirectory
 			summary, body := filepath.Join(dir, "summary.md"), filepath.Join(dir, "submission.md")
 			if err := os.WriteFile(summary, []byte("accepted candidate"), 0600); err != nil {
@@ -216,6 +219,10 @@ func TestStatusRecoversOnlyTheCandidateAcceptedByInterruptedPassThroughGitHub(t 
 				f.forge.head = strings.TrimSpace(runGitOutput(t, f.worktree, "rev-parse", "HEAD"))
 			case "missing":
 				f.forge.summaries = nil
+				f.forge.sourceComments = append(f.forge.sourceComments, map[string]any{
+					"author_association": "OWNER",
+					"body":               "<!-- skl.implement/v1\n{\"watchdog_head\":\"" + f.head + "\",\"verdict_head\":\"" + final + "\"}\n-->",
+				})
 			case "legacy":
 				f.forge.summaries[0]["body"] = "<!-- skl.watchdog.review/v1\n{\"review_number\":1,\"verdict\":\"pass\"}\n-->\naccepted candidate"
 			case "duplicate":

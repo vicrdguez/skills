@@ -385,6 +385,96 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 	}
 }
 
+func TestGitHubImplementationCompletesRequeuedSubmissionHandoff(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		interrupted bool
+	}{
+		{name: "accepted human requeue"},
+		{name: "retry after interrupted publication", interrupted: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			labels := map[int][]string{7: {"needs-human"}, 11: {"rework", "wip"}}
+			interrupt := tt.interrupted
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				path := strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets")
+				issue := func(number int) map[string]any {
+					ls := []map[string]string{}
+					for _, name := range labels[number] {
+						ls = append(ls, map[string]string{"name": name})
+					}
+					return map[string]any{"number": number, "state": "open", "labels": ls}
+				}
+				switch {
+				case path == "/issues" && r.Method == http.MethodGet:
+					issue := issue(7)
+					issue["title"] = "widget"
+					json.NewEncoder(w).Encode([]any{issue})
+					return
+				case path == "/pulls" && r.Method == http.MethodGet:
+					pull := issue(11)
+					pull["head"] = map[string]any{"ref": "widget", "sha": "fixed", "repo": map[string]string{"full_name": "acme/widgets"}}
+					pull["base"] = map[string]string{"ref": "main"}
+					json.NewEncoder(w).Encode([]any{pull})
+					return
+				case path == "/issues/7" && r.Method == http.MethodGet:
+					json.NewEncoder(w).Encode(issue(7))
+					return
+				case path == "/issues/11" && r.Method == http.MethodGet:
+					json.NewEncoder(w).Encode(issue(11))
+					return
+				case path == "/issues/7/comments" && r.Method == http.MethodGet:
+					fmt.Fprint(w, `[{"author_association":"OWNER","body":"<!-- skl.implement/v1\n{\"transition\":{\"from\":\"rework\",\"target\":\"awaiting_review\",\"head\":\"fixed\",\"directory\":\"original-operation\"}}\n-->"}]`)
+					return
+				}
+				var number int
+				var name string
+				switch {
+				case r.Method == http.MethodPost && strings.HasSuffix(path, "/labels"):
+					fmt.Sscanf(path, "/issues/%d/labels", &number)
+					var payload struct {
+						Labels []string `json:"labels"`
+					}
+					json.NewDecoder(r.Body).Decode(&payload)
+					labels[number] = append(labels[number], payload.Labels...)
+				case r.Method == http.MethodDelete && strings.Contains(path, "/labels/"):
+					fmt.Sscanf(path, "/issues/%d/labels/%s", &number, &name)
+					if interrupt && number == 7 && name == "needs-human" {
+						interrupt = false
+						http.Error(w, "lost response", http.StatusInternalServerError)
+						return
+					}
+					labels[number] = slices.DeleteFunc(labels[number], func(label string) bool { return label == name })
+				default:
+					json.NewEncoder(w).Encode([]any{})
+					return
+				}
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			defer server.Close()
+			b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
+			item := workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Rework,
+				Submission: &workflow.Submission{ID: "11", Head: "fixed", Lifecycle: &workflow.LifecycleObservation{Open: true, States: []workflow.State{workflow.Rework}, Claimed: true}}}
+			ctx := context.Background()
+			if tt.interrupted {
+				if err := b.AwaitImplementationReview(ctx, item, func() error { return nil }); err == nil {
+					t.Fatal("fixture did not interrupt the source cleanup")
+				}
+			}
+			if err := b.AwaitImplementationReview(ctx, item, func() error { return nil }); err != nil {
+				t.Fatal(err)
+			}
+			items, err := b.ImplementationItems(ctx)
+			if err != nil || len(items) != 1 || items[0].Problem != "" || items[0].State != workflow.AwaitingReview || items[0].Claimed {
+				t.Fatalf("requeued handoff: %#v %v", items, err)
+			}
+			if !slices.Equal(labels[11], []string{"review"}) || slices.Contains(labels[7], "needs-human") {
+				t.Fatalf("labels after requeued handoff: %v", labels)
+			}
+		})
+	}
+}
+
 func TestGitHubImplementationRejectsForeignAttachmentsAndIgnoresObsoleteTargetMetadata(t *testing.T) {
 	for _, kind := range []string{"fork", "untrusted metadata", "conflicting metadata"} {
 		t.Run(kind, func(t *testing.T) {

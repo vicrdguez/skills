@@ -233,7 +233,7 @@ func (b *implementationMemory) AwaitImplementationReview(_ context.Context, item
 			}
 			projection.States = slices.DeleteFunc(projection.States, func(state workflow.State) bool { return state == workflow.Rework })
 			projection.Claimed = false
-			current.Source.States = slices.DeleteFunc(current.Source.States, func(state workflow.State) bool { return state == workflow.Ready })
+			current.Source.States = slices.DeleteFunc(current.Source.States, func(state workflow.State) bool { return state == workflow.Ready || state == workflow.NeedsHuman })
 			current.Source.Claimed = false
 			b.work[i] = workflow.ReconcileImplementation(current)
 		}
@@ -1838,49 +1838,62 @@ func TestStatusRetainsImplementationClaimOnProjectionFailure(t *testing.T) {
 }
 
 func TestImplementationReviewProjectionBackendParity(t *testing.T) {
+	sourceStates := map[string]workflow.State{"ready": workflow.Ready, "needs-human": workflow.NeedsHuman}
 	for _, tt := range []struct {
 		labels []string
 		states []workflow.State
+		source []string
 		allow  bool
 	}{
-		{nil, nil, true},
-		{[]string{"rework", "wip"}, []workflow.State{workflow.Rework}, true},
-		{[]string{"rework", "review"}, []workflow.State{workflow.Rework, workflow.AwaitingReview}, true},
-		{[]string{"review", "rework"}, []workflow.State{workflow.AwaitingReview, workflow.Rework}, true},
-		{[]string{"ready"}, []workflow.State{workflow.Ready}, false},
-		{[]string{"done"}, []workflow.State{workflow.ReadyForMerge}, false},
-		{[]string{"needs-human"}, []workflow.State{workflow.NeedsHuman}, false},
-		{[]string{"review", "needs-human"}, []workflow.State{workflow.AwaitingReview, workflow.NeedsHuman}, false},
+		{labels: nil, states: nil, allow: true},
+		{labels: []string{"rework", "wip"}, states: []workflow.State{workflow.Rework}, allow: true},
+		{labels: []string{"rework", "review"}, states: []workflow.State{workflow.Rework, workflow.AwaitingReview}, allow: true},
+		{labels: []string{"review", "rework"}, states: []workflow.State{workflow.AwaitingReview, workflow.Rework}, allow: true},
+		{labels: []string{"rework", "wip"}, states: []workflow.State{workflow.Rework}, source: []string{"needs-human"}, allow: true},
+		{labels: []string{"ready"}, states: []workflow.State{workflow.Ready}, allow: false},
+		{labels: []string{"done"}, states: []workflow.State{workflow.ReadyForMerge}, allow: false},
+		{labels: []string{"needs-human"}, states: []workflow.State{workflow.NeedsHuman}, allow: false},
+		{labels: []string{"review", "needs-human"}, states: []workflow.State{workflow.AwaitingReview, workflow.NeedsHuman}, allow: false},
 		// Preserve the existing first-state policy, even for these unusual overlaps.
-		{[]string{"review", "done"}, []workflow.State{workflow.AwaitingReview, workflow.ReadyForMerge}, true},
-		{[]string{"done", "review"}, []workflow.State{workflow.ReadyForMerge, workflow.AwaitingReview}, false},
-		{[]string{"review", "ready"}, []workflow.State{workflow.AwaitingReview, workflow.Ready}, true},
-		{[]string{"ready", "review"}, []workflow.State{workflow.Ready, workflow.AwaitingReview}, false},
+		{labels: []string{"review", "done"}, states: []workflow.State{workflow.AwaitingReview, workflow.ReadyForMerge}, allow: true},
+		{labels: []string{"done", "review"}, states: []workflow.State{workflow.ReadyForMerge, workflow.AwaitingReview}, allow: false},
+		{labels: []string{"review", "ready"}, states: []workflow.State{workflow.AwaitingReview, workflow.Ready}, allow: true},
+		{labels: []string{"ready", "review"}, states: []workflow.State{workflow.Ready, workflow.AwaitingReview}, allow: false},
 	} {
-		t.Run(fmt.Sprint(tt.labels), func(t *testing.T) {
-			labels := slices.Clone(tt.labels)
+		t.Run(fmt.Sprint(tt.labels, tt.source), func(t *testing.T) {
+			labels, source := slices.Clone(tt.labels), slices.Clone(tt.source)
 			writes := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				path := strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets")
 				if r.Method != http.MethodGet {
 					writes++
 				}
-				switch {
-				case path == "/issues/11" && r.Method == http.MethodGet:
+				labelList := func(names []string) []map[string]string {
 					ls := []map[string]string{}
-					for _, label := range labels {
+					for _, label := range names {
 						ls = append(ls, map[string]string{"name": label})
 					}
-					json.NewEncoder(w).Encode(map[string]any{"number": 11, "state": "open", "labels": ls})
+					return ls
+				}
+				switch {
+				case path == "/issues/11" && r.Method == http.MethodGet:
+					json.NewEncoder(w).Encode(map[string]any{"number": 11, "state": "open", "labels": labelList(labels)})
 				case path == "/issues/7" && r.Method == http.MethodGet:
-					fmt.Fprint(w, `{"number":7,"state":"open","labels":[]}`)
+					json.NewEncoder(w).Encode(map[string]any{"number": 7, "state": "open", "labels": labelList(source)})
 				case path == "/issues/11/labels" && r.Method == http.MethodPost:
 					var payload struct{ Labels []string }
 					json.NewDecoder(r.Body).Decode(&payload)
 					labels = append(labels, payload.Labels...)
+				case path == "/issues/7/labels" && r.Method == http.MethodPost:
+					var payload struct{ Labels []string }
+					json.NewDecoder(r.Body).Decode(&payload)
+					source = append(source, payload.Labels...)
 				case strings.HasPrefix(path, "/issues/11/labels/") && r.Method == http.MethodDelete:
 					label := strings.TrimPrefix(path, "/issues/11/labels/")
 					labels = slices.DeleteFunc(labels, func(value string) bool { return value == label })
+				case strings.HasPrefix(path, "/issues/7/labels/") && r.Method == http.MethodDelete:
+					label := strings.TrimPrefix(path, "/issues/7/labels/")
+					source = slices.DeleteFunc(source, func(value string) bool { return value == label })
 				default:
 					t.Errorf("unexpected %s %s", r.Method, r.URL)
 					http.NotFound(w, r)
@@ -1890,6 +1903,9 @@ func TestImplementationReviewProjectionBackendParity(t *testing.T) {
 			native := setup.NewGitHubBackend(server.URL, "token", server.Client())
 			native.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
 			item := workflow.ImplementationItem{ID: "7", State: workflow.Rework, Source: &workflow.LifecycleObservation{Open: true}, Submission: &workflow.Submission{ID: "11", Lifecycle: &workflow.LifecycleObservation{Open: true, States: slices.Clone(tt.states), Claimed: slices.Contains(tt.labels, "wip")}}}
+			for _, label := range tt.source {
+				item.Source.States = append(item.Source.States, sourceStates[label])
+			}
 			memory := &implementationMemory{work: []workflow.ImplementationItem{item}}
 			for name, backend := range map[string]workflow.ImplementationBackend{"HTTP": native, "memory": memory} {
 				err := backend.AwaitImplementationReview(context.Background(), item, func() error { return nil })
@@ -1897,7 +1913,7 @@ func TestImplementationReviewProjectionBackendParity(t *testing.T) {
 					t.Fatalf("%s permission differs: %v", name, err)
 				}
 			}
-			wantLabels, wantStates := slices.Clone(tt.labels), slices.Clone(tt.states)
+			wantLabels, wantStates, wantSource := slices.Clone(tt.labels), slices.Clone(tt.states), slices.Clone(tt.source)
 			if tt.allow {
 				if !slices.Contains(wantLabels, "review") {
 					wantLabels = append(wantLabels, "review")
@@ -1905,11 +1921,16 @@ func TestImplementationReviewProjectionBackendParity(t *testing.T) {
 				}
 				wantLabels = slices.DeleteFunc(wantLabels, func(label string) bool { return label == "rework" || label == "wip" })
 				wantStates = slices.DeleteFunc(wantStates, func(state workflow.State) bool { return state == workflow.Rework })
+				wantSource = slices.DeleteFunc(wantSource, func(label string) bool { return label == "needs-human" })
 			} else if writes != 0 {
 				t.Fatalf("adapter independently restored Claim or projected forbidden state: %d writes", writes)
 			}
-			if !slices.Equal(labels, wantLabels) || !slices.Equal(memory.work[0].Submission.Lifecycle.States, wantStates) || memory.work[0].Submission.Lifecycle.Claimed {
-				t.Fatalf("projection mismatch: HTTP=%v, memory=%#v", labels, memory.work[0].Submission.Lifecycle)
+			var wantSourceStates []workflow.State
+			for _, label := range wantSource {
+				wantSourceStates = append(wantSourceStates, sourceStates[label])
+			}
+			if !slices.Equal(labels, wantLabels) || !slices.Equal(memory.work[0].Submission.Lifecycle.States, wantStates) || memory.work[0].Submission.Lifecycle.Claimed || !slices.Equal(source, wantSource) || !slices.Equal(memory.work[0].Source.States, wantSourceStates) {
+				t.Fatalf("projection mismatch: HTTP=%v/%v, memory=%#v/%#v", labels, source, memory.work[0].Submission.Lifecycle, memory.work[0].Source)
 			}
 		})
 	}
@@ -2047,6 +2068,26 @@ func TestImplementReconcilesInterruptedHandoffs(t *testing.T) {
 				t.Fatalf("completed retry: %#v", got)
 			}
 		})
+	}
+}
+
+func TestImplementCompletesRequeuedSubmissionHandoff(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "widget")
+	head := completeAndRetireSlice(t, root, "widget")
+	directory := newImplementationResultDirectory(t)
+	body := filepath.Join(directory, "submission.md")
+	if err := os.WriteFile(body, []byte("opaque\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	b := &implementationMemory{work: []workflow.ImplementationItem{{
+		ID: "7", Branch: "widget", State: workflow.Rework,
+		Source:     &workflow.LifecycleObservation{Open: true, States: []workflow.State{workflow.NeedsHuman}},
+		Submission: &workflow.Submission{ID: "11", Head: head, Lifecycle: &workflow.LifecycleObservation{Open: true, States: []workflow.State{workflow.Rework}, Claimed: true}},
+	}}, remoteHeads: map[string]string{"widget": head}}
+	got := implementCLI(t, root, b, "submit", "--item", "7", "--body", body)
+	if got.Status != "awaiting_review" || got.Item.Claimed || got.Item.Problem != "" || b.work[0].State != workflow.AwaitingReview || len(b.work[0].Source.States) != 0 || b.work[0].Submission == nil || !slices.Equal(b.work[0].Submission.Lifecycle.States, []workflow.State{workflow.AwaitingReview}) {
+		t.Fatalf("requeued handoff: %#v", got)
 	}
 }
 

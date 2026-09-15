@@ -59,6 +59,9 @@ func TestGitHubWatchdogBodyPassRetry(t *testing.T) {
 				if f.forge.body != publishedBody || patches != 1 || len(f.forge.summaries) != 1 {
 					t.Fatalf("publication: body=%q, patches=%d, summaries=%v", f.forge.body, patches, f.forge.summaries)
 				}
+				if receipt, _ := f.forge.summaries[0]["body"].(string); !strings.Contains(receipt, `"final_head":"`+f.head+`"`) {
+					t.Fatalf("pass receipt lost the accepted head: %s", receipt)
+				}
 				before := writes
 				if err := os.WriteFile(bodyPath, []byte("changed "+body), 0600); err != nil {
 					t.Fatal(err)

@@ -161,6 +161,31 @@ func TestWatchdogRoutesFirstFailureWithOpaqueFindings(t *testing.T) {
 	}
 }
 
+func TestWatchdogRejectsUnpublishableAnchorSide(t *testing.T) {
+	f := newReviewFixture(t)
+	f.start(t, f.root)
+	before := append([]string(nil), f.forge.labels...)
+	dir := t.TempDir()
+	summary := filepath.Join(dir, "summary.md")
+	inline := filepath.Join(dir, "inline.md")
+	anchors := filepath.Join(dir, "findings.json")
+	for path, body := range map[string]string{summary: "W1 BLOCK", inline: "opaque inline", anchors: fmt.Sprintf(`[{"path":"main.go","line":12,"side":"MIDDLE","body_file":%q}]`, inline)} {
+		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err := f.runResult(f.worktree, "watchdog", "submit", "--item", "7", "--review-number", "1", "--reviewed-head", f.head, "--verdict", "rework", "--summary", summary, "--findings", anchors)
+	if err == nil || !strings.Contains(err.Error(), "invalid structured inline anchor") {
+		t.Fatalf("unpublishable anchor side accepted: %v", err)
+	}
+	if !slices.Equal(f.forge.labels, before) || len(f.forge.summaries) != 0 || len(f.forge.inlines) != 0 {
+		t.Fatalf("anchor refusal mutated review state: labels=%v summaries=%v inlines=%v", f.forge.labels, f.forge.summaries, f.forge.inlines)
+	}
+	if _, err := os.Stat(inline); err != nil {
+		t.Fatal("anchor refusal removed finding prose")
+	}
+}
+
 func TestWatchdogPausesSecondFailure(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
@@ -387,6 +412,10 @@ func (b *implementationMemory) SubmissionBodyMatches(id workflow.WorkItemID, act
 		return (&setup.GitHubBackend{}).SubmissionBodyMatches(id, actual, supplied)
 	}
 	return actual == supplied, nil
+}
+
+func (b *implementationMemory) AnchorSide(side string) bool {
+	return (&setup.GitHubBackend{}).AnchorSide(side)
 }
 
 func (b *implementationMemory) ReviewSubmission(_ context.Context, id workflow.SubmissionID) (workflow.Submission, error) {
