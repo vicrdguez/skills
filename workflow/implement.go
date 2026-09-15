@@ -78,6 +78,8 @@ type ImplementationBackend interface {
 	ImplementationItems(context.Context) ([]ImplementationItem, error)
 	ClaimImplementation(context.Context, ImplementationItem) error
 	ImplementationHead(context.Context, string) (string, error)
+	// SubmissionBodyMatches compares an observation with the body publication would produce.
+	SubmissionBodyMatches(id WorkItemID, actual, supplied string) (bool, error)
 	PublishImplementation(context.Context, ImplementationItem, Submission) (Submission, error)
 	AwaitImplementationReview(context.Context, ImplementationItem, func() error) error
 	PauseImplementation(context.Context, ImplementationItem, string, func() error) error

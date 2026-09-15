@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	skilldist "github.com/vicrdguez/skills"
 	"github.com/vicrdguez/skills/github"
@@ -103,38 +104,65 @@ func (b *GitHubBackend) publishImplementationMetadata(ctx context.Context, repos
 	if err != nil {
 		return err
 	}
-	return b.implementationComment(ctx, repository, number, "<!-- skl.implement/v1\n"+string(payload)+"\n-->", true)
+	return b.implementationComment(ctx, repository, number, "<!-- skl.implement/v1\n"+string(payload)+"\n-->", true, "")
 }
 
-func (b *GitHubBackend) implementationComment(ctx context.Context, repository github.RepositoryID, number int, body string, metadata bool) error {
-	published := func(comments []skilldist.ReviewComment) bool {
+func (b *GitHubBackend) implementationComment(ctx context.Context, repository github.RepositoryID, number int, body string, metadata bool, claimAcquiredAt string) error {
+	var claim time.Time
+	if claimAcquiredAt != "" {
+		var err error
+		claim, err = time.Parse(time.RFC3339Nano, claimAcquiredAt)
+		if err != nil {
+			return workflow.Refuse("decision Claim timing is unavailable; inspect before retrying")
+		}
+	}
+	published := func(comments []skilldist.ReviewComment) (bool, error) {
 		latest := ""
+		found := false
 		for _, comment := range comments {
+			if !comment.EvidenceAuthorized || comment.Path != "" {
+				continue
+			}
 			if metadata {
-				if strings.HasPrefix(comment.Body, "<!-- skl.implement/v1\n") && trustedMetadata(comment) {
+				if strings.HasPrefix(comment.Body, "<!-- skl.implement/v1\n") {
 					latest = comment.Body
 				}
-			} else if comment.Body == body {
-				return true
+				continue
 			}
+			if claimAcquiredAt != "" {
+				if !strings.HasPrefix(comment.Body, workflow.OpaqueImplementationDecision("")) {
+					continue
+				}
+				created, err := time.Parse(time.RFC3339Nano, comment.CreatedAt)
+				if err != nil || created.Equal(claim) {
+					return false, workflow.Refuse("decision receipt ordering is unknown or equal to the Claim; inspect before retrying")
+				}
+				if created.Before(claim) {
+					continue
+				}
+				if comment.Body != body {
+					return false, workflow.Refuse("current decision differs from the supplied Result Document; restore the original decision before retrying")
+				}
+			}
+			found = found || comment.Body == body
 		}
-		return metadata && latest == body
+		return metadata && latest == body || !metadata && found, nil
 	}
 	stream := fmt.Sprintf("/issues/%d/comments", number)
 	comments, err := b.implementationComments(ctx, repository, stream)
 	if err != nil {
 		return err
 	}
-	if published(comments) {
-		return nil
+	if found, err := published(comments); err != nil || found {
+		return err
 	}
 	writeErr := b.request(ctx, http.MethodPost, b.repositoryPath(repository)+stream, map[string]string{"body": body}, nil)
 	comments, err = b.implementationComments(ctx, repository, stream)
 	if err != nil {
 		return err
 	}
-	if published(comments) {
-		return nil
+	if found, err := published(comments); err != nil || found {
+		return err
 	}
 	if writeErr != nil {
 		return writeErr
@@ -336,7 +364,18 @@ func (b *GitHubBackend) PauseImplementation(ctx context.Context, item workflow.I
 	if item.Submission != nil {
 		number = submissionNumber
 	}
-	if err := b.implementationComment(ctx, repository, number, workflow.OpaqueImplementationDecision(decision), false); err != nil {
+	claimNumber := itemNumber
+	if item.State == workflow.Rework {
+		claimNumber = submissionNumber
+	}
+	claimAcquiredAt, err := b.issueClaimAcquiredAt(ctx, repository, claimNumber)
+	if err != nil {
+		return err
+	}
+	if _, err := time.Parse(time.RFC3339Nano, claimAcquiredAt); err != nil {
+		return workflow.Refuse("decision publication requires known source Claim timing; inspect before retrying")
+	}
+	if err := b.implementationComment(ctx, repository, number, workflow.OpaqueImplementationDecision(decision), false, claimAcquiredAt); err != nil {
 		return err
 	}
 	if item.Submission != nil {
@@ -662,7 +701,7 @@ func (b *GitHubBackend) implementationComments(ctx context.Context, repository g
 		}
 		for _, comment := range batch {
 			observed := skilldist.ReviewComment{Body: comment.Body, Author: comment.User.Login, Association: comment.Association, Commit: comment.Commit, Path: comment.Path, CreatedAt: comment.CreatedAt, Line: comment.Line, Side: comment.Side}
-			observed.InlineAuthorized = observed.Path != "" && trustedMetadata(observed)
+			observed.EvidenceAuthorized = trustedMetadata(observed)
 			comments = append(comments, observed)
 		}
 		if len(batch) < 100 {

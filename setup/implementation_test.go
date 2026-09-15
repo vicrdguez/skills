@@ -194,6 +194,12 @@ func TestGitHubLifecycleRejectsInvalidIdentitiesBeforeTransport(t *testing.T) {
 func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 	labels := map[int][]string{7: {"ready", "external"}}
 	comments := map[int][]map[string]any{7: {{"author_association": "NONE", "body": "<!-- skl.implement/v1\n{\"target_snapshot\":\"snapshot\"}\n-->"}}}
+	timeline := map[int][]map[string]any{}
+	clock := 0
+	timestamp := func() string {
+		clock++
+		return fmt.Sprintf("2026-01-01T00:00:%02dZ", clock)
+	}
 	var pulls []map[string]any
 	creations := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -232,8 +238,10 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 			return
 		case path == "/pulls/11/reviews":
 			result = []any{}
-		case path == "/issues/11/timeline":
-			result = []any{}
+		case path == "/issues/11/timeline" || path == "/issues/7/timeline":
+			var number int
+			fmt.Sscanf(path, "/issues/%d/timeline", &number)
+			result = timeline[number]
 		case path == "/pulls/11" && r.Method == http.MethodPatch:
 			var payload map[string]any
 			json.NewDecoder(r.Body).Decode(&payload)
@@ -247,8 +255,6 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 			return
 		case path == "/issues/7/dependencies/blocked_by":
 			result = []any{}
-		case path == "/issues/7/timeline":
-			result = []any{}
 		case strings.HasSuffix(path, "/comments"):
 			var number int
 			fmt.Sscanf(path, "/issues/%d/comments", &number)
@@ -256,6 +262,7 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 				var payload map[string]any
 				json.NewDecoder(r.Body).Decode(&payload)
 				payload["author_association"] = "OWNER"
+				payload["created_at"] = timestamp()
 				comments[number] = append(comments[number], payload)
 				http.Error(w, "response lost after comment", 500)
 				return
@@ -270,6 +277,9 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 				}
 				json.NewDecoder(r.Body).Decode(&payload)
 				labels[number] = append(labels[number], payload.Labels...)
+				for _, label := range payload.Labels {
+					timeline[number] = append(timeline[number], map[string]any{"event": "labeled", "created_at": timestamp(), "label": map[string]string{"name": label}})
+				}
 			} else if r.Method == http.MethodDelete {
 				name := path[strings.LastIndex(path, "/")+1:]
 				var kept []string
@@ -279,6 +289,7 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 					}
 				}
 				labels[number] = kept
+				timeline[number] = append(timeline[number], map[string]any{"event": "unlabeled", "created_at": timestamp(), "label": map[string]string{"name": name}})
 			}
 			http.Error(w, "response lost after label mutation", 500)
 			return
@@ -314,6 +325,7 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 		t.Fatalf("opaque decision parsed as metadata: %#v %v", items, err)
 	}
 	labels[7] = []string{"ready", "external", "wip"}
+	timeline[7] = append(timeline[7], map[string]any{"event": "labeled", "created_at": timestamp(), "label": map[string]string{"name": "wip"}})
 	submission, err := b.PublishImplementation(ctx, item, workflow.Submission{Head: "fixed", Base: "main", Body: "opaque"})
 	if err != nil || submission.ID != "11" {
 		t.Fatalf("publication = %#v, %v", submission, err)
@@ -332,6 +344,7 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 		t.Fatalf("labels=%v", labels)
 	}
 	labels[11] = []string{"rework", "wip"}
+	timeline[11] = append(timeline[11], map[string]any{"event": "labeled", "created_at": timestamp(), "label": map[string]string{"name": "wip"}})
 	item.State = workflow.Rework
 	item.Claimed = true
 	labels[7] = []string{"external"}

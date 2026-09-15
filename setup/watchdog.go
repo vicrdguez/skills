@@ -85,6 +85,9 @@ func (b *GitHubBackend) CompleteReview(ctx context.Context, item workflow.Implem
 		}
 	}
 	remove := []string{"review"}
+	if !item.Synchronization || target != workflow.Rework {
+		remove = append(remove, "sync")
+	}
 	if target != workflow.Rework {
 		remove = append(remove, "rework")
 	}
@@ -190,7 +193,7 @@ func (b *GitHubBackend) PublishReview(ctx context.Context, item workflow.Impleme
 				}
 				continue
 			}
-			if err := b.implementationComment(ctx, repository, number, comment.Body, false); err != nil {
+			if err := b.implementationComment(ctx, repository, number, comment.Body, false, ""); err != nil {
 				return err
 			}
 			continue
@@ -199,7 +202,7 @@ func (b *GitHubBackend) PublishReview(ctx context.Context, item workflow.Impleme
 		published := func() (bool, error) {
 			current, err := b.implementationComments(ctx, repository, stream)
 			for _, c := range current {
-				if c.InlineAuthorized && c.Body == comment.Body && c.Commit == comment.Commit && c.Path == comment.Path && c.Line == comment.Line && c.Side == comment.Side && afterClaim(comment.ClaimAcquiredAt, c.CreatedAt) {
+				if c.EvidenceAuthorized && c.Body == comment.Body && c.Commit == comment.Commit && c.Path == comment.Path && c.Line == comment.Line && c.Side == comment.Side && afterClaim(comment.ClaimAcquiredAt, c.CreatedAt) {
 					return true, err
 				}
 			}

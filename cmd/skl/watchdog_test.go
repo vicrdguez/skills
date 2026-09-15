@@ -407,7 +407,7 @@ func (b *implementationMemory) PublishReview(_ context.Context, item workflow.Im
 	for i := range b.work {
 		if b.work[i].ID == item.ID {
 			for _, c := range comments {
-				c.InlineAuthorized = c.Path != ""
+				c.EvidenceAuthorized = true
 				if c.CreatedAt == "" {
 					c.CreatedAt = b.reviewTime()
 				}

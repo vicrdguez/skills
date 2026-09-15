@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/setup"
@@ -106,7 +107,23 @@ func (b *implementationMemory) PauseImplementation(_ context.Context, item workf
 	for i := range b.work {
 		if b.work[i].ID == item.ID {
 			current := implementationFixture(b.work[i])
-			current.Feedback = append(current.Feedback, skilldist.ReviewComment{Body: workflow.OpaqueImplementationDecision(decision)})
+			comments := &current.Feedback
+			claimAcquiredAt := current.SourceClaimAcquiredAt
+			if current.Submission != nil {
+				comments = &current.Submission.Comments
+				if item.State == workflow.Rework {
+					claimAcquiredAt = current.Submission.ClaimAcquiredAt
+				}
+			}
+			claim, claimErr := time.Parse(time.RFC3339Nano, claimAcquiredAt)
+			body := workflow.OpaqueImplementationDecision(decision)
+			published := slices.ContainsFunc(*comments, func(comment skilldist.ReviewComment) bool {
+				created, err := time.Parse(time.RFC3339Nano, comment.CreatedAt)
+				return comment.EvidenceAuthorized && comment.Path == "" && comment.Body == body && claimErr == nil && err == nil && created.After(claim)
+			})
+			if !published {
+				*comments = append(*comments, skilldist.ReviewComment{Body: body, CreatedAt: b.reviewTime(), EvidenceAuthorized: true})
+			}
 			projection := current.Source
 			if current.Submission != nil {
 				projection = current.Submission.Lifecycle
@@ -1427,6 +1444,7 @@ func TestB10PreserveIncompleteWorkInNeedsHuman(t *testing.T) {
 				item.Submission = &workflow.Submission{ID: "42", Draft: true, Head: baseline, Body: "previous draft\n"}
 			}
 			backend := &implementationMemory{work: []workflow.ImplementationItem{item}, remoteHeads: map[string]string{}}
+			backend.work[0].SourceClaimAcquiredAt = backend.reviewTime()
 			start := implementCLI(t, root, backend, "resume", "--item", "7")
 			if start.Status == "fix_required" {
 				start = setup.ImplementationOutput{}

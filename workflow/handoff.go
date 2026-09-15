@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -103,7 +102,14 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 		return outcome, err
 	}
 
-	if implementationHandoffMatches(item, target, head, string(body), bodyPath != "", string(decision), decisionPath != "") {
+	bodyMatches := bodyPath == ""
+	if bodyPath != "" && item.Submission != nil {
+		bodyMatches, err = backend.SubmissionBodyMatches(item.ID, item.Submission.Body, string(body))
+		if err != nil {
+			return outcome, err
+		}
+	}
+	if implementationHandoffMatches(item, target, head, bodyMatches, bodyPath != "", string(decision), decisionPath != "") {
 		outcome = ImplementationOutcome{Status: string(target), Item: &item}
 		cleanupImplementationResult(&outcome, resultPath)
 		return outcome, nil
@@ -131,7 +137,7 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 		return outcome, Refuse("Rework has no existing Submission; repair its attachment before resubmitting")
 	}
 	if bodyPath != "" && item.Submission != nil {
-		published := implementationBodyMatches(item.ID, item.Submission.Body, string(body))
+		published := bodyMatches
 		if from == Ready && item.Submission.Head == head && !published {
 			return outcome, Refuse("published Submission differs from the supplied Result Document; restore the original body before retrying")
 		}
@@ -228,7 +234,17 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 		return outcome, observeErr
 	}
 	for _, current := range observed {
-		if current.ID == id && implementationHandoffMatches(current, target, head, string(body), bodyPath != "", string(decision), decisionPath != "") {
+		if current.ID != id {
+			continue
+		}
+		bodyMatches = bodyPath == ""
+		if bodyPath != "" && current.Submission != nil {
+			bodyMatches, err = backend.SubmissionBodyMatches(current.ID, current.Submission.Body, string(body))
+			if err != nil {
+				return outcome, err
+			}
+		}
+		if implementationHandoffMatches(current, target, head, bodyMatches, bodyPath != "", string(decision), decisionPath != "") {
 			outcome = ImplementationOutcome{Status: string(target), Item: &current}
 			cleanupImplementationResult(&outcome, resultPath)
 			return outcome, nil
@@ -265,11 +281,11 @@ func provableSourcePausePartial(item ImplementationItem, target State) bool {
 	return problem == ""
 }
 
-func implementationHandoffMatches(item ImplementationItem, target State, head, body string, bodySupplied bool, decision string, decisionSupplied bool) bool {
+func implementationHandoffMatches(item ImplementationItem, target State, head string, bodyMatches, bodySupplied bool, decision string, decisionSupplied bool) bool {
 	if !implementationDestinationFinal(item, target) {
 		return false
 	}
-	if bodySupplied && (item.Submission == nil || item.Submission.Head != head || item.Submission.Draft != (target == NeedsHuman) || !implementationBodyMatches(item.ID, item.Submission.Body, body)) {
+	if bodySupplied && (item.Submission == nil || item.Submission.Head != head || item.Submission.Draft != (target == NeedsHuman) || !bodyMatches) {
 		return false
 	}
 	if !decisionSupplied {
@@ -277,13 +293,13 @@ func implementationHandoffMatches(item ImplementationItem, target State, head, b
 	}
 	wanted := OpaqueImplementationDecision(decision)
 	for _, comment := range item.Feedback {
-		if comment.Body == wanted {
+		if _, err := time.Parse(time.RFC3339Nano, comment.CreatedAt); err == nil && comment.EvidenceAuthorized && comment.Path == "" && comment.Body == wanted {
 			return true
 		}
 	}
 	if item.Submission != nil {
 		for _, comment := range item.Submission.Comments {
-			if comment.Body == wanted {
+			if _, err := time.Parse(time.RFC3339Nano, comment.CreatedAt); err == nil && comment.EvidenceAuthorized && comment.Path == "" && comment.Body == wanted {
 				return true
 			}
 		}
@@ -345,41 +361,30 @@ func reworkReviewedAtHead(item ImplementationItem, head string) bool {
 
 func implementationDecisionConflicts(item ImplementationItem, decision, claimAcquiredAt string) bool {
 	wanted := OpaqueImplementationDecision(decision)
-	current := func(comment skilldist.ReviewComment) bool {
-		if claimAcquiredAt == "" || comment.CreatedAt == "" {
-			return true
+	claim, err := time.Parse(time.RFC3339Nano, claimAcquiredAt)
+	if err != nil {
+		return true
+	}
+	conflicts := func(comment skilldist.ReviewComment) bool {
+		if !comment.EvidenceAuthorized || comment.Path != "" || !strings.HasPrefix(comment.Body, implementationDecisionPrefix) {
+			return false
 		}
-		claim, claimErr := time.Parse(time.RFC3339Nano, claimAcquiredAt)
 		created, createdErr := time.Parse(time.RFC3339Nano, comment.CreatedAt)
-		if claimErr != nil || createdErr != nil {
-			return true
-		}
-		return !created.Before(claim)
+		return createdErr != nil || created.Equal(claim) || created.After(claim) && comment.Body != wanted
 	}
 	for _, comment := range item.Feedback {
-		if strings.HasPrefix(comment.Body, implementationDecisionPrefix) && comment.Body != wanted && current(comment) {
+		if conflicts(comment) {
 			return true
 		}
 	}
 	if item.Submission != nil {
 		for _, comment := range item.Submission.Comments {
-			if strings.HasPrefix(comment.Body, implementationDecisionPrefix) && comment.Body != wanted && current(comment) {
+			if conflicts(comment) {
 				return true
 			}
 		}
 	}
 	return false
-}
-
-func implementationBodyMatches(id WorkItemID, actual, supplied string) bool {
-	if _, err := strconv.Atoi(string(id)); err != nil {
-		return actual == supplied
-	}
-	footer := "\n\nCloses #" + string(id) + "\n"
-	if strings.HasSuffix(supplied, footer) {
-		return actual == supplied
-	}
-	return actual == supplied+footer
 }
 
 func cleanupImplementationResult(outcome *ImplementationOutcome, resultPath string) {

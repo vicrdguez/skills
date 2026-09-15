@@ -294,6 +294,7 @@ func (f *reviewForge) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPost && path == "/issues/11/comments":
 		var value map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&value)
+		value["author_association"] = "OWNER"
 		value["created_at"] = f.timestamp()
 		f.issueComments = append(f.issueComments, value)
 	case r.Method == http.MethodPatch && path == "/pulls/11":
@@ -490,10 +491,12 @@ func TestImplementationPausePublishesBeforeReleaseThroughPublicHTTP(t *testing.T
 			f := newReviewFixture(t)
 			if mode == "rework-draft" {
 				f.forge.labels = []string{"rework", "wip"}
+				f.forge.timeline = []map[string]any{{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": "wip"}}}
 			} else {
 				f.forge.noPull = true
 				f.forge.labels = nil
 				f.forge.sourceLabels = []string{"ready", "wip"}
+				f.forge.sourceTimeline = []map[string]any{{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": "wip"}}}
 				f.forge.sourceComments = []map[string]any{{"author_association": "OWNER", "body": "<!-- skl.implement/v1\n{\"target_snapshot\":\"" + f.head + "\",\"target_branch\":\"main\"}\n-->"}}
 			}
 			start := f.run(t, f.worktree, "implement", "resume", "--item", "7")
@@ -684,8 +687,10 @@ func TestImplementationRetryRefusesChangedPublishedEvidenceThroughPublicHTTP(t *
 	f.forge.sourceLabels = []string{"ready", "wip"}
 	f.forge.sourceComments = []map[string]any{
 		{"author_association": "OWNER", "body": "<!-- skl.implement/v1\n{\"target_snapshot\":\"" + f.head + "\",\"target_branch\":\"main\"}\n-->"},
-		{"author_association": "OWNER", "body": workflow.OpaqueImplementationDecision("original\n")},
+		{"author_association": "OWNER", "created_at": "2026-01-01T00:00:02Z", "body": workflow.OpaqueImplementationDecision("original\n")},
 	}
+	f.forge.sourceTimeline = []map[string]any{{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": "wip"}}}
+	f.forge.clock = 2
 	directory = newImplementationResultDirectory(t)
 	decision := filepath.Join(directory, "decision.md")
 	if err := os.WriteFile(decision, []byte("changed\n"), 0600); err != nil {
@@ -705,8 +710,13 @@ func TestImplementationCompletedHandoffVerifiesEmptyResultDocuments(t *testing.T
 			f.forge.labels = []string{"needs-human"}
 			f.forge.body = "\n\nCloses #7\n"
 			f.forge.draft = true
+			f.forge.timeline = []map[string]any{
+				{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": "wip"}},
+				{"event": "unlabeled", "created_at": "2026-01-01T00:00:03Z", "label": map[string]string{"name": "wip"}},
+			}
+			f.forge.clock = 3
 			if decisionVisible {
-				f.forge.issueComments = []map[string]any{{"body": workflow.OpaqueImplementationDecision("")}}
+				f.forge.issueComments = []map[string]any{{"author_association": "OWNER", "created_at": "2026-01-01T00:00:02Z", "body": workflow.OpaqueImplementationDecision("")}}
 			}
 			directory := newImplementationResultDirectory(t)
 			body, decision := filepath.Join(directory, "submission.md"), filepath.Join(directory, "decision.md")
@@ -980,6 +990,7 @@ func TestImplementationPausePublishesDistinctDecisionAfterRequeueThroughPublicHT
 		t.Run(target, func(t *testing.T) {
 			f := newReviewFixture(t)
 			f.forge.labels = []string{"rework", "wip"}
+			f.forge.timeline = []map[string]any{{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": "wip"}}}
 			firstDirectory := newImplementationResultDirectory(t)
 			body, decision := filepath.Join(firstDirectory, "submission.md"), filepath.Join(firstDirectory, "decision.md")
 			if err := os.WriteFile(body, []byte("draft"), 0600); err != nil {
@@ -1121,6 +1132,7 @@ func TestImplementationCleanupFailuresKeepDestinationProtectedThroughPublicHTTP(
 	t.Run("pause label cleanup", func(t *testing.T) {
 		f := newReviewFixture(t)
 		f.forge.labels = []string{"rework", "wip"}
+		f.forge.timeline = []map[string]any{{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": "wip"}}}
 		directory := newImplementationResultDirectory(t)
 		body, decision := filepath.Join(directory, "submission.md"), filepath.Join(directory, "decision.md")
 		if err := os.WriteFile(body, []byte("draft"), 0600); err != nil {
@@ -1210,6 +1222,7 @@ func TestImplementationCleanupWarningsThroughPublicHTTP(t *testing.T) {
 	t.Run("pause", func(t *testing.T) {
 		f := newReviewFixture(t)
 		f.forge.labels = []string{"rework", "wip"}
+		f.forge.timeline = []map[string]any{{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": "wip"}}}
 		directory := newImplementationResultDirectory(t)
 		body, decision := filepath.Join(directory, "submission.md"), filepath.Join(directory, "decision.md")
 		if err := os.WriteFile(body, []byte("draft"), 0600); err != nil {
@@ -1240,6 +1253,7 @@ func TestImplementationDecisionTransportStaysOpaqueThroughPublicCLI(t *testing.T
 			f.forge.noPull = true
 			f.forge.labels = nil
 			f.forge.sourceLabels = []string{"ready", "wip"}
+			f.forge.sourceTimeline = []map[string]any{{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": "wip"}}}
 			f.forge.sourceComments = []map[string]any{
 				{"author_association": "OWNER", "body": "<!-- skl.implement/v1\n{\"target_snapshot\":\"" + f.head + "\",\"target_branch\":\"main\",\"transition\":\"stale\",\"resume_state\":7}\n-->"},
 				{"author_association": "OWNER", "body": "malformed retired envelope"},
@@ -1344,6 +1358,7 @@ func TestImplementationIssueOnlyPausePublishesNewDecisionAfterRequeueThroughPubl
 	f.forge.noPull = true
 	f.forge.labels = nil
 	f.forge.sourceLabels = []string{"ready", "wip"}
+	f.forge.sourceTimeline = []map[string]any{{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": "wip"}}}
 	f.forge.sourceComments = []map[string]any{{"author_association": "OWNER", "body": "<!-- skl.implement/v1\n{\"target_snapshot\":\"" + f.head + "\",\"target_branch\":\"main\"}\n-->"}}
 	start := f.run(t, f.worktree, "implement", "resume", "--item", "7")
 	first := filepath.Join(start.Packet.Facts.Implementation.ResultDirectory, "decision.md")
@@ -1430,6 +1445,7 @@ func TestImplementationPauseRetryRepublishesNothingThroughPublicHTTP(t *testing.
 	f.forge.noPull = true
 	f.forge.labels = nil
 	f.forge.sourceLabels = []string{"ready", "wip"}
+	f.forge.sourceTimeline = []map[string]any{{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": "wip"}}}
 	f.forge.sourceComments = []map[string]any{{"author_association": "OWNER", "body": "<!-- skl.implement/v1\n{\"target_snapshot\":\"" + f.head + "\",\"target_branch\":\"main\"}\n-->"}}
 	start := f.run(t, f.worktree, "implement", "resume", "--item", "7")
 	directory := start.Packet.Facts.Implementation.ResultDirectory
@@ -1456,6 +1472,7 @@ func TestImplementationPauseRetryReusesAcceptedDecisionThroughPublicHTTP(t *test
 	f.forge.noPull = true
 	f.forge.labels = nil
 	f.forge.sourceLabels = []string{"ready", "wip"}
+	f.forge.sourceTimeline = []map[string]any{{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": "wip"}}}
 	f.forge.sourceComments = []map[string]any{{"author_association": "OWNER", "body": "<!-- skl.implement/v1\n{\"target_snapshot\":\"" + f.head + "\",\"target_branch\":\"main\"}\n-->"}}
 	start := f.run(t, f.worktree, "implement", "resume", "--item", "7")
 	decision := filepath.Join(start.Packet.Facts.Implementation.ResultDirectory, "decision.md")

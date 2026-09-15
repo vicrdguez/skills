@@ -174,6 +174,9 @@ func TestHandoffSourceCleanupFailureRowsThroughPublicHTTP(t *testing.T) {
 			if tc.ready {
 				f.forge.noPull, f.forge.labels = true, nil
 				f.forge.sourceLabels = []string{"ready", "wip", "custom-source"}
+				f.forge.sourceTimeline = []map[string]any{{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": "wip"}}}
+			} else {
+				f.forge.timeline = []map[string]any{{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": "wip"}}}
 			}
 			if tc.sync {
 				f.forge.labels = append(f.forge.labels, "sync")
@@ -356,6 +359,7 @@ func TestCleanupAfterVerificationNeverMutatesHandoffThroughPublicHTTP(t *testing
 			if mode == "submit" || mode == "pause" {
 				consumer = "watchdog"
 				f.forge.labels = []string{"rework", "wip"}
+				f.forge.timeline = []map[string]any{{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": "wip"}}}
 				directory = newImplementationResultDirectory(t)
 				body := filepath.Join(directory, "submission.md")
 				if err := os.WriteFile(body, []byte("final"), 0600); err != nil {

@@ -206,7 +206,7 @@ func TestReviewInlineAuthorizationThroughPublicHTTP(t *testing.T) {
 				t.Fatalf("inline feedback obstructed resume or disappeared: %#v", resumed)
 			}
 			comment := resumed.Packet.Facts.Watchdog.Comments[0]
-			if comment.InlineAuthorized || comment.Body != tc.feedback || comment.Author != "outsider" || comment.Association != tc.association || comment.Commit != f.head || comment.Path != "README.md" || comment.Line != 1 || comment.Side != "RIGHT" || comment.CreatedAt != createdAt {
+			if comment.EvidenceAuthorized || comment.Body != tc.feedback || comment.Author != "outsider" || comment.Association != tc.association || comment.Commit != f.head || comment.Path != "README.md" || comment.Line != 1 || comment.Side != "RIGHT" || comment.CreatedAt != createdAt {
 				t.Fatalf("inline feedback lost its identity or anchor: %#v", comment)
 			}
 			directory := t.TempDir()
@@ -239,7 +239,7 @@ func TestReviewInlineAuthorizationThroughPublicHTTP(t *testing.T) {
 			}
 			if tc.findings {
 				published := got.Item.Submission.Comments[1]
-				if !published.InlineAuthorized || published.Body != "finding" || published.Association != "OWNER" || published.Commit != f.head || published.Path != "README.md" || published.Line != 1 || published.Side != "RIGHT" {
+				if !published.EvidenceAuthorized || published.Body != "finding" || published.Association != "OWNER" || published.Commit != f.head || published.Path != "README.md" || published.Line != 1 || published.Side != "RIGHT" {
 					t.Fatalf("genuine finding was not published at the requested anchor: %#v", published)
 				}
 			}
