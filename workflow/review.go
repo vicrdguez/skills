@@ -111,10 +111,12 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	if !retry && !completedDone && item.State != AwaitingReview {
 		return ImplementationOutcome{}, Refuse("a new review completion requires the selected Awaiting Review Claim")
 	}
+	if err := RefuseNonMainBase(item.Submission.ID, item.Submission.Base); err != nil {
+		return ImplementationOutcome{}, err
+	}
 	if head != reviewed && (verdict != "pass" || gitOK(root, "merge-base", "--is-ancestor", reviewed, head) != nil) {
 		return ImplementationOutcome{}, Refuse("post-marker head must descend from the fixed reviewed head on pass")
 	}
-	requireMergeable := false
 	guard := func() error {
 		local, err := git(root, "rev-parse", "--verify", "refs/heads/"+item.Branch+"^{commit}")
 		if err != nil || local != head {
@@ -134,8 +136,8 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 		if submission.Head != head || submission.Merged || submission.Draft {
 			return Refuse("Submission head changed during verdict")
 		}
-		if requireMergeable && submission.Mergeability != "mergeable" {
-			return Refuse("mergeability changed during verdict; retry to observe the current target")
+		if err := RefuseNonMainBase(item.Submission.ID, submission.Base); err != nil {
+			return err
 		}
 		return nil
 	}
@@ -163,6 +165,9 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 		return ImplementationOutcome{}, err
 	}
 	comments := []skilldist.ReviewComment{{Body: string(summary), Commit: reviewed, Verdict: verdict, ReviewNumber: reviewNumber}}
+	if verdict == "pass" {
+		comments[0].FinalHead = head
+	}
 	if findingsPath != "" {
 		data, err := os.ReadFile(findingsPath)
 		if err != nil {
@@ -239,25 +244,7 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 		item.ResumeState = AwaitingReview
 	}
 	if verdict == "pass" {
-		if submission.Mergeability != "mergeable" && submission.Mergeability != "conflicting" {
-			return ImplementationOutcome{}, Refuse("mergeability unavailable; wait for backend evaluation and retry")
-		}
 		target = ReadyForMerge
-		if item.State == Rework && item.Synchronization {
-			target = Rework
-		} else if submission.Mergeability == "conflicting" && (item.State == AwaitingReview || item.State == ReadyForMerge) {
-			target = Rework
-			item.Synchronization = true
-			item.TargetBranch = submission.Base
-			item.TargetSnapshot, err = backend.ImplementationHead(ctx, submission.Base)
-			if err != nil {
-				return ImplementationOutcome{}, err
-			}
-			if item.TargetSnapshot == "" {
-				return ImplementationOutcome{}, Refuse("current target unavailable; restore it and retry")
-			}
-		}
-		requireMergeable = target == ReadyForMerge
 	}
 	if item.State != AwaitingReview {
 		if item.Claimed && item.Submission.PendingReview == "" {
@@ -267,7 +254,7 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 		if item.Claimed && submission.ClaimAcquiredAt != "" {
 			completedEvidence = bodyMatches && reviewEvidenceMatchesForClaim(item, comments, submission.ClaimAcquiredAt)
 		}
-		compatible := verdict == "rework" && (item.State == Rework || item.State == NeedsHuman) || verdict == "needs-human" && item.State == NeedsHuman || verdict == "pass" && (item.State == ReadyForMerge || item.State == Rework && item.Synchronization)
+		compatible := verdict == "rework" && (item.State == Rework || item.State == NeedsHuman) || verdict == "needs-human" && item.State == NeedsHuman || verdict == "pass" && item.State == ReadyForMerge
 		compatible = compatible && completedEvidence
 		if !compatible {
 			return ImplementationOutcome{}, Refuse("completed or partial review differs from supplied verdict; restore its exact Result Documents")
@@ -434,7 +421,7 @@ func reviewEvidenceMatchesForClaim(item ImplementationItem, wanted []skilldist.R
 }
 
 func reviewCommentsMatch(a, b skilldist.ReviewComment) bool {
-	return a.Body == b.Body && a.Path == b.Path && a.Verdict == b.Verdict && a.Commit == b.Commit && (a.Path != "" || a.ReviewNumber == b.ReviewNumber) && (a.Path == "" || a.Line == b.Line && a.Side == b.Side)
+	return a.Body == b.Body && a.Path == b.Path && a.Verdict == b.Verdict && a.Commit == b.Commit && a.FinalHead == b.FinalHead && (a.Path != "" || a.ReviewNumber == b.ReviewNumber) && (a.Path == "" || a.Line == b.Line && a.Side == b.Side)
 }
 
 func reviewSummariesForClaim(comments []skilldist.ReviewComment, claimedAt string) ([]skilldist.ReviewComment, bool) {

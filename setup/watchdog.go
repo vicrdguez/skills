@@ -19,13 +19,14 @@ const reviewSummaryPrefix = "<!-- skl.watchdog.review/v1\n"
 type reviewSummaryMetadata struct {
 	ReviewNumber uint64 `json:"review_number"`
 	Verdict      string `json:"verdict"`
+	FinalHead    string `json:"final_head,omitempty"`
 }
 
 func reviewSummaryBody(comment skilldist.ReviewComment) (string, error) {
 	if comment.ReviewNumber == 0 || comment.Verdict != "rework" && comment.Verdict != "pass" && comment.Verdict != "needs-human" {
 		return "", fmt.Errorf("invalid review number or verdict")
 	}
-	metadata, err := json.Marshal(reviewSummaryMetadata{ReviewNumber: comment.ReviewNumber, Verdict: comment.Verdict})
+	metadata, err := json.Marshal(reviewSummaryMetadata{ReviewNumber: comment.ReviewNumber, Verdict: comment.Verdict, FinalHead: comment.FinalHead})
 	if err != nil {
 		return "", err
 	}
@@ -63,21 +64,6 @@ func (b *GitHubBackend) CompleteReview(ctx context.Context, item workflow.Implem
 	}
 	if err := guard(); err != nil {
 		return err
-	}
-	// Record the final head the pass verdict accepted before any overlap label
-	// is written, so interrupted recovery can bind completion to it.
-	if target == workflow.ReadyForMerge && item.Submission.Head != "" {
-		if err := b.publishImplementationMetadata(ctx, repository, itemNumber, implementationMetadata{VerdictHead: item.Submission.Head}); err != nil {
-			return err
-		}
-	}
-	if item.Synchronization && target == workflow.Rework {
-		if err := b.publishImplementationMetadata(ctx, repository, itemNumber, implementationMetadata{SynchronizationTarget: item.TargetSnapshot, TargetBranch: item.TargetBranch}); err != nil {
-			return err
-		}
-		if err := b.implementationLabelMutation(ctx, repository, submissionNumber, []string{"sync"}, nil, guard); err != nil {
-			return err
-		}
 	}
 	if target == workflow.NeedsHuman {
 		if err := b.publishImplementationMetadata(ctx, repository, itemNumber, implementationMetadata{ResumeState: item.ResumeState}); err != nil {
@@ -130,7 +116,6 @@ func (b *GitHubBackend) ReviewSubmission(ctx context.Context, id workflow.Submis
 	}
 	labels := map[string]bool{}
 	latest := ""
-	synchronizing := false
 	claimAcquiredAt := ""
 	claimAmbiguous := false
 	for page := 1; ; page++ {
@@ -159,8 +144,6 @@ func (b *GitHubBackend) ReviewSubmission(ctx context.Context, id workflow.Submis
 			}
 			labels[event.Label.Name] = event.Event == "labeled"
 			if event.Event == "labeled" && (event.Label.Name == "review" || event.Label.Name == "rework" || event.Label.Name == "done" || event.Label.Name == "needs-human") {
-				// A conflicting pass retry can add rework before its claimed review is removed.
-				synchronizing = event.Label.Name == "rework" && latest == "done" && labels["done"] && labels["sync"] && (!labels["review"] || labels["wip"]) && !labels["needs-human"] && !labels["ready"]
 				latest = event.Label.Name
 			}
 		}
@@ -180,12 +163,11 @@ func (b *GitHubBackend) ReviewSubmission(ctx context.Context, id workflow.Submis
 		result.PendingReview = map[string]workflow.State{"rework": workflow.Rework, "done": workflow.ReadyForMerge, "needs-human": workflow.NeedsHuman}[latest]
 		result.State = result.PendingReview
 	}
-	if current["review"] && claimed && labels["wip"] && !claimAmbiguous {
-		result.ClaimAcquiredAt = claimAcquiredAt
+	if states == 1 && claimed && (state == workflow.ReadyForMerge || state == workflow.NeedsHuman) {
+		result.PendingReview = state
 	}
-	if (states == 2 && !current["review"] || states == 3 && current["review"] && claimed && labels["wip"]) && current["review"] == labels["review"] && current["done"] && current["rework"] && current["sync"] && labels["done"] && labels["rework"] && labels["sync"] && synchronizing {
-		result.PendingReview = workflow.Rework
-		result.State = workflow.Rework
+	if (current["review"] || result.PendingReview != "") && claimed && labels["wip"] && !claimAmbiguous {
+		result.ClaimAcquiredAt = claimAcquiredAt
 	}
 	return result, nil
 }

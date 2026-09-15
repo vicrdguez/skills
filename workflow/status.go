@@ -21,14 +21,10 @@ func ObserveStatus(ctx context.Context, backend ImplementationBackend) (StatusOu
 	}
 	outcome := StatusOutcome{Status: "observed", Items: items}
 	for i, item := range items {
-		conflictDiversion := false
 		if item.Problem != "" {
 			outcome.Items[i].State = NeedsHuman
 			continue
 		}
-		// A conflicting pass retry routes to Synchronization Rework, but it is
-		// still an interrupted verdict and must bind recovery to its accepted head.
-		interruptedPass := item.Submission != nil && item.Submission.PendingReview == ReadyForMerge
 		if item.State == ReadyForMerge && item.Submission != nil {
 			if port, ok := backend.(ReviewBackend); ok {
 				current, err := port.ReviewSubmission(ctx, item.Submission.ID)
@@ -40,64 +36,51 @@ func ObserveStatus(ctx context.Context, backend ImplementationBackend) (StatusOu
 					outcome.Items[i].Claimed = false
 					continue
 				}
-				if current.Head == item.Submission.Head && current.Mergeability == "conflicting" {
-					item.Synchronization = true
-					item.TargetBranch = current.Base
-					item.TargetSnapshot, err = backend.ImplementationHead(ctx, current.Base)
-					if err != nil {
-						return StatusOutcome{}, err
-					}
-					if item.TargetSnapshot == "" {
-						return StatusOutcome{}, Refuse("current target unavailable; retry status after restoring the target")
-					}
-					submission := *item.Submission
-					submission.PendingReview = Rework
-					item.Submission = &submission
-					conflictDiversion = true
-				}
 			}
 		}
 		if item.Submission != nil && item.Submission.PendingReview != "" {
-			if !conflictDiversion {
+			if item.Submission.PendingReview != ReadyForMerge {
 				return StatusOutcome{}, Refuse("partial review cannot prove its original submit context or evidence; retry its original fixed-number watchdog submit command")
 			}
 			port, ok := backend.(ReviewBackend)
 			if !ok {
 				return StatusOutcome{}, Refuse("backend cannot reconcile partial review")
 			}
+			current, err := port.ReviewSubmission(ctx, item.Submission.ID)
+			if err != nil {
+				return StatusOutcome{}, err
+			}
+			if err := RefuseNonMainBase(item.Submission.ID, current.Base); err != nil {
+				return StatusOutcome{}, err
+			}
+			summaries, unambiguous := reviewSummariesForClaim(item.Submission.Comments, current.ClaimAcquiredAt)
+			if !unambiguous || len(summaries) != 1 || summaries[0].Verdict != "pass" || summaries[0].FinalHead == "" || summaries[0].FinalHead != item.Submission.Head {
+				return StatusOutcome{}, Refuse("interrupted pass does not establish the current candidate; retain the Claim and inspect the original fixed-number watchdog submit command and Result Documents")
+			}
+			acceptedHead, claimedAt := summaries[0].FinalHead, current.ClaimAcquiredAt
 			guard := func() error {
 				current, err := port.ReviewSubmission(ctx, item.Submission.ID)
 				if err != nil {
 					return err
 				}
-				if current.Head != item.Submission.Head || current.Merged {
+				if current.Head != acceptedHead || current.Merged || current.Draft || current.Claimed && current.ClaimAcquiredAt != claimedAt || !current.Claimed && current.PendingReview != "" {
 					return Refuse("Submission changed during status reconciliation")
 				}
-				if interruptedPass {
-					accepted := item.Submission.VerdictHead
-					if accepted == "" {
-						accepted = item.Submission.ReviewedHead
+				if item.Submission.PendingReview == ReadyForMerge {
+					if err := RefuseNonMainBase(item.Submission.ID, current.Base); err != nil {
+						return err
 					}
-					if accepted == "" {
-						return Refuse("pending pass cannot establish the verdict-accepted head; rerun the review before completing")
-					}
-					if current.Head != accepted {
-						return Refuse("Submission head differs from the verdict-accepted head; restore the fixed head or rerun the review")
-					}
-				}
-				if item.Submission.PendingReview == ReadyForMerge && current.Mergeability != "mergeable" {
-					return Refuse("mergeability unavailable or changed during status reconciliation; retry to observe the current target")
 				}
 				return nil
 			}
 			if err := port.CompleteReview(ctx, item, item.Submission.PendingReview, guard); err != nil {
 				return StatusOutcome{}, err
 			}
-			current, err := backend.ImplementationItems(ctx)
+			observed, err := backend.ImplementationItems(ctx)
 			if err != nil {
 				return StatusOutcome{}, err
 			}
-			for _, c := range current {
+			for _, c := range observed {
 				if c.ID == item.ID {
 					outcome.Items[i] = c
 				}
@@ -111,9 +94,10 @@ func ObserveStatus(ctx context.Context, backend ImplementationBackend) (StatusOu
 					return err
 				}
 				for _, c := range current {
-					if c.ID == item.ID && c.Problem == "" && c.Submission != nil && c.Submission.Head == item.Submission.Head && c.Submission.State == AwaitingReview && !c.Submission.Claimed {
-						return nil
+					if c.ID != item.ID || c.Problem != "" || c.Submission == nil || c.Submission.Head != item.Submission.Head || c.Submission.State != AwaitingReview || c.Submission.Claimed {
+						continue
 					}
+					return RefuseNonMainBase(c.Submission.ID, c.Submission.Base)
 				}
 				return Refuse("partial Submission changed; inspect before reconciling")
 			}

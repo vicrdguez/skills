@@ -71,14 +71,6 @@ func (b *GitHubBackend) ClaimImplementation(ctx context.Context, item workflow.I
 		if current.Problem != "" || current.State != item.State || current.Branch != item.Branch {
 			return workflow.Refuse("implementation state changed before Claim; inspect projections and explicitly resume")
 		}
-		if item.TargetSnapshot != "" {
-			if current.TargetSnapshot != "" && current.TargetSnapshot != item.TargetSnapshot {
-				return workflow.Refuse("Target Snapshot contradicts recorded obligation; use the original pinned commit")
-			}
-			if err := b.publishImplementationMetadata(ctx, repository, itemNumber, implementationMetadata{TargetSnapshot: item.TargetSnapshot, TargetBranch: item.TargetBranch}); err != nil {
-				return err
-			}
-		}
 		if item.State == workflow.AwaitingReview {
 			if item.Submission == nil || current.Submission == nil || current.Submission.Head != item.Submission.Head || current.Submission.ID != item.Submission.ID {
 				return workflow.Refuse("Submission changed before Watchdog Claim; retry with the current head")
@@ -246,7 +238,7 @@ func (b *GitHubBackend) PublishImplementation(ctx context.Context, item workflow
 	var pull githubPull
 	var writeErr error
 	if len(matches) == 0 {
-		writeErr = b.request(ctx, http.MethodPost, b.repositoryPath(repository)+"/pulls", map[string]any{"title": item.Branch, "head": item.Branch, "base": wanted.Base, "body": wanted.Body, "draft": wanted.Draft}, &pull)
+		writeErr = b.request(ctx, http.MethodPost, b.repositoryPath(repository)+"/pulls", map[string]any{"title": item.Branch, "head": item.Branch, "base": "main", "body": wanted.Body, "draft": wanted.Draft}, &pull)
 		if writeErr != nil {
 			// Observe an ambiguous create before considering another write.
 			var observed []githubPull
@@ -261,11 +253,15 @@ func (b *GitHubBackend) PublishImplementation(ctx context.Context, item workflow
 	} else {
 		pull = matches[0]
 	}
+	// A recovered or already known non-main Submission must be refused before any further edit.
+	if err := workflow.RefuseNonMainBase(workflow.SubmissionID(strconv.Itoa(pull.Number)), pull.Base.Ref); err != nil {
+		return workflow.Submission{}, err
+	}
 	if pull.Head.Ref != item.Branch || !strings.EqualFold(pull.Head.Repo.FullName, repository.Owner+"/"+repository.Name) || pull.Head.SHA != wanted.Head || pull.State == "closed" {
 		return workflow.Submission{}, workflow.Refuse("Submission head or state changed during publication; inspect and retry at a pushed fixed head")
 	}
-	if pull.Body != wanted.Body || pull.Base.Ref != wanted.Base {
-		writeErr = b.request(ctx, http.MethodPatch, b.repositoryPath(repository)+fmt.Sprintf("/pulls/%d", pull.Number), map[string]string{"body": wanted.Body, "base": wanted.Base}, nil)
+	if pull.Body != wanted.Body {
+		writeErr = b.request(ctx, http.MethodPatch, b.repositoryPath(repository)+fmt.Sprintf("/pulls/%d", pull.Number), map[string]string{"body": wanted.Body}, nil)
 	}
 	if pull.Draft != wanted.Draft {
 		mutation := "markPullRequestReadyForReview"
@@ -286,13 +282,14 @@ func (b *GitHubBackend) PublishImplementation(ctx context.Context, item workflow
 	if err := b.request(ctx, http.MethodGet, b.repositoryPath(repository)+fmt.Sprintf("/pulls/%d", pull.Number), nil, &observed); err != nil {
 		return workflow.Submission{}, err
 	}
-	if observed.Head.Ref != item.Branch || observed.Head.SHA != wanted.Head || observed.Body != wanted.Body || observed.Base.Ref != wanted.Base || observed.Draft != wanted.Draft || observed.State != "open" {
+	if observed.Head.Ref != item.Branch || observed.Head.SHA != wanted.Head || observed.Body != wanted.Body || observed.Base.Ref != "main" || observed.Draft != wanted.Draft || observed.State != "open" {
 		if writeErr != nil {
 			return workflow.Submission{}, writeErr
 		}
 		return workflow.Submission{}, workflow.Refuse("Submission publication not observed at the fixed head; inspect and retry the same handoff")
 	}
 	wanted.ID = workflow.SubmissionID(strconv.Itoa(observed.Number))
+	wanted.Base = "main"
 	return wanted, nil
 }
 
@@ -383,13 +380,8 @@ func trustedMetadata(comment skilldist.ReviewComment) bool {
 }
 
 type implementationMetadata struct {
-	SynchronizationTarget string                             `json:"synchronization_target,omitempty"`
-	ReviewedHead          string                             `json:"watchdog_head,omitempty"`
-	VerdictHead           string                             `json:"verdict_head,omitempty"`
-	Transition            *workflow.ImplementationTransition `json:"transition,omitempty"`
-	TargetSnapshot        string                             `json:"target_snapshot,omitempty"`
-	TargetBranch          string                             `json:"target_branch,omitempty"`
-	ResumeState           workflow.State                     `json:"resume_state,omitempty"`
+	Transition  *workflow.ImplementationTransition `json:"transition,omitempty"`
+	ResumeState workflow.State                     `json:"resume_state,omitempty"`
 }
 
 func implementationBranchOwners(issues []githubIssue) map[string]int {
@@ -482,14 +474,16 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 					for _, review := range reviews {
 						verdict := map[string]string{"CHANGES_REQUESTED": "rework", "APPROVED": "pass", "COMMENTED": "needs-human"}[review.State]
 						body := review.Body
+						finalHead := ""
 						reviewNumber := uint64(0)
 						if strings.HasPrefix(body, reviewSummaryPrefix) {
 							verdict = ""
 							if metadata, summary, ok := parseReviewSummary(body); ok && review.State == "COMMENTED" {
 								body, verdict, reviewNumber = summary, metadata.Verdict, metadata.ReviewNumber
+								finalHead = metadata.FinalHead
 							}
 						}
-						item.Submission.Comments = append(item.Submission.Comments, skilldist.ReviewComment{Body: body, Author: review.User.Login, Association: review.Association, Commit: review.Commit, CreatedAt: review.SubmittedAt, Verdict: verdict, ReviewNumber: reviewNumber})
+						item.Submission.Comments = append(item.Submission.Comments, skilldist.ReviewComment{Body: body, Author: review.User.Login, Association: review.Association, Commit: review.Commit, FinalHead: finalHead, CreatedAt: review.SubmittedAt, Verdict: verdict, ReviewNumber: reviewNumber})
 					}
 					if len(reviews) < 100 {
 						break
@@ -547,27 +541,8 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 					item.Problem = "invalid implementation operation metadata"
 					continue
 				}
-				if metadata.TargetSnapshot != "" {
-					if item.TargetSnapshot != "" && item.TargetSnapshot != metadata.TargetSnapshot {
-						item.Problem = "conflicting Target Snapshot metadata"
-						continue
-					}
-					item.TargetSnapshot = metadata.TargetSnapshot
-				}
-				if metadata.TargetBranch != "" {
-					item.TargetBranch = metadata.TargetBranch
-				}
-				if metadata.SynchronizationTarget != "" {
-					item.TargetSnapshot = metadata.SynchronizationTarget
-				}
 				if metadata.ResumeState != "" {
 					item.ResumeState = metadata.ResumeState
-				}
-				if metadata.ReviewedHead != "" && item.Submission != nil {
-					item.Submission.ReviewedHead = metadata.ReviewedHead
-				}
-				if metadata.VerdictHead != "" && item.Submission != nil {
-					item.Submission.VerdictHead = metadata.VerdictHead
 				}
 				if metadata.Transition != nil {
 					item.Transition = metadata.Transition
@@ -592,13 +567,6 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 		items = append(items, item)
 	}
 	return items, nil
-}
-
-func (b *GitHubBackend) ImplementationTarget(ctx context.Context) (string, error) {
-	if err := b.requireRepository(); err != nil {
-		return "", err
-	}
-	return b.validate(ctx, b.repository)
 }
 
 func implementationLabels(issue githubIssue) (workflow.State, bool, string) {

@@ -92,48 +92,6 @@ func TestB13CarryExplicitEndpointsThroughGeneratedCommands(t *testing.T) {
 		})
 	}
 
-	for _, explicit := range []bool{true, false} {
-		name := "Target Snapshot recovery with marked evidence"
-		if explicit {
-			name = "Target Snapshot recovery with explicit evidence"
-		}
-		t.Run(name, func(t *testing.T) {
-			var root, baseline string
-			if explicit {
-				root, baseline, _, _ = markerless(t, false)
-			} else {
-				root = proposalRepository(t)
-				baseline = prepareSlice(t, root, "widget")
-			}
-			runGit(t, root, "remote", "rename", "origin", "upstream")
-			runGit(t, root, "commit", "--allow-empty", "-m", "implementation progress")
-			item := workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Ready, Claimed: true}
-			flags := []string(nil)
-			if explicit {
-				flags = []string{"--artifact-baseline", baseline}
-			}
-			backend := &implementationMemory{work: []workflow.ImplementationItem{item}}
-			got := implementCLI(t, root, backend, append([]string{"resume", "--item", "7", "--remote", "upstream"}, flags...)...)
-			command := "skl implement resume --item 7 --target-snapshot <sha> --remote 'upstream'"
-			if len(flags) != 0 {
-				command += " " + strings.Join(flags, " ")
-			}
-			if got.Status != "fix_required" || got.Packet != nil || !strings.Contains(got.Reason, command) || !backend.work[0].Claimed {
-				t.Fatalf("recovery lost continuation %q: %#v", command, got)
-			}
-			if !explicit && strings.Contains(got.Reason, "--artifact-") {
-				t.Fatalf("marked recovery received synthetic overrides: %s", got.Reason)
-			}
-			snapshot := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "main"))
-			retry := strings.ReplaceAll(command, "<sha>", snapshot)
-			retry = strings.ReplaceAll(retry, "'upstream'", "upstream")
-			resumed := implementCLI(t, root, backend, strings.Fields(retry)[2:]...)
-			if resumed.Status != "work_available" || resumed.Packet == nil || resumed.Packet.Facts.Implementation.ArtifactBaseline != baseline {
-				t.Fatalf("continuation failed: %#v", resumed)
-			}
-		})
-	}
-
 	root := proposalRepository(t)
 	prepareSlice(t, root, "marked")
 	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "marked", State: workflow.Ready}}, remoteHeads: map[string]string{"main": strings.TrimSpace(runGitOutput(t, root, "rev-parse", "main"))}}

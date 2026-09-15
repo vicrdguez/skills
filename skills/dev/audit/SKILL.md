@@ -24,7 +24,10 @@ Use the supplied Work Item and Submission facts for originating context. This sk
 
 ### 1. Pin the fixed point
 
-Review the single claimed unit of work against the PR base merge-base, or the parent of the implementor's first commit when no PR comparison exists. Never use that first commit itself: `git diff <it>...HEAD` would omit everything it introduced.
+The goal is to review the work done for the single claimed unit of work. Which point that is depends on the round:
+
+- **First workflow review of a change** — the merge-base with `main`, or the parent of the implementor's first commit. Never that first commit itself: `git diff <it>...HEAD` would omit everything it introduced. An independent Audit still uses any fixed point its caller explicitly supplies.
+- **Repeat review after a bounce** — the `Reviewed head` recorded in the previous reviewer's summary, so the round reads only what changed since.
 
 Artifact integrity uses its own, unmoving Artifact Baseline and, when available, Artifact Completion from the engine's endpoint inspection. It never advances with review rounds. Refresh fixed Git facts with the packet's `inspect_command`, or `skl implement inspect --remote <name> --item <number>` when invoked independently; preserve any caller-supplied `--artifact-baseline <full-sha>` and `--artifact-completion <full-sha>`. The engine validates endpoint identity and snapshots, while you read and judge the historical contract.
 

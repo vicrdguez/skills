@@ -53,6 +53,7 @@ type reviewForge struct {
 	denyRename     string
 	renameDenied   bool
 	clock          int
+	writes         int
 }
 
 func (f *reviewForge) timestamp() string {
@@ -63,6 +64,9 @@ func (f *reviewForge) timestamp() string {
 func (f *reviewForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if r.Method != http.MethodGet {
+		f.writes++
+	}
 	path := strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets")
 	branch := f.branch
 	if branch == "" {
@@ -1478,12 +1482,12 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 		f.forge.mergeable = false
 		_ = os.WriteFile(f.checkpoint, []byte("2:"+f.head+"\n"), 0600)
 		f.start(t, f.root)
-		if got := f.submit(t, 3, f.head, "pass"); got.Status != "rework" || strings.TrimSpace(readFile(t, f.checkpoint)) != "3:"+f.head {
-			t.Fatalf("independent conflict diversion consumed review history: %#v", got)
+		if got := f.submit(t, 3, f.head, "pass"); got.Status != "ready_for_merge" || fileExists(f.checkpoint) {
+			t.Fatalf("mergeability gated a valid pass: %#v", got)
 		}
-		before := readFile(t, f.checkpoint)
-		if got := f.run(t, f.root, "status"); got.Status != "observed" || readFile(t, f.checkpoint) != before {
-			t.Fatalf("status rewrote conflict-diverted checkpoint: %#v", got)
+		before := checkpointSnapshot(f.checkpoint)
+		if got := f.run(t, f.root, "status"); got.Status != "observed" || checkpointSnapshot(f.checkpoint) != before {
+			t.Fatalf("status rewrote the conflicting pass checkpoint: %#v", got)
 		}
 
 		f = newReviewFixture(t)
@@ -1514,8 +1518,8 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 		_ = os.WriteFile(f.checkpoint, []byte("3:"+f.head+"\n"), 0600)
 		before = checkpointSnapshot(f.checkpoint)
 		status := f.run(t, f.root, "status")
-		if status.Status != "observed" || checkpointSnapshot(f.checkpoint) != before || !slices.Contains(f.forge.labels, "sync") || !slices.Contains(f.forge.labels, "rework") || slices.Contains(f.forge.labels, "wip") {
-			t.Fatalf("status lost independent conflict diversion: %#v labels=%v", status, f.forge.labels)
+		if status.Status != "observed" || checkpointSnapshot(f.checkpoint) != before || !slices.Contains(f.forge.labels, "done") || slices.Contains(f.forge.labels, "sync") || slices.Contains(f.forge.labels, "rework") || slices.Contains(f.forge.labels, "wip") {
+			t.Fatalf("status invented conflict integration: %#v labels=%v", status, f.forge.labels)
 		}
 	})
 
@@ -1579,8 +1583,12 @@ func reviewSummaryText(t *testing.T, summary map[string]any) string {
 }
 
 func storedReviewSummary(number uint64, verdict, body, commit, submittedAt string) map[string]any {
+	finalHead := ""
+	if verdict == "pass" {
+		finalHead = fmt.Sprintf(",\"final_head\":%q", commit)
+	}
 	return map[string]any{
-		"body":         fmt.Sprintf("<!-- skl.watchdog.review/v1\n{\"review_number\":%d,\"verdict\":%q}\n-->\n%s", number, verdict, body),
+		"body":         fmt.Sprintf("<!-- skl.watchdog.review/v1\n{\"review_number\":%d,\"verdict\":%q%s}\n-->\n%s", number, verdict, finalHead, body),
 		"commit_id":    commit,
 		"state":        "COMMENTED",
 		"submitted_at": submittedAt,

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -16,108 +15,6 @@ import (
 	"github.com/vicrdguez/skills/setup"
 	"github.com/vicrdguez/skills/workflow"
 )
-
-func TestGitHubStatusRefusesPendingPassAtReplacedHead(t *testing.T) {
-	for _, tc := range []struct {
-		name     string
-		verdict  string
-		head     string
-		conflict bool
-		reason   string
-	}{
-		{"replaced after post-marker pass", "marker", "replacement", false, "partial review"},
-		{"replaced without verdict record", "", "replacement", false, "partial review"},
-		{"replaced conflicting after post-marker pass", "marker", "replacement", true, "verdict-accepted head"},
-		{"conflicting replacement without verdict record", "", "replacement", true, "verdict-accepted head"},
-		{"accepted conflicting head synchronizes", "marker", "marker", true, ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			labels := []string{"review", "wip", "done"}
-			events := []map[string]any{}
-			record := func(event, label string) {
-				events = append(events, map[string]any{"event": event, "label": map[string]string{"name": label}})
-			}
-			for _, label := range labels {
-				record("labeled", label)
-			}
-			metadata := []map[string]string{{"author_association": "OWNER", "body": "<!-- skl.implement/v1\n{\"watchdog_head\":\"reviewed\"}\n-->"}}
-			if tc.verdict != "" {
-				metadata = append(metadata, map[string]string{"author_association": "OWNER", "body": "<!-- skl.implement/v1\n{\"verdict_head\":\"" + tc.verdict + "\"}\n-->"})
-			}
-			writes := 0
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				path := strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets")
-				if r.Method != http.MethodGet {
-					writes++
-				}
-				ls := []map[string]string{}
-				for _, label := range labels {
-					ls = append(ls, map[string]string{"name": label})
-				}
-				pull := map[string]any{"number": 11, "state": "open", "mergeable": !tc.conflict, "labels": ls, "head": map[string]any{"ref": "widget", "sha": tc.head, "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": "main"}}
-				var result any = []any{}
-				switch {
-				case path == "/issues" && r.Method == http.MethodGet:
-					result = []any{map[string]any{"number": 7, "title": "widget", "state": "open"}}
-				case path == "/pulls" && r.Method == http.MethodGet:
-					result = []any{pull}
-				case (path == "/pulls/11" || path == "/issues/11") && r.Method == http.MethodGet:
-					result = pull
-				case path == "/issues/7" && r.Method == http.MethodGet:
-					result = map[string]any{"number": 7, "state": "open"}
-				case path == "/issues/7/comments":
-					if r.Method == http.MethodPost {
-						var payload map[string]string
-						json.NewDecoder(r.Body).Decode(&payload)
-						payload["author_association"] = "OWNER"
-						metadata = append(metadata, payload)
-					}
-					result = metadata
-				case path == "/git/ref/heads/main" && r.Method == http.MethodGet:
-					result = map[string]any{"object": map[string]string{"sha": "target"}}
-				case path == "/issues/11/timeline" && r.Method == http.MethodGet:
-					result = events
-				case path == "/issues/11/labels" && r.Method == http.MethodPost:
-					var payload struct{ Labels []string }
-					json.NewDecoder(r.Body).Decode(&payload)
-					for _, label := range payload.Labels {
-						if !slices.Contains(labels, label) {
-							labels = append(labels, label)
-							record("labeled", label)
-						}
-					}
-				case strings.HasPrefix(path, "/issues/11/labels/") && r.Method == http.MethodDelete:
-					label := strings.TrimPrefix(path, "/issues/11/labels/")
-					labels = slices.DeleteFunc(labels, func(v string) bool { return v == label })
-					record("unlabeled", label)
-				case strings.HasSuffix(path, "/comments"), strings.HasSuffix(path, "/reviews"):
-				default:
-					t.Errorf("unexpected %s %s", r.Method, path)
-					http.NotFound(w, r)
-					return
-				}
-				json.NewEncoder(w).Encode(result)
-			}))
-			defer server.Close()
-			backend := setup.NewGitHubBackend(server.URL, "token", server.Client())
-			backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
-			outcome, err := workflow.ObserveStatus(context.Background(), backend)
-			if tc.reason != "" {
-				if err == nil || !strings.Contains(err.Error(), tc.reason) || writes != 0 || !slices.Equal(labels, []string{"review", "wip", "done"}) {
-					t.Fatalf("replaced pending pass: outcome=%#v err=%v writes=%d labels=%v", outcome, err, writes, labels)
-				}
-				return
-			}
-			if err != nil || len(outcome.Items) != 1 || writes == 0 {
-				t.Fatalf("accepted conflict: %#v %v writes=%d", outcome, err, writes)
-			}
-			item := outcome.Items[0]
-			if item.State != workflow.Rework || !item.Synchronization || item.TargetSnapshot != "target" || item.TargetBranch != "main" || item.Claimed || item.Submission == nil || item.Submission.PendingReview != "" || item.Submission.Claimed || !slices.Contains(labels, "sync") || !slices.Contains(labels, "rework") || slices.Contains(labels, "review") || slices.Contains(labels, "done") || slices.Contains(labels, "wip") {
-				t.Fatalf("accepted conflict: %#v labels=%v", item, labels)
-			}
-		})
-	}
-}
 
 func TestGitHubWatchdogBodyPassRetry(t *testing.T) {
 	for _, footer := range []bool{false, true} {
@@ -162,14 +59,8 @@ func TestGitHubWatchdogBodyPassRetry(t *testing.T) {
 				if f.forge.body != publishedBody || patches != 1 || len(f.forge.summaries) != 1 {
 					t.Fatalf("publication: body=%q, patches=%d, summaries=%v", f.forge.body, patches, f.forge.summaries)
 				}
-				verdicts := 0
-				for _, comment := range f.forge.sourceComments {
-					if value, _ := comment["body"].(string); strings.Contains(value, `"verdict_head":"`+f.head+`"`) {
-						verdicts++
-					}
-				}
-				if verdicts != 1 {
-					t.Fatalf("verdict head publications = %d: %v", verdicts, f.forge.sourceComments)
+				if receipt, _ := f.forge.summaries[0]["body"].(string); !strings.Contains(receipt, `"final_head":"`+f.head+`"`) {
+					t.Fatalf("pass receipt lost the accepted head: %s", receipt)
 				}
 				before := writes
 				if err := os.WriteFile(bodyPath, []byte("changed "+body), 0600); err != nil {
