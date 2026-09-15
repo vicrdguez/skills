@@ -144,6 +144,30 @@ func TestStatusRefusesPendingPassForNonMainSubmission(t *testing.T) {
 	}
 }
 
+func TestStatusRefusesClaimLossDuringPartialPass(t *testing.T) {
+	b := &statusGuardMemory{implementationMemory: &implementationMemory{work: []workflow.ImplementationItem{{
+		ID: "7", Branch: "widget", State: workflow.ReadyForMerge, Claimed: true,
+		Submission: &workflow.Submission{
+			ID: "11", Head: "fixed", Base: "main", State: workflow.ReadyForMerge, Claimed: true,
+			PendingReview: workflow.ReadyForMerge, ClaimAcquiredAt: "2026-01-01T00:00:01Z",
+			Comments: []skilldist.ReviewComment{{ReviewNumber: 1, Verdict: "pass", Commit: "fixed", FinalHead: "fixed", CreatedAt: "2026-01-01T00:00:02Z"}},
+		},
+	}}}}
+	b.beforeLaterGuard = func() {
+		b.work[0].Submission.Lifecycle.Claimed = false
+		b.work[0].Submission.ClaimAcquiredAt = ""
+	}
+	var output bytes.Buffer
+	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return b, nil }, bytes.NewReader(nil), &output, &output)
+	if err := app.Run([]string{"skl", "status", "--repo", proposalRepository(t)}); err != nil {
+		t.Fatalf("status: %v %s", err, &output)
+	}
+	var got setup.ImplementationOutput
+	if err := json.Unmarshal(output.Bytes(), &got); err != nil || got.Status != "fix_required" || !strings.Contains(got.Reason, "changed during status") || b.work[0].Submission.PendingReview != workflow.ReadyForMerge || b.work[0].Submission.Claimed {
+		t.Fatalf("Claim loss completed the partial pass or fabricated a Claim: %v %s", err, &output)
+	}
+}
+
 func TestStatusRecoversOnlyTheCandidateAcceptedByInterruptedPassThroughGitHub(t *testing.T) {
 	for _, tc := range []struct {
 		name, failDelete, evidence string

@@ -63,7 +63,7 @@ func ObserveStatus(ctx context.Context, backend ImplementationBackend) (StatusOu
 				if err != nil {
 					return err
 				}
-				if current.Head != acceptedHead || current.Merged || current.Draft || current.Claimed && current.ClaimAcquiredAt != claimedAt {
+				if current.Head != acceptedHead || current.Merged || current.Draft || current.Claimed && current.ClaimAcquiredAt != claimedAt || !current.Claimed && current.PendingReview != "" {
 					return Refuse("Submission changed during status reconciliation")
 				}
 				if item.Submission.PendingReview == ReadyForMerge {
