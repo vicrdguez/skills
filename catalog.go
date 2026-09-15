@@ -78,6 +78,7 @@ type ReviewComment struct {
 	Author          string `json:"author"`
 	Association     string `json:"association"`
 	Commit          string `json:"commit,omitempty"`
+	FinalHead       string `json:"final_head,omitempty"`
 	Path            string `json:"path,omitempty"`
 	CreatedAt       string `json:"created_at,omitempty"`
 	Verdict         string `json:"verdict,omitempty"`

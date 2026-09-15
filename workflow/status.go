@@ -46,12 +46,24 @@ func ObserveStatus(ctx context.Context, backend ImplementationBackend) (StatusOu
 			if !ok {
 				return StatusOutcome{}, Refuse("backend cannot reconcile partial review")
 			}
+			current, err := port.ReviewSubmission(ctx, item.Submission.ID)
+			if err != nil {
+				return StatusOutcome{}, err
+			}
+			if err := RefuseNonMainBase(item.Submission.ID, current.Base); err != nil {
+				return StatusOutcome{}, err
+			}
+			summaries, unambiguous := reviewSummariesForClaim(item.Submission.Comments, current.ClaimAcquiredAt)
+			if !unambiguous || len(summaries) != 1 || summaries[0].Verdict != "pass" || summaries[0].FinalHead == "" || summaries[0].FinalHead != item.Submission.Head {
+				return StatusOutcome{}, Refuse("interrupted pass does not establish the current candidate; retain the Claim and inspect the original fixed-number watchdog submit command and Result Documents")
+			}
+			acceptedHead, claimedAt := summaries[0].FinalHead, current.ClaimAcquiredAt
 			guard := func() error {
 				current, err := port.ReviewSubmission(ctx, item.Submission.ID)
 				if err != nil {
 					return err
 				}
-				if current.Head != item.Submission.Head || current.Merged {
+				if current.Head != acceptedHead || current.Merged || current.Draft || current.Claimed && current.ClaimAcquiredAt != claimedAt {
 					return Refuse("Submission changed during status reconciliation")
 				}
 				if item.Submission.PendingReview == ReadyForMerge {
@@ -64,11 +76,11 @@ func ObserveStatus(ctx context.Context, backend ImplementationBackend) (StatusOu
 			if err := port.CompleteReview(ctx, item, item.Submission.PendingReview, guard); err != nil {
 				return StatusOutcome{}, err
 			}
-			current, err := backend.ImplementationItems(ctx)
+			observed, err := backend.ImplementationItems(ctx)
 			if err != nil {
 				return StatusOutcome{}, err
 			}
-			for _, c := range current {
+			for _, c := range observed {
 				if c.ID == item.ID {
 					outcome.Items[i] = c
 				}

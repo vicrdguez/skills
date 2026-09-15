@@ -474,14 +474,16 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 					for _, review := range reviews {
 						verdict := map[string]string{"CHANGES_REQUESTED": "rework", "APPROVED": "pass", "COMMENTED": "needs-human"}[review.State]
 						body := review.Body
+						finalHead := ""
 						reviewNumber := uint64(0)
 						if strings.HasPrefix(body, reviewSummaryPrefix) {
 							verdict = ""
 							if metadata, summary, ok := parseReviewSummary(body); ok && review.State == "COMMENTED" {
 								body, verdict, reviewNumber = summary, metadata.Verdict, metadata.ReviewNumber
+								finalHead = metadata.FinalHead
 							}
 						}
-						item.Submission.Comments = append(item.Submission.Comments, skilldist.ReviewComment{Body: body, Author: review.User.Login, Association: review.Association, Commit: review.Commit, CreatedAt: review.SubmittedAt, Verdict: verdict, ReviewNumber: reviewNumber})
+						item.Submission.Comments = append(item.Submission.Comments, skilldist.ReviewComment{Body: body, Author: review.User.Login, Association: review.Association, Commit: review.Commit, FinalHead: finalHead, CreatedAt: review.SubmittedAt, Verdict: verdict, ReviewNumber: reviewNumber})
 					}
 					if len(reviews) < 100 {
 						break

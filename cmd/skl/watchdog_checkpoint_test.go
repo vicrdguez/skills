@@ -53,6 +53,7 @@ type reviewForge struct {
 	denyRename     string
 	renameDenied   bool
 	clock          int
+	writes         int
 }
 
 func (f *reviewForge) timestamp() string {
@@ -63,6 +64,9 @@ func (f *reviewForge) timestamp() string {
 func (f *reviewForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if r.Method != http.MethodGet {
+		f.writes++
+	}
 	path := strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets")
 	branch := f.branch
 	if branch == "" {
@@ -1579,8 +1583,12 @@ func reviewSummaryText(t *testing.T, summary map[string]any) string {
 }
 
 func storedReviewSummary(number uint64, verdict, body, commit, submittedAt string) map[string]any {
+	finalHead := ""
+	if verdict == "pass" {
+		finalHead = fmt.Sprintf(",\"final_head\":%q", commit)
+	}
 	return map[string]any{
-		"body":         fmt.Sprintf("<!-- skl.watchdog.review/v1\n{\"review_number\":%d,\"verdict\":%q}\n-->\n%s", number, verdict, body),
+		"body":         fmt.Sprintf("<!-- skl.watchdog.review/v1\n{\"review_number\":%d,\"verdict\":%q%s}\n-->\n%s", number, verdict, finalHead, body),
 		"commit_id":    commit,
 		"state":        "COMMENTED",
 		"submitted_at": submittedAt,

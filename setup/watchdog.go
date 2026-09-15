@@ -19,13 +19,14 @@ const reviewSummaryPrefix = "<!-- skl.watchdog.review/v1\n"
 type reviewSummaryMetadata struct {
 	ReviewNumber uint64 `json:"review_number"`
 	Verdict      string `json:"verdict"`
+	FinalHead    string `json:"final_head,omitempty"`
 }
 
 func reviewSummaryBody(comment skilldist.ReviewComment) (string, error) {
 	if comment.ReviewNumber == 0 || comment.Verdict != "rework" && comment.Verdict != "pass" && comment.Verdict != "needs-human" {
 		return "", fmt.Errorf("invalid review number or verdict")
 	}
-	metadata, err := json.Marshal(reviewSummaryMetadata{ReviewNumber: comment.ReviewNumber, Verdict: comment.Verdict})
+	metadata, err := json.Marshal(reviewSummaryMetadata{ReviewNumber: comment.ReviewNumber, Verdict: comment.Verdict, FinalHead: comment.FinalHead})
 	if err != nil {
 		return "", err
 	}
@@ -158,11 +159,11 @@ func (b *GitHubBackend) ReviewSubmission(ctx context.Context, id workflow.Submis
 		result.PendingReview = map[string]workflow.State{"rework": workflow.Rework, "done": workflow.ReadyForMerge, "needs-human": workflow.NeedsHuman}[latest]
 		result.State = result.PendingReview
 	}
-	if current["review"] && claimed && labels["wip"] && !claimAmbiguous {
-		result.ClaimAcquiredAt = claimAcquiredAt
-	}
 	if states == 1 && claimed && (state == workflow.ReadyForMerge || state == workflow.NeedsHuman) {
 		result.PendingReview = state
+	}
+	if (current["review"] || result.PendingReview != "") && claimed && labels["wip"] && !claimAmbiguous {
+		result.ClaimAcquiredAt = claimAcquiredAt
 	}
 	return result, nil
 }

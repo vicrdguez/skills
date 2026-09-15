@@ -163,6 +163,9 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 		return ImplementationOutcome{}, err
 	}
 	comments := []skilldist.ReviewComment{{Body: string(summary), Commit: reviewed, Verdict: verdict, ReviewNumber: reviewNumber}}
+	if verdict == "pass" {
+		comments[0].FinalHead = head
+	}
 	if findingsPath != "" {
 		data, err := os.ReadFile(findingsPath)
 		if err != nil {
@@ -416,7 +419,7 @@ func reviewEvidenceMatchesForClaim(item ImplementationItem, wanted []skilldist.R
 }
 
 func reviewCommentsMatch(a, b skilldist.ReviewComment) bool {
-	return a.Body == b.Body && a.Path == b.Path && a.Verdict == b.Verdict && a.Commit == b.Commit && (a.Path != "" || a.ReviewNumber == b.ReviewNumber) && (a.Path == "" || a.Line == b.Line && a.Side == b.Side)
+	return a.Body == b.Body && a.Path == b.Path && a.Verdict == b.Verdict && a.Commit == b.Commit && a.FinalHead == b.FinalHead && (a.Path != "" || a.ReviewNumber == b.ReviewNumber) && (a.Path == "" || a.Line == b.Line && a.Side == b.Side)
 }
 
 func reviewSummariesForClaim(comments []skilldist.ReviewComment, claimedAt string) ([]skilldist.ReviewComment, bool) {

@@ -341,7 +341,7 @@ func TestWatchdogPassRetryIgnoresMergeabilityChanges(t *testing.T) {
 				t.Run(fmt.Sprintf("claimed=%t/%s/%s", claimed, mergeability, phase), func(t *testing.T) {
 					body := "opaque final"
 					storedBody := body + "\n\nCloses #7\n"
-					b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.ReadyForMerge, Claimed: claimed, Submission: &workflow.Submission{ID: "11", Head: head, Base: "main", State: workflow.ReadyForMerge, Claimed: claimed, Body: storedBody, Mergeability: "mergeable", ClaimAcquiredAt: "2026-01-01T00:00:01Z", Comments: []skilldist.ReviewComment{{Body: "pass", Commit: head, Verdict: "pass", ReviewNumber: 1, CreatedAt: "2026-01-01T00:00:02Z"}}}}}, remoteHeads: map[string]string{"widget": head}}
+					b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.ReadyForMerge, Claimed: claimed, Submission: &workflow.Submission{ID: "11", Head: head, Base: "main", State: workflow.ReadyForMerge, Claimed: claimed, Body: storedBody, Mergeability: "mergeable", ClaimAcquiredAt: "2026-01-01T00:00:01Z", Comments: []skilldist.ReviewComment{{Body: "pass", Commit: head, FinalHead: head, Verdict: "pass", ReviewNumber: 1, CreatedAt: "2026-01-01T00:00:02Z"}}}}}, remoteHeads: map[string]string{"widget": head}}
 					if claimed {
 						b.work[0].Submission.PendingReview = workflow.ReadyForMerge
 					}
