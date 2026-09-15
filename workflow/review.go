@@ -226,6 +226,7 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 			return ImplementationOutcome{}, Refuse("review publication already started under this Claim; replay its original fixed-number command and Result Documents")
 		}
 	}
+	observedItem := item
 	target := Rework
 	if reviewNumber >= 2 {
 		target = NeedsHuman
@@ -271,8 +272,16 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 		if !compatible {
 			return ImplementationOutcome{}, Refuse("completed or partial review differs from supplied verdict; restore its exact Result Documents")
 		}
-		if !item.Claimed && !reviewDestinationFinal(item, target, synchronization) {
-			return ImplementationOutcome{}, Refuse("review destination or source cleanup is incomplete; inspect projections without acquiring or releasing a Claim")
+		if !item.Claimed {
+			finalTarget, finalSync := target, synchronization
+			if verdict == "pass" && item.State == ReadyForMerge && target == Rework {
+				// The retained target policy may start synchronization from a
+				// genuinely complete, unclaimed Ready for Merge source.
+				finalTarget, finalSync = ReadyForMerge, false
+			}
+			if !reviewDestinationFinal(observedItem, finalTarget, finalSync) {
+				return ImplementationOutcome{}, Refuse("review destination or source cleanup is incomplete; inspect projections without acquiring or releasing a Claim")
+			}
 		}
 		if completedDone {
 			return ImplementationOutcome{Status: string(item.State), Item: &item, Head: head}, guard()

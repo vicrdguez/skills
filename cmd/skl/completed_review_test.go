@@ -98,3 +98,20 @@ func TestWatchdogRemovesObsoleteSynchronizationBeforeReleaseThroughPublicHTTP(t 
 		})
 	}
 }
+
+func TestCompletedPassRetainsConflictSynchronizationPolicyThroughPublicHTTP(t *testing.T) {
+	f := newReviewFixture(t)
+	f.start(t, f.root)
+	if got := f.submit(t, 1, f.head, "pass"); got.Status != "ready_for_merge" {
+		t.Fatalf("first pass: %#v", got)
+	}
+	// A completed checkpoint may remain after optional cleanup fails.
+	if err := os.WriteFile(f.checkpoint, []byte("1:"+f.head+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	f.forge.mergeable = false
+	got := f.submit(t, 1, f.head, "pass")
+	if got.Status != "rework" || got.Item == nil || !got.Item.Synchronization || got.Item.Claimed || got.Item.TargetSnapshot != f.head || !slices.Contains(f.forge.labels, "sync") || len(f.forge.summaries) != 1 || f.forge.body != "final\n\nCloses #7\n" {
+		t.Fatalf("completed pass lost target synchronization policy: %#v", got)
+	}
+}
