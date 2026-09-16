@@ -16,12 +16,6 @@ import (
 	"github.com/vicrdguez/skills/setup"
 )
 
-type selectionReworkTransport func(*http.Request) (*http.Response, error)
-
-func (f selectionReworkTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	return f(r)
-}
-
 // The same CLI/adapter seam as selectionRun, with malformed wire observations.
 func selectionReworkRun(t *testing.T, root string, forge *candidateForge, change func(*http.Request, *http.Response, []byte) []byte, args ...string) (setup.ImplementationOutput, error) {
 	t.Helper()
@@ -29,7 +23,7 @@ func selectionReworkRun(t *testing.T, root string, forge *candidateForge, change
 	defer server.Close()
 	client := server.Client()
 	previous := client.Transport
-	client.Transport = selectionReworkTransport(func(r *http.Request) (*http.Response, error) {
+	client.Transport = httpRoundTripFunc(func(r *http.Request) (*http.Response, error) {
 		response, err := previous.RoundTrip(r)
 		if err != nil {
 			return response, err
@@ -69,6 +63,64 @@ func selectionReworkRun(t *testing.T, root string, forge *candidateForge, change
 		})
 	}
 	return result, nil
+}
+
+func TestRA1FinalPrewriteObservationCannotAdoptClaimOrLifecycleDrift(t *testing.T) {
+	for _, queue := range []string{"ready", "rework", "review"} {
+		for _, drift := range []string{"claimed", "paused", "closed", "body"} {
+			t.Run(queue+"/"+drift, func(t *testing.T) {
+				root := selectionRepository(t)
+				forge := newCandidateForge()
+				forge.addIssue(7, "2020-01-01T00:00:00Z", "Branch: `widget`\n")
+				number, lane := 30, "implement"
+				if queue == "ready" {
+					number = 7
+					forge.addLabel(7, "ready")
+					forge.readyPages = [][]int{{7}}
+				} else {
+					forge.addPull(30, "2021-01-01T00:00:00Z", "Closes #7\n", "widget", strings.Repeat("a", 40), queue)
+					forge.reworkPages, forge.reviewPages = [][]int{{30}}, [][]int{{30}}
+					if queue == "review" {
+						lane = "watchdog"
+					}
+				}
+				reads, changed := 0, false
+				got, err := selectionReworkRun(t, root, forge, func(r *http.Request, _ *http.Response, body []byte) []byte {
+					if r.Method != http.MethodGet || r.URL.Path != fmt.Sprintf("/repos/acme/widgets/issues/%d", number) {
+						return body
+					}
+					reads++
+					// Ready also reads Dependencies, selected context, and preflight.
+					if changed || queue == "ready" && reads != 4 {
+						return body
+					}
+					record := forge.pulls[number]
+					if queue == "ready" {
+						record = forge.issues[number]
+					}
+					switch drift {
+					case "claimed":
+						forge.addLabel(number, "wip")
+					case "paused":
+						record["labels"] = []map[string]string{{"name": "needs-human"}}
+					case "closed":
+						record["state"] = "closed"
+					case "body":
+						record["body"] = "changed attachment"
+					}
+					changed = true
+					body, _ = json.Marshal(record)
+					return body
+				}, lane, "next")
+				if !changed || got.Packet != nil || err == nil && got.Status != "fix_required" {
+					t.Fatalf("final pre-write drift returned work: %#v, %v changed=%t", got, err, changed)
+				}
+				if forge.matching(func(request string) bool { return strings.Contains(request, "/labels") }) != 0 || forge.matching(func(request string) bool { return request == "graphql:queue" }) != 1 {
+					t.Fatalf("incompatible observation was mutated or replaced: %v", forge.seen())
+				}
+			})
+		}
+	}
 }
 
 func TestW2ClaimReadbackRejectsAttachmentDrift(t *testing.T) {

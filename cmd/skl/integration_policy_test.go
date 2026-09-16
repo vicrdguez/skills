@@ -446,11 +446,11 @@ func TestWatchdogPassRetryAndStatusIgnoreMergeabilityThroughGitHub(t *testing.T)
 				if mergeability != "unknown" {
 					pull["mergeable"] = mergeability == "mergeable"
 				}
-				if r.Method != http.MethodGet {
-					writes++
-				}
 				if selectionGraphQL(w, r, pull, true) {
 					return
+				}
+				if r.Method != http.MethodGet {
+					writes++
 				}
 				var result any = []any{}
 				switch {
@@ -626,9 +626,6 @@ func TestNonMainSubmissionRefusesPublicHandoffsThroughGitHub(t *testing.T) {
 			writes := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				path := strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets")
-				if r.Method != http.MethodGet {
-					writes++
-				}
 				pullLabels := make([]map[string]string, 0, len(labels))
 				for _, label := range labels {
 					pullLabels = append(pullLabels, map[string]string{"name": label})
@@ -636,6 +633,9 @@ func TestNonMainSubmissionRefusesPublicHandoffsThroughGitHub(t *testing.T) {
 				pull := map[string]any{"number": 11, "state": "open", "body": "existing\n\nCloses #7\n", "labels": pullLabels, "head": map[string]any{"sha": head, "ref": "widget", "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": "release"}}
 				if selectionGraphQL(w, r, pull, true) {
 					return
+				}
+				if r.Method != http.MethodGet {
+					writes++
 				}
 				var result any = []any{}
 				switch path {
@@ -1015,9 +1015,6 @@ func TestStatusRefusesRetargetedPartialHandoffThroughGitHub(t *testing.T) {
 	unwanted := ""
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets")
-		if r.Method != http.MethodGet {
-			writes++
-		}
 		toLabels := func(values []string) []map[string]string {
 			labels := make([]map[string]string, 0, len(values))
 			for _, value := range values {
@@ -1027,6 +1024,12 @@ func TestStatusRefusesRetargetedPartialHandoffThroughGitHub(t *testing.T) {
 		}
 		source := map[string]any{"number": 7, "title": "widget", "state": "open", "labels": toLabels(sourceLabels), "body": "Branch: `widget`\n"}
 		pull := map[string]any{"number": 11, "state": "open", "body": "existing\n\nCloses #7\n", "labels": toLabels(pullLabels), "head": map[string]any{"ref": "widget", "sha": head, "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": "release"}}
+		if selectionGraphQL(w, r, pull, true) {
+			return
+		}
+		if r.Method != http.MethodGet {
+			writes++
+		}
 		if strings.HasPrefix(path, "/issues/7/labels") || strings.HasPrefix(path, "/issues/11/labels") {
 			target, prefix := &sourceLabels, "/issues/7/labels/"
 			if strings.HasPrefix(path, "/issues/11/") {
@@ -1307,9 +1310,6 @@ func TestWatchdogRefusesInvalidReviewedEvidenceThroughGitHub(t *testing.T) {
 				unwanted := ""
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					path := strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets")
-					if r.Method != http.MethodGet {
-						writes++
-					}
 					if tc.moveHead && path == "/pulls/11/reviews" && r.Method == http.MethodPost && !moved {
 						moved = true
 						pullHead = strings.Repeat("e", 40)
@@ -1324,6 +1324,12 @@ func TestWatchdogRefusesInvalidReviewedEvidenceThroughGitHub(t *testing.T) {
 					pull := map[string]any{"number": 11, "state": "open", "body": prBody, "labels": toLabels(), "head": map[string]any{"sha": pullHead, "ref": "widget", "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": "main"}}
 					if mergeability != "unknown" {
 						pull["mergeable"] = mergeability == "mergeable"
+					}
+					if selectionGraphQL(w, r, pull, true) {
+						return
+					}
+					if r.Method != http.MethodGet {
+						writes++
 					}
 					var result any = []any{}
 					switch {

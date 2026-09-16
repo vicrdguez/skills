@@ -83,20 +83,25 @@ func watchdogPacket(ctx context.Context, root, remote string, item Implementatio
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
+	recovery := "; Claim left unchanged; inspect Work Item " + string(item.ID) + " and explicitly resume with its --item instead of retrying next"
+	port, ok := backend.(submissionReader)
+	if !ok {
+		return ImplementationOutcome{}, Refuse("backend cannot verify Submission during packet construction" + recovery)
+	}
+	observed, err := port.ReviewSubmission(ctx, item.Submission.ID)
+	if err != nil {
+		return ImplementationOutcome{}, Refuse("cannot verify Submission during packet construction: " + err.Error() + recovery)
+	}
+	lifecycle := observed.Lifecycle
+	if observed.ID != item.Submission.ID || observed.Branch != item.Branch || observed.Head != item.Submission.Head || observed.Base != item.Submission.Base || observed.Body != item.Submission.Body || observed.Draft != item.Submission.Draft || observed.Merged ||
+		lifecycle == nil || !lifecycle.Open || !lifecycle.Claimed || len(lifecycle.States) != 1 || lifecycle.States[0] != AwaitingReview {
+		return ImplementationOutcome{}, Refuse("Submission attachment, revision, or Claim changed during packet construction" + recovery)
+	}
 	// A review already published under this Claim must be replayed at its fixed
 	// number rather than superseded by a fresh packet.
-	if port, ok := backend.(ReviewBackend); ok {
-		observed, err := port.ReviewSubmission(ctx, item.Submission.ID)
-		if err != nil {
-			return ImplementationOutcome{}, err
-		}
-		if observed.Head != item.Submission.Head {
-			return ImplementationOutcome{}, Refuse("Submission changed during packet construction")
-		}
-		summaries, unambiguous := reviewSummariesForClaim(item.Submission.Comments, observed.ClaimAcquiredAt)
-		if !unambiguous || len(summaries) != 0 {
-			return ImplementationOutcome{Status: "fix_required", Reason: "review publication already started under this Claim; replay the original fixed-number watchdog submit command and Result Documents"}, nil
-		}
+	summaries, unambiguous := reviewSummariesForClaim(item.Submission.Comments, observed.ClaimAcquiredAt)
+	if !unambiguous || len(summaries) != 0 {
+		return ImplementationOutcome{Status: "fix_required", Reason: "review publication already started under this Claim; replay the original fixed-number watchdog submit command and Result Documents"}, nil
 	}
 	facts := skilldist.WatchdogFacts{
 		Branch: item.Branch, ReviewedHead: item.Submission.Head, AuditBody: item.Submission.Body, Comments: item.Submission.Comments,

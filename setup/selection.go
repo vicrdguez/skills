@@ -576,10 +576,29 @@ func (b *GitHubBackend) blockerObservation(ctx context.Context, number int) (wor
 // claimWriteFailure reports a Claim write that could not be verified through
 // the selected record alone, never inventing a packet for an unverified Claim.
 func claimWriteFailure(writeErr, observeErr error, observedClaimed bool, subject string) error {
+	var refusal *workflow.InvariantError
+	if errors.As(writeErr, &refusal) {
+		return writeErr
+	}
 	if observeErr == nil && observedClaimed {
 		return workflow.Refuse("Claim response was uncertain and a later Claim is now observed; inspect whether it belongs to this handoff before resuming")
 	}
 	return errors.New(writeErr.Error() + "; inspect the selected " + subject + " and explicitly resume instead of retrying next")
+}
+
+// Acquisition cannot use an idempotent label update: an existing Claim belongs
+// to an earlier acquisition, not the worker currently requesting next.
+func (b *GitHubBackend) acquireSelectedClaim(ctx context.Context, before githubIssue) error {
+	observed, err := b.issueRecord(ctx, before.Number)
+	if err != nil {
+		return err
+	}
+	expected, _, _ := implementationLabels(before)
+	state, claimed, problem := implementationLabels(observed)
+	if problem != "" || observed.Number != before.Number || observed.State != "open" || state != expected || claimed || observed.Body != before.Body {
+		return workflow.Refuse("selected record changed before the Claim write; inspect it and explicitly resume instead of retrying next")
+	}
+	return b.request(ctx, http.MethodPost, b.repositoryPath(b.repository)+fmt.Sprintf("/issues/%d/labels", before.Number), map[string][]string{"labels": {"wip"}}, nil)
 }
 
 // ClaimSelected adds the queue record's additive `wip` Claim after refreshing
@@ -617,7 +636,7 @@ func (b *GitHubBackend) claimSubmission(ctx context.Context, candidate workflow.
 	if claimed {
 		return workflow.ImplementationItem{}, workflow.Refuse("selected Submission already carries a Claim; resume with --item if it is yours, otherwise inspect it")
 	}
-	if err := b.implementationLabelMutation(ctx, b.repository, number, []string{"wip"}, nil, nil); err != nil {
+	if err := b.acquireSelectedClaim(ctx, before.githubIssue); err != nil {
 		observed, observeErr := b.pullRecord(ctx, number)
 		var observedClaimed bool
 		if observeErr == nil {
@@ -671,7 +690,7 @@ func (b *GitHubBackend) claimReady(ctx context.Context, candidate workflow.Queue
 	if branch, branchProblem := declaredBranch(before.Body); branchProblem != "" || branch == "" || branch != item.Branch {
 		return workflow.ImplementationItem{}, workflow.Refuse("selected Work Item branch attachment changed before acquisition; inspect it before retrying")
 	}
-	if err := b.implementationLabelMutation(ctx, b.repository, number, []string{"wip"}, nil, nil); err != nil {
+	if err := b.acquireSelectedClaim(ctx, before); err != nil {
 		observed, observeErr := b.issueRecord(ctx, number)
 		var observedClaimed bool
 		if observeErr == nil {

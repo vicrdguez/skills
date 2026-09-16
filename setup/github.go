@@ -212,8 +212,11 @@ func (b *GitHubBackend) ListMergedWorkItems(ctx context.Context) ([]workflow.Wor
 						MergedAt    string `json:"merged_at"`
 						MergeCommit string `json:"merge_commit_sha"`
 						Head        struct {
-							Ref string `json:"ref"`
-							SHA string `json:"sha"`
+							Ref  string `json:"ref"`
+							SHA  string `json:"sha"`
+							Repo struct {
+								FullName string `json:"full_name"`
+							} `json:"repo"`
 						} `json:"head"`
 					}
 					path := b.repositoryPath(repository) + fmt.Sprintf("/commits/%s/pulls?per_page=100&page=%d", url.PathEscape(commit), page)
@@ -222,7 +225,7 @@ func (b *GitHubBackend) ListMergedWorkItems(ctx context.Context) ([]workflow.Wor
 					}
 					for _, pull := range pulls {
 						owner, problem := submissionOwner(pull.Body)
-						if problem == "" && owner == issue.Number && pull.MergedAt != "" && pull.MergeCommit == commit {
+						if problem == "" && owner == issue.Number && pull.MergedAt != "" && pull.MergeCommit == commit && strings.EqualFold(pull.Head.Repo.FullName, repository.Owner+"/"+repository.Name) {
 							matches++
 							item.AcceptedHead = pull.Head.SHA
 							item.Branch = pull.Head.Ref

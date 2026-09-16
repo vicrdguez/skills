@@ -486,6 +486,40 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 			}
 		}
 		item = workflow.ReconcileImplementation(item)
+		if len(matches) <= 1 {
+			submissionNumber := 0
+			var associationErr error
+			terminal := len(matches) == 1 && matches[0].State == "closed"
+			if len(matches) == 1 {
+				pull := matches[0]
+				submissionNumber = pull.Number
+				if !strings.EqualFold(pull.Head.Repo.FullName, repository.Owner+"/"+repository.Name) {
+					associationErr = workflow.Refuse("Submission head repository is outside the supported repository attachment; repair its association")
+				} else if terminal {
+					// A terminal attachment needs historical membership, not an open PR.
+					references, err := b.closingReferences(ctx, issue.Number, true)
+					associationErr = err
+					if err == nil && !slices.ContainsFunc(references, func(reference closingReference) bool { return reference.Number == pull.Number }) {
+						associationErr = workflow.Refuse("closed Submission owning association is missing; inspect the Work Item before continuing")
+					}
+					for _, reference := range references {
+						if reference.Number != pull.Number && !slices.ContainsFunc(pulls, func(other githubPull) bool { return other.Number == reference.Number && other.State == "closed" }) {
+							associationErr = workflow.Refuse("another active Submission conflicts with the historical owning association; inspect the Work Item before continuing")
+						}
+					}
+				}
+			}
+			if associationErr == nil && !terminal {
+				associationErr = b.verifyOwningAssociation(ctx, issue.Number, submissionNumber)
+			}
+			if associationErr != nil {
+				var refusal *workflow.InvariantError
+				if !errors.As(associationErr, &refusal) {
+					return nil, associationErr
+				}
+				item.Problem = refusal.Reason
+			}
+		}
 		if len(matches) == 1 && (item.Problem == "contradictory lifecycle projections" || item.Problem == "" && item.Claimed && (item.State == workflow.ReadyForMerge || item.State == workflow.NeedsHuman || item.State == workflow.Rework)) {
 			observation, err := b.ReviewSubmission(ctx, item.Submission.ID)
 			if err != nil {

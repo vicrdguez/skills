@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +11,91 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestRA3WatchdogPacketRejectsFinalObservationDrift(t *testing.T) {
+	for _, change := range []string{"unchanged", "head", "owner", "body", "base", "draft", "branch", "repository", "missing repository", "number", "closed", "merged", "state", "overlapping states", "claim lost", "observation failure"} {
+		t.Run(change, func(t *testing.T) {
+			root := selectionRepository(t)
+			forge := newCandidateForge()
+			head, body := strings.Repeat("a", 40), "opaque audit\n[not parsed]\n\nCloses #7\n"
+			forge.addIssue(7, "2020-01-01T00:00:00Z", "Branch: `widget`\n")
+			forge.addPull(30, "2021-01-01T00:00:00Z", body, "widget", head, "review")
+			forge.reviewPages = [][]int{{30}}
+			reads := 0
+			forge.onPullRead = func(number int) {
+				if number != 30 {
+					return
+				}
+				reads++
+				// Selection, acquisition refresh, and Claim readback stay valid.
+				// Only the final packet observation changes, usually at the same SHA.
+				if reads != 4 {
+					return
+				}
+				pull := forge.pulls[number]
+				switch change {
+				case "head":
+					pull["head"].(map[string]any)["sha"] = strings.Repeat("b", 40)
+				case "owner":
+					pull["body"] = "opaque audit\n\nCloses #8\n"
+				case "body":
+					pull["body"] = "changed audit\n\nCloses #7\n"
+				case "base":
+					pull["base"] = map[string]string{"ref": "release"}
+				case "draft":
+					pull["draft"] = true
+				case "branch":
+					pull["head"].(map[string]any)["ref"] = "other-branch"
+				case "repository":
+					pull["head"].(map[string]any)["repo"] = map[string]string{"full_name": "outsider/widgets"}
+				case "missing repository":
+					delete(pull["head"].(map[string]any), "repo")
+				case "number":
+					pull["number"] = 31
+				case "closed":
+					pull["state"] = "closed"
+				case "merged":
+					pull["merged"] = true
+				case "state":
+					pull["labels"] = []map[string]string{{"name": "rework"}, {"name": "wip"}}
+				case "overlapping states":
+					forge.addLabel(number, "rework")
+				case "claim lost":
+					forge.removeLabel(number, "wip")
+				case "observation failure":
+					forge.fail["GET /issues/30/timeline"] = http.StatusInternalServerError
+				}
+			}
+			got, err := selectionRun(t, root, forge, "watchdog", "next")
+			if reads != 4 {
+				t.Fatalf("final observation not reached: reads=%d, outcome=%#v, err=%v", reads, got, err)
+			}
+			if change == "unchanged" {
+				if err != nil || got.Status != "work_available" || got.Packet == nil || got.Packet.Facts.Watchdog.ReviewedHead != head || got.Packet.Facts.Watchdog.AuditBody != body || got.Packet.Facts.Watchdog.Branch != "widget" {
+					t.Fatalf("verified packet lost the fixed revision or raw audit: %#v, %v", got, err)
+				}
+			} else {
+				reason := got.Reason
+				if err != nil {
+					reason = err.Error()
+				}
+				if got.Packet != nil || err == nil && got.Status != "fix_required" || !strings.Contains(reason, "inspect") || !strings.Contains(reason, "explicitly resume") {
+					t.Fatalf("final drift returned stale work or lost recovery: %#v, %v", got, err)
+				}
+			}
+			if hasLabel(forge.pulls[30], "wip") != (change != "claim lost") {
+				t.Fatal("packet observation released or reacquired the Claim")
+			}
+			if forge.matching(func(request string) bool { return request == "graphql:queue" }) != 1 || forge.matching(func(request string) bool {
+				return strings.HasPrefix(request, "POST ") && strings.Contains(request, "/labels")
+			}) != 1 || forge.matching(func(request string) bool {
+				return strings.HasPrefix(request, "DELETE ") || strings.HasPrefix(request, "PATCH ")
+			}) != 0 {
+				t.Fatalf("packet observation reselected or mutated the handoff: %v", forge.seen())
+			}
+		})
+	}
+}
 
 func TestW5PacketUsesSubmissionIdentityNotFeedback(t *testing.T) {
 	for _, tc := range []struct {

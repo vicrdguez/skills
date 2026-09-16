@@ -108,6 +108,8 @@ func TestGitHubImplementationRejectsReassignedSourceBeforePublication(t *testing
 func TestGitHubImplementationNormalizesPaginatedWork(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/graphql":
+			fmt.Fprint(w, `{"data":{"repository":{"issue":{"closedByPullRequestsReferences":{"nodes":[]}}}}}`)
 		case "/repos/acme/widgets/issues":
 			if r.URL.Query().Get("page") == "1" {
 				fmt.Fprint(w, "[")
@@ -344,8 +346,8 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 	b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
 	ctx := context.Background()
 	item := workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Ready, Source: &workflow.LifecycleObservation{Open: true, States: []workflow.State{workflow.Ready}}}
-	if _, err := b.ClaimSelected(ctx, workflow.QueueCandidate{ID: "7"}, item); err != nil {
-		t.Fatal(err)
+	if _, err := b.ClaimSelected(ctx, workflow.QueueCandidate{ID: "7"}, item); err == nil || !strings.Contains(err.Error(), "Claim response was uncertain") {
+		t.Fatalf("uncertain acquisition lacked explicit recovery: %v", err)
 	}
 	items, err := b.ImplementationItems(ctx)
 	if err != nil || len(items) != 1 || !items[0].Claimed {
@@ -513,6 +515,8 @@ func TestGitHubImplementationRejectsForeignAttachmentsAndIgnoresObsoleteTargetMe
 		t.Run(kind, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
+				case "/graphql":
+					fmt.Fprint(w, `{"data":{"repository":{"issue":{"closedByPullRequestsReferences":{"nodes":[]}}}}}`)
 				case "/repos/acme/widgets/issues":
 					fmt.Fprint(w, `[{"number":7,"title":"widget","state":"open","labels":[{"name":"ready"},{"name":"wip"}]}]`)
 				case "/repos/acme/widgets/pulls":
@@ -619,6 +623,10 @@ func TestGitHubImplementationUsesMainAndNeverRetargetsExistingSubmission(t *test
 
 func TestGitHubImplementationPreservesPendingLifecycleObservations(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/graphql" {
+			fmt.Fprint(w, `{"data":{"repository":{"issue":{"closedByPullRequestsReferences":{"nodes":[{"number":11,"repository":{"nameWithOwner":"acme/widgets"}}]}}}}}`)
+			return
+		}
 		if r.Method != http.MethodGet {
 			t.Errorf("observation mutated backend: %s %s", r.Method, r.URL)
 			http.Error(w, "unexpected mutation", http.StatusInternalServerError)
@@ -665,6 +673,9 @@ func TestGitHubImplementationStatusRefusesPartialHandoff(t *testing.T) {
 		pull := map[string]any{"number": 11, "state": "open", "body": "candidate\n\nCloses #7\n", "labels": []map[string]string{{"name": "review"}}, "head": map[string]any{"ref": "widget", "sha": "fixed", "repo": map[string]string{"full_name": "acme/widgets"}}}
 		var result any = []any{}
 		switch {
+		case path == "/graphql":
+			fmt.Fprint(w, `{"data":{"repository":{"issue":{"closedByPullRequestsReferences":{"nodes":[{"number":11,"repository":{"nameWithOwner":"acme/widgets"}}]}}}}}`)
+			return
 		case path == "/issues" && r.Method == http.MethodGet:
 			result = []any{source}
 		case path == "/pulls" && r.Method == http.MethodGet:

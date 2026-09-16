@@ -52,6 +52,7 @@ type Submission struct {
 	State           State
 	Claimed         bool
 	ID              SubmissionID
+	Branch          string
 	Head            string
 	Base            string
 	Body            string

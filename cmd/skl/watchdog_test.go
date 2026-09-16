@@ -426,7 +426,9 @@ func (b *implementationMemory) ReviewSubmission(_ context.Context, id workflow.S
 			if b.work[i].Claimed && submission.ClaimAcquiredAt == "" {
 				submission.ClaimAcquiredAt = b.reviewTime()
 			}
-			return *submission, nil
+			observed := *submission
+			observed.Branch = b.work[i].Branch
+			return observed, nil
 		}
 	}
 	return workflow.Submission{}, fmt.Errorf("missing Submission")

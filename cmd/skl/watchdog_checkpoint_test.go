@@ -163,6 +163,7 @@ func (f *reviewForge) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		result := map[string]any{"id": number, "number": number, "title": title, "body": "", "state": "open", "created_at": "2026", "labels": labelObjects(labels), "sub_issues_summary": map[string]int{"total": 0}}
 		if pull {
 			result["pull_request"] = map[string]string{"url": "pull"}
+			result["body"] = f.submissionBody()
 		} else {
 			result["body"] = "Branch: `" + title + "`\n"
 		}

@@ -16,16 +16,18 @@ import (
 
 func TestCleanupRequiresMergedOwningSubmissionThroughGitHub(t *testing.T) {
 	for _, test := range []struct {
-		name, body string
-		merged     bool
-		remove     bool
+		name, body, headRepository string
+		merged                     bool
+		remove                     bool
 	}{
-		{"ordinary mention by another owner", "Related to #17.\n\nCloses #99\n", true, false},
-		{"ordinary mention without owner", "Related to #17.\n", true, false},
-		{"conflicting owners", "Closes #17\nCloses #99\n", true, false},
-		{"foreign owner", "Closes other/repository#17\n", true, false},
-		{"unmerged owner", "Closes #17\n", false, false},
-		{"merged owner with renamed titles", "Result\n\nCloses #17\n", true, true},
+		{"ordinary mention by another owner", "Related to #17.\n\nCloses #99\n", "acme/widgets", true, false},
+		{"ordinary mention without owner", "Related to #17.\n", "acme/widgets", true, false},
+		{"conflicting owners", "Closes #17\nCloses #99\n", "acme/widgets", true, false},
+		{"foreign owner", "Closes other/repository#17\n", "acme/widgets", true, false},
+		{"unmerged owner", "Closes #17\n", "acme/widgets", false, false},
+		{"merged owner with renamed titles", "Result\n\nCloses #17\n", "Acme/Widgets", true, true},
+		{"merged fork owner", "Closes #17\n", "contributor/widgets", true, false},
+		{"unknown head repository", "Closes #17\n", "", true, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			root := proposalRepository(t)
@@ -50,7 +52,7 @@ func TestCleanupRequiresMergedOwningSubmissionThroughGitHub(t *testing.T) {
 					if test.merged {
 						mergedAt = "2026-09-16T10:00:00Z"
 					}
-					body = fmt.Sprintf(`[{"number":21,"title":"Renamed Submission","body":%q,"state":"closed","merged_at":%q,"merge_commit_sha":"squash","head":{"ref":"submission-branch","sha":%q,"repo":{"full_name":"acme/widgets"}}}]`, test.body, mergedAt, head)
+					body = fmt.Sprintf(`[{"number":21,"title":"Renamed Submission","body":%q,"state":"closed","merged_at":%q,"merge_commit_sha":"squash","head":{"ref":"submission-branch","sha":%q,"repo":{"full_name":%q}}}]`, test.body, mergedAt, head, test.headRepository)
 				default:
 					t.Fatalf("unexpected request: %s %s", request.Method, request.URL)
 				}
