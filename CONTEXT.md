@@ -62,6 +62,14 @@ _Avoid_: Workflow implementation
 The authoritative, harness-independent description of an **Agent Worker** behavior. It may be specialized only with facts and deterministic conditions.
 _Avoid_: Harness skill, generated prompt
 
+**Skill Module**:
+A coherent authored unit of instructions used to compose a **Skill Definition**. It is source material, not a separately activated skill.
+_Avoid_: Execution skill, skill stub
+
+**Execution Skill**:
+A **Skill Definition** specialized for one invocation and its known situation. It is the instruction content delivered to the **Agent Worker**, distinct from its authored **Skill Modules** and any transport metadata.
+_Avoid_: Rendered skill, instruction packet
+
 **Skill Stub**:
 A discoverable filesystem representative of one **Skill Definition**, installed in each supported harness's user skill directory. It delegates instruction retrieval without duplicating behavior or requiring a harness plugin package.
 _Avoid_: Skill definition, harness adapter
@@ -71,8 +79,8 @@ Named supporting material belonging to a **Skill Definition** and retrieved only
 _Avoid_: Inline prompt context
 
 **Instruction Packet**:
-The concrete instructions and structured facts produced for one skill invocation. Its machine-readable and rendered forms express the same information, and its manifest ensures every bundled Skill Definition is loaded at most once.
-_Avoid_: Skill definition, model-generated prompt
+The structured delivery representation of a skill invocation's instructions, facts, and inclusion manifest, distinct from the **Execution Skill** it carries.
+_Avoid_: Execution skill, skill definition, model-generated prompt
 
 **Result Document**:
 Ephemeral, template-guided Markdown written by an Agent Worker for the Workflow Engine to publish as an opaque backend projection. It lives in a private temporary directory rather than the Consumer Repository; the engine does not parse or judge its prose.
@@ -107,7 +115,7 @@ An attempt to move a **Work Item** toward a valid target **Workflow State**. Rec
 _Avoid_: Shell command, rollback transaction
 
 **Work Start**:
-A **Transition Operation** that selects and claims one eligible **Work Item** and returns an **Instruction Packet** describing the existing Git preparation the Agent Worker must perform.
+A **Transition Operation** that selects and claims one eligible **Work Item** and returns its **Execution Skill**.
 _Avoid_: Read-only queue lookup, instruction rendering
 
 **Ready for Merge**:
@@ -210,7 +218,11 @@ _Avoid_: Local Git helper, GitHub cache
 >
 > **Developer:** Does the Claude Skill Stub define different behavior from the Pi one?
 >
-> **Domain expert:** No. Both expose the same Skill Definition and retrieve equivalent Instruction Packets; only their activation metadata is harness-specific.
+> **Domain expert:** No. Both expose the same Skill Definition. Their Execution Skills preserve the same Workflow Mechanics while reflecting the worker's known execution capabilities.
+>
+> **Developer:** Does the Agent Worker assemble the Skill Modules for its task?
+>
+> **Domain expert:** No. The Workflow Engine selects and composes them into the Execution Skill for that invocation.
 >
 > **Developer:** GitHub shows the `done` label. Is the Work Item Merged?
 >
