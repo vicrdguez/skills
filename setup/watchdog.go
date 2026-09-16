@@ -19,13 +19,14 @@ const reviewSummaryPrefix = "<!-- skl.watchdog.review/v1\n"
 type reviewSummaryMetadata struct {
 	ReviewNumber uint64 `json:"review_number"`
 	Verdict      string `json:"verdict"`
+	FinalHead    string `json:"final_head,omitempty"`
 }
 
 func reviewSummaryBody(comment skilldist.ReviewComment) (string, error) {
 	if comment.ReviewNumber == 0 || comment.Verdict != "rework" && comment.Verdict != "pass" && comment.Verdict != "needs-human" {
 		return "", fmt.Errorf("invalid review number or verdict")
 	}
-	metadata, err := json.Marshal(reviewSummaryMetadata{ReviewNumber: comment.ReviewNumber, Verdict: comment.Verdict})
+	metadata, err := json.Marshal(reviewSummaryMetadata{ReviewNumber: comment.ReviewNumber, Verdict: comment.Verdict, FinalHead: comment.FinalHead})
 	if err != nil {
 		return "", err
 	}
@@ -67,14 +68,6 @@ func (b *GitHubBackend) CompleteReview(ctx context.Context, item workflow.Implem
 	if err := b.implementationLabelMutation(ctx, repository, submissionNumber, []string{"wip"}, nil, guard); err != nil {
 		return err
 	}
-	if item.Synchronization && target == workflow.Rework {
-		if err := b.publishImplementationMetadata(ctx, repository, itemNumber, implementationMetadata{SynchronizationTarget: item.TargetSnapshot, TargetBranch: item.TargetBranch}); err != nil {
-			return err
-		}
-		if err := b.implementationLabelMutation(ctx, repository, submissionNumber, []string{"sync"}, nil, guard); err != nil {
-			return err
-		}
-	}
 	if err := b.implementationLabelMutation(ctx, repository, submissionNumber, []string{label}, nil, guard); err != nil {
 		return err
 	}
@@ -84,10 +77,7 @@ func (b *GitHubBackend) CompleteReview(ctx context.Context, item workflow.Implem
 			return err
 		}
 	}
-	remove := []string{"review"}
-	if !item.Synchronization || target != workflow.Rework {
-		remove = append(remove, "sync")
-	}
+	remove := []string{"review", "sync"}
 	if target != workflow.Rework {
 		remove = append(remove, "rework")
 	}
@@ -140,6 +130,10 @@ func (b *GitHubBackend) issueClaimAcquiredAt(ctx context.Context, repository git
 	return claimAcquiredAt, nil
 }
 
+func (b *GitHubBackend) AnchorSide(side string) bool {
+	return side == "LEFT" || side == "RIGHT"
+}
+
 func (b *GitHubBackend) ReviewSubmission(ctx context.Context, id workflow.SubmissionID) (workflow.Submission, error) {
 	if err := b.requireRepository(); err != nil {
 		return workflow.Submission{}, err
@@ -160,6 +154,24 @@ func (b *GitHubBackend) ReviewSubmission(ctx context.Context, id workflow.Submis
 		if *pull.Mergeable {
 			result.Mergeability = "mergeable"
 		}
+	}
+	// An interrupted review is identified by its observed labels, never by
+	// timeline order: the pending target is the other target label beside a
+	// retained review, or the single lifecycle state of a claimed record.
+	current := map[string]bool{}
+	states := 0
+	for _, label := range pull.Labels {
+		current[label.Name] = true
+		if label.Name == "review" || label.Name == "rework" || label.Name == "done" || label.Name == "needs-human" || label.Name == "ready" {
+			states++
+		}
+	}
+	if current["review"] && states == 2 && current["done"] {
+		result.PendingReview = workflow.ReadyForMerge
+		result.State = workflow.ReadyForMerge
+	}
+	if states == 1 && claimed && (state == workflow.ReadyForMerge || state == workflow.NeedsHuman) {
+		result.PendingReview = state
 	}
 	if claimed {
 		result.ClaimAcquiredAt, err = b.issueClaimAcquiredAt(ctx, repository, number)
@@ -193,7 +205,7 @@ func (b *GitHubBackend) PublishReview(ctx context.Context, item workflow.Impleme
 				}
 				continue
 			}
-			if err := b.implementationComment(ctx, repository, number, comment.Body, false, ""); err != nil {
+			if err := b.implementationComment(ctx, repository, number, comment.Body, ""); err != nil {
 				return err
 			}
 			continue

@@ -39,44 +39,63 @@ func ObserveStatus(ctx context.Context, backend ImplementationBackend) (StatusOu
 					outcome.Items[i].Claimed = false
 					continue
 				}
-				if current.Head == item.Submission.Head && current.Mergeability == "conflicting" {
-					if item.Claimed {
-						return StatusOutcome{}, Refuse("claimed conflicting Submission cannot prove status owns its handoff; inspect without changing the Claim")
+			}
+		}
+		if item.Claimed && item.Submission != nil {
+			// A non-main destination needs explicit human repair; status never
+			// retargets it or completes the handoff on its behalf.
+			if err := RefuseNonMainBase(item.Submission.ID, item.Submission.Base); err != nil {
+				return StatusOutcome{}, err
+			}
+		}
+		if item.Submission != nil && item.Submission.PendingReview != "" {
+			if item.Submission.PendingReview != ReadyForMerge {
+				return StatusOutcome{}, Refuse("partial review cannot prove its original submit context or evidence; retry its original fixed-number watchdog submit command")
+			}
+			port, ok := backend.(ReviewBackend)
+			if !ok {
+				return StatusOutcome{}, Refuse("backend cannot reconcile partial review")
+			}
+			current, err := port.ReviewSubmission(ctx, item.Submission.ID)
+			if err != nil {
+				return StatusOutcome{}, err
+			}
+			if err := RefuseNonMainBase(item.Submission.ID, current.Base); err != nil {
+				return StatusOutcome{}, err
+			}
+			summaries, unambiguous := reviewSummariesForClaim(item.Submission.Comments, current.ClaimAcquiredAt)
+			if !unambiguous || len(summaries) != 1 || summaries[0].Verdict != "pass" || summaries[0].FinalHead == "" || summaries[0].FinalHead != item.Submission.Head {
+				return StatusOutcome{}, Refuse("interrupted pass does not establish the current candidate; retain the Claim and inspect the original fixed-number watchdog submit command and Result Documents")
+			}
+			acceptedHead, claimedAt := summaries[0].FinalHead, current.ClaimAcquiredAt
+			guard := func() error {
+				current, err := port.ReviewSubmission(ctx, item.Submission.ID)
+				if err != nil {
+					return err
+				}
+				if current.Head != acceptedHead || current.Merged || current.Draft || current.Claimed && current.ClaimAcquiredAt != claimedAt || !current.Claimed && current.PendingReview != "" {
+					return Refuse("Submission changed during status reconciliation")
+				}
+				if item.Submission.PendingReview == ReadyForMerge {
+					if err := RefuseNonMainBase(item.Submission.ID, current.Base); err != nil {
+						return err
 					}
-					item.Synchronization = true
-					item.TargetBranch = current.Base
-					item.TargetSnapshot, err = backend.ImplementationHead(ctx, current.Base)
-					if err != nil {
-						return StatusOutcome{}, err
-					}
-					if item.TargetSnapshot == "" {
-						return StatusOutcome{}, Refuse("current target unavailable; retry status after restoring the target")
-					}
-					guard := func() error {
-						observed, err := port.ReviewSubmission(ctx, item.Submission.ID)
-						if err != nil {
-							return err
-						}
-						if observed.Head != item.Submission.Head || observed.Merged || observed.Mergeability != "conflicting" {
-							return Refuse("Submission changed during conflict diversion; inspect before retrying")
-						}
-						return nil
-					}
-					if err := port.CompleteReview(ctx, item, Rework, guard); err != nil {
-						return StatusOutcome{}, err
-					}
-					currentItems, err := loadImplementation(ctx, backend)
-					if err != nil {
-						return StatusOutcome{}, err
-					}
-					for _, currentItem := range currentItems {
-						if currentItem.ID == item.ID {
-							outcome.Items[i] = currentItem
-						}
-					}
-					continue
+				}
+				return nil
+			}
+			if err := port.CompleteReview(ctx, item, item.Submission.PendingReview, guard); err != nil {
+				return StatusOutcome{}, err
+			}
+			observed, err := backend.ImplementationItems(ctx)
+			if err != nil {
+				return StatusOutcome{}, err
+			}
+			for _, c := range observed {
+				if c.ID == item.ID {
+					outcome.Items[i] = c
 				}
 			}
+			continue
 		}
 		if item.State == Ready && item.Submission != nil && item.Submission.State == AwaitingReview && !item.Submission.Claimed {
 			return StatusOutcome{}, Refuse("partial implementation handoff requires its original Result Document; status cannot establish publication authority")

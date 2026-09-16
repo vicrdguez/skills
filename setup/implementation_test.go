@@ -307,12 +307,12 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 	defer server.Close()
 	b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
 	ctx := context.Background()
-	item := workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Ready, TargetSnapshot: "snapshot"}
+	item := workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Ready}
 	if err := b.ClaimImplementation(ctx, item); err != nil {
 		t.Fatal(err)
 	}
 	items, err := b.ImplementationItems(ctx)
-	if err != nil || len(items) != 1 || !items[0].Claimed || items[0].TargetSnapshot != "snapshot" {
+	if err != nil || len(items) != 1 || !items[0].Claimed {
 		t.Fatalf("Claim: %#v %v", items, err)
 	}
 	item = items[0]
@@ -321,7 +321,7 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 		t.Fatal(err)
 	}
 	items, err = b.ImplementationItems(ctx)
-	if err != nil || len(items) != 1 || items[0].Problem != "" || items[0].TargetSnapshot != "snapshot" || items[0].State != workflow.NeedsHuman {
+	if err != nil || len(items) != 1 || items[0].Problem != "" || items[0].State != workflow.NeedsHuman {
 		t.Fatalf("opaque decision parsed as metadata: %#v %v", items, err)
 	}
 	labels[7] = []string{"ready", "external", "wip"}
@@ -378,7 +378,97 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 	}
 }
 
-func TestGitHubImplementationRejectsForeignAttachmentsAndConflictingMetadata(t *testing.T) {
+func TestGitHubImplementationCompletesRequeuedSubmissionHandoff(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		interrupted bool
+	}{
+		{name: "accepted human requeue"},
+		{name: "retry after interrupted publication", interrupted: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			labels := map[int][]string{7: {"needs-human"}, 11: {"rework", "wip"}}
+			interrupt := tt.interrupted
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				path := strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets")
+				issue := func(number int) map[string]any {
+					ls := []map[string]string{}
+					for _, name := range labels[number] {
+						ls = append(ls, map[string]string{"name": name})
+					}
+					return map[string]any{"number": number, "state": "open", "labels": ls}
+				}
+				switch {
+				case path == "/issues" && r.Method == http.MethodGet:
+					issue := issue(7)
+					issue["title"] = "widget"
+					json.NewEncoder(w).Encode([]any{issue})
+					return
+				case path == "/pulls" && r.Method == http.MethodGet:
+					pull := issue(11)
+					pull["head"] = map[string]any{"ref": "widget", "sha": "fixed", "repo": map[string]string{"full_name": "acme/widgets"}}
+					pull["base"] = map[string]string{"ref": "main"}
+					json.NewEncoder(w).Encode([]any{pull})
+					return
+				case path == "/issues/7" && r.Method == http.MethodGet:
+					json.NewEncoder(w).Encode(issue(7))
+					return
+				case path == "/issues/11" && r.Method == http.MethodGet:
+					json.NewEncoder(w).Encode(issue(11))
+					return
+				case path == "/issues/7/comments" && r.Method == http.MethodGet:
+					fmt.Fprint(w, `[{"author_association":"OWNER","body":"<!-- skl.implement/v1\n{\"transition\":{\"from\":\"rework\",\"target\":\"awaiting_review\",\"head\":\"fixed\",\"directory\":\"original-operation\"}}\n-->"}]`)
+					return
+				}
+				var number int
+				var name string
+				switch {
+				case r.Method == http.MethodPost && strings.HasSuffix(path, "/labels"):
+					fmt.Sscanf(path, "/issues/%d/labels", &number)
+					var payload struct {
+						Labels []string `json:"labels"`
+					}
+					json.NewDecoder(r.Body).Decode(&payload)
+					labels[number] = append(labels[number], payload.Labels...)
+				case r.Method == http.MethodDelete && strings.Contains(path, "/labels/"):
+					fmt.Sscanf(path, "/issues/%d/labels/%s", &number, &name)
+					if interrupt && number == 7 && name == "needs-human" {
+						interrupt = false
+						http.Error(w, "lost response", http.StatusInternalServerError)
+						return
+					}
+					labels[number] = slices.DeleteFunc(labels[number], func(label string) bool { return label == name })
+				default:
+					json.NewEncoder(w).Encode([]any{})
+					return
+				}
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			defer server.Close()
+			b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
+			item := workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Rework,
+				Submission: &workflow.Submission{ID: "11", Head: "fixed", Lifecycle: &workflow.LifecycleObservation{Open: true, States: []workflow.State{workflow.Rework}, Claimed: true}}}
+			ctx := context.Background()
+			if tt.interrupted {
+				if err := b.AwaitImplementationReview(ctx, item, func() error { return nil }); err == nil {
+					t.Fatal("fixture did not interrupt the source cleanup")
+				}
+			}
+			if err := b.AwaitImplementationReview(ctx, item, func() error { return nil }); err != nil {
+				t.Fatal(err)
+			}
+			items, err := b.ImplementationItems(ctx)
+			if err != nil || len(items) != 1 || items[0].Problem != "" || items[0].State != workflow.AwaitingReview || items[0].Claimed {
+				t.Fatalf("requeued handoff: %#v %v", items, err)
+			}
+			if !slices.Equal(labels[11], []string{"review"}) || slices.Contains(labels[7], "needs-human") {
+				t.Fatalf("labels after requeued handoff: %v", labels)
+			}
+		})
+	}
+}
+
+func TestGitHubImplementationRejectsForeignAttachmentsAndIgnoresObsoleteTargetMetadata(t *testing.T) {
 	for _, kind := range []string{"fork", "untrusted metadata", "conflicting metadata"} {
 		t.Run(kind, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -418,14 +508,70 @@ func TestGitHubImplementationRejectsForeignAttachmentsAndConflictingMetadata(t *
 				t.Fatalf("items = %#v %v", items, err)
 			}
 			item := items[0]
-			if kind == "fork" && (item.Submission != nil || item.State == workflow.Merged) || kind == "untrusted metadata" && item.TargetSnapshot != "original" || kind == "conflicting metadata" && item.Problem == "" {
+			if kind == "fork" && (item.Submission != nil || item.State == workflow.Merged) || kind != "fork" && item.Problem != "" {
 				t.Fatalf("unsafe adoption: %#v", item)
 			}
 		})
 	}
 }
 
-func TestGitHubImplementationIgnoresRetiredTransitionMetadata(t *testing.T) {
+func TestGitHubImplementationUsesMainAndNeverRetargetsExistingSubmission(t *testing.T) {
+	for _, existingBase := range []string{"", "release"} {
+		t.Run(existingBase, func(t *testing.T) {
+			writes := 0
+			postedBase := ""
+			handlerErr := ""
+			pull := map[string]any{"number": 11, "state": "open", "body": "wanted", "head": map[string]any{"ref": "widget", "sha": "fixed", "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": existingBase}}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet {
+					writes++
+				}
+				switch r.URL.Path {
+				case "/repos/acme/widgets/issues":
+					fmt.Fprint(w, `[{"number":7,"title":"widget","state":"open","labels":[{"name":"ready"}]}]`)
+				case "/repos/acme/widgets/pulls":
+					if r.Method == http.MethodPost {
+						var payload map[string]any
+						if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+							handlerErr = err.Error()
+							http.Error(w, handlerErr, http.StatusBadRequest)
+							return
+						}
+						postedBase, _ = payload["base"].(string)
+						pull["base"] = map[string]string{"ref": postedBase}
+						pull["body"] = payload["body"]
+						json.NewEncoder(w).Encode(pull)
+					} else if existingBase == "" {
+						fmt.Fprint(w, `[]`)
+					} else {
+						json.NewEncoder(w).Encode([]any{pull})
+					}
+				case "/repos/acme/widgets/pulls/11":
+					json.NewEncoder(w).Encode(pull)
+				default:
+					handlerErr = fmt.Sprintf("unexpected %s %s", r.Method, r.URL)
+					http.Error(w, handlerErr, http.StatusNotFound)
+				}
+			}))
+			defer server.Close()
+			b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
+			wanted := workflow.Submission{Head: "fixed", Base: "release", Body: "wanted"}
+			if existingBase != "" {
+				wanted.ID = "11"
+			}
+			got, err := b.PublishImplementation(context.Background(), workflow.ImplementationItem{ID: "7", Branch: "widget"}, wanted)
+			if existingBase == "" {
+				if err != nil || handlerErr != "" || got.Base != "main" || postedBase != "main" || writes != 1 {
+					t.Fatalf("creation = %#v, %v, base=%q writes=%d", got, err, postedBase, writes)
+				}
+			} else if handlerErr != "" || err == nil || !strings.Contains(err.Error(), "repair its base to main") || writes != 0 {
+				t.Fatalf("non-main update = %#v, %v, writes=%d", got, err, writes)
+			}
+		})
+	}
+}
+
+func TestGitHubImplementationPreservesPendingLifecycleObservations(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			t.Errorf("observation mutated backend: %s %s", r.Method, r.URL)
@@ -437,6 +583,8 @@ func TestGitHubImplementationIgnoresRetiredTransitionMetadata(t *testing.T) {
 			fmt.Fprint(w, `[{"number":7,"title":"widget","state":"open","labels":[{"name":"ready"},{"name":"needs-human"},{"name":"wip"},{"name":"external"}]}]`)
 		case "/repos/acme/widgets/pulls":
 			fmt.Fprint(w, `[{"number":11,"state":"open","labels":[{"name":"needs-human"}],"head":{"ref":"widget","sha":"fixed","repo":{"full_name":"acme/widgets"}},"base":{"ref":"main"}}]`)
+		case "/repos/acme/widgets/pulls/11":
+			fmt.Fprint(w, `{"number":11,"state":"open","labels":[{"name":"needs-human"}],"head":{"ref":"widget","sha":"fixed","repo":{"full_name":"acme/widgets"}},"base":{"ref":"main"}}`)
 		case "/repos/acme/widgets/issues/7/comments":
 			fmt.Fprint(w, `[{"author_association":"OWNER","body":"<!-- skl.implement/v1\n{\"target_snapshot\":\"pinned\",\"transition\":{\"from\":\"ready_for_implementation\",\"target\":\"needs_human\",\"head\":\"fixed\",\"directory\":\"original-operation\"}}\n-->"}]`)
 		default:
@@ -453,7 +601,7 @@ func TestGitHubImplementationIgnoresRetiredTransitionMetadata(t *testing.T) {
 	if item.Source == nil || !item.Source.Open || !item.Source.Claimed || !slices.Equal(item.Source.States, []workflow.State{workflow.Ready, workflow.NeedsHuman}) || item.Submission.Lifecycle == nil || !slices.Equal(item.Submission.Lifecycle.States, []workflow.State{workflow.NeedsHuman}) {
 		t.Fatalf("lost normalized partial progress: %#v, %#v", item, item.Submission)
 	}
-	if item.Problem == "" || !item.Claimed || item.TargetSnapshot != "pinned" {
+	if item.Problem != "contradictory lifecycle projections" || !item.Claimed {
 		t.Fatalf("retired transition metadata became authoritative: %#v", item)
 	}
 }

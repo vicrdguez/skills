@@ -571,7 +571,7 @@ func TestWatchdogVerdictsReleaseLastThroughPublicHTTP(t *testing.T) {
 			f := newReviewFixture(t)
 			f.forge.noOther = true
 			f.forge.sourceLabels = []string{"needs-human"}
-			verdict, number, want := mode, "1", map[string]string{"rework": "rework", "pass": "ready_for_merge", "needs-human": "needs_human", "conflicting-pass": "rework", "review-limit": "needs_human"}[mode]
+			verdict, number, want := mode, "1", map[string]string{"rework": "rework", "pass": "ready_for_merge", "needs-human": "needs_human", "conflicting-pass": "ready_for_merge", "review-limit": "needs_human"}[mode]
 			if mode == "conflicting-pass" {
 				verdict, f.forge.mergeable = "pass", false
 			}
@@ -608,6 +608,9 @@ func TestWatchdogVerdictsReleaseLastThroughPublicHTTP(t *testing.T) {
 				if targetVisible {
 					reviews := f.getJSON(t, "/pulls/11/reviews").([]any)
 					wanted := "<!-- skl.watchdog.review/v1\n{\"review_number\":" + number + ",\"verdict\":\"" + verdict + "\"}\n-->\nverdict\n"
+					if verdict == "pass" {
+						wanted = "<!-- skl.watchdog.review/v1\n{\"review_number\":" + number + ",\"verdict\":\"pass\",\"final_head\":\"" + f.head + "\"}\n-->\nverdict\n"
+					}
 					if len(reviews) != 1 || reviews[0].(map[string]any)["body"] != wanted || reviews[0].(map[string]any)["commit_id"] != f.head || f.getJSON(t, "/pulls/11/comments") != nil {
 						t.Errorf("verdict projection lacks exact summary/anchors: %#v", reviews)
 					}
@@ -616,7 +619,7 @@ func TestWatchdogVerdictsReleaseLastThroughPublicHTTP(t *testing.T) {
 					}
 					if unprotected {
 						source := f.getJSON(t, "/issues/7")
-						if recordHasLabel(source, "ready") || recordHasLabel(source, "wip") || recordHasLabel(source, "needs-human") != (want == "needs_human") || recordHasLabel(pull, "review") || recordHasLabel(pull, "sync") != (mode == "conflicting-pass") {
+						if recordHasLabel(source, "ready") || recordHasLabel(source, "wip") || recordHasLabel(source, "needs-human") != (want == "needs_human") || recordHasLabel(pull, "review") || recordHasLabel(pull, "sync") {
 							t.Errorf("verdict released before complete source cleanup: source=%#v destination=%#v", source, pull)
 						}
 						if checkpointSnapshot(f.checkpoint) != number+":"+f.head+"\n" {
@@ -1289,14 +1292,14 @@ func TestImplementationDecisionTransportStaysOpaqueThroughPublicCLI(t *testing.T
 			if err := json.Unmarshal(data, &status); err != nil {
 				t.Fatal(err)
 			}
-			pinRetained := false
+			observed := false
 			for _, item := range status.Items {
 				if item.Number == 7 {
-					pinRetained = item.TargetSnapshot == f.head && item.TargetBranch == "main" && !item.Claimed && item.State == workflow.NeedsHuman
+					observed = !item.Claimed && item.State == workflow.NeedsHuman
 				}
 			}
-			if status.Status != "observed" || !pinRetained {
-				t.Fatalf("status consumed opaque decision as pin metadata: %s", data)
+			if status.Status != "observed" || !observed {
+				t.Fatalf("status consumed opaque decision as metadata: %s", data)
 			}
 			if resumed := f.run(t, f.root, "implement", "resume", "--item", "7"); resumed.Status != "fix_required" || !strings.Contains(resumed.Reason, "not an unambiguous implementation Claim") || resumed.Packet != nil {
 				t.Fatalf("resume consumed opaque decision prose: %#v", resumed)
@@ -1313,7 +1316,8 @@ func TestImplementationDecisionTransportStaysOpaqueThroughPublicCLI(t *testing.T
 			if retry.Status != "needs_human" || writes != len(f.forge.acceptedMutations) || !reflect.DeepEqual(before, f.evidenceSnapshot(t)) {
 				t.Fatalf("exact opaque retry changed publication: %#v", retry)
 			}
-			// A genuine trusted top-level pin contradiction must still refuse.
+			// Retired pin-shaped metadata stays historical and never refuses or
+			// authorizes the handoff.
 			f.forge.sourceComments = append(f.forge.sourceComments, map[string]any{"author_association": "OWNER", "body": "<!-- skl.implement/v1\n{\"target_snapshot\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"target_branch\":\"main\"}\n-->"})
 			directory = newImplementationResultDirectory(t)
 			decision = filepath.Join(directory, "decision.md")
@@ -1321,9 +1325,9 @@ func TestImplementationDecisionTransportStaysOpaqueThroughPublicCLI(t *testing.T
 				t.Fatal(err)
 			}
 			before = f.evidenceSnapshot(t)
-			refused := f.run(t, f.worktree, "implement", "needs-human", "--item", "7", "--reason", "mandatory_rule", "--decision", decision)
-			if refused.Status != "fix_required" || !strings.Contains(refused.Reason, "conflicting Target Snapshot") || writes != len(f.forge.acceptedMutations) || !reflect.DeepEqual(before, f.evidenceSnapshot(t)) || readFile(t, decision) != tc.prose {
-				t.Fatalf("genuine pin contradiction not preserved/refused: %#v", refused)
+			retried := f.run(t, f.worktree, "implement", "needs-human", "--item", "7", "--reason", "mandatory_rule", "--decision", decision)
+			if retried.Status != "needs_human" || writes != len(f.forge.acceptedMutations) || count() != 1 || !reflect.DeepEqual(before, f.evidenceSnapshot(t)) || fileExists(decision) {
+				t.Fatalf("retired pin metadata changed the completed pause: %#v", retried)
 			}
 		})
 	}
@@ -2827,12 +2831,12 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 		f.forge.mergeable = false
 		_ = os.WriteFile(f.checkpoint, []byte("2:"+f.head+"\n"), 0600)
 		f.start(t, f.root)
-		if got := f.submit(t, 3, f.head, "pass"); got.Status != "rework" || strings.TrimSpace(readFile(t, f.checkpoint)) != "3:"+f.head {
-			t.Fatalf("independent conflict diversion consumed review history: %#v", got)
+		if got := f.submit(t, 3, f.head, "pass"); got.Status != "ready_for_merge" || fileExists(f.checkpoint) {
+			t.Fatalf("mergeability gated a valid pass: %#v", got)
 		}
-		before := readFile(t, f.checkpoint)
-		if got := f.run(t, f.root, "status"); got.Status != "observed" || readFile(t, f.checkpoint) != before {
-			t.Fatalf("status rewrote conflict-diverted checkpoint: %#v", got)
+		before := checkpointSnapshot(f.checkpoint)
+		if got := f.run(t, f.root, "status"); got.Status != "observed" || checkpointSnapshot(f.checkpoint) != before {
+			t.Fatalf("status rewrote the conflicting pass checkpoint: %#v", got)
 		}
 
 		f = newReviewFixture(t)
@@ -2863,8 +2867,8 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 		_ = os.WriteFile(f.checkpoint, []byte("3:"+f.head+"\n"), 0600)
 		before = checkpointSnapshot(f.checkpoint)
 		status := f.run(t, f.root, "status")
-		if status.Status != "observed" || checkpointSnapshot(f.checkpoint) != before || !slices.Contains(f.forge.labels, "sync") || !slices.Contains(f.forge.labels, "rework") || slices.Contains(f.forge.labels, "wip") {
-			t.Fatalf("status lost independent conflict diversion: %#v labels=%v", status, f.forge.labels)
+		if status.Status != "observed" || checkpointSnapshot(f.checkpoint) != before || !slices.Contains(f.forge.labels, "done") || slices.Contains(f.forge.labels, "sync") || slices.Contains(f.forge.labels, "rework") || slices.Contains(f.forge.labels, "wip") {
+			t.Fatalf("status invented conflict integration: %#v labels=%v", status, f.forge.labels)
 		}
 	})
 
@@ -2928,9 +2932,13 @@ func reviewSummaryText(t *testing.T, summary map[string]any) string {
 }
 
 func storedReviewSummary(number uint64, verdict, body, commit, submittedAt string) map[string]any {
+	finalHead := ""
+	if verdict == "pass" {
+		finalHead = fmt.Sprintf(",\"final_head\":%q", commit)
+	}
 	return map[string]any{
 		"author_association": "OWNER",
-		"body":               fmt.Sprintf("<!-- skl.watchdog.review/v1\n{\"review_number\":%d,\"verdict\":%q}\n-->\n%s", number, verdict, body),
+		"body":               fmt.Sprintf("<!-- skl.watchdog.review/v1\n{\"review_number\":%d,\"verdict\":%q%s}\n-->\n%s", number, verdict, finalHead, body),
 		"commit_id":          commit,
 		"state":              "COMMENTED",
 		"submitted_at":       submittedAt,

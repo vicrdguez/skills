@@ -48,7 +48,11 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 	if item.ID == "" {
 		return outcome, Refuse("Work Item unavailable; inspect its stable identity")
 	}
-
+	if bodyPath != "" && item.Submission != nil {
+		if err := RefuseNonMainBase(item.Submission.ID, item.Submission.Base); err != nil {
+			return ImplementationOutcome{}, err
+		}
+	}
 	resultPath := bodyPath
 	if resultPath == "" {
 		resultPath = decisionPath
@@ -87,16 +91,30 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 		if e != nil || local != head {
 			return Refuse("local head changed during handoff; commit and push a fixed head, then retry")
 		}
-		if bodyPath != "" {
-			pushed, e := backend.ImplementationHead(ctx, item.Branch)
-			if e != nil {
-				return e
-			}
-			if pushed != head {
-				return Refuse("remote head changed or local and remote heads differ; push a fixed head and retry")
-			}
+		if bodyPath == "" {
+			return nil
 		}
-		return nil
+		pushed, e := backend.ImplementationHead(ctx, item.Branch)
+		if e != nil {
+			return e
+		}
+		if pushed != head {
+			return Refuse("remote head changed or local and remote heads differ; push a fixed head and retry")
+		}
+		if item.Submission == nil {
+			return nil
+		}
+		// A retarget after publication must stop the handoff rather than move
+		// lifecycle labels. Read only the destination record for that check.
+		port, ok := backend.(submissionReader)
+		if !ok {
+			return nil
+		}
+		current, e := port.ReviewSubmission(ctx, item.Submission.ID)
+		if e != nil {
+			return e
+		}
+		return RefuseNonMainBase(current.ID, current.Base)
 	}
 	if err := guard(); err != nil {
 		return outcome, err
@@ -139,7 +157,12 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 	if bodyPath != "" && item.Submission != nil {
 		published := bodyMatches
 		if from == Ready && item.Submission.Head == head && !published {
-			return outcome, Refuse("published Submission differs from the supplied Result Document; restore the original body before retrying")
+			// Published review evidence is never silently replaced. A pause may
+			// still publish the current draft body while the destination has
+			// never carried a review projection.
+			if target != NeedsHuman || submissionExposed(item.Submission) {
+				return outcome, Refuse("published Submission differs from the supplied Result Document; restore the original body before retrying")
+			}
 		}
 		if from == Rework {
 			if reworkReviewedAtHead(item, head) {
@@ -175,9 +198,6 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 		return outcome, err
 	}
 	if target == AwaitingReview {
-		if from == Ready && item.TargetSnapshot == "" || item.TargetSnapshot != "" && gitOK(root, "merge-base", "--is-ancestor", item.TargetSnapshot, head) != nil {
-			return outcome, Refuse("Target Snapshot is absent; merge the pinned snapshot, commit and push before retrying")
-		}
 		if history.Phase != "retired" || len(history.Violations) > 0 {
 			return outcome, Refuse(fmt.Sprint(history.Violations) + "; complete permitted ticks, commit Completion, then delete the entire ledger in a child commit and push")
 		}
@@ -194,17 +214,7 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 	}
 
 	if bodyPath != "" {
-		base := item.TargetBranch
-		if item.Submission != nil && item.Submission.Base != "" {
-			base = item.Submission.Base
-		}
-		if base == "" {
-			base, err = backend.ImplementationTarget(ctx)
-			if err != nil {
-				return outcome, err
-			}
-		}
-		submission := Submission{Head: head, Base: base, Body: string(body), Draft: target == NeedsHuman}
+		submission := Submission{Head: head, Base: "main", Body: string(body), Draft: target == NeedsHuman}
 		if item.Submission != nil {
 			submission.ID = item.Submission.ID
 		}
@@ -237,6 +247,11 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 		if current.ID != id {
 			continue
 		}
+		if current.Submission != nil {
+			if err := RefuseNonMainBase(current.Submission.ID, current.Submission.Base); err != nil {
+				return ImplementationOutcome{}, err
+			}
+		}
 		bodyMatches = bodyPath == ""
 		if bodyPath != "" && current.Submission != nil {
 			bodyMatches, err = backend.SubmissionBodyMatches(current.ID, current.Submission.Body, string(body))
@@ -254,6 +269,22 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 		return outcome, writeErr
 	}
 	return outcome, Refuse("handoff observations cannot prove completion; retain Result Documents and inspect before retrying")
+}
+
+// submissionReader is the narrow destination read the handoff guard needs to
+// refuse a retarget without re-reading the whole board.
+type submissionReader interface {
+	ReviewSubmission(context.Context, SubmissionID) (Submission, error)
+}
+
+// submissionExposed reports whether a Submission ever carried a destination
+// review projection. An unexposed draft may still be refreshed; once exposed,
+// its body is evidence and must match.
+func submissionExposed(submission *Submission) bool {
+	if submission == nil || submission.Lifecycle == nil {
+		return false
+	}
+	return slices.ContainsFunc(submission.Lifecycle.States, func(state State) bool { return state != NeedsHuman })
 }
 
 func implementationSourceClaim(item ImplementationItem) bool {

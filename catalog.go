@@ -64,7 +64,6 @@ type ImplementationFacts struct {
 	WorkItem                   int             `json:"work_item"`
 	Branch                     string          `json:"branch"`
 	Worktree                   string          `json:"worktree"`
-	TargetSnapshot             string          `json:"target_snapshot,omitempty"`
 	ArtifactBaseline           string          `json:"artifact_baseline,omitempty"`
 	ArtifactCompletion         string          `json:"artifact_completion,omitempty"`
 	SuppliedArtifactBaseline   string          `json:"supplied_artifact_baseline,omitempty"`
@@ -79,6 +78,7 @@ type ReviewComment struct {
 	Author          string `json:"author"`
 	Association     string `json:"association"`
 	Commit          string `json:"commit,omitempty"`
+	FinalHead       string `json:"final_head,omitempty"`
 	Path            string `json:"path,omitempty"`
 	CreatedAt       string `json:"created_at,omitempty"`
 	Verdict         string `json:"verdict,omitempty"`
@@ -146,16 +146,13 @@ func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
 	if facts.Implementation != nil {
 		f := facts.Implementation
 		instructions += fmt.Sprintf("\n\n## Work Start\n\nWork Item: %s\nBranch: %s\nWorktree: %s\nArtifact Baseline: %s\nResume: `%s`\n", f.WorkItemReference, f.Branch, f.Worktree, f.ArtifactBaseline, f.ResumeCommand)
-		if f.TargetSnapshot != "" {
-			instructions += "\nBefore coding, use ordinary Git in the worktree: `git merge " + f.TargetSnapshot + "`. The engine has not merged or run project checks.\n"
-		}
-		if f.Comments != nil && facts.Implementation != nil && facts.Implementation.TargetSnapshot == "" {
+		if f.Comments != nil {
 			instructions += "\nFinding-driven Rework: sync nothing; inspect the current PR comparison, supplied summary, inline evidence, and human comments. Keep the ledger retired.\n"
 		}
 		instructions += "\nWrite the opaque Result Document using the named template, then run `" + f.SubmitCommand + "`. Refresh ledger integrity for Audit with `" + f.InspectCommand + "`. If pausing, run `" + f.NeedsHumanCommand + "` and add `--body <result>/submission.md` when preserving implementation changes.\n"
 	}
 	if f := facts.Watchdog; f != nil {
-		instructions += fmt.Sprintf("\n\n## Review Start\n\nWork Item: %s\nSubmission: %s\nWorktree: %s\nReviewed head: %s\nArtifact Baseline: %s\nArtifact Completion: %s\nCompleted reviews: %d\nReview number: %d\nScope: %s\nResume: `%s`\n\nUse the supplied historical files, opaque PR body, prior findings, and human comments. Review the invocation's current head; rerun the Full Gate, active-finding verification, artifact checks, and whole-change critical-class scan. The engine has not run Audit or project checks.\n\nWrite `summary.md`, optional anchored findings, and on pass `submission.md` in %s. Run `%s --verdict <pass|rework|needs-human>`. Pass also requires `--body <result>/submission.md`; optional inline inputs use `--findings <result>/findings.json`. After permitted Debt Marker comments, commit and push, run the Post-Marker Check, and supply `--head <final-sha>` while retaining the original `--reviewed-head`.\n", f.WorkItemReference, f.SubmissionReference, f.Worktree, f.ReviewedHead, f.ArtifactBaseline, f.ArtifactCompletion, f.ReviewCount, f.ReviewNumber, f.ReviewScope, f.ResumeCommand, f.ResultDirectory, f.SubmitCommand)
+		instructions += fmt.Sprintf("\n\n## Review Start\n\nWork Item: %s\nSubmission: %s\nWorktree: %s\nReviewed head: %s\nArtifact Baseline: %s\nArtifact Completion: %s\nCompleted reviews: %d\nReview number: %d\nScope: %s\nResume: `%s`\n\nUse the supplied historical files, opaque Submission body, prior findings, and human comments. Review the invocation's current head; rerun the Full Gate, active-finding verification, artifact checks, and whole-change critical-class scan. The engine has not run Audit or project checks.\n\nWrite `summary.md`, optional anchored findings, and on pass `submission.md` in %s. Run `%s --verdict <pass|rework|needs-human>`. Pass also requires `--body <result>/submission.md`; optional inline inputs use `--findings <result>/findings.json`. After permitted Debt Marker comments, commit and push, run the Post-Marker Check, and supply `--head <final-sha>` while retaining the original `--reviewed-head`.\n", f.WorkItemReference, f.SubmissionReference, f.Worktree, f.ReviewedHead, f.ArtifactBaseline, f.ArtifactCompletion, f.ReviewCount, f.ReviewNumber, f.ReviewScope, f.ResumeCommand, f.ResultDirectory, f.SubmitCommand)
 		if f.ReviewScope == "incremental" {
 			instructions += "\nCompare `" + f.PreviousReviewedHead + "..." + f.ReviewedHead + "`; an empty code diff is valid.\n"
 		} else {

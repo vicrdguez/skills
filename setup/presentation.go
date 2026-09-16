@@ -22,8 +22,6 @@ type implementationItemOutput struct {
 	Problem         string
 	Submission      *submissionOutput
 	Branch          string
-	TargetSnapshot  string
-	TargetBranch    string
 	Number          int
 	State           workflow.State
 	CreatedAt       string
@@ -32,17 +30,18 @@ type implementationItemOutput struct {
 }
 
 type submissionOutput struct {
-	Merged       bool
-	Mergeability string
-	CreatedAt    string
-	State        workflow.State
-	Claimed      bool
-	Number       int
-	Head         string
-	Base         string
-	Body         string
-	Draft        bool
-	Comments     []skilldist.ReviewComment
+	PendingReview workflow.State
+	Merged        bool
+	Mergeability  string
+	CreatedAt     string
+	State         workflow.State
+	Claimed       bool
+	Number        int
+	Head          string
+	Base          string
+	Body          string
+	Draft         bool
+	Comments      []skilldist.ReviewComment
 }
 
 type StatusOutput struct {
@@ -54,8 +53,8 @@ type StatusOutput struct {
 func presentItem(item workflow.ImplementationItem) (implementationItemOutput, error) {
 	output := implementationItemOutput{
 		Synchronization: item.Synchronization, Problem: item.Problem,
-		Branch: item.Branch, TargetSnapshot: item.TargetSnapshot, TargetBranch: item.TargetBranch,
-		State: item.State, CreatedAt: item.CreatedAt, Claimed: item.Claimed,
+		Branch: item.Branch,
+		State:  item.State, CreatedAt: item.CreatedAt, Claimed: item.Claimed,
 	}
 	var err error
 	if item.ID != "" {
@@ -74,7 +73,8 @@ func presentItem(item workflow.ImplementationItem) (implementationItemOutput, er
 	if item.Submission != nil {
 		s := item.Submission
 		output.Submission = &submissionOutput{
-			Merged: s.Merged, Mergeability: s.Mergeability,
+			PendingReview: s.PendingReview,
+			Merged:        s.Merged, Mergeability: s.Mergeability,
 			CreatedAt: s.CreatedAt, State: s.State, Claimed: s.Claimed,
 			Head: s.Head, Base: s.Base, Body: s.Body, Draft: s.Draft, Comments: s.Comments,
 		}
@@ -122,13 +122,7 @@ func PresentImplementation(outcome workflow.ImplementationOutcome) (Implementati
 		if output.Item.Submission != nil {
 			f.Submission = output.Item.Submission.Number
 		}
-		if outcome.Status == "fix_required" && f.TargetSnapshot == "" {
-			f.TargetSnapshot = "<sha>"
-		}
-		f.ResumeCommand = fmt.Sprintf("skl implement resume --item %d --target-snapshot %s", f.WorkItem, f.TargetSnapshot)
-		if outcome.Item.State == workflow.Rework && !outcome.Item.Synchronization {
-			f.ResumeCommand = fmt.Sprintf("skl implement resume --item %d", f.WorkItem)
-		}
+		f.ResumeCommand = fmt.Sprintf("skl implement resume --item %d", f.WorkItem)
 		f.ResumeCommand += " --remote " + quote(f.Remote)
 		flags := endpointFlags(f.SuppliedArtifactBaseline, f.SuppliedArtifactCompletion)
 		f.ResumeCommand += flags

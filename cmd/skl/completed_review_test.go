@@ -99,7 +99,7 @@ func TestWatchdogRemovesObsoleteSynchronizationBeforeReleaseThroughPublicHTTP(t 
 	}
 }
 
-func TestCompletedPassRetainsConflictSynchronizationPolicyThroughPublicHTTP(t *testing.T) {
+func TestCompletedPassIgnoresMergeabilityThroughPublicHTTP(t *testing.T) {
 	f := newReviewFixture(t)
 	f.start(t, f.root)
 	if got := f.submit(t, 1, f.head, "pass"); got.Status != "ready_for_merge" {
@@ -111,7 +111,7 @@ func TestCompletedPassRetainsConflictSynchronizationPolicyThroughPublicHTTP(t *t
 	}
 	f.forge.mergeable = false
 	got := f.submit(t, 1, f.head, "pass")
-	if got.Status != "rework" || got.Item == nil || !got.Item.Synchronization || got.Item.Claimed || got.Item.TargetSnapshot != f.head || !slices.Contains(f.forge.labels, "sync") || len(f.forge.summaries) != 1 || f.forge.body != "final\n\nCloses #7\n" {
-		t.Fatalf("completed pass lost target synchronization policy: %#v", got)
+	if got.Status != "ready_for_merge" || got.Item == nil || got.Item.Synchronization || got.Item.Claimed || slices.Contains(f.forge.labels, "sync") || len(f.forge.summaries) != 1 || f.forge.body != "final\n\nCloses #7\n" {
+		t.Fatalf("completed pass depended on mergeability: %#v", got)
 	}
 }

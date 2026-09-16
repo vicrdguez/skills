@@ -144,6 +144,9 @@ func (f *reviewFixture) interleaveProtectedCleanup(t *testing.T, lane, body, dec
 		if verdict != "" {
 			reviews := f.getJSON(t, "/pulls/11/reviews").([]any)
 			wanted := "<!-- skl.watchdog.review/v1\n{\"review_number\":1,\"verdict\":\"" + verdict + "\"}\n-->\nverdict"
+			if verdict == "pass" {
+				wanted = "<!-- skl.watchdog.review/v1\n{\"review_number\":1,\"verdict\":\"pass\",\"final_head\":\"" + f.head + "\"}\n-->\nverdict"
+			}
 			if len(reviews) != 1 || reviews[0].(map[string]any)["body"] != wanted || reviews[0].(map[string]any)["commit_id"] != f.head {
 				t.Errorf("target lacks exact review receipt: %#v", reviews)
 			}
@@ -476,8 +479,8 @@ func TestRetiredMetadataDoesNotAuthorizeHandoffsThroughPublicHTTP(t *testing.T) 
 				metadata := fmt.Sprintf("<!-- skl.implement/v1\n{\"target_snapshot\":%q,\"target_branch\":\"main\"%s}\n-->", f.head, retired.fields)
 				f.forge.sourceComments = []map[string]any{{"author_association": "OWNER", "body": metadata}}
 				start := f.run(t, f.worktree, "implement", "resume", "--item", "7")
-				if start.Status != "work_available" || start.Packet.Facts.Implementation.TargetSnapshot != f.head || start.Packet.Facts.Implementation.WorkItem != 7 {
-					t.Fatalf("retired metadata altered resume/pin: %#v", start)
+				if start.Status != "work_available" || start.Packet.Facts.Implementation.WorkItem != 7 {
+					t.Fatalf("retired metadata altered resume: %#v", start)
 				}
 				directory := start.Packet.Facts.Implementation.ResultDirectory
 				body := filepath.Join(directory, "submission.md")
@@ -488,7 +491,7 @@ func TestRetiredMetadataDoesNotAuthorizeHandoffsThroughPublicHTTP(t *testing.T) 
 				if operation == "resume" {
 					before, writes := f.evidenceSnapshot(t), len(f.forge.acceptedMutations)
 					got := f.run(t, f.root, "implement", "resume", "--item", "7")
-					if got.Status != "work_available" || got.Packet.Facts.Implementation.TargetSnapshot != f.head || writes != len(f.forge.acceptedMutations) || !reflect.DeepEqual(before, f.evidenceSnapshot(t)) {
+					if got.Status != "work_available" || writes != len(f.forge.acceptedMutations) || !reflect.DeepEqual(before, f.evidenceSnapshot(t)) {
 						t.Fatalf("resume used retired fields: %#v", got)
 					}
 				} else {
@@ -526,15 +529,10 @@ func TestRetiredMetadataDoesNotAuthorizeHandoffsThroughPublicHTTP(t *testing.T) 
 					}
 				}
 				if f.forge.sourceComments[0]["body"] != metadata || !slices.Equal(f.forge.otherLabels, []string{"ready"}) {
-					t.Fatal("historical pin or other item changed")
+					t.Fatal("historical metadata or other item changed")
 				}
-				if len(f.forge.issueComments) != 0 || len(f.forge.inlines) != 0 || len(f.forge.summaries) != 0 {
+				if len(f.forge.issueComments) != 0 || len(f.forge.inlines) != 0 || len(f.forge.summaries) != 0 || len(f.forge.sourceComments) != 1 {
 					t.Fatal("publication wrote an unexpected comment record")
-				}
-				for _, comment := range f.forge.sourceComments[1:] {
-					if comment["body"] != fmt.Sprintf("<!-- skl.implement/v1\n{\"target_snapshot\":%q,\"target_branch\":\"main\"}\n-->", f.head) {
-						t.Fatalf("legitimate pin changed: %#v", comment)
-					}
 				}
 				if fileExists(directory) {
 					entries, err := os.ReadDir(directory)
