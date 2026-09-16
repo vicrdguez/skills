@@ -146,7 +146,7 @@ func commitLedger(t *testing.T, root, slug string, complete bool) {
 		}
 	}
 	runGit(t, root, "add", ".changes/"+slug)
-	runGit(t, root, "commit", "-m", "add ledger")
+	runGit(t, root, "commit", "-m", "[baseline] "+slug)
 }
 
 func commitFile(t *testing.T, root, name, contents string) {

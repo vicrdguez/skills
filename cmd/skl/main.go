@@ -2,11 +2,12 @@ package main
 
 import (
 	"bufio"
-	"context"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/urfave/cli/v2"
 	skilldist "github.com/vicrdguez/skills"
@@ -17,11 +18,11 @@ import (
 
 type backendFactory func(github.RepositoryID) (setup.Backend, error)
 
-func newApp(newBackend backendFactory, stdin io.Reader, stdout, stderr io.Writer) *cli.App {
+func newApp(newBackend backendFactory, stdin io.Reader, stdout, stderr io.Writer) *stageApp {
 	return newAppWithSkillHome(newBackend, stdin, stdout, stderr, "")
 }
 
-func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, stderr io.Writer, home string) *cli.App {
+func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, stderr io.Writer, home string) *stageApp {
 	app := cli.NewApp()
 	app.Name = "skl"
 	app.Writer = stdout
@@ -199,7 +200,7 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 		},
 	}}
 	app.Commands = append(app.Commands, statusCommand(newBackend, stdout))
-	return app
+	return &stageApp{app}
 }
 
 func proposalRequest(command *cli.Context) (workflow.PublishRequest, error) {
@@ -229,7 +230,20 @@ func proposalRequest(command *cli.Context) (workflow.PublishRequest, error) {
 
 func main() {
 	app := newApp(setup.NewGitHubBackendFromEnv, os.Stdin, os.Stdout, os.Stderr)
-	if err := app.RunContext(context.Background(), os.Args); err != nil {
+	for _, lane := range []string{"implement", "watchdog"} {
+		command := app.Command(lane).Command("next")
+		action := command.Action
+		command.Action = func(c *cli.Context) error {
+			// Only waiting selections translate process signals into cancellation.
+			if c.Duration("wait") > 0 {
+				ctx, stop := signal.NotifyContext(c.Context, os.Interrupt, syscall.SIGTERM)
+				defer stop()
+				c.Context = ctx
+			}
+			return action(c)
+		}
+	}
+	if err := app.Run(os.Args); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

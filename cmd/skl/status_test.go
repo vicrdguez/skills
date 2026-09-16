@@ -4,10 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
+	skilldist "github.com/vicrdguez/skills"
 	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/setup"
 	"github.com/vicrdguez/skills/workflow"
@@ -28,8 +32,8 @@ func statusCLI(t *testing.T, root string, b *implementationMemory) setup.StatusO
 }
 
 func TestStatusCompletesCoordinationOnlyWhenEveryChildMerged(t *testing.T) {
-	b := &implementationMemory{coordination: []workflow.CoordinationItem{{ID: "100", Children: []workflow.WorkItemID{"7", "8"}}}, work: []workflow.ImplementationItem{{ID: "7", State: workflow.Merged}, {ID: "8", State: workflow.ReadyForMerge}}}
 	root := proposalRepository(t)
+	b := &implementationMemory{coordination: []workflow.CoordinationItem{{ID: "100", Children: []workflow.WorkItemID{"7", "8"}}}, work: []workflow.ImplementationItem{{ID: "7", State: workflow.Merged}, {ID: "8", State: workflow.ReadyForMerge}}}
 	if got := statusCLI(t, root, b); b.coordination[0].Closed || len(got.CompleteProposals) != 0 {
 		t.Fatalf("premature completion: %#v", got)
 	}
@@ -40,10 +44,10 @@ func TestStatusCompletesCoordinationOnlyWhenEveryChildMerged(t *testing.T) {
 	}
 }
 
-func (b *implementationMemory) CoordinationItems(context.Context, github.RepositoryID) ([]workflow.CoordinationItem, error) {
+func (b *implementationMemory) CoordinationItems(context.Context) ([]workflow.CoordinationItem, error) {
 	return b.coordination, nil
 }
-func (b *implementationMemory) CloseCoordination(_ context.Context, _ github.RepositoryID, id workflow.WorkItemID) error {
+func (b *implementationMemory) CloseCoordination(_ context.Context, id workflow.WorkItemID) error {
 	for i := range b.coordination {
 		if b.coordination[i].ID == id {
 			b.coordination[i].Closed = true
@@ -72,30 +76,19 @@ func TestStatusObservesHumanMergeAndReleasesDependencies(t *testing.T) {
 	}
 }
 
-func TestStatusNormalizesPartialAndContradictoryRecords(t *testing.T) {
+func TestStatusRefusesPartialAndPreservesRecords(t *testing.T) {
 	b := &implementationMemory{work: []workflow.ImplementationItem{
 		{ID: "1", State: workflow.Ready}, {ID: "2", State: workflow.Ready, Claimed: true},
 		{ID: "3", State: workflow.AwaitingReview}, {ID: "4", State: workflow.Rework},
-		{ID: "5", State: workflow.NeedsHuman, ResumeState: workflow.Rework}, {ID: "6", State: workflow.ReadyForMerge},
+		{ID: "5", State: workflow.NeedsHuman}, {ID: "6", State: workflow.ReadyForMerge},
 		{ID: "7", State: workflow.Merged}, {ID: "8", State: workflow.Superseded, Branch: "retained-reference"},
 		{ID: "9", State: workflow.Ready, Claimed: true, Submission: &workflow.Submission{ID: "19", State: workflow.AwaitingReview, Head: "fixed"}},
 		{ID: "10", State: workflow.Rework, Problem: "contradictory lifecycle projections"},
 	}}
 	before := append([]workflow.ImplementationItem(nil), b.work...)
-	got := statusCLI(t, proposalRepository(t), b)
-	if !reflect.DeepEqual(before[:8], b.work[:8]) || !reflect.DeepEqual(before[9], b.work[9]) {
-		t.Fatal("status mutated valid or contradictory state")
-	}
-	if got.Items[8].State != workflow.AwaitingReview || got.Items[8].Claimed || got.Items[9].State != workflow.NeedsHuman || got.Items[7].Branch != "retained-reference" {
-		t.Fatalf("normalized status: %#v", got)
-	}
-}
-
-func TestStatusCompletesPartiallyProjectedReview(t *testing.T) {
-	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Rework, Claimed: true, Submission: &workflow.Submission{ID: "11", Head: "fixed", PendingReview: workflow.Rework}}}}
-	got := statusCLI(t, proposalRepository(t), b)
-	if got.Items[0].Claimed || got.Items[0].Submission.PendingReview != "" || got.Items[0].State != workflow.Rework {
-		t.Fatalf("partial review: %#v", got)
+	_, err := workflow.ObserveStatus(context.Background(), b)
+	if err == nil || !strings.Contains(err.Error(), "original Result Document") || !reflect.DeepEqual(before, b.work) {
+		t.Fatalf("status changed an ambiguous partial handoff: %v, %#v", err, b.work)
 	}
 }
 
@@ -105,77 +98,35 @@ type statusGuardMemory struct {
 	beforeLaterGuard func()
 }
 
-func (b *statusGuardMemory) CompleteReview(ctx context.Context, repository github.RepositoryID, item workflow.ImplementationItem, target workflow.State, guard func() error) error {
+func (b *statusGuardMemory) CompleteReview(ctx context.Context, item workflow.ImplementationItem, target workflow.State, guard func() error) error {
 	if err := guard(); err != nil {
 		return err
 	}
 	if b.beforeLaterGuard != nil {
 		b.beforeLaterGuard()
 	}
-	return b.implementationMemory.CompleteReview(ctx, repository, item, target, guard)
+	return b.implementationMemory.CompleteReview(ctx, item, target, guard)
 }
 
-func TestStatusPendingPassRequiresMergeabilityAndRetainsRecovery(t *testing.T) {
-	for _, stage := range []string{"entry", "transition", "later-guard"} {
-		for _, mergeability := range []string{"unknown", "conflicting"} {
-			if stage == "entry" && mergeability == "conflicting" {
-				continue // Known conflicts use the existing Synchronization Rework path.
-			}
-			t.Run(stage+"/"+mergeability, func(t *testing.T) {
-				root := proposalRepository(t)
-				head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
-				b := &statusGuardMemory{implementationMemory: &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.ReadyForMerge, Claimed: true, Submission: &workflow.Submission{ID: "11", Head: head, ReviewedHead: head, Base: "main", State: workflow.ReadyForMerge, Claimed: true, PendingReview: workflow.ReadyForMerge, Mergeability: "mergeable", Bounces: 1}}}}}
-				change := func() { b.work[0].Submission.Mergeability = mergeability }
-				switch stage {
-				case "entry":
-					change()
-				case "transition":
-					b.beforeTransition = change
-				case "later-guard":
-					b.beforeLaterGuard = change
-				}
-				var output bytes.Buffer
-				app := newApp(func(github.RepositoryID) (setup.Backend, error) { return b, nil }, bytes.NewReader(nil), &output, &output)
-				if err := app.Run([]string{"skl", "status", "--repo", root}); err != nil {
-					t.Fatal(err)
-				}
-				var result setup.ImplementationOutput
-				if err := json.Unmarshal(output.Bytes(), &result); err != nil {
-					t.Fatal(err)
-				}
-				if result.Status != "fix_required" || !strings.Contains(result.Reason, "mergeability") {
-					t.Fatalf("unsafe pending pass: %s", &output)
-				}
-				item := b.work[0]
-				if !item.Claimed || !item.Submission.Claimed || item.Submission.PendingReview != workflow.ReadyForMerge || item.Submission.Head != head || item.Submission.ReviewedHead != head || item.Submission.Bounces != 1 {
-					t.Fatalf("lost recovery state: %#v / %#v", item, item.Submission)
-				}
-				b.beforeTransition = nil
-				b.beforeLaterGuard = nil
-				b.work[0].Submission.Mergeability = "mergeable"
-				got := statusCLI(t, root, b.implementationMemory).Items[0]
-				if got.State != workflow.ReadyForMerge || got.Claimed || got.Submission.Claimed || got.Submission.PendingReview != "" || got.Submission.Bounces != 1 {
-					t.Fatalf("retry did not finalize pass: %#v / %#v", got, got.Submission)
+func TestStatusPreservesApprovalRegardlessOfMergeability(t *testing.T) {
+	root := proposalRepository(t)
+	for _, mergeability := range []string{"conflicting", "unknown"} {
+		for _, pending := range []workflow.State{"", workflow.ReadyForMerge} {
+			t.Run(mergeability+"/"+string(pending), func(t *testing.T) {
+				b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.ReadyForMerge, Claimed: pending != "", Submission: &workflow.Submission{ID: "11", Head: "fixed", Base: "main", Mergeability: mergeability, PendingReview: pending, Claimed: pending != ""}}}}
+				b.work[0].Submission.ClaimAcquiredAt = "2026-01-01T00:00:01Z"
+				b.work[0].Submission.Comments = []skilldist.ReviewComment{{ReviewNumber: 1, Verdict: "pass", Commit: "fixed", FinalHead: "fixed", CreatedAt: "2026-01-01T00:00:02Z"}}
+				got := statusCLI(t, root, b).Items[0]
+				if got.State != workflow.ReadyForMerge || got.Synchronization || got.Claimed || got.Submission.Claimed || got.Submission.PendingReview != "" {
+					t.Fatalf("approval changed (pending %q): %#v / %#v", pending, got, got.Submission)
 				}
 			})
 		}
 	}
 }
 
-func TestStatusRoutesAcceptedConflictToSynchronizationRework(t *testing.T) {
-	root := proposalRepository(t)
-	target := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "main"))
-	for _, pending := range []workflow.State{"", workflow.ReadyForMerge} {
-		b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.ReadyForMerge, Claimed: pending != "", Submission: &workflow.Submission{ID: "11", Head: "fixed", Base: "main", Mergeability: "conflicting", Bounces: 1, PendingReview: pending, Claimed: pending != ""}}}, remoteHeads: map[string]string{"main": target}}
-		got := statusCLI(t, root, b).Items[0]
-		if got.State != workflow.Rework || !got.Synchronization || got.TargetSnapshot != target || got.TargetBranch != "main" || got.Submission.Bounces != 1 || got.Claimed || got.Submission.Claimed || got.Submission.PendingReview != "" {
-			t.Fatalf("accepted conflict (pending %q): %#v / %#v", pending, got, got.Submission)
-		}
-	}
-}
-
-func TestStatusReturnsStructuredRepairableRefusal(t *testing.T) {
-	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.ReadyForMerge, Submission: &workflow.Submission{ID: "11", Head: "fixed", Base: "main", Mergeability: "conflicting"}}}}
+func TestStatusRefusesPendingPassForNonMainSubmission(t *testing.T) {
+	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.ReadyForMerge, Claimed: true, Submission: &workflow.Submission{ID: "11", Head: "fixed", Base: "release", PendingReview: workflow.ReadyForMerge, Claimed: true}}}}
 	var output bytes.Buffer
 	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return b, nil }, bytes.NewReader(nil), &output, &output)
 	if err := app.Run([]string{"skl", "status", "--repo", proposalRepository(t)}); err != nil {
@@ -185,7 +136,131 @@ func TestStatusReturnsStructuredRepairableRefusal(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
-	if result.Status != "fix_required" || !strings.Contains(result.Reason, "current target unavailable") || b.work[0].State != workflow.ReadyForMerge {
+	if result.Status != "fix_required" || !strings.Contains(result.Reason, "main") || !b.work[0].Claimed || b.work[0].State != workflow.ReadyForMerge {
 		t.Fatalf("repairable status: %#v", result)
+	}
+}
+
+func TestStatusRefusesClaimLossDuringPartialPass(t *testing.T) {
+	b := &statusGuardMemory{implementationMemory: &implementationMemory{work: []workflow.ImplementationItem{{
+		ID: "7", Branch: "widget", State: workflow.ReadyForMerge, Claimed: true,
+		Submission: &workflow.Submission{
+			ID: "11", Head: "fixed", Base: "main", State: workflow.ReadyForMerge, Claimed: true,
+			PendingReview: workflow.ReadyForMerge, ClaimAcquiredAt: "2026-01-01T00:00:01Z",
+			Comments: []skilldist.ReviewComment{{ReviewNumber: 1, Verdict: "pass", Commit: "fixed", FinalHead: "fixed", CreatedAt: "2026-01-01T00:00:02Z"}},
+		},
+	}}}}
+	b.beforeLaterGuard = func() {
+		b.work[0].Submission.Lifecycle.Claimed = false
+		b.work[0].Submission.ClaimAcquiredAt = ""
+	}
+	var output bytes.Buffer
+	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return b, nil }, bytes.NewReader(nil), &output, &output)
+	if err := app.Run([]string{"skl", "status", "--repo", proposalRepository(t)}); err != nil {
+		t.Fatalf("status: %v %s", err, &output)
+	}
+	var got setup.ImplementationOutput
+	if err := json.Unmarshal(output.Bytes(), &got); err != nil || got.Status != "fix_required" || !strings.Contains(got.Reason, "changed during status") || b.work[0].Submission.PendingReview != workflow.ReadyForMerge || b.work[0].Submission.Claimed {
+		t.Fatalf("Claim loss completed the partial pass or fabricated a Claim: %v %s", err, &output)
+	}
+}
+
+func TestStatusRecoversOnlyTheCandidateAcceptedByInterruptedPassThroughGitHub(t *testing.T) {
+	for _, tc := range []struct {
+		name, failDelete, evidence string
+		marker, mergeable          bool
+	}{
+		{"replaced during overlap", "review", "replaced", false, false},
+		{"replaced after review cleanup", "wip", "replaced", false, false},
+		{"unchanged reviewed head", "wip", "unchanged", false, false},
+		{"unchanged final marker head", "review", "unchanged", true, false},
+		{"replaced final marker head", "wip", "replaced", true, false},
+		{"replaced mergeable marker head", "review", "replaced", true, true},
+		{"unchanged mergeable head", "wip", "unchanged", false, true},
+		{"missing receipt", "review", "missing", false, false},
+		{"missing mergeable receipt", "review", "missing", false, true},
+		{"receipt omits final head", "wip", "legacy", false, false},
+		{"duplicate receipt", "wip", "duplicate", false, false},
+		{"receipt predates claim", "wip", "stale", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newReviewFixture(t)
+			packet := f.start(t, f.root).Packet
+			if packet == nil {
+				t.Fatal("review did not start")
+			}
+			final := f.head
+			if tc.marker {
+				runGit(t, f.worktree, "commit", "--allow-empty", "-m", "debt marker")
+				final = strings.TrimSpace(runGitOutput(t, f.worktree, "rev-parse", "HEAD"))
+				f.forge.head = final
+			}
+			f.forge.mergeable = tc.mergeable
+			dir := packet.Facts.Watchdog.ResultDirectory
+			summary, body := filepath.Join(dir, "summary.md"), filepath.Join(dir, "submission.md")
+			if err := os.WriteFile(summary, []byte("accepted candidate"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(body, []byte("final body"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			f.forge.failDelete = tc.failDelete
+			command := []string{"watchdog", "submit", "--item", "7", "--review-number", "1", "--reviewed-head", f.head, "--verdict", "pass", "--summary", summary, "--body", body}
+			_, err := f.runResult(f.worktree, append(command, "--head", final)...)
+			if err == nil || !slices.Contains(f.forge.labels, "done") || !slices.Contains(f.forge.labels, "wip") || slices.Contains(f.forge.labels, "review") != (tc.failDelete == "review") || len(f.forge.summaries) != 1 {
+				t.Fatalf("pass was not interrupted at %s: %v labels=%v summaries=%v", tc.failDelete, err, f.forge.labels, f.forge.summaries)
+			}
+			switch tc.evidence {
+			case "replaced":
+				runGit(t, f.worktree, "commit", "--allow-empty", "-m", "unreviewed replacement")
+				f.forge.head = strings.TrimSpace(runGitOutput(t, f.worktree, "rev-parse", "HEAD"))
+			case "missing":
+				f.forge.summaries = nil
+				f.forge.sourceComments = append(f.forge.sourceComments, map[string]any{
+					"author_association": "OWNER",
+					"body":               "<!-- skl.implement/v1\n{\"watchdog_head\":\"" + f.head + "\",\"verdict_head\":\"" + final + "\"}\n-->",
+				})
+			case "legacy":
+				f.forge.summaries[0]["body"] = "<!-- skl.watchdog.review/v1\n{\"review_number\":1,\"verdict\":\"pass\"}\n-->\naccepted candidate"
+			case "duplicate":
+				f.forge.summaries = append(f.forge.summaries, f.forge.summaries[0])
+			case "stale":
+				f.forge.summaries[0]["submitted_at"] = "2025-01-01T00:00:00Z"
+			}
+			labels, writes := slices.Clone(f.forge.labels), f.forge.writes
+			checkpoint := checkpointSnapshot(f.checkpoint)
+			var output bytes.Buffer
+			app := newApp(func(repository github.RepositoryID) (setup.Backend, error) {
+				backend := setup.NewGitHubBackend(f.server.URL, "token", f.server.Client())
+				backend.BindRepository(repository)
+				return backend, nil
+			}, bytes.NewReader(nil), &output, &output)
+			if err := app.Run([]string{"skl", "status", "--repo", f.root}); err != nil {
+				t.Fatalf("status: %v %s", err, &output)
+			}
+			if tc.evidence == "unchanged" {
+				var got setup.StatusOutput
+				if err := json.Unmarshal(output.Bytes(), &got); err != nil || got.Status != "observed" || len(got.Items) == 0 || got.Items[0].State != workflow.ReadyForMerge || got.Items[0].Claimed || !slices.Equal(f.forge.labels, []string{"done"}) {
+					t.Fatalf("unchanged candidate did not recover: %v %s labels=%v", err, &output, f.forge.labels)
+				}
+			} else {
+				var got setup.ImplementationOutput
+				if err := json.Unmarshal(output.Bytes(), &got); err != nil || got.Status != "fix_required" || !strings.Contains(got.Reason, "interrupted pass") {
+					t.Fatalf("unsafe recovery was not refused: %v %s", err, &output)
+				}
+				if !slices.Equal(f.forge.labels, labels) || f.forge.writes != writes || checkpointSnapshot(f.checkpoint) != checkpoint {
+					t.Fatalf("refusal changed handoff: labels=%v writes=%d/%d checkpoint=%s", f.forge.labels, f.forge.writes, writes, checkpointSnapshot(f.checkpoint))
+				}
+				if tc.evidence == "replaced" {
+					got := f.run(t, f.worktree, append(command, "--head", f.forge.head)...)
+					if got.Status != "fix_required" || !strings.Contains(got.Reason, "recorded review differs") || f.forge.writes != writes || !slices.Equal(f.forge.labels, labels) || checkpointSnapshot(f.checkpoint) != checkpoint {
+						t.Fatalf("retry substituted a different final head: %#v labels=%v writes=%d/%d", got, f.forge.labels, f.forge.writes, writes)
+					}
+				}
+			}
+			if readFile(t, summary) != "accepted candidate" || readFile(t, body) != "final body" || f.forge.body != "final body\n\nCloses #7\n" {
+				t.Fatal("status discarded repair documents or published body")
+			}
+		})
 	}
 }

@@ -286,6 +286,49 @@ func TestSetupAndProposalResolveRepository(t *testing.T) {
 	}
 }
 
+func TestB1PublishAMarkedBaselineBeforeIssueCreation(t *testing.T) {
+	for _, test := range []struct {
+		name, subject, want string
+		extraHead, complete bool
+	}{
+		{"marked baseline", "[baseline] ship-widget", "completed\n", false, true},
+		{"missing marker", "Propose ship-widget", "missing [baseline] ship-widget marker", false, true},
+		{"marker before head", "[baseline] ship-widget", "Artifact Baseline must be the published branch head", true, true},
+		{"incomplete baseline", "[baseline] ship-widget", "ledger misses behavior.md", false, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := proposalRepository(t)
+			runGit(t, root, "switch", "-c", "ship-widget", "main")
+			writeLedger(t, root, "ship-widget", test.complete)
+			runGit(t, root, "add", ".changes/ship-widget")
+			runGit(t, root, "commit", "-m", test.subject)
+			baseline := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+			if test.extraHead {
+				runGit(t, root, "commit", "--allow-empty", "-m", "implementation")
+			}
+			runGit(t, root, "update-ref", "refs/remotes/origin/ship-widget", "HEAD")
+
+			backend := &memoryBackend{}
+			var output bytes.Buffer
+			app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+			err := app.Run([]string{"skl", "propose", "publish", "--repo", root, "--target", "main", "--slice", proposalSliceFlag(t, "ship-widget")})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(output.String(), test.want) {
+				t.Fatalf("output = %q, want %q", &output, test.want)
+			}
+			if test.want == "completed\n" {
+				if len(backend.items) != 1 || backend.items[0].ArtifactBaseline != baseline || backend.items[0].Body != "ship-widget body\n" || !backend.items[0].Ready {
+					t.Fatalf("publication = %#v", backend.items)
+				}
+			} else if len(backend.items) != 0 {
+				t.Fatalf("refusal mutated publication: %#v", backend.items)
+			}
+		})
+	}
+}
+
 func TestPublishExplicitRemoteChecksItsOwnGitEvidence(t *testing.T) {
 	for _, evidence := range []string{"missing target", "target ancestry", "pushed head", "artifact baseline"} {
 		t.Run(evidence, func(t *testing.T) {
@@ -310,7 +353,7 @@ func TestPublishExplicitRemoteChecksItsOwnGitEvidence(t *testing.T) {
 			case "artifact baseline":
 				runGit(t, root, "update-ref", "refs/heads/widget", "main")
 				runGit(t, root, "update-ref", "refs/remotes/upstream/widget", "main")
-				invariant, repair = "ledger is missing at .changes/widget", "commit the complete ledger once at the published branch head"
+				invariant, repair = "slice widget is missing [baseline] widget marker", "commit the complete ledger once at the published branch head"
 			}
 			backend := &memoryBackend{}
 			var output bytes.Buffer
@@ -485,6 +528,20 @@ func TestEmbeddedResourceDelegationSmoke(t *testing.T) {
 		return stdout.String()
 	}
 	run(t, "skl install")
+	for _, command := range []string{
+		"skl skill --format json domain",
+		"skl skill --format json explore",
+		"skl skill --format json implement",
+		"skl skill --format json propose",
+		"skl skill --resource reference/tasks.md propose",
+	} {
+		got := run(t, command)
+		for _, retired := range []string{"docs/capabilities", "CAPABILITIES-FORMAT.md", "document a capability", "ADRs, capabilities", "capability changes", "capability-doc"} {
+			if strings.Contains(got, retired) {
+				t.Errorf("%s retains %q", command, retired)
+			}
+		}
+	}
 	for _, harness := range []string{".pi/agent/skills", ".codex/skills", ".claude/skills"} {
 		for _, skill := range []string{"audit", "brainstorm", "design", "domain", "explore", "implement", "propose", "shape", "tdd", "watchdog", "writing-for-agents"} {
 			directory := filepath.Join(home, harness, skill)
@@ -509,7 +566,6 @@ func TestEmbeddedResourceDelegationSmoke(t *testing.T) {
 	}{
 		{"domain", "", "Use the format from `skl skill --resource reference/CONTEXT-FORMAT.md domain`.", "skl skill --resource reference/CONTEXT-FORMAT.md domain", "# CONTEXT.md Format"},
 		{"domain", "", "If any of the three is missing, skip the ADR. Use the format from `skl skill --resource reference/ADR-FORMAT.md domain`.", "skl skill --resource reference/ADR-FORMAT.md domain", "# ADR Format"},
-		{"domain", "", "Use the format from `skl skill --resource reference/CAPABILITIES-FORMAT.md domain`.", "skl skill --resource reference/CAPABILITIES-FORMAT.md domain", "# Capability Doc Format"},
 		{"tdd", "", "See `skl skill --resource reference/tests.md tdd` for examples", "skl skill --resource reference/tests.md tdd", "# Good and Bad Tests"},
 		{"tdd", "", "`skl skill --resource reference/mocking.md tdd` for mocking guidelines.", "skl skill --resource reference/mocking.md tdd", "Mock at **system boundaries** only:"},
 		{"audit", "", "the Standards axis always carries the **smell baseline** from `skl skill --resource reference/smells.md audit`", "skl skill --resource reference/smells.md audit", "# Smell Baseline"},
@@ -526,7 +582,6 @@ func TestEmbeddedResourceDelegationSmoke(t *testing.T) {
 		{"propose", "", "Follow the template from `skl skill --resource reference/behavior.md propose`", "skl skill --resource reference/behavior.md propose", "## Feature: Order cancellation"},
 		{"propose", "", "Follow the template from `skl skill --resource reference/plan.md propose`", "skl skill --resource reference/plan.md propose", "### Module shapes & seams"},
 		{"propose", "", "`tasks.md`: Follow the template from `skl skill --resource reference/tasks.md propose`", "skl skill --resource reference/tasks.md propose", "Write it when there's more than a couple of scenarios or any non-behavioral chores."},
-		{"propose", "reference/tasks.md", "When relevant include the capability-doc update as the final doc task (format: `skl skill --resource reference/CAPABILITIES-FORMAT.md domain`).", "skl skill --resource reference/CAPABILITIES-FORMAT.md domain", "# Capability Doc Format"},
 		{"writing-for-agents", "", "When the document you're writing is a skill, read `skl skill --resource SKILL-MECHANICS.md writing-for-agents` for frontmatter, invocation choice, and router skills.", "skl skill --resource SKILL-MECHANICS.md writing-for-agents", "## Invocation"},
 		{"writing-for-agents", "", "**By invocation**, skill-specific: see `skl skill --resource SKILL-MECHANICS.md writing-for-agents`.", "skl skill --resource SKILL-MECHANICS.md writing-for-agents", "## Router skills"},
 		{"writing-for-agents", "SKILL-MECHANICS.md", "the Writing for Agents definition (retrieve with `skl skill writing-for-agents` if not already supplied)", "skl skill writing-for-agents", "## Context pointers"},
@@ -957,8 +1012,8 @@ func TestRefuseInvalidProposalPreflight(t *testing.T) {
 		"missing target":                          {"target branch is unavailable", "fetch the target branch"},
 		"missing slice branch":                    {"slice branch missing is unavailable", "create the local slice branch"},
 		"unpushed slice":                          {"slice branch unpushed is not pushed at its local head", "push the slice branch"},
-		"missing ledger":                          {"ledger is missing", "commit the complete ledger once at the published branch head"},
-		"baseline not at head":                    {"Artifact Baseline is not the published branch head", "commit the complete ledger once at the published branch head"},
+		"missing ledger":                          {"missing [baseline] missing marker", "commit the complete ledger once at the published branch head"},
+		"baseline not at head":                    {"Artifact Baseline must be the published branch head", "commit the complete ledger once at the published branch head"},
 		"unknown dependency":                      {"Dependency graph contains an unknown or self-referencing edge", "correct the --depends values"},
 		"self dependency":                         {"Dependency graph contains an unknown or self-referencing edge", "correct the --depends values"},
 	}
@@ -1041,7 +1096,7 @@ func TestRefuseInvalidProposalPreflight(t *testing.T) {
 			runGit(t, root, "switch", "-c", "incomplete", "main")
 			writeLedger(t, root, "incomplete", false)
 			runGit(t, root, "add", ".changes/incomplete")
-			runGit(t, root, "commit", "-m", "incomplete")
+			runGit(t, root, "commit", "-m", "[baseline] incomplete")
 			runGit(t, root, "update-ref", "refs/remotes/origin/incomplete", "HEAD")
 			return root, []string{"--slice", proposalSliceFlag(t, "incomplete")}
 		},
@@ -1078,6 +1133,44 @@ func TestRefuseInvalidProposalPreflight(t *testing.T) {
 			}
 			if len(backend.items)+len(backend.parents)+len(backend.children)+len(backend.blocks) != 0 {
 				t.Fatalf("backend mutated: %#v", backend)
+			}
+		})
+	}
+}
+
+func TestProposalDurableDocumentPaths(t *testing.T) {
+	for _, tc := range []struct{ path, status string }{
+		{"CONTEXT.md", "fix_required\n"},
+		{"docs/adr/0001-decision.md", "fix_required\n"},
+		{"docs/capabilities/legacy.md", "completed\n"},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			root := proposalRepository(t)
+			prepareSlice(t, root, "ship-widget")
+			runGit(t, root, "switch", "main")
+			worktree := filepath.Join(root, ".worktrees", "ship-widget")
+			runGit(t, root, "worktree", "add", worktree, "ship-widget")
+			path := filepath.Join(root, tc.path)
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte("uncommitted\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			backend := &memoryBackend{}
+			var output bytes.Buffer
+			app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+			if err := app.Run([]string{"skl", "propose", "publish", "--repo", worktree, "--target", "main", "--slice", proposalSliceFlag(t, "ship-widget")}); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.HasPrefix(output.String(), tc.status) {
+				t.Fatalf("output = %q, want %q", output.String(), tc.status)
+			}
+			if published := len(backend.items) == 1; published != (tc.status == "completed\n") {
+				t.Fatalf("unexpected publication: %#v", backend.items)
+			}
+			if got := readFile(t, path); got != "uncommitted\n" {
+				t.Fatalf("uncommitted document changed: %q", got)
 			}
 		})
 	}
@@ -1545,6 +1638,13 @@ func TestRetrieveOneNamedResource(t *testing.T) {
 	if got, want := stdout.String(), readRepositoryFile(t, "skills/dev/tdd/reference/tests.md"); got != want {
 		t.Fatalf("stdout did not contain only the requested resource:\n%s", got)
 	}
+	stdout.Reset()
+	if err := app.Run([]string{"skl", "skill", "--resource", "reference/CAPABILITIES-FORMAT.md", "domain"}); err == nil || !strings.Contains(err.Error(), "unknown resource") {
+		t.Fatalf("retired capability resource error = %v", err)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("retired capability resource returned content: %q", stdout.String())
+	}
 }
 
 func TestBundleGuaranteedSupportingSkills(t *testing.T) {
@@ -1712,10 +1812,18 @@ func prepareSlice(t *testing.T, root, slug string) string {
 	runGit(t, root, "switch", "-c", slug, "main")
 	writeLedger(t, root, slug, true)
 	runGit(t, root, "add", filepath.Join(".changes", slug))
-	runGit(t, root, "commit", "-m", "Propose "+slug)
+	runGit(t, root, "commit", "-m", "[baseline] "+slug)
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	runGit(t, root, "update-ref", "refs/remotes/origin/"+slug, head)
 	return head
+}
+
+func completeAndRetireSlice(t *testing.T, root, slug string) string {
+	t.Helper()
+	runGit(t, root, "commit", "--allow-empty", "-m", "[completion] "+slug)
+	runGit(t, root, "rm", "-r", filepath.Join(".changes", slug))
+	runGit(t, root, "commit", "-m", "retire "+slug)
+	return strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 }
 
 func writeLedger(t *testing.T, root, slug string, complete bool) {

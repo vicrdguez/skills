@@ -1,6 +1,6 @@
 ---
 name: domain
-description: Actively build and sharpen a project's domain model. Use when the user wants to pin down domain terminology or a ubiquitous language, record an architectural decision, document a capability, or when another skill needs to maintain the domain model
+description: Actively build and sharpen a project's domain model. Use when the user wants to pin down domain terminology or a ubiquitous language, record an architectural decision, or when another skill needs to maintain the domain model
 ---
 
 Actively build and sharpen the project's domain model as you design. This is the *active discipline* — challenging terms, inventing edge-case scenarios, and writing the glossary and decisions down **the moment they crystallise**. (Merely reading CONTEXT.md for vocabulary is not this skill — that's a one-line habit any skill can do. This skill is for when you're changing the model, not just consuming it.)
@@ -14,11 +14,9 @@ Most repos have a single context:
 /
 ├── CONTEXT.md
 ├── docs/
-│   ├── adr/
-│   │   ├── 0001-event-sourced-orders.md
-│   │   └── 0002-postgres-for-write-model.md
-│   └── capabilities/
-│       └── order-cancellation.md
+│   └── adr/
+│       ├── 0001-event-sourced-orders.md
+│       └── 0002-postgres-for-write-model.md
 └── src/
 ```
 
@@ -68,6 +66,3 @@ Only offer to create an ADR when all three are true:
 3. The result of a real trade-off — there were genuine alternatives and you picked one for specific reasons
 
 If any of the three is missing, skip the ADR. Use the format from `skl skill --resource reference/ADR-FORMAT.md domain`.
-
-### Maintain capability docs
-When a change adds, alters, or retires an observable capability, create or update its doc in `docs/capabilities/` — one capability per file, created lazily like ADRs. Use the format from `skl skill --resource reference/CAPABILITIES-FORMAT.md domain`.
