@@ -33,22 +33,22 @@ Select from open queue-labelled records, apply ordering and candidate-local Depe
 
 ## Definition of Done
 
-- [ ] D1 Implementation chooses eligible Rework before Ready using PR age, not source issue age. (B1)
-- [ ] D2 Ready and Watchdog queues use their own record age, deterministic identity ties, and exclude Claims. (B2)
-- [ ] D3 Empty or entirely claimed queues return `no_work` without historical discovery, discussions, or local project-object reads. (B3)
-- [ ] D4 Blocked Ready candidates are skipped before detailed context retrieval and younger candidates are considered in order. (B4)
-- [ ] D5 Only actually Merged referenced blockers satisfy Dependencies, including referenced closed records. (B5)
-- [ ] D6 Complete candidate and relevant Dependency pagination is observed without speculative hydration of later candidates. (B6)
-- [ ] D7 Publication establishes one explicit issue/PR association and renamed titles do not break later operations. (B7)
-- [ ] D8 Missing, conflicting, or invalid explicit ownership causes a selected-item error without mutation or global name guessing. (B8)
-- [ ] D9 A successful Claim is verified through only its selected records, without a second repository-wide discovery. (B9)
-- [ ] D10 Drift during acquisition is handled without overwriting incompatible state, returning a wrong packet, or blindly claiming a replacement after uncertainty. (B10)
-- [ ] D11 Both `next` commands return one usable packet when the selected branch objects and worktree are absent locally. (B11)
-- [ ] D12 Explicit resume stays on its supplied Claim and supplies continuation instructions that preserve existing work. (B12)
-- [ ] D13 The selected worker receives all relevant feedback with original content and provenance, but unselected discussions are not requested. (B13)
-- [ ] D14 Forge failures and incomplete observations are errors, never false `no_work`; targeted dependency failures are not treated as satisfied blockers. (B14)
-- [ ] D15 The selector preserves prerequisite handoff and CLI-owned checkpoint behavior while exposing no file-management burden to agents. (B15)
-- [ ] D16 Measured request/object-read work is independent of unrelated historical records and discussions, with a reproducible before/after performance report. (B16)
+- [x] D1 Implementation chooses eligible Rework before Ready using PR age, not source issue age. (B1)
+- [x] D2 Ready and Watchdog queues use their own record age, deterministic identity ties, and exclude Claims. (B2)
+- [x] D3 Empty or entirely claimed queues return `no_work` without historical discovery, discussions, or local project-object reads. (B3)
+- [x] D4 Blocked Ready candidates are skipped before detailed context retrieval and younger candidates are considered in order. (B4)
+- [x] D5 Only actually Merged referenced blockers satisfy Dependencies, including referenced closed records. (B5)
+- [x] D6 Complete candidate and relevant Dependency pagination is observed without speculative hydration of later candidates. (B6)
+- [x] D7 Publication establishes one explicit issue/PR association and renamed titles do not break later operations. (B7)
+- [x] D8 Missing, conflicting, or invalid explicit ownership causes a selected-item error without mutation or global name guessing. (B8)
+- [x] D9 A successful Claim is verified through only its selected records, without a second repository-wide discovery. (B9)
+- [x] D10 Drift during acquisition is handled without overwriting incompatible state, returning a wrong packet, or blindly claiming a replacement after uncertainty. (B10)
+- [x] D11 Both `next` commands return one usable packet when the selected branch objects and worktree are absent locally. (B11)
+- [x] D12 Explicit resume stays on its supplied Claim and supplies continuation instructions that preserve existing work. (B12)
+- [x] D13 The selected worker receives all relevant feedback with original content and provenance, but unselected discussions are not requested. (B13)
+- [x] D14 Forge failures and incomplete observations are errors, never false `no_work`; targeted dependency failures are not treated as satisfied blockers. (B14)
+- [x] D15 The selector preserves prerequisite handoff and CLI-owned checkpoint behavior while exposing no file-management burden to agents. (B15)
+- [x] D16 Measured request/object-read work is independent of unrelated historical records and discussions, with a reproducible before/after performance report. (B16)
 
 ## Manual verification
 
