@@ -154,8 +154,14 @@ func (b *GitHubBackend) submissionQueuePage(ctx context.Context, queue workflow.
 		return workflow.QueuePage{}, errors.New(response.Errors[0].Message)
 	}
 	pulls := response.Data.Repository.PullRequests
+	if pulls.PageInfo.HasNextPage && (pulls.PageInfo.EndCursor == "" || pulls.PageInfo.EndCursor == cursor) {
+		return workflow.QueuePage{}, errors.New("queue pagination cursor is missing or did not advance; required observation is incomplete")
+	}
 	result := workflow.QueuePage{}
 	for _, pull := range pulls.Nodes {
+		if len(pull.Labels.Nodes) == 100 {
+			return workflow.QueuePage{}, workflow.Refuse("label observation is truncated on Submission #" + strconv.Itoa(pull.Number) + "; repair the record before retrying")
+		}
 		claimed, paused, queued := false, false, false
 		for _, label := range pull.Labels.Nodes {
 			claimed = claimed || label.Name == "wip"
@@ -166,9 +172,6 @@ func (b *GitHubBackend) submissionQueuePage(ctx context.Context, queue workflow.
 			continue
 		}
 		candidate := workflow.QueueCandidate{SubmissionID: workflow.SubmissionID(strconv.Itoa(pull.Number)), Number: pull.Number, CreatedAt: pull.CreatedAt, Claimed: claimed}
-		if len(pull.Labels.Nodes) == 100 {
-			candidate.Problem = "label observation is truncated on Submission #" + strconv.Itoa(pull.Number) + "; repair the record before retrying"
-		}
 		result.Candidates = append(result.Candidates, candidate)
 	}
 	if pulls.PageInfo.HasNextPage {
@@ -212,7 +215,14 @@ func (b *GitHubBackend) ResumedImplementation(ctx context.Context, id workflow.W
 			return workflow.ImplementationItem{}, workflow.Refuse("multiple active Submissions own Work Item #" + strconv.Itoa(number) + "; repair the attachment before resuming")
 		}
 		if len(owners) == 1 {
-			return b.selectedSubmission(ctx, owners[0])
+			item, err := b.selectedSubmission(ctx, owners[0])
+			if err != nil {
+				return workflow.ImplementationItem{}, err
+			}
+			if item.ID != id {
+				return workflow.ImplementationItem{}, workflow.Refuse("Submission ownership contradicts supplied Work Item #" + strconv.Itoa(number) + "; repair its explicit association before resuming")
+			}
+			return item, nil
 		}
 		return b.selectedReady(ctx, id)
 	}
@@ -250,6 +260,9 @@ func (b *GitHubBackend) selectedSubmission(ctx context.Context, number int) (wor
 	}
 	if pull.State != "open" {
 		return workflow.ImplementationItem{}, workflow.Refuse("selected Submission #" + strconv.Itoa(number) + " is not open; repair its attachment")
+	}
+	if !strings.EqualFold(pull.Head.Repo.FullName, b.repository.Owner+"/"+b.repository.Name) {
+		return workflow.ImplementationItem{}, workflow.Refuse("selected Submission head repository is outside the supported repository attachment; inspect and repair its association")
 	}
 	item, problem, err := b.submissionItem(ctx, pull)
 	if err != nil {
@@ -374,9 +387,12 @@ func (b *GitHubBackend) issueRecord(ctx context.Context, number int) (githubIssu
 }
 
 type closingReference struct {
-	Number   int    `json:"number"`
-	Merged   bool   `json:"merged"`
-	MergedAt string `json:"mergedAt"`
+	Number     int    `json:"number"`
+	Merged     bool   `json:"merged"`
+	MergedAt   string `json:"mergedAt"`
+	Repository struct {
+		NameWithOwner string `json:"nameWithOwner"`
+	} `json:"repository"`
 }
 
 // closingReferences observes GitHub's explicit issue/PR references for one
@@ -388,6 +404,7 @@ func (b *GitHubBackend) closingReferences(ctx context.Context, issueNumber int, 
 	}
 	var references []closingReference
 	after := ""
+	seen := make(map[string]bool)
 	for {
 		var response struct {
 			Data struct {
@@ -407,7 +424,7 @@ func (b *GitHubBackend) closingReferences(ctx context.Context, issueNumber int, 
 				Message string `json:"message"`
 			} `json:"errors"`
 		}
-		query := "query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){issue(number:$number){closedByPullRequestsReferences(first:100,includeClosedPrs:" + closedPrs + ",after:$after){nodes{number merged mergedAt}pageInfo{hasNextPage endCursor}}}}}"
+		query := "query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){issue(number:$number){closedByPullRequestsReferences(first:100,includeClosedPrs:" + closedPrs + ",after:$after){nodes{number merged mergedAt repository{nameWithOwner}}pageInfo{hasNextPage endCursor}}}}}"
 		variables := map[string]any{"owner": b.repository.Owner, "name": b.repository.Name, "number": issueNumber}
 		if after != "" {
 			variables["after"] = after
@@ -422,26 +439,36 @@ func (b *GitHubBackend) closingReferences(ctx context.Context, issueNumber int, 
 			return nil, workflow.Refuse("owning-link relationship for #" + strconv.Itoa(issueNumber) + " is unavailable; inspect the Work Item before retrying")
 		}
 		page := response.Data.Repository.Issue.ClosedByPullRequestsReferences
+		for _, reference := range page.Nodes {
+			if !strings.EqualFold(reference.Repository.NameWithOwner, b.repository.Owner+"/"+b.repository.Name) {
+				return nil, workflow.Refuse("owning-link relationship for #" + strconv.Itoa(issueNumber) + " is outside the supported repository attachment; inspect and repair its association")
+			}
+		}
 		references = append(references, page.Nodes...)
 		if !page.PageInfo.HasNextPage {
 			return references, nil
 		}
+		if page.PageInfo.EndCursor == "" || seen[page.PageInfo.EndCursor] {
+			return nil, errors.New("owning-link pagination cursor is missing or repeated; required observation is incomplete")
+		}
+		seen[page.PageInfo.EndCursor] = true
 		after = page.PageInfo.EndCursor
 	}
 }
 
-// verifyOwningAssociation reads back GitHub's explicit relationship after
-// publication: the owning issue must list exactly this Submission.
+// verifyOwningAssociation requires exactly this Submission, or no association
+// when submissionNumber is zero before first publication.
 func (b *GitHubBackend) verifyOwningAssociation(ctx context.Context, issueNumber, submissionNumber int) error {
 	references, err := b.closingReferences(ctx, issueNumber, false)
 	if err != nil {
 		return err
 	}
-	present := false
+	present := submissionNumber == 0
 	for _, reference := range references {
-		if reference.Number == submissionNumber {
-			present = true
+		if reference.Number != submissionNumber {
+			return workflow.Refuse("another active Submission already owns Work Item #" + strconv.Itoa(issueNumber) + "; retain the Claim and inspect its association before retrying")
 		}
+		present = true
 	}
 	if !present {
 		return workflow.Refuse("owning-link relationship for #" + strconv.Itoa(issueNumber) + " does not observe Submission #" + strconv.Itoa(submissionNumber) + "; inspect the association before retrying")
@@ -464,16 +491,14 @@ func (b *GitHubBackend) activeOwners(ctx context.Context, issueNumber int) ([]in
 
 // dependencyReferences observes one Ready Work Item's referenced blockers from
 // its native relationships and the supported explicit declaration. A non-empty
-// problem reports an invalid legacy projection; unavailability of the native
-// relationship API is not an unknown relationship, so its explicit declaration
-// still applies.
+// problem reports an invalid legacy projection; inaccessible native relationships
+// cannot establish the complete set of blockers.
 func (b *GitHubBackend) dependencyReferences(ctx context.Context, number int, body string) ([]int, string, error) {
 	var blockers []int
 	for page := 1; ; page++ {
 		var batch []githubIssue
 		path := b.repositoryPath(b.repository) + fmt.Sprintf("/issues/%d/dependencies/blocked_by?per_page=100&page=%d", number, page)
-		status, err := b.requestStatus(ctx, http.MethodGet, path, nil, &batch)
-		if err != nil && status != http.StatusNotFound && status != http.StatusGone {
+		if err := b.request(ctx, http.MethodGet, path, nil, &batch); err != nil {
 			return nil, "", err
 		}
 		for _, blocker := range batch {
@@ -583,7 +608,7 @@ func (b *GitHubBackend) claimSubmission(ctx context.Context, candidate workflow.
 		return workflow.ImplementationItem{}, workflow.Refuse("selected Submission ownership changed before acquisition; inspect it and explicitly resume or retry")
 	}
 	state, claimed, problem := implementationLabels(before.githubIssue)
-	if problem != "" || before.State != "open" || before.Head.SHA != item.Submission.Head || before.Head.Ref != item.Branch {
+	if problem != "" || before.Number != number || before.State != "open" || !strings.EqualFold(before.Head.Repo.FullName, b.repository.Owner+"/"+b.repository.Name) || before.Head.SHA != item.Submission.Head || before.Head.Ref != item.Branch || before.Base.Ref != item.Submission.Base || before.Draft != item.Submission.Draft || before.Body != item.Submission.Body {
 		return workflow.ImplementationItem{}, workflow.Refuse("selected Submission changed before acquisition; inspect it and explicitly resume or retry")
 	}
 	if state != workflow.Rework && state != workflow.AwaitingReview {
@@ -607,9 +632,15 @@ func (b *GitHubBackend) claimSubmission(ctx context.Context, candidate workflow.
 	if _, observedClaimed, observedProblem := implementationLabels(observed.githubIssue); observedProblem != "" || !observedClaimed {
 		return workflow.ImplementationItem{}, workflow.Refuse("Claim was not observed on the selected Submission; inspect it before retrying")
 	}
+	if observedOwner, problem := submissionOwner(observed.Body); problem != "" || observedOwner != owner || observed.Number != number || observed.Head.SHA != before.Head.SHA || observed.Head.Ref != before.Head.Ref || !strings.EqualFold(observed.Head.Repo.FullName, before.Head.Repo.FullName) || observed.Base.Ref != before.Base.Ref || observed.Draft != before.Draft || observed.Body != before.Body {
+		return workflow.ImplementationItem{}, workflow.Refuse("selected Submission identity or revision changed during Claim acquisition; Claim preserved; inspect it and explicitly resume instead of retrying next")
+	}
 	source, err := b.issueRecord(ctx, owner)
 	if err != nil {
-		return workflow.ImplementationItem{}, err
+		return workflow.ImplementationItem{}, errors.New(err.Error() + "; Claim verification was interrupted; inspect the selected Work Item and explicitly resume instead of retrying next")
+	}
+	if source.Number != owner {
+		return workflow.ImplementationItem{}, workflow.Refuse("selected source identity changed during Claim acquisition; Claim preserved; inspect it and explicitly resume instead of retrying next")
 	}
 	item.Source = implementationLifecycle(source)
 	item.Submission.Lifecycle = implementationLifecycle(observed.githubIssue)
@@ -654,6 +685,9 @@ func (b *GitHubBackend) claimReady(ctx context.Context, candidate workflow.Queue
 	}
 	if _, observedClaimed, observedProblem := implementationLabels(observed); observedProblem != "" || !observedClaimed {
 		return workflow.ImplementationItem{}, workflow.Refuse("Claim was not observed on the selected Work Item; inspect it before retrying")
+	}
+	if branch, problem := declaredBranch(observed.Body); problem != "" || branch != item.Branch || observed.Number != number {
+		return workflow.ImplementationItem{}, workflow.Refuse("selected Work Item branch attachment or identity changed during Claim acquisition; Claim preserved; inspect it and explicitly resume instead of retrying next")
 	}
 	item.Source = implementationLifecycle(observed)
 	item = workflow.ReconcileImplementation(item)

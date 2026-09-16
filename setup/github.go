@@ -208,6 +208,7 @@ func (b *GitHubBackend) ListMergedWorkItems(ctx context.Context) ([]workflow.Wor
 			for _, commit := range commits {
 				for page := 1; ; page++ {
 					var pulls []struct {
+						Body        string `json:"body"`
 						MergedAt    string `json:"merged_at"`
 						MergeCommit string `json:"merge_commit_sha"`
 						Head        struct {
@@ -220,7 +221,8 @@ func (b *GitHubBackend) ListMergedWorkItems(ctx context.Context) ([]workflow.Wor
 						return nil, err
 					}
 					for _, pull := range pulls {
-						if pull.MergedAt != "" && pull.MergeCommit == commit {
+						owner, problem := submissionOwner(pull.Body)
+						if problem == "" && owner == issue.Number && pull.MergedAt != "" && pull.MergeCommit == commit {
 							matches++
 							item.AcceptedHead = pull.Head.SHA
 							item.Branch = pull.Head.Ref

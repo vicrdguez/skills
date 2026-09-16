@@ -3,6 +3,7 @@ package workflow
 import (
 	"cmp"
 	"context"
+	"errors"
 	"slices"
 	"strings"
 )
@@ -66,11 +67,18 @@ func compareCandidates(a, b QueueCandidate) int {
 func selectQueue(ctx context.Context, backend SelectionBackend, queue QueueKind) (QueueCandidate, bool, error) {
 	var observed []QueueCandidate
 	blocked := make(map[WorkItemID]bool)
+	seen := make(map[string]bool)
 	cursor := ""
 	for {
 		page, err := backend.QueuePage(ctx, queue, cursor)
 		if err != nil {
 			return QueueCandidate{}, false, err
+		}
+		if page.Next != "" {
+			if seen[page.Next] {
+				return QueueCandidate{}, false, errors.New("queue pagination cursor repeated; required observation is incomplete")
+			}
+			seen[page.Next] = true
 		}
 		observed = append(observed, page.Candidates...)
 		slices.SortFunc(observed, compareCandidates)

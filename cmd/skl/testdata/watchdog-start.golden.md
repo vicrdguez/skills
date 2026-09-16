@@ -7,7 +7,7 @@ Reviewed head: <head>
 Completed reviews: 0
 Review number: 1
 Scope: full; the comparison rule below applies after Git preparation
-Prepare: `git -C '<main>' fetch 'origin' 'widget'` then `git -C '<main>' worktree add -b 'widget' '<worktree>' 'origin/widget'`; safely reuse a clean existing worktree instead of recreating it
+Prepare: `git -C '<main>' fetch 'origin' '+refs/heads/widget:refs/remotes/origin/widget'` then `git -C '<main>' worktree add -b 'widget' '<worktree>' 'origin/widget'`; safely reuse a clean existing worktree instead of recreating it
 Inspect: `skl implement inspect --repo '<worktree>' --remote 'origin' --item 7` resolves the Artifact Baseline and Completion from the fetched history
 Resume: `skl watchdog resume --repo '<worktree>' --remote 'origin' --item 7`
 

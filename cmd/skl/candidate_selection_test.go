@@ -43,7 +43,8 @@ type candidateForge struct {
 	errorAfter   map[string]bool
 	heads        map[string]string
 
-	onPullRead func(number int)
+	onPullRead   func(number int)
+	onLabelWrite func(number int)
 
 	graphqlError string
 	nextPR       int
@@ -98,14 +99,18 @@ func (f *candidateForge) matching(match func(string) bool) int {
 }
 
 func (f *candidateForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	f.record(r)
 	path := strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets")
-	if status := f.fail[r.Method+" "+path]; status != 0 {
-		http.Error(w, "injected failure", status)
+	status := f.fail[r.Method+" "+path+"?"+r.URL.RawQuery]
+	if status == 0 {
+		status = f.fail[r.Method+" "+path]
+	}
+	if r.Method == http.MethodPost && path == "/graphql" && status == 0 {
+		f.serveGraphQL(w, r)
 		return
 	}
-	if r.Method == http.MethodPost && path == "/graphql" {
-		f.serveGraphQL(w, r)
+	f.record(r)
+	if status != 0 {
+		http.Error(w, "injected failure", status)
 		return
 	}
 	if r.Method != http.MethodGet {
@@ -256,6 +261,9 @@ func (f *candidateForge) serveMutation(w http.ResponseWriter, r *http.Request, p
 		_ = json.NewDecoder(r.Body).Decode(&payload)
 		number, _ := strconv.Atoi(segments[1])
 		f.addLabel(number, payload.Labels...)
+		if f.onLabelWrite != nil {
+			f.onLabelWrite(number)
+		}
 		if f.errorAfter[r.Method+" "+"/issues/"+segments[1]+"/labels"] {
 			http.Error(w, "accepted mutation response lost", http.StatusInternalServerError)
 			return
@@ -391,6 +399,7 @@ func (f *candidateForge) serveGraphQL(w http.ResponseWriter, r *http.Request) {
 		nodes := []any{}
 		if strings.Contains(payload.Query, "includeClosedPrs:true") {
 			for _, node := range f.evidence[issueNumber] {
+				node["repository"] = map[string]string{"nameWithOwner": "acme/widgets"}
 				nodes = append(nodes, node)
 			}
 		} else {
@@ -402,7 +411,7 @@ func (f *candidateForge) serveGraphQL(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			for _, number := range owners {
-				nodes = append(nodes, map[string]any{"number": number, "merged": false, "mergedAt": "", "state": "OPEN"})
+				nodes = append(nodes, map[string]any{"number": number, "merged": false, "mergedAt": "", "state": "OPEN", "repository": map[string]string{"nameWithOwner": "acme/widgets"}})
 			}
 		}
 		response(map[string]any{"repository": map[string]any{"issue": map[string]any{"state": "OPEN", "closedByPullRequestsReferences": map[string]any{"nodes": nodes, "pageInfo": map[string]any{"hasNextPage": false, "endCursor": ""}}}}})
@@ -715,7 +724,7 @@ func TestB6PaginationPreservesCandidateAndDependencyCompleteness(t *testing.T) {
 		forge.addIssue(number, "2020-01-01T00:00:00Z", "claimed\n", "ready", "wip")
 		claimed = append(claimed, number)
 	}
-	forge.addIssue(101, "2021-01-01T00:00:00Z", "Blocked by: #200\n", "ready")
+	forge.addIssue(101, "2021-01-01T00:00:00Z", "Branch: `slice-101`\n", "ready")
 	forge.addIssue(200, "1999-01-01T00:00:00Z", "blocker\n")
 	forge.addIssue(102, "2022-01-01T00:00:00Z", "Branch: `slice-102`\n", "ready")
 	forge.readyPages = [][]int{claimed, {101, 102}}
@@ -890,13 +899,10 @@ func TestB10AcquisitionDriftCannotReturnAnInvalidHandoff(t *testing.T) {
 		forge.addIssue(7, "2019-01-01T00:00:00Z", "Branch: `slice-seven`\n")
 		forge.reworkPages = [][]int{{30}}
 		forge.owners[7] = []int{30}
-		reads := 0
-		forge.onPullRead = func(int) {
-			reads++
-			if reads == 2 {
-				// The Claim mutation lands but its readback is interrupted.
-				forge.fail["GET /issues/30"] = http.StatusInternalServerError
-			}
+		forge.onLabelWrite = func(int) {
+			// Fail both readback paths only after the Claim POST has landed.
+			forge.fail["GET /issues/30"] = http.StatusInternalServerError
+			forge.fail["GET /pulls/30"] = http.StatusInternalServerError
 		}
 		forge.errorAfter["POST /issues/30/labels"] = true
 		got, err := selectionRun(t, root, forge, "implement", "next")
@@ -911,6 +917,12 @@ func TestB10AcquisitionDriftCannotReturnAnInvalidHandoff(t *testing.T) {
 		}
 		if queues := forge.matching(func(request string) bool { return request == "graphql:queue" }); queues != 1 {
 			t.Fatalf("uncertainty triggered a replacement selection: %v", forge.seen())
+		}
+		if forge.matching(func(request string) bool { return request == "POST /repos/acme/widgets/issues/30/labels" }) != 1 || !hasLabel(forge.pulls[30], "wip") {
+			t.Fatalf("uncertain Claim was never accepted or was released: %v labels=%v", forge.seen(), forge.pulls[30]["labels"])
+		}
+		if forge.matching(func(request string) bool { return strings.HasPrefix(request, "DELETE ") }) != 0 {
+			t.Fatalf("uncertain Claim was released: %v", forge.seen())
 		}
 	})
 }
@@ -1112,7 +1124,7 @@ func TestB14RequiredObservationFailureIsNotAnEmptyQueue(t *testing.T) {
 				page = append(page, number)
 			}
 			f.readyPages = [][]int{page}
-			f.fail["GET /issues"] = http.StatusInternalServerError
+			f.fail["GET /issues?state=open&labels=ready&sort=created&direction=asc&filter=all&per_page=100&page=2"] = http.StatusInternalServerError
 		}},
 		{"inaccessible dependency", func(f *candidateForge) {
 			f.addIssue(1, "2020-01-01T00:00:00Z", "Branch: `slice-one`\n\nBlocked by: #9\n", "ready")
@@ -1127,14 +1139,19 @@ func TestB14RequiredObservationFailureIsNotAnEmptyQueue(t *testing.T) {
 			forge.reworkPages = [][]int{{}}
 			tc.configure(forge)
 			got, err := selectionRun(t, root, forge, "implement", "next")
-			if err == nil && got.Status == "no_work" {
-				t.Fatalf("incomplete observation became no_work")
+			if err == nil && got.Status != "fix_required" {
+				t.Fatalf("incomplete observation did not produce an error or refusal: %#v", got)
 			}
 			if err != nil && got.Status != "" {
 				t.Fatalf("error also wrote an outcome: %#v", got)
 			}
 			if forge.matching(func(request string) bool { return strings.Contains(request, "/labels") }) != 0 {
 				t.Fatalf("failure claimed work: %v", forge.seen())
+			}
+			if tc.name == "missing continuation page" && forge.matching(func(request string) bool {
+				return strings.Contains(request, "labels=ready&") && strings.Contains(request, "page=2")
+			}) != 1 {
+				t.Fatalf("failure never reached the required continuation: %v", forge.seen())
 			}
 		})
 	}
@@ -1168,6 +1185,16 @@ func TestB15StartupComposesWithSafeHandoffsAndPrivateCheckpoints(t *testing.T) {
 		if !strings.Contains(instructions, required) {
 			t.Fatalf("packet lacks concrete command %q", required)
 		}
+	}
+}
+
+func TestW14EachHTTPRequestIsCountedOnce(t *testing.T) {
+	forge := newCandidateForge()
+	request := httptest.NewRequest(http.MethodPost, "/graphql", strings.NewReader(`{"query":"pullRequests(","variables":{"label":["review"]}}`))
+	response := httptest.NewRecorder()
+	forge.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !reflect.DeepEqual(forge.seen(), []string{"graphql:queue"}) {
+		t.Fatalf("one HTTP request must have exactly one purpose: status=%d requests=%v", response.Code, forge.seen())
 	}
 }
 
@@ -1236,7 +1263,11 @@ func TestB16UnrelatedHistoryDoesNotScaleWorkStartCost(t *testing.T) {
 			if counts[2] != counts[200] || !reflect.DeepEqual(purposes[2], purposes[200]) {
 				t.Fatalf("%s work=%t request work grew with unrelated history: %d vs %d, %v vs %v", lane, work, counts[2], counts[200], purposes[2], purposes[200])
 			}
-			t.Logf("%s work=%t requests/op=%d by purpose=%v median history=2:%s history=200:%s tail history=2:%s history=200:%s", lane, work, counts[2]/5, purposes[2], medians[2], medians[200], tails[2], tails[200])
+			perOperation := map[string]int{}
+			for purpose, count := range purposes[2] {
+				perOperation[purpose] = count / 5
+			}
+			t.Logf("%s work=%t requests/op=%d by purpose=%v median history=2:%s history=200:%s tail history=2:%s history=200:%s", lane, work, counts[2]/5, perOperation, medians[2], medians[200], tails[2], tails[200])
 		}
 	}
 }
@@ -1253,6 +1284,12 @@ func purposeOf(request string) string {
 		return "graphql-other"
 	case strings.Contains(request, "/labels"):
 		return "label-mutation"
+	case strings.Contains(request, "labels=ready&"):
+		return "ready-queue"
+	case strings.Contains(request, "/dependencies/blocked_by"):
+		return "dependencies"
+	case strings.Contains(request, "/comments") || strings.Contains(request, "/reviews"):
+		return "feedback"
 	default:
 		return "rest-read"
 	}

@@ -249,6 +249,9 @@ func TestGitHubWatchdogLeavesStaleSyncUntilImplementationHandoff(t *testing.T) {
 		pull := map[string]any{"number": 11, "state": "open", "body": "original\n\nCloses #7\n", "labels": ls, "head": map[string]any{"sha": "fixed", "ref": "widget", "repo": map[string]string{"full_name": "acme/widgets"}}}
 		var result any = []any{}
 		switch {
+		case path == "/graphql":
+			fmt.Fprint(w, `{"data":{"repository":{"issue":{"closedByPullRequestsReferences":{"nodes":[{"number":11,"repository":{"nameWithOwner":"acme/widgets"}}]}}}}}`)
+			return
 		case path == "/issues":
 			result = []any{map[string]any{"number": 7, "title": "widget", "state": "open"}}
 		case path == "/pulls":

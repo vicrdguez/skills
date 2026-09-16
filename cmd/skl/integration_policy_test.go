@@ -66,7 +66,7 @@ func selectionGraphQL(w http.ResponseWriter, r *http.Request, pull map[string]an
 	case strings.Contains(request.Query, "closedByPullRequestsReferences"):
 		nodes := []any{}
 		if present {
-			nodes = append(nodes, map[string]any{"number": pull["number"], "merged": false, "mergedAt": "", "state": "OPEN"})
+			nodes = append(nodes, map[string]any{"number": pull["number"], "merged": false, "mergedAt": "", "state": "OPEN", "repository": map[string]string{"nameWithOwner": "acme/widgets"}})
 		}
 		data(map[string]any{"repository": map[string]any{"issue": map[string]any{"closedByPullRequestsReferences": map[string]any{"nodes": nodes}}}})
 		return true
@@ -114,7 +114,7 @@ func TestReadyStartAndResumeDoNotObserveIntegrationTargetThroughGitHub(t *testin
 			} else {
 				nodes := []any{}
 				if pullExists {
-					nodes = append(nodes, map[string]any{"number": 11})
+					nodes = append(nodes, map[string]any{"number": 11, "repository": map[string]string{"nameWithOwner": "acme/widgets"}})
 				}
 				result = map[string]any{"data": map[string]any{"repository": map[string]any{"issue": map[string]any{"closedByPullRequestsReferences": map[string]any{"nodes": nodes}}}}}
 			}
@@ -327,7 +327,7 @@ func TestStaleSynchronizationReworkUsesOrdinaryCLIFlow(t *testing.T) {
 				break
 			}
 			if strings.Contains(request.Query, "closedByPullRequestsReferences") {
-				result = map[string]any{"data": map[string]any{"repository": map[string]any{"issue": map[string]any{"closedByPullRequestsReferences": map[string]any{"nodes": []any{map[string]any{"number": 11}}}}}}}
+				result = map[string]any{"data": map[string]any{"repository": map[string]any{"issue": map[string]any{"closedByPullRequestsReferences": map[string]any{"nodes": []any{map[string]any{"number": 11, "repository": map[string]string{"nameWithOwner": "acme/widgets"}}}}}}}}
 				break
 			}
 			result = map[string]any{"data": map[string]any{}}
@@ -498,7 +498,7 @@ func TestWatchdogPassRetryAndStatusIgnoreMergeabilityThroughGitHub(t *testing.T)
 				case path == "/pulls/11", path == "/issues/11":
 					result = pull
 				case path == "/graphql":
-					result = map[string]any{"data": map[string]any{"repository": map[string]any{"issue": map[string]any{"closedByPullRequestsReferences": map[string]any{"nodes": []any{map[string]any{"number": 11}}}}}}}
+					result = map[string]any{"data": map[string]any{"repository": map[string]any{"issue": map[string]any{"closedByPullRequestsReferences": map[string]any{"nodes": []any{map[string]any{"number": 11, "repository": map[string]string{"nameWithOwner": "acme/widgets"}}}}}}}}
 				case path == "/issues/11/timeline":
 					result = events
 				case path == "/git/ref/heads/widget":
@@ -787,7 +787,7 @@ func TestNeedsHumanPreservesDraftMainSubmissionThroughGitHub(t *testing.T) {
 			var payload struct{ Query string }
 			json.NewDecoder(r.Body).Decode(&payload)
 			if strings.Contains(payload.Query, "closedByPullRequestsReferences") {
-				result = map[string]any{"data": map[string]any{"repository": map[string]any{"issue": map[string]any{"closedByPullRequestsReferences": map[string]any{"nodes": []any{map[string]any{"number": 11}}}}}}}
+				result = map[string]any{"data": map[string]any{"repository": map[string]any{"issue": map[string]any{"closedByPullRequestsReferences": map[string]any{"nodes": []any{map[string]any{"number": 11, "repository": map[string]string{"nameWithOwner": "acme/widgets"}}}}}}}}
 			} else if strings.HasPrefix(payload.Query, "query") {
 				// A pre-existing draft body carries native content-edit evidence
 				// older than the source Claim, so the pause may refresh it.
@@ -946,7 +946,7 @@ func TestSubmitRefusesLateRetargetThroughGitHub(t *testing.T) {
 		case path == "/graphql":
 			nodes := []any{}
 			if prExists {
-				nodes = append(nodes, map[string]any{"number": 11})
+				nodes = append(nodes, map[string]any{"number": 11, "repository": map[string]string{"nameWithOwner": "acme/widgets"}})
 			}
 			result = map[string]any{"data": map[string]any{"repository": map[string]any{"issue": map[string]any{"closedByPullRequestsReferences": map[string]any{"nodes": nodes}}}}}
 		case path == "/git/ref/heads/main" || strings.Contains(path, "target"):
@@ -1197,7 +1197,7 @@ func TestSubmitRefusesRecoveredNonMainSubmissionThroughGitHub(t *testing.T) {
 			if strings.Contains(payload.Query, "closedByPullRequestsReferences") {
 				nodes := []any{}
 				if created {
-					nodes = append(nodes, map[string]any{"number": 11})
+					nodes = append(nodes, map[string]any{"number": 11, "repository": map[string]string{"nameWithOwner": "acme/widgets"}})
 				}
 				result = map[string]any{"data": map[string]any{"repository": map[string]any{"issue": map[string]any{"closedByPullRequestsReferences": map[string]any{"nodes": nodes}}}}}
 				break
@@ -1379,7 +1379,7 @@ func TestWatchdogRefusesInvalidReviewedEvidenceThroughGitHub(t *testing.T) {
 						labels = slices.DeleteFunc(labels, func(value string) bool { return value == label })
 						events = append(events, map[string]any{"event": "unlabeled", "label": map[string]string{"name": label}})
 					case path == "/graphql":
-						result = map[string]any{"data": map[string]any{"repository": map[string]any{"issue": map[string]any{"closedByPullRequestsReferences": map[string]any{"nodes": []any{map[string]any{"number": 11}}}}}}}
+						result = map[string]any{"data": map[string]any{"repository": map[string]any{"issue": map[string]any{"closedByPullRequestsReferences": map[string]any{"nodes": []any{map[string]any{"number": 11, "repository": map[string]string{"nameWithOwner": "acme/widgets"}}}}}}}}
 					case path == "/git/ref/heads/main" || strings.Contains(path, "target"):
 						unwanted = r.Method + " " + path
 						http.Error(w, "integration target unavailable", http.StatusInternalServerError)

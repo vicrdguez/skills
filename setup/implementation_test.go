@@ -60,7 +60,7 @@ func TestGitHubImplementationReportsMultipleActiveOwner(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/graphql":
-			fmt.Fprint(w, `{"data":{"repository":{"issue":{"closedByPullRequestsReferences":{"nodes":[{"number":11},{"number":12}]}}}}}`)
+			fmt.Fprint(w, `{"data":{"repository":{"issue":{"closedByPullRequestsReferences":{"nodes":[{"number":11,"repository":{"nameWithOwner":"acme/widgets"}},{"number":12,"repository":{"nameWithOwner":"acme/widgets"}}]}}}}}`)
 		case r.URL.Path == "/repos/acme/widgets/pulls/11":
 			json.NewEncoder(w).Encode(map[string]any{"number": 11, "state": "open", "body": "opening\n\nCloses #7\n", "head": map[string]any{"ref": "widget", "sha": "fixed", "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": "main"}})
 		case r.URL.Path == "/repos/acme/widgets/issues/7":
@@ -262,7 +262,11 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 			var payload map[string]any
 			json.NewDecoder(r.Body).Decode(&payload)
 			if query, _ := payload["query"].(string); strings.Contains(query, "closedByPullRequestsReferences") {
-				result = map[string]any{"data": map[string]any{"repository": map[string]any{"issue": map[string]any{"closedByPullRequestsReferences": map[string]any{"nodes": []any{map[string]any{"number": 11}}}}}}}
+				nodes := []any{}
+				if len(pulls) != 0 {
+					nodes = append(nodes, map[string]any{"number": 11, "repository": map[string]string{"nameWithOwner": "acme/widgets"}})
+				}
+				result = map[string]any{"data": map[string]any{"repository": map[string]any{"issue": map[string]any{"closedByPullRequestsReferences": map[string]any{"nodes": nodes}}}}}
 				break
 			}
 			pulls[0]["draft"] = strings.Contains(payload["query"].(string), "convertPullRequestToDraft")
@@ -431,6 +435,9 @@ func TestGitHubImplementationCompletesRequeuedSubmissionHandoff(t *testing.T) {
 					return map[string]any{"number": number, "state": "open", "labels": ls}
 				}
 				switch {
+				case path == "/graphql":
+					fmt.Fprint(w, `{"data":{"repository":{"issue":{"closedByPullRequestsReferences":{"nodes":[{"number":11,"repository":{"nameWithOwner":"acme/widgets"}}]}}}}}`)
+					return
 				case path == "/issues" && r.Method == http.MethodGet:
 					issue := issue(7)
 					issue["title"] = "widget"
@@ -582,7 +589,11 @@ func TestGitHubImplementationUsesMainAndNeverRetargetsExistingSubmission(t *test
 				case "/repos/acme/widgets/pulls/11":
 					json.NewEncoder(w).Encode(pull)
 				case "/graphql":
-					fmt.Fprint(w, `{"data":{"repository":{"issue":{"closedByPullRequestsReferences":{"nodes":[{"number":11}]}}}}}`)
+					if existingBase == "" && postedBase == "" {
+						fmt.Fprint(w, `{"data":{"repository":{"issue":{"closedByPullRequestsReferences":{"nodes":[]}}}}}`)
+					} else {
+						fmt.Fprint(w, `{"data":{"repository":{"issue":{"closedByPullRequestsReferences":{"nodes":[{"number":11,"repository":{"nameWithOwner":"acme/widgets"}}]}}}}}`)
+					}
 				default:
 					handlerErr = fmt.Sprintf("unexpected %s %s", r.Method, r.URL)
 					http.Error(w, handlerErr, http.StatusNotFound)

@@ -3,7 +3,7 @@
 Work Item: #7
 Branch: widget
 Worktree: <worktree>
-Prepare: `git -C '<main>' fetch 'origin' 'widget'` then `git -C '<main>' worktree add -b 'widget' '<worktree>' 'origin/widget'`; safely reuse a clean existing worktree instead of recreating it
+Prepare: `git -C '<main>' fetch 'origin' '+refs/heads/widget:refs/remotes/origin/widget'` then `git -C '<main>' worktree add -b 'widget' '<worktree>' 'origin/widget'`; safely reuse a clean existing worktree instead of recreating it
 Inspect: `skl implement inspect --repo '<worktree>' --remote 'origin' --item 7` resolves the Artifact Baseline and Completion from the fetched history
 Resume: `skl implement resume --item 7 --remote 'origin'`
 

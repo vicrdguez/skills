@@ -202,6 +202,9 @@ func (b *GitHubBackend) PublishImplementation(ctx context.Context, item workflow
 	var pull githubPull
 	var writeErr error
 	if len(matches) == 0 {
+		if err := b.verifyOwningAssociation(ctx, itemNumber, 0); err != nil {
+			return workflow.Submission{}, err
+		}
 		writeErr = b.request(ctx, http.MethodPost, b.repositoryPath(repository)+"/pulls", map[string]any{"title": item.Branch, "head": item.Branch, "base": "main", "body": wanted.Body, "draft": wanted.Draft}, &pull)
 		if writeErr != nil {
 			// Observe an ambiguous create before considering another write.
@@ -225,6 +228,9 @@ func (b *GitHubBackend) PublishImplementation(ctx context.Context, item workflow
 		owner, problem := submissionOwner(pull.Body)
 		if problem != "" || owner != itemNumber {
 			return workflow.Submission{}, workflow.Refuse("existing Submission is not explicitly owned by Work Item #" + strconv.Itoa(itemNumber) + "; inspect and repair its association instead of reassigning it")
+		}
+		if err := b.verifyOwningAssociation(ctx, itemNumber, pull.Number); err != nil {
+			return workflow.Submission{}, err
 		}
 	}
 	if pull.Head.Ref != item.Branch || !strings.EqualFold(pull.Head.Repo.FullName, repository.Owner+"/"+repository.Name) || pull.Head.SHA != wanted.Head || pull.State == "closed" {
@@ -252,7 +258,7 @@ func (b *GitHubBackend) PublishImplementation(ctx context.Context, item workflow
 	if err := b.request(ctx, http.MethodGet, b.repositoryPath(repository)+fmt.Sprintf("/pulls/%d", pull.Number), nil, &observed); err != nil {
 		return workflow.Submission{}, err
 	}
-	if observed.Head.Ref != item.Branch || observed.Head.SHA != wanted.Head || observed.Body != wanted.Body || observed.Base.Ref != "main" || observed.Draft != wanted.Draft || observed.State != "open" {
+	if observed.Number != pull.Number || observed.Head.Ref != item.Branch || !strings.EqualFold(observed.Head.Repo.FullName, repository.Owner+"/"+repository.Name) || observed.Head.SHA != wanted.Head || observed.Body != wanted.Body || observed.Base.Ref != "main" || observed.Draft != wanted.Draft || observed.State != "open" {
 		if writeErr != nil {
 			return workflow.Submission{}, writeErr
 		}
@@ -281,6 +287,15 @@ func (b *GitHubBackend) AwaitImplementationReview(ctx context.Context, item work
 	if item.Submission == nil {
 		return workflow.PermitImplementationReview(nil)
 	}
+	checkHead := guard
+	guard = func() error {
+		if checkHead != nil {
+			if err := checkHead(); err != nil {
+				return err
+			}
+		}
+		return b.verifyOwningAssociation(ctx, itemNumber, submissionNumber)
+	}
 	var issue githubIssue
 	if err := b.request(ctx, http.MethodGet, b.repositoryPath(repository)+fmt.Sprintf("/issues/%d", submissionNumber), nil, &issue); err != nil {
 		return err
@@ -304,6 +319,18 @@ func (b *GitHubBackend) PauseImplementation(ctx context.Context, item workflow.I
 	repository := b.repository
 	itemNumber, submissionNumber, err := githubImplementationNumbers(item)
 	if err != nil {
+		return err
+	}
+	checkHead := guard
+	guard = func() error {
+		if checkHead != nil {
+			if err := checkHead(); err != nil {
+				return err
+			}
+		}
+		return b.verifyOwningAssociation(ctx, itemNumber, submissionNumber)
+	}
+	if err := guard(); err != nil {
 		return err
 	}
 	number := itemNumber
@@ -573,7 +600,7 @@ func (b *GitHubBackend) implementationComments(ctx context.Context, repository g
 	var comments []skilldist.ReviewComment
 	for page := 1; ; page++ {
 		var batch []struct {
-			Line        int    `json:"line"`
+			Line        *int   `json:"line"`
 			Side        string `json:"side"`
 			Body        string `json:"body"`
 			Association string `json:"author_association"`
@@ -583,12 +610,24 @@ func (b *GitHubBackend) implementationComments(ctx context.Context, repository g
 			User        struct {
 				Login string `json:"login"`
 			} `json:"user"`
+
+			OriginalLine      int    `json:"original_line"`
+			StartLine         *int   `json:"start_line"`
+			OriginalStartLine int    `json:"original_start_line"`
+			StartSide         string `json:"start_side"`
+			OriginalCommit    string `json:"original_commit_id"`
 		}
 		if err := b.request(ctx, http.MethodGet, b.repositoryPath(repository)+stream+fmt.Sprintf("?per_page=100&page=%d", page), nil, &batch); err != nil {
 			return nil, err
 		}
 		for _, comment := range batch {
-			observed := skilldist.ReviewComment{Body: comment.Body, Author: comment.User.Login, Association: comment.Association, Commit: comment.Commit, Path: comment.Path, CreatedAt: comment.CreatedAt, Line: comment.Line, Side: comment.Side}
+			observed := skilldist.ReviewComment{
+				Body: comment.Body, Author: comment.User.Login, Association: comment.Association, Commit: comment.Commit, Path: comment.Path, CreatedAt: comment.CreatedAt, Side: comment.Side,
+				CurrentLine: comment.Line, OriginalLine: comment.OriginalLine, StartLine: comment.StartLine, OriginalStartLine: comment.OriginalStartLine, StartSide: comment.StartSide, OriginalCommit: comment.OriginalCommit,
+			}
+			if comment.Line != nil {
+				observed.Line = *comment.Line
+			}
 			observed.EvidenceAuthorized = trustedMetadata(observed)
 			comments = append(comments, observed)
 		}

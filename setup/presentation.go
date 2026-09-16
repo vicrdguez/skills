@@ -135,7 +135,7 @@ func PresentImplementation(outcome workflow.ImplementationOutcome) (Implementati
 			output.Reason += "; resume with `" + f.ResumeCommand + "`"
 			return output, nil
 		}
-		f.FetchCommand = fmt.Sprintf("git -C %s fetch %s %s", quote(primary(f.Worktree)), quote(f.Remote), quote(f.Branch))
+		f.FetchCommand = fmt.Sprintf("git -C %s fetch %s %s", quote(primary(f.Worktree)), quote(f.Remote), quote("+refs/heads/"+f.Branch+":refs/remotes/"+f.Remote+"/"+f.Branch))
 		f.WorktreeCommand = fmt.Sprintf("git -C %s worktree add -b %s %s %s", quote(primary(f.Worktree)), quote(f.Branch), quote(f.Worktree), quote(f.Remote+"/"+f.Branch))
 		f.InspectCommand = fmt.Sprintf("skl implement inspect --repo %s --remote %s --item %d", quote(f.Worktree), quote(f.Remote), f.WorkItem)
 		f.SubmitCommand = fmt.Sprintf("skl implement submit --repo %s --remote %s --item %d --body %s", quote(f.Worktree), quote(f.Remote), f.WorkItem, quote(filepath.Join(directory, "submission.md")))
@@ -157,7 +157,7 @@ func PresentImplementation(outcome workflow.ImplementationOutcome) (Implementati
 		flags := endpointFlags(f.SuppliedArtifactBaseline, f.SuppliedArtifactCompletion)
 		f.ResumeCommand += flags
 		f.SubmitCommand += flags
-		f.FetchCommand = fmt.Sprintf("git -C %s fetch %s %s", quote(primary(f.Worktree)), quote(f.Remote), quote(f.Branch))
+		f.FetchCommand = fmt.Sprintf("git -C %s fetch %s %s", quote(primary(f.Worktree)), quote(f.Remote), quote("+refs/heads/"+f.Branch+":refs/remotes/"+f.Remote+"/"+f.Branch))
 		f.WorktreeCommand = fmt.Sprintf("git -C %s worktree add -b %s %s %s", quote(primary(f.Worktree)), quote(f.Branch), quote(f.Worktree), quote(f.Remote+"/"+f.Branch))
 		f.InspectCommand = fmt.Sprintf("skl implement inspect --repo %s --remote %s --item %d", quote(f.Worktree), quote(f.Remote), f.WorkItem)
 		f.InspectCommand += flags

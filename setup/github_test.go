@@ -319,7 +319,7 @@ func TestGitHubBackendReadsMergedLifecycleAcrossTimelinePages(t *testing.T) {
 		case "/repos/acme/widgets/issues":
 			return jsonResponse(http.StatusOK, `[{"number":17,"title":"merged","state":"closed","labels":[]}]`), nil
 		case "/repos/acme/widgets/commits/abc123/pulls":
-			return jsonResponse(http.StatusOK, `[{"merged_at":"2026-09-02T16:57:13Z","merge_commit_sha":"abc123","head":{"ref":"merged","sha":"accepted"}}]`), nil
+			return jsonResponse(http.StatusOK, `[{"body":"Closes #17\n","merged_at":"2026-09-02T16:57:13Z","merge_commit_sha":"abc123","head":{"ref":"merged","sha":"accepted"}}]`), nil
 		case "/repos/acme/widgets/issues/17/timeline":
 			if request.URL.Query().Get("page") == "2" {
 				return jsonResponse(http.StatusOK, `[{"event":"referenced","commit_id":"abc123"}]`), nil
@@ -339,14 +339,14 @@ func TestGitHubBackendReadsMergedLifecycleAcrossTimelinePages(t *testing.T) {
 }
 
 func TestGitHubBackendIdentifiesAcceptedSubmissionHead(t *testing.T) {
-	accepted := `{"merged_at":"2026-09-07T10:00:00Z","merge_commit_sha":"squash","head":{"ref":"slice","sha":"accepted"}}`
+	accepted := `{"body":"Closes #17\n","merged_at":"2026-09-07T10:00:00Z","merge_commit_sha":"squash","head":{"ref":"slice","sha":"accepted"}}`
 	for _, test := range []struct{ name, pulls, want string }{
 		{"accepted squash", "[" + accepted + "]", "accepted"},
 		{"unknown", `[]`, ""},
 		{"ambiguous", "[" + accepted + "," + accepted + "]", ""},
-		{"unmerged", `[{"merge_commit_sha":"squash","head":{"ref":"slice","sha":"unaccepted"}}]`, ""},
-		{"renamed branch", `[{"merged_at":"2026-09-07T10:00:00Z","merge_commit_sha":"squash","head":{"ref":"other","sha":"unaccepted"}}]`, "unaccepted"},
-		{"other merge", `[{"merged_at":"2026-09-07T10:00:00Z","merge_commit_sha":"other","head":{"ref":"slice","sha":"unaccepted"}}]`, ""},
+		{"unmerged", `[{"body":"Closes #17\n","merge_commit_sha":"squash","head":{"ref":"slice","sha":"unaccepted"}}]`, ""},
+		{"renamed branch", `[{"body":"Closes #17\n","merged_at":"2026-09-07T10:00:00Z","merge_commit_sha":"squash","head":{"ref":"other","sha":"unaccepted"}}]`, "unaccepted"},
+		{"other merge", `[{"body":"Closes #17\n","merged_at":"2026-09-07T10:00:00Z","merge_commit_sha":"other","head":{"ref":"slice","sha":"unaccepted"}}]`, ""},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
@@ -373,15 +373,15 @@ func TestGitHubBackendIdentifiesAcceptedSubmissionHead(t *testing.T) {
 }
 
 func TestGitHubBackendRecognizesCloseBeforeMerge(t *testing.T) {
-	accepted := `{"merged_at":"2026-09-02T16:57:13Z","merge_commit_sha":"squash","head":{"ref":"slice","sha":"accepted"}}`
+	accepted := `{"body":"Closes #17\n","merged_at":"2026-09-02T16:57:13Z","merge_commit_sha":"squash","head":{"ref":"slice","sha":"accepted"}}`
 	for _, test := range []struct {
 		name, pulls, wantHead, wantBranch string
 		wantItems                         int
 	}{
 		{"merged after handoff", "[" + accepted + "]", "accepted", "slice", 1},
 		{"merely closed", `[]`, "", "", 0},
-		{"unmerged submission", `[{"merge_commit_sha":"squash","head":{"ref":"slice","sha":"accepted"}}]`, "", "", 0},
-		{"renamed submission", `[{"merged_at":"2026-09-02T16:57:13Z","merge_commit_sha":"squash","head":{"ref":"other","sha":"accepted"}}]`, "accepted", "other", 1},
+		{"unmerged submission", `[{"body":"Closes #17\n","merge_commit_sha":"squash","head":{"ref":"slice","sha":"accepted"}}]`, "", "", 0},
+		{"renamed submission", `[{"body":"Closes #17\n","merged_at":"2026-09-02T16:57:13Z","merge_commit_sha":"squash","head":{"ref":"other","sha":"accepted"}}]`, "accepted", "other", 1},
 		{"ambiguous submissions", "[" + accepted + "," + accepted + "]", "", "", 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {

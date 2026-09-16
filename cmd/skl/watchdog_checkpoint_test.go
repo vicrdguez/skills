@@ -241,6 +241,8 @@ func (f *reviewForge) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		write(f.sourceTimeline)
 	case r.Method == http.MethodGet && path == "/issues/8/timeline":
 		write(f.otherTimeline)
+	case r.Method == http.MethodGet && (path == "/issues/7/dependencies/blocked_by" || path == "/issues/8/dependencies/blocked_by"):
+		write([]any{})
 	case r.Method == http.MethodGet && path == "/pulls/11/reviews":
 		f.reviewReads++
 		if f.duplicateRead && f.reviewReads == 2 {
@@ -343,8 +345,9 @@ func (f *reviewForge) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			if strings.Contains(query, "closedByPullRequestsReferences") {
 				nodes := []any{}
-				if !f.noPull {
-					nodes = append(nodes, map[string]any{"number": 11, "merged": false, "mergedAt": "", "state": "OPEN"})
+				variables, _ := value["variables"].(map[string]any)
+				if !f.noPull && variables["number"] == float64(7) {
+					nodes = append(nodes, map[string]any{"number": 11, "merged": false, "mergedAt": "", "state": "OPEN", "repository": map[string]string{"nameWithOwner": "acme/widgets"}})
 				}
 				write(map[string]any{"data": map[string]any{"repository": map[string]any{"issue": map[string]any{"state": "OPEN", "closedByPullRequestsReferences": map[string]any{"nodes": nodes}}}}})
 				return

@@ -88,6 +88,15 @@ type ReviewComment struct {
 	ReviewNumber    uint64 `json:"review_number,omitempty"`
 	ClaimAcquiredAt string `json:"claim_acquired_at,omitempty"`
 
+	// Line is the publication/deduplication anchor. CurrentLine also preserves
+	// an observed null for outdated inline comments; original anchors never replace it.
+	CurrentLine       *int   `json:"current_line"`
+	OriginalLine      int    `json:"original_line,omitempty"`
+	StartLine         *int   `json:"start_line"`
+	OriginalStartLine int    `json:"original_start_line,omitempty"`
+	StartSide         string `json:"start_side,omitempty"`
+	OriginalCommit    string `json:"original_commit,omitempty"`
+
 	// EvidenceAuthorized is the backend's assertion that a comment may count as published evidence.
 	EvidenceAuthorized bool `json:"evidence_authorized,omitempty"`
 }
@@ -149,7 +158,7 @@ func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
 	if facts.Implementation != nil {
 		f := facts.Implementation
 		instructions += fmt.Sprintf("\n\n## Work Start\n\nWork Item: %s\nBranch: %s\nWorktree: %s\nPrepare: `%s` then `%s`; safely reuse a clean existing worktree instead of recreating it\nInspect: `%s` resolves the Artifact Baseline and Completion from the fetched history\nResume: `%s`\n", f.WorkItemReference, f.Branch, f.Worktree, f.FetchCommand, f.WorktreeCommand, f.InspectCommand, f.ResumeCommand)
-		if f.Comments != nil {
+		if f.Submission != 0 {
 			instructions += "\nFinding-driven Rework: sync nothing; inspect the current PR comparison, supplied summary, inline evidence, and human comments. Keep the ledger retired.\n"
 		}
 		instructions += "\nWrite the opaque Result Document using the named template, then run `" + f.SubmitCommand + "`. If pausing, run `" + f.NeedsHumanCommand + "` and add `--body <result>/submission.md` when preserving implementation changes.\n"
