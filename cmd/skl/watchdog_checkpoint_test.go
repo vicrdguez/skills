@@ -85,6 +85,17 @@ func (f *reviewForge) timestamp() string {
 	return time.Date(2026, 1, 1, 0, 0, f.clock, 0, time.UTC).Format(time.RFC3339Nano)
 }
 
+// submissionBody renders the observed Submission body: the engine always
+// establishes its explicit owning reference at publication, while stored prose
+// stays separate so refusal probes can still distinguish it from the footer.
+func (f *reviewForge) submissionBody() string {
+	body := strings.TrimRight(f.body, "\n")
+	if !strings.HasSuffix(body, "Closes #7") {
+		body += "\n\nCloses #7"
+	}
+	return body + "\n"
+}
+
 func (f *reviewForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets")
 	request := r.Method + " " + path
@@ -152,6 +163,8 @@ func (f *reviewForge) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		result := map[string]any{"id": number, "number": number, "title": title, "body": "", "state": "open", "created_at": "2026", "labels": labelObjects(labels), "sub_issues_summary": map[string]int{"total": 0}}
 		if pull {
 			result["pull_request"] = map[string]string{"url": "pull"}
+		} else {
+			result["body"] = "Branch: `" + title + "`\n"
 		}
 		return result
 	}
@@ -161,7 +174,7 @@ func (f *reviewForge) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			head = f.pullHead
 		}
 		result := issue(11, branch, f.labels, true)
-		result["body"], result["draft"], result["merged"], result["mergeable"] = f.body, f.draft, false, f.mergeable
+		result["body"], result["draft"], result["merged"], result["mergeable"] = f.submissionBody(), f.draft, false, f.mergeable
 		result["node_id"] = "PR_11"
 		result["head"] = map[string]any{"ref": branch, "sha": head, "repo": map[string]string{"full_name": "acme/widgets"}}
 		result["base"] = map[string]string{"ref": "main"}
@@ -316,11 +329,31 @@ func (f *reviewForge) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&value)
 		query, _ := value["query"].(string)
 		if strings.HasPrefix(query, "query") {
+			if strings.Contains(query, "pullRequests(") {
+				nodes := []any{}
+				if !f.noPull {
+					head := f.head
+					if f.pullHead != "" {
+						head = f.pullHead
+					}
+					nodes = append(nodes, map[string]any{"number": 11, "createdAt": "2026-01-01T00:00:00Z", "headRefName": branch, "headRefOid": head, "isDraft": f.draft, "labels": map[string]any{"nodes": labelObjects(f.labels)}})
+				}
+				write(map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequests": map[string]any{"nodes": nodes, "pageInfo": map[string]any{"hasNextPage": false, "endCursor": ""}}}}})
+				return
+			}
+			if strings.Contains(query, "closedByPullRequestsReferences") {
+				nodes := []any{}
+				if !f.noPull {
+					nodes = append(nodes, map[string]any{"number": 11, "merged": false, "mergedAt": "", "state": "OPEN"})
+				}
+				write(map[string]any{"data": map[string]any{"repository": map[string]any{"issue": map[string]any{"state": "OPEN", "closedByPullRequestsReferences": map[string]any{"nodes": nodes}}}}})
+				return
+			}
 			var edited any
 			if f.bodyEditedAt != "" {
 				edited = f.bodyEditedAt
 			}
-			write(map[string]any{"data": map[string]any{"node": map[string]any{"body": f.body, "createdAt": "2026-01-01T00:00:00Z", "lastEditedAt": edited}}})
+			write(map[string]any{"data": map[string]any{"node": map[string]any{"body": f.submissionBody(), "createdAt": "2026-01-01T00:00:00Z", "lastEditedAt": edited}}})
 			return
 		}
 		f.writes++
@@ -404,6 +437,7 @@ func (f *reviewForge) serveHTTP(w http.ResponseWriter, r *http.Request) {
 func TestImplementationHandoffProtectsDestinationThroughPublicHTTP(t *testing.T) {
 	f := newReviewFixture(t)
 	f.forge.labels = []string{"rework", "wip"}
+	f.forge.timeline = append(f.forge.timeline, map[string]any{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": "wip"}})
 	start := f.run(t, f.worktree, "implement", "resume", "--item", "7")
 	if start.Status != "work_available" || start.Packet == nil || start.Packet.Facts.Implementation == nil {
 		t.Fatalf("resume: %#v", start)
@@ -440,9 +474,9 @@ func TestImplementationHandoffProtectsDestinationThroughPublicHTTP(t *testing.T)
 		}
 	}
 
-	_, err := f.runResult(f.worktree, "implement", "submit", "--item", "7", "--body", body)
+	got, err := f.runResult(f.worktree, "implement", "submit", "--item", "7", "--body", body)
 	if err == nil || checks == 0 || !claimedAfterRelease || !slices.Equal(f.forge.labels, []string{"review", "wip"}) {
-		t.Fatalf("handoff did not preserve the later Watchdog Claim: err=%v checks=%d claimed=%t labels=%v", err, checks, claimedAfterRelease, f.forge.labels)
+		t.Fatalf("handoff did not preserve the later Watchdog Claim: status=%s reason=%s err=%v checks=%d claimed=%t labels=%v", got.Status, got.Reason, err, checks, claimedAfterRelease, f.forge.labels)
 	}
 }
 
@@ -903,6 +937,7 @@ func TestReworkSubmitRefusesChangedBodyAfterAcceptedWriteThroughPublicHTTP(t *te
 func TestReworkSubmitRetriesExactAcceptedBodyThroughPublicHTTP(t *testing.T) {
 	f := newReviewFixture(t)
 	f.forge.labels = []string{"rework", "wip"}
+	f.forge.timeline = append(f.forge.timeline, map[string]any{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": "wip"}})
 	directory := newImplementationResultDirectory(t)
 	body := filepath.Join(directory, "submission.md")
 	if err := os.WriteFile(body, []byte("first accepted body"), 0600); err != nil {
@@ -973,6 +1008,7 @@ func TestReworkSubmitAcceptsProvenNewSourceStageUpdateThroughPublicHTTP(t *testi
 func TestReworkSubmitRefusesStaleSameHeadCommandThroughPublicHTTP(t *testing.T) {
 	f := newReviewFixture(t)
 	f.forge.labels = []string{"rework", "wip"}
+	f.forge.timeline = append(f.forge.timeline, map[string]any{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": "wip"}})
 	directory := newImplementationResultDirectory(t)
 	body := filepath.Join(directory, "submission.md")
 	if err := os.WriteFile(body, []byte("accepted"), 0600); err != nil {
@@ -1135,6 +1171,7 @@ func TestImplementationCleanupFailuresKeepDestinationProtectedThroughPublicHTTP(
 	t.Run("rework submit label cleanup", func(t *testing.T) {
 		f := newReviewFixture(t)
 		f.forge.labels = []string{"rework", "wip"}
+		f.forge.timeline = append(f.forge.timeline, map[string]any{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": "wip"}})
 		directory := newImplementationResultDirectory(t)
 		body := filepath.Join(directory, "submission.md")
 		if err := os.WriteFile(body, []byte("rework"), 0600); err != nil {
@@ -1156,6 +1193,7 @@ func TestImplementationCleanupFailuresKeepDestinationProtectedThroughPublicHTTP(
 	t.Run("sync label cleanup", func(t *testing.T) {
 		f := newReviewFixture(t)
 		f.forge.labels = []string{"rework", "sync", "wip"}
+		f.forge.timeline = append(f.forge.timeline, map[string]any{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": "wip"}})
 		directory := newImplementationResultDirectory(t)
 		body := filepath.Join(directory, "submission.md")
 		if err := os.WriteFile(body, []byte("rework"), 0600); err != nil {
@@ -1795,14 +1833,14 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 		for _, tc := range []struct {
 			name          string
 			count, number uint64
-			scope, head   string
+			head          string
 		}{
-			{"absent", 0, 1, "full", "absent"},
-			{"zero at current head", 0, 1, "full", "current"},
-			{"one at ancestor", 1, 2, "incremental", "ancestor"},
-			{"one at current head", 1, 2, "incremental", "current"},
-			{"unavailable prior head", 2, 3, "full", strings.Repeat("f", 40)},
-			{"available nonancestor", 2, 3, "full", "nonancestor"},
+			{"absent", 0, 1, "absent"},
+			{"zero at current head", 0, 1, "current"},
+			{"one at ancestor", 1, 2, "ancestor"},
+			{"one at current head", 1, 2, "current"},
+			{"unavailable prior head", 2, 3, strings.Repeat("f", 40)},
+			{"available nonancestor", 2, 3, "nonancestor"},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				f := newReviewFixture(t)
@@ -1825,13 +1863,13 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 				before := checkpointSnapshot(f.checkpoint)
 				for _, started := range []setup.ImplementationOutput{f.start(t, f.root), f.run(t, f.root, "watchdog", "resume", "--item", "7")} {
 					facts := started.Packet.Facts.Watchdog
-					if facts.ReviewCount != tc.count || facts.ReviewNumber != tc.number || string(facts.ReviewScope) != tc.scope {
+					// Scope is decided after Git preparation; startup defers it.
+					if facts.ReviewCount != tc.count || facts.ReviewNumber != tc.number || string(facts.ReviewScope) != "full" {
 						t.Fatalf("facts = %#v", facts)
 					}
-					if tc.scope == "incremental" {
-						comparison := "Compare `" + checkpointHead + "..." + f.head + "`"
-						if facts.PreviousReviewedHead != checkpointHead || !strings.Contains(started.Packet.Instructions, comparison) {
-							t.Fatalf("incremental comparison missing: %#v\n%s", facts, started.Packet.Instructions)
+					if tc.count > 0 {
+						if facts.PreviousReviewedHead != checkpointHead || !strings.Contains(started.Packet.Instructions, checkpointHead+"..."+f.head) {
+							t.Fatalf("previous revision fallback missing: %#v\n%s", facts, started.Packet.Instructions)
 						}
 					} else if facts.PreviousReviewedHead != "" || !strings.Contains(started.Packet.Instructions, "Review the full PR comparison") {
 						t.Fatalf("full fallback missing: %#v\n%s", facts, started.Packet.Instructions)
@@ -1934,7 +1972,7 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 					t.Fatalf("unreadable checkpoint accepted through %s: %#v", command, got)
 				}
 			})
-			t.Run("selected worktree cannot be resolved "+command, func(t *testing.T) {
+			t.Run("missing selected worktree starts a fresh review "+command, func(t *testing.T) {
 				f := newReviewFixture(t)
 				if command == "resume" {
 					f.forge.labels = []string{"review", "wip"}
@@ -1945,8 +1983,10 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 				if command == "resume" {
 					args = append(args, "--item", "7")
 				}
-				if got := f.run(t, f.root, args...); got.Status != "fix_required" || !strings.Contains(got.Reason, "resolve private Git directory") || !slices.Equal(f.forge.labels, labels) {
-					t.Fatalf("missing selected worktree accepted through %s: %#v", command, got)
+				got := f.run(t, f.root, args...)
+				facts := got.Packet.Facts.Watchdog
+				if got.Status != "work_available" || facts.ReviewCount != 0 || facts.ReviewNumber != 1 || facts.ReviewScope != "full" || facts.PreviousReviewedHead != "" || !slices.Contains(f.forge.labels, "wip") || command == "resume" && !slices.Equal(f.forge.labels, labels) {
+					t.Fatalf("missing selected worktree did not start a fresh review through %s: %#v", command, got)
 				}
 			})
 		}
@@ -2770,7 +2810,7 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 			}
 			for _, result := range []setup.ImplementationOutput{f.start(t, f.root), f.run(t, f.root, "watchdog", "resume", "--item", "7")} {
 				facts := result.Packet.Facts.Watchdog
-				if facts.ReviewCount != 1 || facts.ReviewNumber != 2 || facts.ReviewScope != "incremental" || facts.PreviousReviewedHead != prior || checkpointSnapshot(f.checkpoint) != before {
+				if facts.ReviewCount != 1 || facts.ReviewNumber != 2 || facts.ReviewScope != "full" || facts.PreviousReviewedHead != prior || !strings.Contains(result.Packet.Instructions, prior+"..."+facts.ReviewedHead) || checkpointSnapshot(f.checkpoint) != before {
 					t.Fatalf("retained review facts: %#v checkpoint=%q", facts, checkpointSnapshot(f.checkpoint))
 				}
 			}

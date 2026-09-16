@@ -20,9 +20,15 @@ func boundGitHubBackend(backend *GitHubBackend) *GitHubBackend {
 	return backend
 }
 
-func TestGitHubImplementationRejectsDuplicateSourceOwnership(t *testing.T) {
-	for _, attached := range []bool{false, true} {
-		t.Run(fmt.Sprint(attached), func(t *testing.T) {
+func TestGitHubImplementationRejectsInvalidOwningLinks(t *testing.T) {
+	cases := map[string]string{
+		"no explicit owning issue":     "unowned body",
+		"multiple conflicting owners":  "opening\n\nCloses #7\nCloses #8\n",
+		"outside the repository":       "opening\n\nCloses acme/other#7\n",
+		"conflicting trailing footers": "opening\n\nCloses #7\n\nCloses #8\n",
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
 			writes := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method != http.MethodGet {
@@ -30,41 +36,47 @@ func TestGitHubImplementationRejectsDuplicateSourceOwnership(t *testing.T) {
 					http.Error(w, "unexpected mutation", 500)
 					return
 				}
-				switch r.URL.Path {
-				case "/repos/acme/widgets/issues":
-					fmt.Fprint(w, `[{"number":7,"title":"widget","state":"open","labels":[{"name":"ready"}]},{"number":8,"title":"widget","state":"open","labels":[{"name":"ready"}]}]`)
-				case "/repos/acme/widgets/pulls":
-					if attached {
-						fmt.Fprint(w, `[{"number":11,"state":"open","body":"original","head":{"ref":"widget","sha":"fixed","repo":{"full_name":"acme/widgets"}},"base":{"ref":"main"}}]`)
-					} else {
-						fmt.Fprint(w, `[]`)
-					}
+				switch {
+				case r.URL.Path == "/repos/acme/widgets/pulls/11":
+					json.NewEncoder(w).Encode(map[string]any{"number": 11, "state": "open", "body": body, "head": map[string]any{"ref": "widget", "sha": "fixed", "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": "main"}})
 				default:
-					fmt.Fprint(w, `[]`)
+					http.NotFound(w, r)
 				}
 			}))
 			defer server.Close()
 			b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
-			ctx := context.Background()
-			items, err := b.ImplementationItems(ctx)
-			if err != nil || len(items) != 2 {
-				t.Fatalf("items = %#v, %v", items, err)
-			}
-			for _, item := range items {
-				if !strings.Contains(item.Problem, "multiple source") {
-					t.Errorf("ambiguous ownership accepted: %#v", item)
-				}
-				if err := b.ClaimImplementation(ctx, item); err == nil {
-					t.Error("ambiguous Claim accepted")
-				}
-				if _, err := b.PublishImplementation(ctx, item, workflow.Submission{Head: "fixed", Base: "main", Body: "replacement"}); err == nil {
-					t.Error("ambiguous publication accepted")
-				}
+			item, err := b.SelectedImplementation(context.Background(), workflow.QueueCandidate{SubmissionID: "11", Number: 11, Branch: "widget", Head: "fixed"})
+			if err != nil || item.Problem == "" {
+				t.Fatalf("invalid ownership accepted: %#v %v", item, err)
 			}
 			if writes != 0 {
-				t.Fatalf("ambiguous ownership caused %d mutations", writes)
+				t.Fatalf("invalid ownership caused %d mutations", writes)
 			}
 		})
+	}
+}
+
+func TestGitHubImplementationReportsMultipleActiveOwner(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/graphql":
+			fmt.Fprint(w, `{"data":{"repository":{"issue":{"closedByPullRequestsReferences":{"nodes":[{"number":11},{"number":12}]}}}}}`)
+		case r.URL.Path == "/repos/acme/widgets/pulls/11":
+			json.NewEncoder(w).Encode(map[string]any{"number": 11, "state": "open", "body": "opening\n\nCloses #7\n", "head": map[string]any{"ref": "widget", "sha": "fixed", "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": "main"}})
+		case r.URL.Path == "/repos/acme/widgets/issues/7":
+			json.NewEncoder(w).Encode(map[string]any{"number": 7, "state": "open", "labels": []map[string]string{{"name": "rework"}}})
+		case strings.HasSuffix(r.URL.Path, "/comments") || strings.HasSuffix(r.URL.Path, "/reviews"):
+			fmt.Fprint(w, `[]`)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL)
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
+	item, err := b.SelectedImplementation(context.Background(), workflow.QueueCandidate{SubmissionID: "11", Number: 11, Branch: "widget", Head: "fixed"})
+	if err != nil || !strings.Contains(item.Problem, "another active Submission") {
+		t.Fatalf("competing owner accepted: %#v %v", item, err)
 	}
 }
 
@@ -107,7 +119,7 @@ func TestGitHubImplementationNormalizesPaginatedWork(t *testing.T) {
 				}
 				fmt.Fprint(w, "]")
 			} else {
-				fmt.Fprint(w, `[{"number":7,"title":"widget","state":"open","body":"Blocked by: #2, #3","created_at":"2020-01-01T00:00:00Z","labels":[{"name":"ready"}]}]`)
+				fmt.Fprint(w, `[{"number":7,"title":"widget","state":"open","body":"Branch: `+"`widget`"+`\n\nBlocked by: #2, #3","created_at":"2020-01-01T00:00:00Z","labels":[{"name":"ready"}]}]`)
 			}
 		case "/repos/acme/widgets/pulls":
 			fmt.Fprint(w, `[]`)
@@ -140,7 +152,12 @@ func TestGitHubLifecycleRejectsInvalidIdentitiesBeforeTransport(t *testing.T) {
 	guard := func() error { return nil }
 	operations := map[string]func(workflow.ImplementationItem) error{
 		"claim": func(item workflow.ImplementationItem) error {
-			return b.ClaimImplementation(ctx, item)
+			candidate := workflow.QueueCandidate{ID: item.ID}
+			if item.Submission != nil {
+				candidate.SubmissionID = item.Submission.ID
+			}
+			_, err := b.ClaimSelected(ctx, candidate, item)
+			return err
 		},
 		"publish": func(item workflow.ImplementationItem) error {
 			_, err := b.PublishImplementation(ctx, item, *item.Submission)
@@ -169,7 +186,7 @@ func TestGitHubLifecycleRejectsInvalidIdentitiesBeforeTransport(t *testing.T) {
 	for _, id := range []string{"", "0", "-1", "07", "7/labels", "issue:7", "999999999999999999999999"} {
 		for _, identity := range []string{"item", "submission"} {
 			for name, operation := range operations {
-				if identity == "item" && (name == "review-submission" || name == "publish-review") || identity == "submission" && (name == "close-coordination" || name == "publish" && id == "") {
+				if identity == "item" && (name == "review-submission" || name == "publish-review") || identity == "submission" && (name == "close-coordination" || name == "claim" || name == "publish" && id == "") {
 					continue
 				}
 				t.Run(name+"/"+identity+"/"+id, func(t *testing.T) {
@@ -179,7 +196,18 @@ func TestGitHubLifecycleRejectsInvalidIdentitiesBeforeTransport(t *testing.T) {
 					} else {
 						item.Submission.ID = workflow.SubmissionID(id)
 					}
-					if err := operation(item); err == nil || !strings.Contains(err.Error(), "invalid GitHub issue identity") {
+					run := operation
+					if name == "claim" {
+						run = func(item workflow.ImplementationItem) error {
+							candidate := workflow.QueueCandidate{ID: item.ID}
+							if identity == "submission" {
+								candidate = workflow.QueueCandidate{SubmissionID: item.Submission.ID}
+							}
+							_, err := b.ClaimSelected(ctx, candidate, item)
+							return err
+						}
+					}
+					if err := run(item); err == nil || !strings.Contains(err.Error(), "invalid GitHub issue identity") {
 						t.Fatalf("invalid identity accepted: %v", err)
 					}
 				})
@@ -209,7 +237,7 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 			for _, name := range labels[number] {
 				ls = append(ls, map[string]string{"name": name})
 			}
-			return map[string]any{"number": number, "title": "widget", "state": "open", "labels": ls}
+			return map[string]any{"number": number, "title": "widget", "state": "open", "body": "Branch: `widget`\n", "labels": ls}
 		}
 		var result any = map[string]any{}
 		switch {
@@ -307,8 +335,8 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 	defer server.Close()
 	b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
 	ctx := context.Background()
-	item := workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Ready}
-	if err := b.ClaimImplementation(ctx, item); err != nil {
+	item := workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Ready, Source: &workflow.LifecycleObservation{Open: true, States: []workflow.State{workflow.Ready}}}
+	if _, err := b.ClaimSelected(ctx, workflow.QueueCandidate{ID: "7"}, item); err != nil {
 		t.Fatal(err)
 	}
 	items, err := b.ImplementationItems(ctx)
@@ -406,6 +434,7 @@ func TestGitHubImplementationCompletesRequeuedSubmissionHandoff(t *testing.T) {
 					return
 				case path == "/pulls" && r.Method == http.MethodGet:
 					pull := issue(11)
+					pull["body"] = "original\n\nCloses #7\n"
 					pull["head"] = map[string]any{"ref": "widget", "sha": "fixed", "repo": map[string]string{"full_name": "acme/widgets"}}
 					pull["base"] = map[string]string{"ref": "main"}
 					json.NewEncoder(w).Encode([]any{pull})
@@ -582,7 +611,7 @@ func TestGitHubImplementationPreservesPendingLifecycleObservations(t *testing.T)
 		case "/repos/acme/widgets/issues":
 			fmt.Fprint(w, `[{"number":7,"title":"widget","state":"open","labels":[{"name":"ready"},{"name":"needs-human"},{"name":"wip"},{"name":"external"}]}]`)
 		case "/repos/acme/widgets/pulls":
-			fmt.Fprint(w, `[{"number":11,"state":"open","labels":[{"name":"needs-human"}],"head":{"ref":"widget","sha":"fixed","repo":{"full_name":"acme/widgets"}},"base":{"ref":"main"}}]`)
+			fmt.Fprint(w, `[{"number":11,"state":"open","body":"original\n\nCloses #7\n","labels":[{"name":"needs-human"}],"head":{"ref":"widget","sha":"fixed","repo":{"full_name":"acme/widgets"}},"base":{"ref":"main"}}]`)
 		case "/repos/acme/widgets/pulls/11":
 			fmt.Fprint(w, `{"number":11,"state":"open","labels":[{"name":"needs-human"}],"head":{"ref":"widget","sha":"fixed","repo":{"full_name":"acme/widgets"}},"base":{"ref":"main"}}`)
 		case "/repos/acme/widgets/issues/7/comments":
@@ -615,8 +644,8 @@ func TestGitHubImplementationStatusRefusesPartialHandoff(t *testing.T) {
 		for _, label := range labels {
 			ls = append(ls, map[string]string{"name": label})
 		}
-		source := map[string]any{"number": 7, "title": "widget", "state": "open", "labels": ls}
-		pull := map[string]any{"number": 11, "state": "open", "labels": []map[string]string{{"name": "review"}}, "head": map[string]any{"ref": "widget", "sha": "fixed", "repo": map[string]string{"full_name": "acme/widgets"}}}
+		source := map[string]any{"number": 7, "title": "widget", "state": "open", "body": "Branch: `widget`\n", "labels": ls}
+		pull := map[string]any{"number": 11, "state": "open", "body": "candidate\n\nCloses #7\n", "labels": []map[string]string{{"name": "review"}}, "head": map[string]any{"ref": "widget", "sha": "fixed", "repo": map[string]string{"full_name": "acme/widgets"}}}
 		var result any = []any{}
 		switch {
 		case path == "/issues" && r.Method == http.MethodGet:

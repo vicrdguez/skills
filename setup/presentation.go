@@ -85,6 +85,11 @@ func presentItem(item workflow.ImplementationItem) (implementationItemOutput, er
 	return output, err
 }
 
+// primary returns the main worktree the conventional worktree is attached to.
+func primary(worktree string) string {
+	return filepath.Dir(filepath.Dir(worktree))
+}
+
 func PresentImplementation(outcome workflow.ImplementationOutcome) (ImplementationOutput, error) {
 	output := ImplementationOutput{ImplementationOutcome: outcome}
 	if outcome.Item != nil {
@@ -130,6 +135,8 @@ func PresentImplementation(outcome workflow.ImplementationOutcome) (Implementati
 			output.Reason += "; resume with `" + f.ResumeCommand + "`"
 			return output, nil
 		}
+		f.FetchCommand = fmt.Sprintf("git -C %s fetch %s %s", quote(primary(f.Worktree)), quote(f.Remote), quote(f.Branch))
+		f.WorktreeCommand = fmt.Sprintf("git -C %s worktree add %s %s", quote(primary(f.Worktree)), quote(f.Worktree), quote(f.Branch))
 		f.InspectCommand = fmt.Sprintf("skl implement inspect --repo %s --remote %s --item %d", quote(f.Worktree), quote(f.Remote), f.WorkItem)
 		f.SubmitCommand = fmt.Sprintf("skl implement submit --repo %s --remote %s --item %d --body %s", quote(f.Worktree), quote(f.Remote), f.WorkItem, quote(filepath.Join(directory, "submission.md")))
 		f.NeedsHumanCommand = fmt.Sprintf("skl implement needs-human --repo %s --remote %s --item %d --reason <permitted-reason> --decision %s", quote(f.Worktree), quote(f.Remote), f.WorkItem, quote(filepath.Join(directory, "decision.md")))
@@ -150,6 +157,10 @@ func PresentImplementation(outcome workflow.ImplementationOutcome) (Implementati
 		flags := endpointFlags(f.SuppliedArtifactBaseline, f.SuppliedArtifactCompletion)
 		f.ResumeCommand += flags
 		f.SubmitCommand += flags
+		f.FetchCommand = fmt.Sprintf("git -C %s fetch %s %s", quote(primary(f.Worktree)), quote(f.Remote), quote(f.Branch))
+		f.WorktreeCommand = fmt.Sprintf("git -C %s worktree add %s %s", quote(primary(f.Worktree)), quote(f.Worktree), quote(f.Branch))
+		f.InspectCommand = fmt.Sprintf("skl implement inspect --repo %s --remote %s --item %d", quote(f.Worktree), quote(f.Remote), f.WorkItem)
+		f.InspectCommand += flags
 	}
 	packet, err := skilldist.BuildPacket(skill, facts)
 	if err != nil {

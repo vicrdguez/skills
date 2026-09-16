@@ -90,7 +90,7 @@ func TestGitHubWatchdogBodyPassRetry(t *testing.T) {
 
 func TestGitHubWatchdogBodyObservation(t *testing.T) {
 	for name, body := range map[string]string{
-		"adopted":   "original",
+		"adopted":   "original\n\nCloses #7\n",
 		"published": "opaque\x00\r\n  prose\n\nCloses #7\n",
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -98,7 +98,7 @@ func TestGitHubWatchdogBodyObservation(t *testing.T) {
 			f.start(t, f.root)
 			f.forge.body = body
 			f.server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method != http.MethodGet {
+				if r.Method != http.MethodGet && !(r.Method == http.MethodPost && r.URL.Path == "/graphql") {
 					t.Errorf("observation mutated backend: %s %s", r.Method, r.URL)
 					http.Error(w, "unexpected mutation", 500)
 					return

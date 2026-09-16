@@ -203,7 +203,7 @@ func (b *GitHubBackend) ListMergedWorkItems(ctx context.Context) ([]workflow.Wor
 			}
 		}
 		if workflowItem && closed {
-			item := workflow.WorkItem{ID: workflow.WorkItemID(strconv.Itoa(issue.Number)), Title: issue.Title, Body: issue.Body, Branch: issue.Title, Merged: true}
+			item := workflow.WorkItem{ID: workflow.WorkItemID(strconv.Itoa(issue.Number)), Title: issue.Title, Body: issue.Body, Merged: true}
 			matches := 0
 			for _, commit := range commits {
 				for page := 1; ; page++ {
@@ -220,9 +220,10 @@ func (b *GitHubBackend) ListMergedWorkItems(ctx context.Context) ([]workflow.Wor
 						return nil, err
 					}
 					for _, pull := range pulls {
-						if pull.MergedAt != "" && pull.MergeCommit == commit && pull.Head.Ref == item.Branch {
+						if pull.MergedAt != "" && pull.MergeCommit == commit {
 							matches++
 							item.AcceptedHead = pull.Head.SHA
+							item.Branch = pull.Head.Ref
 						}
 					}
 					if len(pulls) < 100 {
@@ -232,6 +233,7 @@ func (b *GitHubBackend) ListMergedWorkItems(ctx context.Context) ([]workflow.Wor
 			}
 			if matches != 1 {
 				item.AcceptedHead = ""
+				item.Branch = ""
 			}
 			if merged || matches > 0 {
 				items = append(items, item)

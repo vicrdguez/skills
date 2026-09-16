@@ -345,7 +345,7 @@ func TestGitHubBackendIdentifiesAcceptedSubmissionHead(t *testing.T) {
 		{"unknown", `[]`, ""},
 		{"ambiguous", "[" + accepted + "," + accepted + "]", ""},
 		{"unmerged", `[{"merge_commit_sha":"squash","head":{"ref":"slice","sha":"unaccepted"}}]`, ""},
-		{"other branch", `[{"merged_at":"2026-09-07T10:00:00Z","merge_commit_sha":"squash","head":{"ref":"other","sha":"unaccepted"}}]`, ""},
+		{"renamed branch", `[{"merged_at":"2026-09-07T10:00:00Z","merge_commit_sha":"squash","head":{"ref":"other","sha":"unaccepted"}}]`, "unaccepted"},
 		{"other merge", `[{"merged_at":"2026-09-07T10:00:00Z","merge_commit_sha":"other","head":{"ref":"slice","sha":"unaccepted"}}]`, ""},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -375,14 +375,14 @@ func TestGitHubBackendIdentifiesAcceptedSubmissionHead(t *testing.T) {
 func TestGitHubBackendRecognizesCloseBeforeMerge(t *testing.T) {
 	accepted := `{"merged_at":"2026-09-02T16:57:13Z","merge_commit_sha":"squash","head":{"ref":"slice","sha":"accepted"}}`
 	for _, test := range []struct {
-		name, pulls, wantHead string
-		wantItems             int
+		name, pulls, wantHead, wantBranch string
+		wantItems                         int
 	}{
-		{"merged after handoff", "[" + accepted + "]", "accepted", 1},
-		{"merely closed", `[]`, "", 0},
-		{"unmerged submission", `[{"merge_commit_sha":"squash","head":{"ref":"slice","sha":"accepted"}}]`, "", 0},
-		{"unrelated submission", `[{"merged_at":"2026-09-02T16:57:13Z","merge_commit_sha":"squash","head":{"ref":"other","sha":"accepted"}}]`, "", 0},
-		{"ambiguous submissions", "[" + accepted + "," + accepted + "]", "", 1},
+		{"merged after handoff", "[" + accepted + "]", "accepted", "slice", 1},
+		{"merely closed", `[]`, "", "", 0},
+		{"unmerged submission", `[{"merge_commit_sha":"squash","head":{"ref":"slice","sha":"accepted"}}]`, "", "", 0},
+		{"renamed submission", `[{"merged_at":"2026-09-02T16:57:13Z","merge_commit_sha":"squash","head":{"ref":"other","sha":"accepted"}}]`, "accepted", "other", 1},
+		{"ambiguous submissions", "[" + accepted + "," + accepted + "]", "", "", 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
@@ -417,8 +417,8 @@ func TestGitHubBackendRecognizesCloseBeforeMerge(t *testing.T) {
 			if err != nil || len(items) != test.wantItems {
 				t.Fatalf("Merged Work Items = %#v, %v; want %d", items, err, test.wantItems)
 			}
-			if len(items) == 1 && (!items[0].Merged || items[0].ID != "17" || items[0].Branch != "slice" || items[0].AcceptedHead != test.wantHead) {
-				t.Fatalf("accepted Submission = %#v; want head %q", items[0], test.wantHead)
+			if len(items) == 1 && (!items[0].Merged || items[0].ID != "17" || items[0].Branch != test.wantBranch || items[0].AcceptedHead != test.wantHead) {
+				t.Fatalf("accepted Submission = %#v; want head %q branch %q", items[0], test.wantHead, test.wantBranch)
 			}
 		})
 	}

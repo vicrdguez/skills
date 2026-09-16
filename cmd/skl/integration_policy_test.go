@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -27,6 +28,52 @@ func prepareReviewWorktree(t *testing.T, root, branch string) {
 	}
 }
 
+// selectionGraphQL answers the candidate-queue and owning-link queries from the
+// same REST fixture records. It reports whether it handled the request.
+func selectionGraphQL(w http.ResponseWriter, r *http.Request, pull map[string]any, present bool) bool {
+	if r.Method != http.MethodPost || r.URL.Path != "/graphql" {
+		return false
+	}
+	var request struct {
+		Query string `json:"query"`
+	}
+	payload, err := io.ReadAll(r.Body)
+	if err != nil {
+		return false
+	}
+	r.Body = io.NopCloser(bytes.NewReader(payload))
+	if err := json.Unmarshal(payload, &request); err != nil {
+		return false
+	}
+	data := func(value map[string]any) { _ = json.NewEncoder(w).Encode(map[string]any{"data": value}) }
+	switch {
+	case strings.Contains(request.Query, "pullRequests("):
+		nodes := []any{}
+		if present {
+			head, _ := pull["head"].(map[string]any)
+			labels := []any{}
+			if raw, ok := pull["labels"].([]map[string]string); ok {
+				for _, label := range raw {
+					labels = append(labels, map[string]any{"name": label["name"]})
+				}
+			}
+			created, _ := pull["created_at"].(string)
+			draft, _ := pull["draft"].(bool)
+			nodes = append(nodes, map[string]any{"number": pull["number"], "createdAt": created, "headRefName": head["ref"], "headRefOid": head["sha"], "isDraft": draft, "labels": map[string]any{"nodes": labels}})
+		}
+		data(map[string]any{"repository": map[string]any{"pullRequests": map[string]any{"nodes": nodes, "pageInfo": map[string]any{"hasNextPage": false, "endCursor": ""}}}})
+		return true
+	case strings.Contains(request.Query, "closedByPullRequestsReferences"):
+		nodes := []any{}
+		if present {
+			nodes = append(nodes, map[string]any{"number": pull["number"], "merged": false, "mergedAt": "", "state": "OPEN"})
+		}
+		data(map[string]any{"repository": map[string]any{"issue": map[string]any{"closedByPullRequestsReferences": map[string]any{"nodes": nodes}}}})
+		return true
+	}
+	return false
+}
+
 func TestReadyStartAndResumeDoNotObserveIntegrationTargetThroughGitHub(t *testing.T) {
 	root := proposalRepository(t)
 	baseline := prepareSlice(t, root, "widget")
@@ -46,7 +93,7 @@ func TestReadyStartAndResumeDoNotObserveIntegrationTargetThroughGitHub(t *testin
 		for _, label := range labels {
 			issueLabels = append(issueLabels, map[string]string{"name": label})
 		}
-		issue := map[string]any{"number": 7, "title": "widget", "state": "open", "labels": issueLabels}
+		issue := map[string]any{"number": 7, "title": "widget", "state": "open", "labels": issueLabels, "body": "Branch: `widget`\n"}
 		pullLabelObjects := make([]map[string]string, 0, len(prLabels))
 		for _, label := range prLabels {
 			pullLabelObjects = append(pullLabelObjects, map[string]string{"name": label})
@@ -54,6 +101,19 @@ func TestReadyStartAndResumeDoNotObserveIntegrationTargetThroughGitHub(t *testin
 		pull := map[string]any{"number": 11, "state": "open", "body": prBody, "labels": pullLabelObjects, "head": map[string]any{"ref": "widget", "sha": branchHead, "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": postedBase}}
 		var result any = []any{}
 		switch {
+		case path == "/graphql":
+			var payload struct {
+				Query string `json:"query"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if strings.Contains(payload.Query, "pullRequests(") {
+				result = map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequests": map[string]any{"nodes": []any{}, "pageInfo": map[string]any{"hasNextPage": false, "endCursor": ""}}}}}
+			} else {
+				result = map[string]any{"data": map[string]any{"repository": map[string]any{"issue": map[string]any{"closedByPullRequestsReferences": map[string]any{"nodes": []any{}}}}}}
+			}
 		case path == "/issues":
 			result = []any{issue}
 		case path == "/pulls":
@@ -158,7 +218,7 @@ func TestReadyStartAndResumeDoNotObserveIntegrationTargetThroughGitHub(t *testin
 		return result
 	}
 	first := run("next")
-	if exec.Command("git", "-C", root, "cat-file", "-e", mainHead+"^{commit}").Run() == nil || exec.Command("git", "-C", root, "cat-file", "-e", obsoleteTarget+"^{commit}").Run() == nil || first.Status != "work_available" || first.Packet == nil || first.Packet.Facts.Implementation.ArtifactBaseline != baseline || unwanted != "" {
+	if exec.Command("git", "-C", root, "cat-file", "-e", mainHead+"^{commit}").Run() == nil || exec.Command("git", "-C", root, "cat-file", "-e", obsoleteTarget+"^{commit}").Run() == nil || first.Status != "work_available" || first.Packet == nil || first.Packet.Facts.Implementation.InspectCommand == "" || unwanted != "" {
 		t.Fatalf("target-free start: %#v unwanted=%q", first, unwanted)
 	}
 	if err := os.WriteFile(filepath.Join(root, "progress.txt"), []byte("preserved\n"), 0600); err != nil {
@@ -195,7 +255,7 @@ func TestStaleSynchronizationReworkUsesOrdinaryCLIFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	labels := []string{"rework", "sync"}
-	body := "existing"
+	body := "existing\n\nCloses #7\n"
 	metadata := []map[string]any{{"body": fmt.Sprintf("<!-- skl.implement/v1\n{\"reviewed_head\":%q,\"review_round_head\":%q,\"target_snapshot\":\"missing\",\"target_branch\":\"release\",\"synchronization_target\":\"conflicting\"}\n-->", head, head), "author_association": "OWNER"}}
 	reviewComments := []map[string]any{{"body": "retained review feedback", "author_association": "OWNER"}}
 	events := []map[string]any{
@@ -213,10 +273,13 @@ func TestStaleSynchronizationReworkUsesOrdinaryCLIFlow(t *testing.T) {
 			pullLabels = append(pullLabels, map[string]string{"name": label})
 		}
 		pull := map[string]any{"number": 11, "node_id": "PR_11", "state": "open", "created_at": "2026-01-01T00:00:00Z", "body": body, "labels": pullLabels, "head": map[string]any{"sha": head, "ref": "widget", "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": "main"}}
+		if selectionGraphQL(w, r, pull, true) {
+			return
+		}
 		var result any = []any{}
 		switch {
 		case path == "/issues":
-			result = []any{map[string]any{"number": 7, "title": "widget", "state": "open"}}
+			result = []any{map[string]any{"number": 7, "title": "widget", "state": "open", "body": "Branch: `widget`\n"}}
 		case path == "/pulls":
 			result = []any{pull}
 		case path == "/issues/7/comments":
@@ -354,7 +417,7 @@ func TestWatchdogPassRetryAndStatusIgnoreMergeabilityThroughGitHub(t *testing.T)
 			head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 			prepareReviewWorktree(t, root, "widget")
 			labels := []string{"review", "wip"}
-			prBody := "audit"
+			prBody := "audit\n\nCloses #7\n"
 			mergeability := tc.initial
 			failRelease := tc.recover != ""
 			metadata := []map[string]any{{"body": fmt.Sprintf("<!-- skl.implement/v1\n{\"watchdog_head\":%q}\n-->", head), "author_association": "OWNER"}}
@@ -378,10 +441,13 @@ func TestWatchdogPassRetryAndStatusIgnoreMergeabilityThroughGitHub(t *testing.T)
 				if r.Method != http.MethodGet {
 					writes++
 				}
+				if selectionGraphQL(w, r, pull, true) {
+					return
+				}
 				var result any = []any{}
 				switch {
 				case path == "/issues":
-					result = []any{map[string]any{"number": 7, "title": "widget", "state": "open"}}
+					result = []any{map[string]any{"number": 7, "title": "widget", "state": "open", "body": "Branch: `widget`\n"}}
 				case path == "/pulls":
 					result = []any{pull}
 				case path == "/issues/7/comments":
@@ -557,7 +623,10 @@ func TestNonMainSubmissionRefusesPublicHandoffsThroughGitHub(t *testing.T) {
 				for _, label := range labels {
 					pullLabels = append(pullLabels, map[string]string{"name": label})
 				}
-				pull := map[string]any{"number": 11, "state": "open", "body": "existing", "labels": pullLabels, "head": map[string]any{"sha": head, "ref": "widget", "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": "release"}}
+				pull := map[string]any{"number": 11, "state": "open", "body": "existing\n\nCloses #7\n", "labels": pullLabels, "head": map[string]any{"sha": head, "ref": "widget", "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": "release"}}
+				if selectionGraphQL(w, r, pull, true) {
+					return
+				}
 				var result any = []any{}
 				switch path {
 				case "/issues":
@@ -624,7 +693,7 @@ func TestNeedsHumanPreservesDraftMainSubmissionThroughGitHub(t *testing.T) {
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	sourceLabels := []string{"ready", "wip"}
 	var prLabels []string
-	prBody := "existing"
+	prBody := "existing\n\nCloses #7\n"
 	draft := false
 	var sourceComments, prComments []map[string]any
 	unwanted := ""
@@ -637,8 +706,11 @@ func TestNeedsHumanPreservesDraftMainSubmissionThroughGitHub(t *testing.T) {
 			}
 			return result
 		}
-		source := map[string]any{"number": 7, "title": "widget", "state": "open", "labels": toLabels(sourceLabels)}
+		source := map[string]any{"number": 7, "title": "widget", "state": "open", "labels": toLabels(sourceLabels), "body": "Branch: `widget`\n"}
 		pull := map[string]any{"number": 11, "node_id": "PR_node", "state": "open", "draft": draft, "body": prBody, "labels": toLabels(prLabels), "head": map[string]any{"sha": head, "ref": "widget", "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": "main"}}
+		if selectionGraphQL(w, r, pull, true) {
+			return
+		}
 		var result any = []any{}
 		switch {
 		case path == "/issues":
@@ -777,8 +849,11 @@ func TestSubmitRefusesLateRetargetThroughGitHub(t *testing.T) {
 			}
 			return labels
 		}
-		source := map[string]any{"number": 7, "title": "widget", "state": "open", "labels": toLabels(sourceLabels)}
+		source := map[string]any{"number": 7, "title": "widget", "state": "open", "labels": toLabels(sourceLabels), "body": "Branch: `widget`\n"}
 		pull := map[string]any{"number": 11, "state": "open", "body": prBody, "labels": toLabels(pullLabels), "head": map[string]any{"ref": "widget", "sha": branchHead, "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": base}}
+		if selectionGraphQL(w, r, pull, prExists) {
+			return
+		}
 		var result any = []any{}
 		switch {
 		case path == "/issues":
@@ -934,8 +1009,8 @@ func TestStatusRefusesRetargetedPartialHandoffThroughGitHub(t *testing.T) {
 			}
 			return labels
 		}
-		source := map[string]any{"number": 7, "title": "widget", "state": "open", "labels": toLabels(sourceLabels)}
-		pull := map[string]any{"number": 11, "state": "open", "body": "existing", "labels": toLabels(pullLabels), "head": map[string]any{"ref": "widget", "sha": head, "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": "release"}}
+		source := map[string]any{"number": 7, "title": "widget", "state": "open", "labels": toLabels(sourceLabels), "body": "Branch: `widget`\n"}
+		pull := map[string]any{"number": 11, "state": "open", "body": "existing\n\nCloses #7\n", "labels": toLabels(pullLabels), "head": map[string]any{"ref": "widget", "sha": head, "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": "release"}}
 		if strings.HasPrefix(path, "/issues/7/labels") || strings.HasPrefix(path, "/issues/11/labels") {
 			target, prefix := &sourceLabels, "/issues/7/labels/"
 			if strings.HasPrefix(path, "/issues/11/") {
@@ -1023,8 +1098,11 @@ func TestSubmitRefusesRecoveredNonMainSubmissionThroughGitHub(t *testing.T) {
 			}
 			return labels
 		}
-		source := map[string]any{"number": 7, "title": "widget", "state": "open", "labels": toLabels(sourceLabels)}
+		source := map[string]any{"number": 7, "title": "widget", "state": "open", "labels": toLabels(sourceLabels), "body": "Branch: `widget`\n"}
 		pull := map[string]any{"number": 11, "node_id": "PR_node", "state": "open", "draft": draft, "body": prBody, "labels": toLabels(pullLabels), "head": map[string]any{"ref": "widget", "sha": branchHead, "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": "release"}}
+		if selectionGraphQL(w, r, pull, created) {
+			return
+		}
 		var result any = []any{}
 		switch {
 		case path == "/issues":
@@ -1191,7 +1269,7 @@ func TestWatchdogRefusesInvalidReviewedEvidenceThroughGitHub(t *testing.T) {
 				}
 				labels := slices.Clone(tc.labels)
 				pullHead := head
-				prBody := "existing"
+				prBody := "existing\n\nCloses #7\n"
 				moved := false
 				writes := 0
 				metadata := []map[string]any{{"body": fmt.Sprintf("<!-- skl.implement/v1\n{\"watchdog_head\":%q}\n-->", reviewed), "author_association": "OWNER"}}

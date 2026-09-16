@@ -1,12 +1,10 @@
 package workflow
 
 import (
-	"cmp"
 	"context"
-	"fmt"
+	"errors"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	skilldist "github.com/vicrdguez/skills"
@@ -74,7 +72,6 @@ type ImplementationBackend interface {
 	// ImplementationItems must retain source and Submission lifecycle observations;
 	// derived State and Claimed fields are not substitutes for those records.
 	ImplementationItems(context.Context) ([]ImplementationItem, error)
-	ClaimImplementation(context.Context, ImplementationItem) error
 	ImplementationHead(context.Context, string) (string, error)
 	// SubmissionBodyMatches compares an observation with the body publication would produce.
 	SubmissionBodyMatches(id WorkItemID, actual, supplied string) (bool, error)
@@ -223,136 +220,74 @@ func InspectImplementation(ctx context.Context, root string, id WorkItemID, endp
 }
 
 func StartImplementation(ctx context.Context, root, remote string, id WorkItemID, endpoints ArtifactEndpoints, backend ImplementationBackend) (ImplementationOutcome, error) {
-	items, err := loadImplementation(ctx, backend)
+	selection, ok := backend.(SelectionBackend)
+	if !ok {
+		return ImplementationOutcome{}, errors.New("workflow backend does not support candidate selection")
+	}
+	if id != "" {
+		return resumeImplementation(ctx, root, remote, id, endpoints, selection)
+	}
+	candidate, found, err := selectQueue(ctx, selection, ReworkQueue)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
-	if id != "" {
-		if id == CurrentWorktree {
-			main, err := primaryWorktree(root)
-			if err != nil {
-				return ImplementationOutcome{}, err
-			}
-			location, err := git(root, "rev-parse", "--show-toplevel")
-			if err != nil {
-				return ImplementationOutcome{}, err
-			}
-			for _, item := range items {
-				if item.Claimed && filepath.Clean(location) == filepath.Join(main, ".worktrees", item.Branch) {
-					if id != CurrentWorktree {
-						return ImplementationOutcome{Status: "fix_required", Reason: "worktree identity is ambiguous; resume with --item after repairing attachments"}, nil
-					}
-					id = item.ID
-				}
-			}
-		}
-		for _, item := range items {
-			if item.ID == id && item.Claimed && (item.State == Ready || item.State == Rework) {
-				prepared, outcome, err := prepareImplementationStart(ctx, root, remote, item, endpoints, backend)
-				if err != nil || outcome.Status != "" {
-					return outcome, err
-				}
-				if err := backend.ClaimImplementation(ctx, prepared); err != nil {
-					return ImplementationOutcome{}, err
-				}
-				item = prepared
-				return implementationPacket(root, remote, item, endpoints)
-			}
-		}
-		return ImplementationOutcome{Status: "fix_required", Reason: "explicit Work Item is not an unambiguous implementation Claim; repair its projections before resuming"}, nil
-	}
-	merged := make(map[WorkItemID]bool)
-	for _, item := range items {
-		merged[item.ID] = item.State == Merged
-	}
-	slices.SortFunc(items, func(a, b ImplementationItem) int {
-		if a.State != b.State {
-			if a.State == Rework {
-				return -1
-			}
-			if b.State == Rework {
-				return 1
-			}
-		}
-		if age := cmp.Compare(a.CreatedAt, b.CreatedAt); age != 0 {
-			return age
-		}
-		return cmp.Compare(a.Order, b.Order)
-	})
-	for _, item := range items {
-		if item.Claimed || item.State != Ready && item.State != Rework {
-			continue
-		}
-		blocked := false
-		if item.State == Ready {
-			for _, blocker := range item.Blockers {
-				blocked = blocked || !merged[blocker]
-			}
-		}
-		if blocked {
-			continue
-		}
-		prepared, outcome, err := prepareImplementationStart(ctx, root, remote, item, endpoints, backend)
-		if err != nil || outcome.Status != "" {
-			return outcome, err
-		}
-		item = prepared
-		claimErr := backend.ClaimImplementation(ctx, item)
-		observed, err := loadImplementation(ctx, backend)
+	if !found {
+		candidate, found, err = selectQueue(ctx, selection, ReadyQueue)
 		if err != nil {
 			return ImplementationOutcome{}, err
 		}
-		for _, current := range observed {
-			if current.ID == item.ID && current.Claimed && current.State == item.State && current.Problem == "" && current.Branch == item.Branch {
-				return implementationPacket(root, remote, current, endpoints)
-			}
-		}
-		if claimErr != nil {
-			return ImplementationOutcome{}, claimErr
-		}
-		return ImplementationOutcome{Status: "fix_required", Reason: "Claim read-back contradicts selected state; repair the Work Item projections and explicitly resume"}, nil
 	}
-	return ImplementationOutcome{Status: "no_work"}, nil
+	if !found {
+		return ImplementationOutcome{Status: "no_work"}, nil
+	}
+	item, outcome, err := selectedImplementation(ctx, selection, candidate)
+	if err != nil || outcome.Status != "" {
+		return outcome, err
+	}
+	if item.State != Ready && item.State != Rework {
+		return implementationRefusal(item, "the selected Work Item is not an eligible implementation record; repair its projections"), nil
+	}
+	if item.Claimed {
+		return implementationRefusal(item, "the selected Work Item was claimed before acquisition; resume with `skl implement resume --item "+string(item.ID)+"` if it is yours, otherwise inspect its projections"), nil
+	}
+	if !validConventionalBranch(root, item.Branch) {
+		return implementationRefusal(item, "invalid conventional branch identity; repair the Work Item attachment"), nil
+	}
+	observed, outcome, err := claimSelected(ctx, selection, candidate, item)
+	if err != nil || outcome.Status != "" {
+		return outcome, err
+	}
+	return implementationPacket(root, remote, observed, endpoints)
+}
+
+func resumeImplementation(ctx context.Context, root, remote string, id WorkItemID, endpoints ArtifactEndpoints, selection SelectionBackend) (ImplementationOutcome, error) {
+	branch := ""
+	if id == CurrentWorktree {
+		id = ""
+		current, err := git(root, "symbolic-ref", "--short", "HEAD")
+		if err != nil || current == "" {
+			return ImplementationOutcome{Status: "fix_required", Reason: "worktree identity is ambiguous; resume with --item after repairing attachments"}, nil
+		}
+		branch = current
+	}
+	item, err := selection.ResumedImplementation(ctx, id, branch)
+	if err != nil {
+		return ImplementationOutcome{}, err
+	}
+	if item.Problem != "" {
+		return implementationRefusal(item, item.Problem+"; repair the Work Item projections before resuming"), nil
+	}
+	if !item.Claimed || item.State != Ready && item.State != Rework {
+		return implementationRefusal(item, "explicit Work Item is not an unambiguous implementation Claim; repair its projections before resuming"), nil
+	}
+	if !validConventionalBranch(root, item.Branch) {
+		return implementationRefusal(item, "invalid conventional branch identity; repair the Work Item attachment"), nil
+	}
+	return implementationPacket(root, remote, item, endpoints)
 }
 
 func validConventionalBranch(root, branch string) bool {
 	return branch != "" && gitOK(root, "check-ref-format", "--branch", branch) == nil && !strings.Contains(branch, "/")
-}
-
-func prepareImplementationStart(ctx context.Context, root, remote string, item ImplementationItem, endpoints ArtifactEndpoints, backend ImplementationBackend) (ImplementationItem, ImplementationOutcome, error) {
-	refuse := func(reason string) (ImplementationItem, ImplementationOutcome, error) {
-		return item, ImplementationOutcome{Status: "fix_required", Reason: reason, Item: &item}, nil
-	}
-	if item.Problem != "" {
-		return refuse(item.Problem + "; repair contradictory projections before resuming")
-	}
-	if !validConventionalBranch(root, item.Branch) {
-		return refuse("invalid conventional branch identity; repair the Work Item attachment")
-	}
-	head, err := git(root, "rev-parse", "--verify", "refs/heads/"+item.Branch+"^{commit}")
-	if err != nil {
-		head, err = git(root, "rev-parse", "--verify", "refs/remotes/"+remote+"/"+item.Branch+"^{commit}")
-	}
-	if err != nil {
-		return refuse("branch unavailable; fetch the published branch and resume")
-	}
-	history, err := InspectLedger(root, head, item.Branch, endpoints, implementationLedgerPolicy(item.State))
-	if err != nil {
-		return item, ImplementationOutcome{}, err
-	}
-	if len(history.Violations) > 0 {
-		return refuse(fmt.Sprint(history.Violations) + "; repair frozen ledger history")
-	}
-	if item.State == Ready {
-	} else {
-		if item.Submission == nil {
-			return refuse("Rework requires its existing Submission; repair the attachment")
-		}
-		if !item.Submission.Draft && history.Phase != "retired" {
-			return refuse("finding-driven Rework must keep the ledger retired; restore its deletion history")
-		}
-	}
-	return item, ImplementationOutcome{}, nil
 }
 
 func implementationPacket(root, remote string, item ImplementationItem, endpoints ArtifactEndpoints) (ImplementationOutcome, error) {
@@ -360,24 +295,7 @@ func implementationPacket(root, remote string, item ImplementationItem, endpoint
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
-	history := LedgerHistory{}
-	if item.Branch != "" {
-		head, headErr := git(root, "rev-parse", "refs/heads/"+item.Branch)
-		if headErr != nil {
-			head, headErr = git(root, "rev-parse", "refs/remotes/"+remote+"/"+item.Branch)
-		}
-		if headErr != nil {
-			return ImplementationOutcome{Status: "fix_required", Reason: "branch unavailable; fetch and create the conventional worktree before resuming"}, nil
-		}
-		history, err = InspectLedger(root, head, item.Branch, endpoints, implementationLedgerPolicy(item.State))
-		if err != nil {
-			return ImplementationOutcome{}, err
-		}
-		if len(history.Violations) != 0 {
-			return ImplementationOutcome{Status: "fix_required", Reason: fmt.Sprint(history.Violations) + "; repair ledger history and resume"}, nil
-		}
-	}
-	facts := skilldist.ImplementationFacts{Branch: item.Branch, Worktree: filepath.Join(main, ".worktrees", item.Branch), ArtifactBaseline: history.Baseline, ArtifactCompletion: history.Completion, SuppliedArtifactBaseline: endpoints.Baseline, SuppliedArtifactCompletion: endpoints.Completion}
+	facts := skilldist.ImplementationFacts{Branch: item.Branch, Worktree: filepath.Join(main, ".worktrees", item.Branch), SuppliedArtifactBaseline: endpoints.Baseline, SuppliedArtifactCompletion: endpoints.Completion}
 	if item.Submission != nil {
 		facts.Comments = item.Submission.Comments
 	}
