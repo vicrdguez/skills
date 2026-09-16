@@ -702,8 +702,16 @@ func TestNeedsHumanPreservesDraftMainSubmissionThroughGitHub(t *testing.T) {
 			label := strings.TrimPrefix(path, prefix)
 			*target = slices.DeleteFunc(*target, func(value string) bool { return value == label })
 		case path == "/graphql":
-			draft = true
-			result = map[string]any{"data": map[string]any{}}
+			var payload struct{ Query string }
+			json.NewDecoder(r.Body).Decode(&payload)
+			if strings.HasPrefix(payload.Query, "query") {
+				// A pre-existing draft body carries native content-edit evidence
+				// older than the source Claim, so the pause may refresh it.
+				result = map[string]any{"data": map[string]any{"node": map[string]any{"body": prBody, "createdAt": "2026-01-01T00:00:00Z", "lastEditedAt": "2026-01-01T00:00:00Z"}}}
+			} else {
+				draft = true
+				result = map[string]any{"data": map[string]any{}}
+			}
 		case path == "/git/ref/heads/main" || strings.Contains(path, "target"):
 			unwanted = r.Method + " " + path
 			http.Error(w, "target lookup forbidden", http.StatusInternalServerError)

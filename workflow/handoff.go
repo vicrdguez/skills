@@ -158,10 +158,24 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 		published := bodyMatches
 		if from == Ready && item.Submission.Head == head && !published {
 			// Published review evidence is never silently replaced. A pause may
-			// still publish the current draft body while the destination has
-			// never carried a review projection.
-			if target != NeedsHuman || submissionExposed(item.Submission) {
-				return outcome, Refuse("published Submission differs from the supplied Result Document; restore the original body before retrying")
+			// refresh a draft body only while the destination has never carried
+			// a review projection and the retained body provably predates this
+			// Claim. A newer body can be this handoff's own accepted write,
+			// including one whose response and readbacks were lost.
+			refreshable := target == NeedsHuman && !submissionExposed(item.Submission)
+			if refreshable {
+				updated := item.Submission.BodyUpdatedAt
+				if reader, ok := backend.(submissionBodyTimeReader); ok {
+					var err error
+					updated, err = reader.SubmissionBodyUpdatedAt(ctx, item.Submission.ID)
+					if err != nil {
+						return outcome, err
+					}
+				}
+				refreshable = bodyProvablyPredatesClaim(updated, item.SourceClaimAcquiredAt)
+			}
+			if !refreshable {
+				return outcome, Refuse("published Submission differs from the supplied Result Document; the retained body does not provably predate this Claim; inspect and restore the accepted body before retrying")
 			}
 		}
 		if from == Rework {
@@ -169,11 +183,9 @@ func handoffImplementation(ctx context.Context, root, remote string, id WorkItem
 				return outcome, Refuse("published Rework Submission already belongs to a completed review at this head; push a new commit and supply the current round's Result Document")
 			}
 			if !published && item.Submission.Body != "" {
-				updated, updatedErr := time.Parse(time.RFC3339Nano, item.Submission.BodyUpdatedAt)
-				claim, claimErr := time.Parse(time.RFC3339Nano, item.Submission.ClaimAcquiredAt)
 				// Native content-edit evidence must precede this Claim. An older
 				// review alone remains true even after an accepted body write.
-				if updatedErr != nil || claimErr != nil || !updated.Before(claim) {
+				if !bodyProvablyPredatesClaim(item.Submission.BodyUpdatedAt, item.Submission.ClaimAcquiredAt) {
 					return outcome, Refuse("published Rework Submission differs from the supplied Result Document; body does not provably predate this Claim; inspect and supply the accepted Result Document")
 				}
 			}
@@ -277,6 +289,13 @@ type submissionReader interface {
 	ReviewSubmission(context.Context, SubmissionID) (Submission, error)
 }
 
+// submissionBodyTimeReader supplies native content-edit evidence for a
+// Submission body when a handoff must judge whether a differing Ready-stage
+// draft body is older-stage content or this handoff's own accepted write.
+type submissionBodyTimeReader interface {
+	SubmissionBodyUpdatedAt(context.Context, SubmissionID) (string, error)
+}
+
 // submissionExposed reports whether a Submission ever carried a destination
 // review projection. An unexposed draft may still be refreshed; once exposed,
 // its body is evidence and must match.
@@ -285,6 +304,17 @@ func submissionExposed(submission *Submission) bool {
 		return false
 	}
 	return slices.ContainsFunc(submission.Lifecycle.States, func(state State) bool { return state != NeedsHuman })
+}
+
+// bodyProvablyPredatesClaim reports whether retained native content-edit
+// evidence is older than the Claim that would replace it. A body accepted by
+// that Claim cannot predate its acquisition, so this distinguishes a
+// legitimate refresh of an earlier stage's draft from recovery of this
+// handoff's own write.
+func bodyProvablyPredatesClaim(bodyUpdatedAt, claimAcquiredAt string) bool {
+	updated, updatedErr := time.Parse(time.RFC3339Nano, bodyUpdatedAt)
+	claim, claimErr := time.Parse(time.RFC3339Nano, claimAcquiredAt)
+	return updatedErr == nil && claimErr == nil && updated.Before(claim)
 }
 
 func implementationSourceClaim(item ImplementationItem) bool {

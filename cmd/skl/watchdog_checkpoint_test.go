@@ -705,6 +705,72 @@ func TestImplementationRetryRefusesChangedPublishedEvidenceThroughPublicHTTP(t *
 	}
 }
 
+func TestImplementationPauseRefusesChangedReadyDraftAfterAcceptedWriteThroughPublicHTTP(t *testing.T) {
+	f := newReviewFixture(t)
+	f.forge.noPull, f.forge.labels = true, nil
+	f.forge.sourceLabels = []string{"ready", "wip"}
+	f.forge.sourceTimeline = []map[string]any{{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": "wip"}}}
+	directory := newImplementationResultDirectory(t)
+	body, decision := filepath.Join(directory, "submission.md"), filepath.Join(directory, "decision.md")
+	if err := os.WriteFile(body, []byte("first draft body"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(decision, []byte("hold\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"implement", "needs-human", "--item", "7", "--reason", "mandatory_rule", "--decision", decision, "--body", body}
+	f.forge.loseResponse = "POST /pulls"
+	if _, err := f.runResult(f.worktree, args...); err == nil {
+		t.Fatal("accepted draft creation with lost response and failed readbacks was not interrupted")
+	}
+	if f.forge.pullCreations != 1 || f.forge.body != "first draft body\n\nCloses #7\n" || !f.forge.draft || len(f.forge.labels) != 0 || !slices.Equal(f.forge.sourceLabels, []string{"ready", "wip"}) {
+		t.Fatalf("interruption did not leave accepted draft evidence: body=%q draft=%t labels=%v source=%v", f.forge.body, f.forge.draft, f.forge.labels, f.forge.sourceLabels)
+	}
+	if !f.forge.readsUnavailable || !slices.Contains(f.forge.failedReads, "GET /pulls") {
+		t.Fatalf("accepted create did not exhaust immediate readbacks: %v", f.forge.failedReads)
+	}
+	f.forge.readsUnavailable = false
+	before, writes := f.evidenceSnapshot(t), f.forge.writes
+	if err := os.WriteFile(body, []byte("changed retry body"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got := f.run(t, f.worktree, args...)
+	if got.Status != "fix_required" || !strings.Contains(got.Reason, "published Submission differs") {
+		t.Fatalf("changed retry overwrote accepted draft evidence: %#v", got)
+	}
+	if !reflect.DeepEqual(before, f.evidenceSnapshot(t)) || f.forge.writes != writes || f.forge.pullCreations != 1 || readFile(t, body) != "changed retry body" || !slices.Equal(f.forge.sourceLabels, []string{"ready", "wip"}) {
+		t.Fatalf("changed retry mutated the handoff: body=%q draft=%t labels=%v source=%v writes=%d", f.forge.body, f.forge.draft, f.forge.labels, f.forge.sourceLabels, f.forge.writes)
+	}
+	if err := os.WriteFile(body, []byte("first draft body"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got = f.run(t, f.worktree, args...)
+	if got.Status != "needs_human" || f.forge.pullCreations != 1 || f.forge.body != "first draft body\n\nCloses #7\n" || !slices.Equal(f.forge.labels, []string{"needs-human"}) || !slices.Equal(f.forge.sourceLabels, []string{"needs-human"}) || fileExists(body) || fileExists(decision) {
+		t.Fatalf("exact accepted-draft retry failed or duplicated publication: %#v body=%q labels=%v source=%v", got, f.forge.body, f.forge.labels, f.forge.sourceLabels)
+	}
+}
+
+func TestImplementationPauseRefreshesOlderReadyDraftBodyThroughPublicHTTP(t *testing.T) {
+	f := newReviewFixture(t)
+	f.forge.labels, f.forge.draft = nil, false
+	f.forge.body = "existing\n\nCloses #7\n"
+	f.forge.bodyEditedAt = "2026-01-01T00:00:01Z"
+	f.forge.sourceLabels = []string{"ready", "wip"}
+	f.forge.sourceTimeline = []map[string]any{{"event": "labeled", "created_at": "2026-01-01T00:00:02Z", "label": map[string]string{"name": "wip"}}}
+	directory := newImplementationResultDirectory(t)
+	body, decision := filepath.Join(directory, "submission.md"), filepath.Join(directory, "decision.md")
+	if err := os.WriteFile(body, []byte("preserved"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(decision, []byte("hold\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got := f.run(t, f.worktree, "implement", "needs-human", "--item", "7", "--reason", "mandatory_rule", "--decision", decision, "--body", body)
+	if got.Status != "needs_human" || f.forge.body != "preserved\n\nCloses #7\n" || !f.forge.draft || !slices.Equal(f.forge.labels, []string{"needs-human"}) || !slices.Equal(f.forge.sourceLabels, []string{"needs-human"}) {
+		t.Fatalf("proven older draft body was not refreshed: %#v body=%q draft=%t labels=%v source=%v", got, f.forge.body, f.forge.draft, f.forge.labels, f.forge.sourceLabels)
+	}
+}
+
 func TestImplementationCompletedHandoffVerifiesEmptyResultDocuments(t *testing.T) {
 	for _, decisionVisible := range []bool{false, true} {
 		t.Run(fmt.Sprintf("decision-visible=%t", decisionVisible), func(t *testing.T) {

@@ -569,6 +569,27 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 	return items, nil
 }
 
+// SubmissionBodyUpdatedAt reports native content-edit evidence for the
+// observed body of a Submission. An empty result means the record carries no
+// body or no stable node identity to read that evidence from.
+func (b *GitHubBackend) SubmissionBodyUpdatedAt(ctx context.Context, id workflow.SubmissionID) (string, error) {
+	if err := b.requireRepository(); err != nil {
+		return "", err
+	}
+	number, err := githubIssueNumber(workflow.WorkItemID(id))
+	if err != nil {
+		return "", err
+	}
+	var pull githubPull
+	if err := b.request(ctx, http.MethodGet, b.repositoryPath(b.repository)+fmt.Sprintf("/pulls/%d", number), nil, &pull); err != nil {
+		return "", err
+	}
+	if pull.Body == "" || pull.NodeID == "" {
+		return "", nil
+	}
+	return b.implementationBodyUpdatedAt(ctx, pull)
+}
+
 func (b *GitHubBackend) implementationBodyUpdatedAt(ctx context.Context, pull githubPull) (string, error) {
 	var response struct {
 		Data struct {
