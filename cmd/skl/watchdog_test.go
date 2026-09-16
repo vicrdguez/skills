@@ -202,7 +202,7 @@ func TestWatchdogPausesSecondFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := watchdogCLI(t, root, b, "submit", "--item", "7", "--review-number", "2", "--reviewed-head", head, "--verdict", "rework", "--summary", summary)
-	if got.Status != "needs_human" || got.Item.Claimed || got.Item.ResumeState != workflow.Rework || got.Item.Submission.Comments[0].Body != "current W1 BLOCK" {
+	if got.Status != "needs_human" || got.Item.Claimed || got.Item.Submission.Comments[0].Body != "current W1 BLOCK" {
 		t.Fatalf("second failure: %#v", got)
 	}
 }
@@ -303,7 +303,7 @@ func TestWatchdogHumanDirectionRequiresExplicitRequeue(t *testing.T) {
 		summary := filepath.Join(t.TempDir(), "summary.md")
 		os.WriteFile(summary, []byte("W1 HUMAN"), 0600)
 		got := watchdogCLI(t, root, b, "submit", "--item", "7", "--reviewed-head", head, "--verdict", "needs-human", "--summary", summary)
-		if got.Status != "needs_human" || got.Item.ResumeState != workflow.AwaitingReview {
+		if got.Status != "needs_human" {
 			t.Fatalf("human verdict: %#v", got)
 		}
 		human := skilldist.ReviewComment{Body: "W1 resolved [no parsing\n", Association: "OWNER"}
@@ -439,6 +439,7 @@ func (b *implementationMemory) PublishReview(_ context.Context, item workflow.Im
 	for i := range b.work {
 		if b.work[i].ID == item.ID {
 			for _, c := range comments {
+				c.EvidenceAuthorized = true
 				if c.CreatedAt == "" {
 					c.CreatedAt = b.reviewTime()
 				}
@@ -461,7 +462,6 @@ func (b *implementationMemory) CompleteReview(_ context.Context, item workflow.I
 	for i := range b.work {
 		if b.work[i].ID == item.ID {
 			b.work[i] = implementationFixture(b.work[i])
-			b.work[i].ResumeState = item.ResumeState
 			b.work[i].Synchronization = item.Synchronization
 			if target != workflow.NeedsHuman {
 				b.work[i].Source.States = slices.DeleteFunc(b.work[i].Source.States, func(state workflow.State) bool { return state == workflow.NeedsHuman })

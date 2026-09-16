@@ -65,10 +65,8 @@ func (b *GitHubBackend) CompleteReview(ctx context.Context, item workflow.Implem
 	if err := guard(); err != nil {
 		return err
 	}
-	if target == workflow.NeedsHuman {
-		if err := b.publishImplementationMetadata(ctx, repository, itemNumber, implementationMetadata{ResumeState: item.ResumeState}); err != nil {
-			return err
-		}
+	if err := b.implementationLabelMutation(ctx, repository, submissionNumber, []string{"wip"}, nil, guard); err != nil {
+		return err
 	}
 	if err := b.implementationLabelMutation(ctx, repository, submissionNumber, []string{label}, nil, guard); err != nil {
 		return err
@@ -79,7 +77,7 @@ func (b *GitHubBackend) CompleteReview(ctx context.Context, item workflow.Implem
 			return err
 		}
 	}
-	remove := []string{"review"}
+	remove := []string{"review", "sync"}
 	if target != workflow.Rework {
 		remove = append(remove, "rework")
 	}
@@ -87,6 +85,49 @@ func (b *GitHubBackend) CompleteReview(ctx context.Context, item workflow.Implem
 		remove = append(remove, "done")
 	}
 	return b.implementationLabelMutation(ctx, repository, submissionNumber, nil, append(remove, "wip"), guard)
+}
+
+// issueClaimAcquiredAt observes the latest unambiguous `wip` acquisition from a
+// record timeline. An empty result means no currently observed Claim or an
+// ambiguous one; it is never direction inference.
+func (b *GitHubBackend) issueClaimAcquiredAt(ctx context.Context, repository github.RepositoryID, number int) (string, error) {
+	labels := map[string]bool{}
+	claimAcquiredAt := ""
+	claimAmbiguous := false
+	for page := 1; ; page++ {
+		var events []struct {
+			Event     string `json:"event"`
+			CreatedAt string `json:"created_at"`
+			Label     struct {
+				Name string `json:"name"`
+			} `json:"label"`
+		}
+		if err := b.request(ctx, http.MethodGet, b.repositoryPath(repository)+fmt.Sprintf("/issues/%d/timeline?per_page=100&page=%d", number, page), nil, &events); err != nil {
+			return "", err
+		}
+		for _, event := range events {
+			if event.Event != "labeled" && event.Event != "unlabeled" {
+				continue
+			}
+			if event.Label.Name == "wip" {
+				if event.Event == "labeled" {
+					claimAmbiguous = claimAmbiguous || labels["wip"]
+					claimAcquiredAt = event.CreatedAt
+				} else {
+					claimAcquiredAt = ""
+					claimAmbiguous = false
+				}
+			}
+			labels[event.Label.Name] = event.Event == "labeled"
+		}
+		if len(events) < 100 {
+			break
+		}
+	}
+	if !labels["wip"] || claimAmbiguous {
+		return "", nil
+	}
+	return claimAcquiredAt, nil
 }
 
 func (b *GitHubBackend) AnchorSide(side string) bool {
@@ -114,43 +155,9 @@ func (b *GitHubBackend) ReviewSubmission(ctx context.Context, id workflow.Submis
 			result.Mergeability = "mergeable"
 		}
 	}
-	labels := map[string]bool{}
-	latest := ""
-	claimAcquiredAt := ""
-	claimAmbiguous := false
-	for page := 1; ; page++ {
-		var events []struct {
-			Event     string `json:"event"`
-			CreatedAt string `json:"created_at"`
-			Label     struct {
-				Name string `json:"name"`
-			} `json:"label"`
-		}
-		if err := b.request(ctx, http.MethodGet, b.repositoryPath(repository)+fmt.Sprintf("/issues/%d/timeline?per_page=100&page=%d", number, page), nil, &events); err != nil {
-			return workflow.Submission{}, err
-		}
-		for _, event := range events {
-			if event.Event != "labeled" && event.Event != "unlabeled" {
-				continue
-			}
-			if event.Label.Name == "wip" {
-				if event.Event == "labeled" {
-					claimAmbiguous = claimAmbiguous || labels["wip"]
-					claimAcquiredAt = event.CreatedAt
-				} else {
-					claimAcquiredAt = ""
-					claimAmbiguous = false
-				}
-			}
-			labels[event.Label.Name] = event.Event == "labeled"
-			if event.Event == "labeled" && (event.Label.Name == "review" || event.Label.Name == "rework" || event.Label.Name == "done" || event.Label.Name == "needs-human") {
-				latest = event.Label.Name
-			}
-		}
-		if len(events) < 100 {
-			break
-		}
-	}
+	// An interrupted review is identified by its observed labels, never by
+	// timeline order: the pending target is the other target label beside a
+	// retained review, or the single lifecycle state of a claimed record.
 	current := map[string]bool{}
 	states := 0
 	for _, label := range pull.Labels {
@@ -159,15 +166,18 @@ func (b *GitHubBackend) ReviewSubmission(ctx context.Context, id workflow.Submis
 			states++
 		}
 	}
-	if current["review"] && states == 2 && current[latest] && latest != "review" && latest != "ready" {
-		result.PendingReview = map[string]workflow.State{"rework": workflow.Rework, "done": workflow.ReadyForMerge, "needs-human": workflow.NeedsHuman}[latest]
-		result.State = result.PendingReview
+	if current["review"] && states == 2 && current["done"] {
+		result.PendingReview = workflow.ReadyForMerge
+		result.State = workflow.ReadyForMerge
 	}
 	if states == 1 && claimed && (state == workflow.ReadyForMerge || state == workflow.NeedsHuman) {
 		result.PendingReview = state
 	}
-	if (current["review"] || result.PendingReview != "") && claimed && labels["wip"] && !claimAmbiguous {
-		result.ClaimAcquiredAt = claimAcquiredAt
+	if claimed {
+		result.ClaimAcquiredAt, err = b.issueClaimAcquiredAt(ctx, repository, number)
+		if err != nil {
+			return workflow.Submission{}, err
+		}
 	}
 	return result, nil
 }
@@ -195,7 +205,7 @@ func (b *GitHubBackend) PublishReview(ctx context.Context, item workflow.Impleme
 				}
 				continue
 			}
-			if err := b.implementationComment(ctx, repository, number, comment.Body, false); err != nil {
+			if err := b.implementationComment(ctx, repository, number, comment.Body, ""); err != nil {
 				return err
 			}
 			continue
@@ -204,7 +214,7 @@ func (b *GitHubBackend) PublishReview(ctx context.Context, item workflow.Impleme
 		published := func() (bool, error) {
 			current, err := b.implementationComments(ctx, repository, stream)
 			for _, c := range current {
-				if c.Body == comment.Body && c.Commit == comment.Commit && c.Path == comment.Path && c.Line == comment.Line && c.Side == comment.Side && afterClaim(comment.ClaimAcquiredAt, c.CreatedAt) {
+				if c.EvidenceAuthorized && c.Body == comment.Body && c.Commit == comment.Commit && c.Path == comment.Path && c.Line == comment.Line && c.Side == comment.Side && afterClaim(comment.ClaimAcquiredAt, c.CreatedAt) {
 					return true, err
 				}
 			}
@@ -240,6 +250,7 @@ func (b *GitHubBackend) publishReviewSummary(ctx context.Context, repository git
 			Commit      string `json:"commit_id"`
 			State       string `json:"state"`
 			SubmittedAt string `json:"submitted_at"`
+			Association string `json:"author_association"`
 		}
 		matches := 0
 		for page := 1; ; page++ {
@@ -248,7 +259,7 @@ func (b *GitHubBackend) publishReviewSummary(ctx context.Context, repository git
 				return 0, err
 			}
 			for _, review := range reviews {
-				if review.Body == body && review.Commit == wanted.Commit && review.State == "COMMENTED" && afterClaim(wanted.ClaimAcquiredAt, review.SubmittedAt) {
+				if trustedMetadata(skilldist.ReviewComment{Association: review.Association}) && review.Body == body && review.Commit == wanted.Commit && review.State == "COMMENTED" && afterClaim(wanted.ClaimAcquiredAt, review.SubmittedAt) {
 					matches++
 				}
 			}

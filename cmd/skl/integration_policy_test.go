@@ -80,9 +80,14 @@ func TestReadyStartAndResumeDoNotObserveIntegrationTargetThroughGitHub(t *testin
 					return
 				}
 				comment["author_association"] = "OWNER"
+				comment["created_at"] = "2026-01-01T00:00:02Z"
 				metadata = append(metadata, comment)
 			}
 			result = metadata
+		case path == "/issues/7/timeline":
+			result = []any{map[string]any{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": "wip"}}}
+		case path == "/issues/11/timeline":
+			result = []any{map[string]any{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": "wip"}}}
 		case path == "/issues/7/dependencies/blocked_by", path == "/issues/11/comments", path == "/pulls/11/comments", path == "/pulls/11/reviews":
 		case path == "/issues/7":
 			result = issue
@@ -194,9 +199,9 @@ func TestStaleSynchronizationReworkUsesOrdinaryCLIFlow(t *testing.T) {
 	metadata := []map[string]any{{"body": fmt.Sprintf("<!-- skl.implement/v1\n{\"reviewed_head\":%q,\"review_round_head\":%q,\"target_snapshot\":\"missing\",\"target_branch\":\"release\",\"synchronization_target\":\"conflicting\"}\n-->", head, head), "author_association": "OWNER"}}
 	reviewComments := []map[string]any{{"body": "retained review feedback", "author_association": "OWNER"}}
 	events := []map[string]any{
-		{"event": "labeled", "label": map[string]string{"name": "review"}},
-		{"event": "labeled", "label": map[string]string{"name": "wip"}},
-		{"event": "labeled", "label": map[string]string{"name": "rework"}},
+		{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": "review"}},
+		{"event": "labeled", "created_at": "2026-01-01T00:00:02Z", "label": map[string]string{"name": "wip"}},
+		{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": "rework"}},
 		{"event": "unlabeled", "label": map[string]string{"name": "review"}},
 		{"event": "unlabeled", "label": map[string]string{"name": "wip"}},
 	}
@@ -207,7 +212,7 @@ func TestStaleSynchronizationReworkUsesOrdinaryCLIFlow(t *testing.T) {
 		for _, label := range labels {
 			pullLabels = append(pullLabels, map[string]string{"name": label})
 		}
-		pull := map[string]any{"number": 11, "state": "open", "body": body, "labels": pullLabels, "head": map[string]any{"sha": head, "ref": "widget", "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": "main"}}
+		pull := map[string]any{"number": 11, "node_id": "PR_11", "state": "open", "created_at": "2026-01-01T00:00:00Z", "body": body, "labels": pullLabels, "head": map[string]any{"sha": head, "ref": "widget", "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": "main"}}
 		var result any = []any{}
 		switch {
 		case path == "/issues":
@@ -245,6 +250,16 @@ func TestStaleSynchronizationReworkUsesOrdinaryCLIFlow(t *testing.T) {
 			result = pull
 		case path == "/issues/11/timeline":
 			result = events
+		case path == "/graphql":
+			var request struct {
+				Query string `json:"query"`
+			}
+			json.NewDecoder(r.Body).Decode(&request)
+			if strings.Contains(request.Query, "lastEditedAt") {
+				result = map[string]any{"data": map[string]any{"node": map[string]any{"body": body, "createdAt": "2026-01-01T00:00:00Z", "lastEditedAt": ""}}}
+				break
+			}
+			result = map[string]any{"data": map[string]any{}}
 		case path == "/git/ref/heads/widget":
 			result = map[string]any{"object": map[string]string{"sha": head}}
 		case path == "/issues/11/labels" && r.Method == http.MethodPost:
@@ -256,7 +271,7 @@ func TestStaleSynchronizationReworkUsesOrdinaryCLIFlow(t *testing.T) {
 			for _, label := range payload.Labels {
 				if !slices.Contains(labels, label) {
 					labels = append(labels, label)
-					events = append(events, map[string]any{"event": "labeled", "label": map[string]string{"name": label}})
+					events = append(events, map[string]any{"event": "labeled", "created_at": "2026-01-01T00:00:03Z", "label": map[string]string{"name": label}})
 				}
 			}
 		case strings.HasPrefix(path, "/issues/11/labels/") && r.Method == http.MethodDelete:
@@ -389,6 +404,7 @@ func TestWatchdogPassRetryAndStatusIgnoreMergeabilityThroughGitHub(t *testing.T)
 							http.Error(w, err.Error(), http.StatusBadRequest)
 							return
 						}
+						review["author_association"] = "OWNER"
 						review["state"] = "COMMENTED"
 						review["submitted_at"] = "2026-01-01T00:00:02Z"
 						summaries = append(summaries, review)
@@ -634,14 +650,20 @@ func TestNeedsHumanPreservesDraftMainSubmissionThroughGitHub(t *testing.T) {
 				var comment map[string]any
 				json.NewDecoder(r.Body).Decode(&comment)
 				comment["author_association"] = "OWNER"
+				comment["created_at"] = "2026-01-01T00:00:02Z"
 				sourceComments = append(sourceComments, comment)
 			}
 			result = sourceComments
+		case path == "/issues/7/timeline":
+			result = []any{map[string]any{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": "wip"}}}
+		case path == "/issues/11/timeline":
+			result = []any{map[string]any{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": "wip"}}}
 		case path == "/issues/11/comments":
 			if r.Method == http.MethodPost {
 				var comment map[string]any
 				json.NewDecoder(r.Body).Decode(&comment)
 				comment["author_association"] = "OWNER"
+				comment["created_at"] = "2026-01-01T00:00:02Z"
 				prComments = append(prComments, comment)
 			}
 			result = prComments
@@ -680,8 +702,16 @@ func TestNeedsHumanPreservesDraftMainSubmissionThroughGitHub(t *testing.T) {
 			label := strings.TrimPrefix(path, prefix)
 			*target = slices.DeleteFunc(*target, func(value string) bool { return value == label })
 		case path == "/graphql":
-			draft = true
-			result = map[string]any{"data": map[string]any{}}
+			var payload struct{ Query string }
+			json.NewDecoder(r.Body).Decode(&payload)
+			if strings.HasPrefix(payload.Query, "query") {
+				// A pre-existing draft body carries native content-edit evidence
+				// older than the source Claim, so the pause may refresh it.
+				result = map[string]any{"data": map[string]any{"node": map[string]any{"body": prBody, "createdAt": "2026-01-01T00:00:00Z", "lastEditedAt": "2026-01-01T00:00:00Z"}}}
+			} else {
+				draft = true
+				result = map[string]any{"data": map[string]any{}}
+			}
 		case path == "/git/ref/heads/main" || strings.Contains(path, "target"):
 			unwanted = r.Method + " " + path
 			http.Error(w, "target lookup forbidden", http.StatusInternalServerError)
@@ -778,12 +808,15 @@ func TestSubmitRefusesLateRetargetThroughGitHub(t *testing.T) {
 					return
 				}
 				comment["author_association"] = "OWNER"
+				comment["created_at"] = "2026-01-01T00:00:02Z"
 				if body, _ := comment["body"].(string); strings.Contains(body, `"completed":true`) {
 					completed++
 				}
 				metadata = append(metadata, comment)
 			}
 			result = metadata
+		case path == "/issues/7/timeline":
+			result = []any{map[string]any{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": "wip"}}}
 		case path == "/issues/7/dependencies/blocked_by", path == "/issues/11/comments", path == "/pulls/11/comments", path == "/pulls/11/reviews", path == "/issues/11/timeline":
 		case path == "/issues/7":
 			result = source
@@ -936,6 +969,8 @@ func TestStatusRefusesRetargetedPartialHandoffThroughGitHub(t *testing.T) {
 		case "/issues/7":
 			result = source
 		case "/issues/7/comments":
+		case "/issues/7/timeline":
+			result = []any{map[string]any{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": "wip"}}}
 			result = metadata
 		case "/issues/7/dependencies/blocked_by", "/issues/11/comments", "/pulls/11/comments", "/pulls/11/reviews", "/issues/11/timeline":
 		case "/pulls/11", "/issues/11":
@@ -1016,9 +1051,12 @@ func TestSubmitRefusesRecoveredNonMainSubmissionThroughGitHub(t *testing.T) {
 					return
 				}
 				comment["author_association"] = "OWNER"
+				comment["created_at"] = "2026-01-01T00:00:02Z"
 				metadata = append(metadata, comment)
 			}
 			result = metadata
+		case path == "/issues/7/timeline":
+			result = []any{map[string]any{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": "wip"}}}
 		case path == "/issues/7/labels" && r.Method == http.MethodPost:
 			var payload struct{ Labels []string }
 			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
@@ -1249,6 +1287,7 @@ func TestWatchdogRefusesInvalidReviewedEvidenceThroughGitHub(t *testing.T) {
 								http.Error(w, err.Error(), http.StatusBadRequest)
 								return
 							}
+							review["author_association"] = "OWNER"
 							review["state"] = "COMMENTED"
 							review["submitted_at"] = "2026-01-01T00:00:02Z"
 							summaries = append(summaries, review)

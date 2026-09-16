@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -16,8 +17,6 @@ import (
 type ReviewBackend interface {
 	ImplementationBackend
 	ReviewSubmission(context.Context, SubmissionID) (Submission, error)
-	// SubmissionBodyMatches compares an observation with the body publication would produce.
-	SubmissionBodyMatches(id WorkItemID, actual, supplied string) (bool, error)
 	// AnchorSide reports whether a supplied inline-anchor side is natively publishable.
 	AnchorSide(side string) bool
 	PublishReview(context.Context, ImplementationItem, []skilldist.ReviewComment, func() error) error
@@ -87,7 +86,7 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 			item = candidate
 		}
 	}
-	if item.Problem != "" || item.Submission == nil || item.State == AwaitingReview && !item.Claimed {
+	if item.Problem != "" && item.Problem != "contradictory lifecycle projections" || item.Submission == nil || item.State == AwaitingReview && !item.Claimed {
 		return ImplementationOutcome{}, Refuse("verdict requires the selected review Claim or an exactly observable fixed-number retry")
 	}
 	checkpoint, err := loadReviewCheckpoint(root, item.Branch)
@@ -234,41 +233,49 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 			return ImplementationOutcome{}, Refuse("review publication already started under this Claim; replay its original fixed-number command and Result Documents")
 		}
 	}
+	observedItem := item
 	target := Rework
 	if reviewNumber >= 2 {
 		target = NeedsHuman
-		item.ResumeState = Rework
 	}
 	if verdict == "needs-human" {
 		target = NeedsHuman
-		item.ResumeState = AwaitingReview
 	}
 	if verdict == "pass" {
 		target = ReadyForMerge
 	}
-	if item.State != AwaitingReview {
-		if item.Claimed && item.Submission.PendingReview == "" {
-			return ImplementationOutcome{}, Refuse("target-only Claim cannot prove it belongs to this review handoff; inspect before replaying the original fixed-number command")
+	if item.State != AwaitingReview || retry && item.Problem == "contradictory lifecycle projections" {
+		if item.Claimed {
+			if !retry || submission.ClaimAcquiredAt == "" || !evidenceMatches || receiptCount != 1 || !claimPrecedesReceipt(submission.ClaimAcquiredAt, receipt.CreatedAt) {
+				return ImplementationOutcome{}, Refuse("target-only Claim cannot prove it belongs to this review handoff; inspect before replaying the original fixed-number command")
+			}
 		}
 		completedEvidence := bodyMatches && reviewEvidenceMatches(item, comments)
 		if item.Claimed && submission.ClaimAcquiredAt != "" {
 			completedEvidence = bodyMatches && reviewEvidenceMatchesForClaim(item, comments, submission.ClaimAcquiredAt)
 		}
 		compatible := verdict == "rework" && (item.State == Rework || item.State == NeedsHuman) || verdict == "needs-human" && item.State == NeedsHuman || verdict == "pass" && item.State == ReadyForMerge
+		compatible = compatible || retry && item.Submission.Lifecycle != nil && slices.Contains(item.Submission.Lifecycle.States, target)
 		compatible = compatible && completedEvidence
 		if !compatible {
 			return ImplementationOutcome{}, Refuse("completed or partial review differs from supplied verdict; restore its exact Result Documents")
 		}
+		if !item.Claimed {
+			if !reviewDestinationFinal(observedItem, target) {
+				return ImplementationOutcome{}, Refuse("review destination or source cleanup is incomplete; inspect projections without acquiring or releasing a Claim")
+			}
+		}
 		if completedDone {
 			return ImplementationOutcome{Status: string(item.State), Item: &item, Head: head}, guard()
 		}
-		if verdict != "pass" {
+		if verdict != "pass" && item.Problem != "contradictory lifecycle projections" {
 			target = item.State
 		}
 		if !retry {
 			return ImplementationOutcome{}, Refuse("completed review is missing its matching Review Checkpoint; inspect before changing the handoff")
 		}
 		if item.Claimed || target != item.State {
+			item.Synchronization = false
 			if err := backend.CompleteReview(ctx, item, target, guard); err != nil {
 				return ImplementationOutcome{}, err
 			}
@@ -277,7 +284,7 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 				return ImplementationOutcome{}, err
 			}
 			for _, c := range current {
-				if c.ID == item.ID && c.Problem == "" && !c.Claimed && c.State == target {
+				if c.ID == item.ID && reviewDestinationFinal(c, target) {
 					result := completedReviewOutcome(c, head, checkpoint)
 					return result, guard()
 				}
@@ -329,6 +336,7 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	if err := checkpoint.replace(reviewNumber, reviewed, guard); err != nil {
 		return ImplementationOutcome{}, Refuse(err.Error())
 	}
+	item.Synchronization = false
 	if err := backend.CompleteReview(ctx, item, target, guard); err != nil {
 		return ImplementationOutcome{}, err
 	}
@@ -340,7 +348,7 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 		return ImplementationOutcome{}, err
 	}
 	for _, current := range observed {
-		if current.ID == id && current.Problem == "" && current.State == target && !current.Claimed {
+		if current.ID == id && reviewDestinationFinal(current, target) {
 			result := completedReviewOutcome(current, head, checkpoint)
 			return result, nil
 		}
@@ -348,10 +356,24 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	return ImplementationOutcome{}, Refuse("review handoff incomplete; retry the same verdict and Result Documents")
 }
 
+func reviewDestinationFinal(item ImplementationItem, target State) bool {
+	if item.Problem != "" || item.Claimed || item.State != target || item.Synchronization || item.Source == nil || !item.Source.Open || item.Source.Claimed || item.Submission == nil || item.Submission.Lifecycle == nil {
+		return false
+	}
+	if len(item.Source.States) != 0 && (target != NeedsHuman || !slices.Equal(item.Source.States, []State{NeedsHuman})) {
+		return false
+	}
+	pr := item.Submission.Lifecycle
+	return pr.Open && !pr.Claimed && slices.Equal(pr.States, []State{target})
+}
+
 func reviewEvidenceMatches(item ImplementationItem, wanted []skilldist.ReviewComment) bool {
 	for _, comment := range wanted {
 		matches := 0
 		for _, existing := range item.Submission.Comments {
+			if existing.Path != "" && !existing.EvidenceAuthorized {
+				continue
+			}
 			if reviewCommentsMatch(comment, existing) {
 				matches++
 			}
@@ -368,7 +390,7 @@ func reviewEvidenceCompatible(item ImplementationItem, wanted []skilldist.Review
 		return false
 	}
 	for _, existing := range item.Submission.Comments {
-		if existing.Path == "" || existing.Commit != wanted[0].Commit {
+		if !existing.EvidenceAuthorized || existing.Path == "" || existing.Commit != wanted[0].Commit {
 			continue
 		}
 		after, unambiguous := receiptAfterClaim(claimedAt, existing.CreatedAt)
@@ -402,7 +424,7 @@ func reviewEvidenceMatchesForClaim(item ImplementationItem, wanted []skilldist.R
 	for _, comment := range wanted[1:] {
 		matches := 0
 		for _, existing := range item.Submission.Comments {
-			if existing.Path == "" || existing.Commit != comment.Commit {
+			if !existing.EvidenceAuthorized || existing.Path == "" || existing.Commit != comment.Commit {
 				continue
 			}
 			after, unambiguous := receiptAfterClaim(claimedAt, existing.CreatedAt)

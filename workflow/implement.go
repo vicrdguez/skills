@@ -28,25 +28,26 @@ const (
 )
 
 type ImplementationItem struct {
-	Source          *LifecycleObservation
-	Synchronization bool
-	Problem         string
-	ResumeState     State
-	Submission      *Submission
-	Branch          string
-	ID              WorkItemID
-	Order           int
-	State           State
-	CreatedAt       string
-	Claimed         bool
-	Blockers        []WorkItemID
-	Transition      *ImplementationTransition
+	Source                *LifecycleObservation
+	Synchronization       bool
+	Problem               string
+	Submission            *Submission
+	Feedback              []skilldist.ReviewComment
+	Branch                string
+	ID                    WorkItemID
+	Order                 int
+	State                 State
+	CreatedAt             string
+	Claimed               bool
+	SourceClaimAcquiredAt string
+	Blockers              []WorkItemID
 }
 
 type Submission struct {
 	Lifecycle       *LifecycleObservation
 	PendingReview   State
 	ClaimAcquiredAt string
+	BodyUpdatedAt   string
 	Merged          bool
 	Mergeability    string
 	CreatedAt       string
@@ -75,21 +76,11 @@ type ImplementationBackend interface {
 	ImplementationItems(context.Context) ([]ImplementationItem, error)
 	ClaimImplementation(context.Context, ImplementationItem) error
 	ImplementationHead(context.Context, string) (string, error)
+	// SubmissionBodyMatches compares an observation with the body publication would produce.
+	SubmissionBodyMatches(id WorkItemID, actual, supplied string) (bool, error)
 	PublishImplementation(context.Context, ImplementationItem, Submission) (Submission, error)
-	RecordImplementationTransition(context.Context, ImplementationItem, ImplementationTransition) error
-	RetainImplementationClaim(context.Context, ImplementationItem) error
 	AwaitImplementationReview(context.Context, ImplementationItem, func() error) error
 	PauseImplementation(context.Context, ImplementationItem, string, func() error) error
-}
-
-type ImplementationTransition struct {
-	From           State  `json:"from"`
-	Target         State  `json:"target"`
-	Head           string `json:"head"`
-	BodyDigest     string `json:"body_digest"`
-	DecisionDigest string `json:"decision_digest"`
-	Directory      string `json:"directory"`
-	Completed      bool   `json:"completed"`
 }
 
 type InvariantError struct{ Reason string }
@@ -171,49 +162,7 @@ func ReconcileImplementation(item ImplementationItem) ImplementationItem {
 	if !item.Source.Open && item.State != Merged && item.State != ReadyForMerge && item.State != Superseded && (item.Problem == "" || item.Problem == "contradictory lifecycle projections" || item.Problem == "source Ready contradicts Submission lifecycle") {
 		item.Problem = "source is closed without a merged Submission"
 	}
-	if transition := item.Transition; transition != nil && !transition.Completed {
-		allowed := func(observation *LifecycleObservation, states []State) bool {
-			if observation == nil || !observation.Open {
-				return false
-			}
-			for _, state := range observation.States {
-				if !slices.Contains(states, state) {
-					return false
-				}
-			}
-			return true
-		}
-		var sourceStates, submissionStates []State
-		if transition.From == Ready {
-			sourceStates = append(sourceStates, Ready)
-		} else if transition.From == Rework {
-			submissionStates = append(submissionStates, Rework)
-		}
-		submissionStates = append(submissionStates, transition.Target)
-		if transition.Target == NeedsHuman {
-			sourceStates = append(sourceStates, NeedsHuman)
-		}
-		valid := allowed(item.Source, sourceStates) && (item.Submission == nil || allowed(item.Submission.Lifecycle, submissionStates))
-		if !valid {
-			item.Problem = "projections contradict the pending implementation transition"
-		}
-		if valid && (item.Problem == "" || item.Problem == "contradictory lifecycle projections" || item.Problem == "source Ready contradicts Submission lifecycle") {
-			item.Problem = ""
-			final := !sourceClaimed && sourceProblem == ""
-			if transition.Target == AwaitingReview {
-				final = final && sourceState == "" && item.Submission != nil && item.Submission.State == AwaitingReview && !item.Submission.Claimed
-			} else {
-				final = final && sourceState == NeedsHuman && (item.Submission == nil || item.Submission.State == NeedsHuman && !item.Submission.Claimed)
-			}
-			item.State = transition.From
-			if final {
-				item.State = transition.Target
-			} else {
-				item.ResumeState = transition.From
-			}
-		}
-	}
-	if item.Submission != nil && item.Submission.PendingReview != "" && (item.Transition == nil || item.Transition.Completed) && sourceProblem == "" && (item.Problem == "" || item.Problem == "contradictory lifecycle projections") {
+	if item.Submission != nil && item.Submission.PendingReview != "" && sourceProblem == "" && (item.Problem == "" || item.Problem == "contradictory lifecycle projections") {
 		item.Problem = ""
 		item.State = item.Submission.PendingReview
 	}
@@ -238,13 +187,17 @@ func (observation LifecycleObservation) state() (State, string) {
 }
 
 // PermitImplementationReview checks the fresh Submission observation before its
-// review projection is written, including the shipped overlap acceptance rules.
+// review projection is written. Any unresolved lifecycle contradiction must stop
+// the handoff; a normalized first state is not direction proof.
 func PermitImplementationReview(observation *LifecycleObservation) error {
 	if observation == nil {
 		return Refuse("review requires a durable Submission; publish it before retrying")
 	}
 	state, problem := observation.state()
-	if state == NeedsHuman || state == ReadyForMerge || state == Ready || problem != "" && state != Rework && state != AwaitingReview {
+	if problem != "" {
+		return Refuse("Submission lifecycle contradicts review handoff: " + problem + "; repair its projections")
+	}
+	if state == NeedsHuman || state == ReadyForMerge || state == Ready {
 		return Refuse("Submission lifecycle contradicts review handoff; repair its projections")
 	}
 	return nil
@@ -327,7 +280,7 @@ func StartImplementation(ctx context.Context, root, remote string, id WorkItemID
 		return cmp.Compare(a.Order, b.Order)
 	})
 	for _, item := range items {
-		if item.Claimed || item.Submission != nil && item.Submission.PendingReview != "" || item.Transition != nil && !item.Transition.Completed || item.State != Ready && item.State != Rework {
+		if item.Claimed || item.State != Ready && item.State != Rework {
 			continue
 		}
 		blocked := false

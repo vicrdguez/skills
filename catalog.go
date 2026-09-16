@@ -84,6 +84,9 @@ type ReviewComment struct {
 	Verdict         string `json:"verdict,omitempty"`
 	ReviewNumber    uint64 `json:"review_number,omitempty"`
 	ClaimAcquiredAt string `json:"claim_acquired_at,omitempty"`
+
+	// EvidenceAuthorized is the backend's assertion that a comment may count as published evidence.
+	EvidenceAuthorized bool `json:"evidence_authorized,omitempty"`
 }
 
 type Packet struct {

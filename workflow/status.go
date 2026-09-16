@@ -22,6 +22,9 @@ func ObserveStatus(ctx context.Context, backend ImplementationBackend) (StatusOu
 	outcome := StatusOutcome{Status: "observed", Items: items}
 	for i, item := range items {
 		if item.Problem != "" {
+			if item.Problem == "contradictory lifecycle projections" && item.Claimed {
+				return StatusOutcome{}, Refuse("ambiguous claimed lifecycle projections require the original semantic command and Result Documents; inspect without changing the Claim")
+			}
 			outcome.Items[i].State = NeedsHuman
 			continue
 		}
@@ -36,6 +39,13 @@ func ObserveStatus(ctx context.Context, backend ImplementationBackend) (StatusOu
 					outcome.Items[i].Claimed = false
 					continue
 				}
+			}
+		}
+		if item.Claimed && item.Submission != nil {
+			// A non-main destination needs explicit human repair; status never
+			// retargets it or completes the handoff on its behalf.
+			if err := RefuseNonMainBase(item.Submission.ID, item.Submission.Base); err != nil {
+				return StatusOutcome{}, err
 			}
 		}
 		if item.Submission != nil && item.Submission.PendingReview != "" {
@@ -88,31 +98,7 @@ func ObserveStatus(ctx context.Context, backend ImplementationBackend) (StatusOu
 			continue
 		}
 		if item.State == Ready && item.Submission != nil && item.Submission.State == AwaitingReview && !item.Submission.Claimed {
-			guard := func() error {
-				current, err := backend.ImplementationItems(ctx)
-				if err != nil {
-					return err
-				}
-				for _, c := range current {
-					if c.ID != item.ID || c.Problem != "" || c.Submission == nil || c.Submission.Head != item.Submission.Head || c.Submission.State != AwaitingReview || c.Submission.Claimed {
-						continue
-					}
-					return RefuseNonMainBase(c.Submission.ID, c.Submission.Base)
-				}
-				return Refuse("partial Submission changed; inspect before reconciling")
-			}
-			if err := projectImplementation(ctx, backend, item, AwaitingReview, "", guard); err != nil {
-				return StatusOutcome{}, err
-			}
-			current, err := backend.ImplementationItems(ctx)
-			if err != nil {
-				return StatusOutcome{}, err
-			}
-			for _, c := range current {
-				if c.ID == item.ID {
-					outcome.Items[i] = c
-				}
-			}
+			return StatusOutcome{}, Refuse("partial implementation handoff requires its original Result Document; status cannot establish publication authority")
 		}
 	}
 	if port, ok := backend.(StatusBackend); ok {

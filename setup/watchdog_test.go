@@ -54,6 +54,11 @@ func TestGitHubWatchdogClaimsSubmissionAndReadsReviewFacts(t *testing.T) {
 			return
 		case "/issues/11/comments":
 			result = []any{map[string]any{"body": "raw human", "author_association": "OWNER"}}
+		case "/issues/11/timeline":
+			result = []any{
+				map[string]any{"event": "labeled", "created_at": "2026-01-01T00:00:01Z", "label": map[string]string{"name": "review"}},
+				map[string]any{"event": "labeled", "created_at": "2026-01-01T00:00:02Z", "label": map[string]string{"name": "wip"}},
+			}
 		case "/pulls/11/comments":
 			result = []any{map[string]any{"body": "raw inline", "path": "main.go", "line": 12, "side": "RIGHT", "commit_id": "older"}}
 		case "/pulls/11/reviews":
@@ -105,6 +110,7 @@ func TestGitHubWatchdogPublishesOpaqueAnchorsOnceAfterLostResponse(t *testing.T)
 		if r.Method == "POST" {
 			var p map[string]any
 			json.NewDecoder(r.Body).Decode(&p)
+			p["author_association"] = "OWNER"
 			*stream = append(*stream, p)
 			posts++
 			http.Error(w, "lost response", 500)
@@ -210,7 +216,7 @@ func TestGitHubWatchdogCompletesReviewWithoutClosingSource(t *testing.T) {
 			}))
 			defer server.Close()
 			b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
-			item := workflow.ImplementationItem{ID: "7", State: workflow.AwaitingReview, ResumeState: workflow.Rework, Submission: &workflow.Submission{ID: "11", Head: "fixed"}}
+			item := workflow.ImplementationItem{ID: "7", State: workflow.AwaitingReview, Submission: &workflow.Submission{ID: "11", Head: "fixed"}}
 			for range 2 {
 				if err := b.CompleteReview(context.Background(), item, target, func() error { return nil }); err != nil {
 					t.Fatal(err)
@@ -389,16 +395,12 @@ func TestGitHubStatusAdoptsOnlyForwardReviewProjections(t *testing.T) {
 		if err != nil || len(items) != 1 {
 			t.Fatalf("items: %#v %v", items, err)
 		}
-		if latest == "rework" {
-			if items[0].Problem != "" || items[0].State != workflow.Rework || items[0].Submission.PendingReview != workflow.Rework {
-				t.Fatalf("forward transition: %#v", items[0])
-			}
-		} else if latest == "partial" {
-			if items[0].Problem != "" || items[0].State != workflow.Rework || items[0].Submission.PendingReview != "" || !items[0].Claimed {
+		if latest == "partial" {
+			if items[0].Problem != "" || items[0].State != workflow.Rework || !items[0].Claimed {
 				t.Fatalf("target-only Claim was treated as a proven review handoff: %#v", items[0])
 			}
 		} else if items[0].Problem == "" {
-			t.Fatalf("contradiction guessed through: %#v", items[0])
+			t.Fatalf("timeline inferred transition direction: %#v", items[0])
 		}
 	}
 }
@@ -438,7 +440,7 @@ func TestGitHubReviewRecoveryPreservesProblems(t *testing.T) {
 				t.Fatalf("items: %#v %v", items, err)
 			}
 			for _, item := range items {
-				if item.Problem != problem || item.Submission.PendingReview != "" {
+				if item.Problem != problem {
 					t.Fatalf("recovery erased unrelated problem: %#v", item)
 				}
 			}

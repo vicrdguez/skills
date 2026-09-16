@@ -2,8 +2,6 @@ package setup
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -11,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	skilldist "github.com/vicrdguez/skills"
 	"github.com/vicrdguez/skills/github"
@@ -91,43 +90,56 @@ func (b *GitHubBackend) ClaimImplementation(ctx context.Context, item workflow.I
 	return workflow.Refuse("Work Item disappeared before Claim; inspect its stable identity")
 }
 
-func (b *GitHubBackend) publishImplementationMetadata(ctx context.Context, repository github.RepositoryID, number int, metadata implementationMetadata) error {
-	payload, err := json.Marshal(metadata)
-	if err != nil {
-		return err
+func (b *GitHubBackend) implementationComment(ctx context.Context, repository github.RepositoryID, number int, body string, claimAcquiredAt string) error {
+	var claim time.Time
+	if claimAcquiredAt != "" {
+		var err error
+		claim, err = time.Parse(time.RFC3339Nano, claimAcquiredAt)
+		if err != nil {
+			return workflow.Refuse("decision Claim timing is unavailable; inspect before retrying")
+		}
 	}
-	return b.implementationComment(ctx, repository, number, "<!-- skl.implement/v1\n"+string(payload)+"\n-->", true)
-}
-
-func (b *GitHubBackend) implementationComment(ctx context.Context, repository github.RepositoryID, number int, body string, metadata bool) error {
-	published := func(comments []skilldist.ReviewComment) bool {
-		latest := ""
+	published := func(comments []skilldist.ReviewComment) (bool, error) {
 		for _, comment := range comments {
-			if metadata {
-				if strings.HasPrefix(comment.Body, "<!-- skl.implement/v1\n") && trustedMetadata(comment) {
-					latest = comment.Body
+			if !comment.EvidenceAuthorized || comment.Path != "" {
+				continue
+			}
+			if claimAcquiredAt != "" {
+				if !strings.HasPrefix(comment.Body, workflow.OpaqueImplementationDecision("")) {
+					continue
 				}
-			} else if comment.Body == body {
-				return true
+				created, err := time.Parse(time.RFC3339Nano, comment.CreatedAt)
+				if err != nil || created.Equal(claim) {
+					return false, workflow.Refuse("decision receipt ordering is unknown or equal to the Claim; inspect before retrying")
+				}
+				if created.Before(claim) {
+					continue
+				}
+				if comment.Body != body {
+					return false, workflow.Refuse("current decision differs from the supplied Result Document; restore the original decision before retrying")
+				}
+			}
+			if comment.Body == body {
+				return true, nil
 			}
 		}
-		return metadata && latest == body
+		return false, nil
 	}
 	stream := fmt.Sprintf("/issues/%d/comments", number)
 	comments, err := b.implementationComments(ctx, repository, stream)
 	if err != nil {
 		return err
 	}
-	if published(comments) {
-		return nil
+	if found, err := published(comments); err != nil || found {
+		return err
 	}
 	writeErr := b.request(ctx, http.MethodPost, b.repositoryPath(repository)+stream, map[string]string{"body": body}, nil)
 	comments, err = b.implementationComments(ctx, repository, stream)
 	if err != nil {
 		return err
 	}
-	if published(comments) {
-		return nil
+	if found, err := published(comments); err != nil || found {
+		return err
 	}
 	if writeErr != nil {
 		return writeErr
@@ -312,10 +324,13 @@ func (b *GitHubBackend) AwaitImplementationReview(ctx context.Context, item work
 	if err := workflow.PermitImplementationReview(implementationLifecycle(issue)); err != nil {
 		return err
 	}
-	if err := b.implementationLabelMutation(ctx, repository, submissionNumber, []string{"review"}, []string{"rework", "wip", "sync"}, guard); err != nil {
+	if err := b.implementationLabelMutation(ctx, repository, submissionNumber, []string{"wip", "review"}, []string{"rework", "sync"}, guard); err != nil {
 		return err
 	}
-	return b.implementationLabelMutation(ctx, repository, itemNumber, nil, []string{"ready", "wip", "needs-human"}, guard)
+	if err := b.implementationLabelMutation(ctx, repository, itemNumber, nil, []string{"ready", "needs-human", "wip"}, guard); err != nil {
+		return err
+	}
+	return b.implementationLabelMutation(ctx, repository, submissionNumber, nil, []string{"wip"}, guard)
 }
 
 func (b *GitHubBackend) PauseImplementation(ctx context.Context, item workflow.ImplementationItem, decision string, guard func() error) error {
@@ -327,61 +342,40 @@ func (b *GitHubBackend) PauseImplementation(ctx context.Context, item workflow.I
 	if err != nil {
 		return err
 	}
-	if err := guard(); err != nil {
-		return err
-	}
-	if err := b.publishImplementationMetadata(ctx, repository, itemNumber, implementationMetadata{ResumeState: item.State}); err != nil {
-		return err
-	}
 	number := itemNumber
 	if item.Submission != nil {
 		number = submissionNumber
 	}
-	if err := b.implementationComment(ctx, repository, number, decision, false); err != nil {
+	claimNumber := itemNumber
+	if item.State == workflow.Rework {
+		claimNumber = submissionNumber
+	}
+	claimAcquiredAt, err := b.issueClaimAcquiredAt(ctx, repository, claimNumber)
+	if err != nil {
+		return err
+	}
+	if _, err := time.Parse(time.RFC3339Nano, claimAcquiredAt); err != nil {
+		return workflow.Refuse("decision publication requires known source Claim timing; inspect before retrying")
+	}
+	if err := b.implementationComment(ctx, repository, number, workflow.OpaqueImplementationDecision(decision), claimAcquiredAt); err != nil {
 		return err
 	}
 	if item.Submission != nil {
-		if err := b.implementationLabelMutation(ctx, repository, number, []string{"needs-human"}, []string{"review", "rework", "wip"}, guard); err != nil {
+		if err := b.implementationLabelMutation(ctx, repository, number, []string{"wip", "needs-human"}, []string{"review", "rework", "sync"}, guard); err != nil {
 			return err
 		}
 	}
-	return b.implementationLabelMutation(ctx, repository, itemNumber, []string{"needs-human"}, []string{"ready", "wip"}, guard)
-}
-
-func (b *GitHubBackend) RecordImplementationTransition(ctx context.Context, item workflow.ImplementationItem, transition workflow.ImplementationTransition) error {
-	if err := b.requireRepository(); err != nil {
+	if err := b.implementationLabelMutation(ctx, repository, itemNumber, []string{"needs-human"}, []string{"ready", "wip"}, guard); err != nil {
 		return err
 	}
-	repository := b.repository
-	number, err := githubIssueNumber(item.ID)
-	if err != nil {
-		return err
+	if item.Submission != nil {
+		return b.implementationLabelMutation(ctx, repository, submissionNumber, nil, []string{"wip"}, guard)
 	}
-	return b.publishImplementationMetadata(ctx, repository, number, implementationMetadata{Transition: &transition})
-}
-
-func (b *GitHubBackend) RetainImplementationClaim(ctx context.Context, item workflow.ImplementationItem) error {
-	if err := b.requireRepository(); err != nil {
-		return err
-	}
-	repository := b.repository
-	number, submissionNumber, err := githubImplementationNumbers(item)
-	if err != nil {
-		return err
-	}
-	if item.State == workflow.Rework && item.Submission != nil {
-		number = submissionNumber
-	}
-	return b.implementationLabelMutation(ctx, repository, number, []string{"wip"}, nil, nil)
+	return nil
 }
 
 func trustedMetadata(comment skilldist.ReviewComment) bool {
 	return slices.Contains([]string{"OWNER", "MEMBER", "COLLABORATOR"}, comment.Association)
-}
-
-type implementationMetadata struct {
-	Transition  *workflow.ImplementationTransition `json:"transition,omitempty"`
-	ResumeState workflow.State                     `json:"resume_state,omitempty"`
 }
 
 func implementationBranchOwners(issues []githubIssue) map[string]int {
@@ -436,6 +430,12 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 		state, claimed, problem := implementationLabels(issue)
 		item := workflow.ImplementationItem{ID: workflow.WorkItemID(strconv.Itoa(issue.Number)), Order: issue.Number, Branch: issue.Title, CreatedAt: issue.CreatedAt, State: state, Claimed: claimed, Problem: problem}
 		item.Source = implementationLifecycle(issue)
+		if claimed {
+			item.SourceClaimAcquiredAt, err = b.issueClaimAcquiredAt(ctx, repository, issue.Number)
+			if err != nil {
+				return nil, err
+			}
+		}
 		if len(matches) > 1 {
 			item.Problem = "multiple Submissions share the conventional branch"
 		}
@@ -445,6 +445,18 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 			item.Submission = &workflow.Submission{ID: workflow.SubmissionID(strconv.Itoa(pull.Number)), Head: pull.Head.SHA, Base: pull.Base.Ref, Draft: pull.Draft, Body: pull.Body, State: prState, Claimed: prClaimed, CreatedAt: pull.CreatedAt}
 			item.Submission.Lifecycle = implementationLifecycle(pull.githubIssue)
 			item.Submission.Lifecycle.Merged = pull.MergedAt != ""
+			if prClaimed {
+				item.Submission.ClaimAcquiredAt, err = b.issueClaimAcquiredAt(ctx, repository, pull.Number)
+				if err != nil {
+					return nil, err
+				}
+				if prState == workflow.Rework && pull.Body != "" && pull.NodeID != "" {
+					item.Submission.BodyUpdatedAt, err = b.implementationBodyUpdatedAt(ctx, pull)
+					if err != nil {
+						return nil, err
+					}
+				}
+			}
 			for _, label := range pull.Labels {
 				item.Synchronization = item.Synchronization || label.Name == "sync"
 			}
@@ -476,7 +488,9 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 						body := review.Body
 						finalHead := ""
 						reviewNumber := uint64(0)
-						if strings.HasPrefix(body, reviewSummaryPrefix) {
+						if !trustedMetadata(skilldist.ReviewComment{Association: review.Association}) {
+							verdict = ""
+						} else if strings.HasPrefix(body, reviewSummaryPrefix) {
 							verdict = ""
 							if metadata, summary, ok := parseReviewSummary(body); ok && review.State == "COMMENTED" {
 								body, verdict, reviewNumber = summary, metadata.Verdict, metadata.ReviewNumber
@@ -525,35 +539,21 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 			return nil, err
 		}
 		for _, comment := range comments {
-			if item.Submission != nil && !strings.HasPrefix(comment.Body, "<!-- skl.implement/v1\n") {
-				item.Submission.Comments = append(item.Submission.Comments, comment)
-			}
-			// The operation identifies opaque prose before that prose is published.
-			if item.Transition != nil && fmt.Sprintf("%x", sha256.Sum256([]byte(comment.Body))) == item.Transition.DecisionDigest {
+			// Retired operation metadata stays historical: it never authorizes
+			// direction, pins, Claim handling, or recovery, and it is not evidence.
+			if strings.HasPrefix(comment.Body, "<!-- skl.implement/v1\n") {
 				continue
 			}
-			if body, ok := strings.CutPrefix(comment.Body, "<!-- skl.implement/v1\n"); ok && strings.HasSuffix(body, "\n-->") {
-				if !trustedMetadata(comment) {
-					continue
-				}
-				var metadata implementationMetadata
-				if err := json.Unmarshal([]byte(strings.TrimSuffix(body, "\n-->")), &metadata); err != nil {
-					item.Problem = "invalid implementation operation metadata"
-					continue
-				}
-				if metadata.ResumeState != "" {
-					item.ResumeState = metadata.ResumeState
-				}
-				if metadata.Transition != nil {
-					item.Transition = metadata.Transition
-				}
+			item.Feedback = append(item.Feedback, comment)
+			if item.Submission != nil {
+				item.Submission.Comments = append(item.Submission.Comments, comment)
 			}
 		}
 		item = workflow.ReconcileImplementation(item)
 		if owners[item.Branch] != issue.Number {
 			item.Problem = "multiple source issues own the conventional branch"
 		}
-		if len(matches) == 1 && (item.Problem == "contradictory lifecycle projections" || item.Problem == "" && item.Claimed && (item.State == workflow.ReadyForMerge || item.State == workflow.NeedsHuman || item.State == workflow.Rework)) && (item.Transition == nil || item.Transition.Completed) {
+		if len(matches) == 1 && (item.Problem == "contradictory lifecycle projections" || item.Problem == "" && item.Claimed && (item.State == workflow.ReadyForMerge || item.State == workflow.NeedsHuman || item.State == workflow.Rework)) {
 			observation, err := b.ReviewSubmission(ctx, item.Submission.ID)
 			if err != nil {
 				return nil, err
@@ -569,6 +569,51 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 	return items, nil
 }
 
+// SubmissionBodyUpdatedAt reports native content-edit evidence for the
+// observed body of a Submission. An empty result means the record carries no
+// body or no stable node identity to read that evidence from.
+func (b *GitHubBackend) SubmissionBodyUpdatedAt(ctx context.Context, id workflow.SubmissionID) (string, error) {
+	if err := b.requireRepository(); err != nil {
+		return "", err
+	}
+	number, err := githubIssueNumber(workflow.WorkItemID(id))
+	if err != nil {
+		return "", err
+	}
+	var pull githubPull
+	if err := b.request(ctx, http.MethodGet, b.repositoryPath(b.repository)+fmt.Sprintf("/pulls/%d", number), nil, &pull); err != nil {
+		return "", err
+	}
+	if pull.Body == "" || pull.NodeID == "" {
+		return "", nil
+	}
+	return b.implementationBodyUpdatedAt(ctx, pull)
+}
+
+func (b *GitHubBackend) implementationBodyUpdatedAt(ctx context.Context, pull githubPull) (string, error) {
+	var response struct {
+		Data struct {
+			Node *struct {
+				Body, CreatedAt, LastEditedAt string
+			}
+		}
+		Errors []struct{ Message string }
+	}
+	query := "query($id:ID!){node(id:$id){... on PullRequest{body createdAt lastEditedAt}}}"
+	if err := b.request(ctx, http.MethodPost, "/graphql", map[string]any{"query": query, "variables": map[string]string{"id": pull.NodeID}}, &response); err != nil {
+		return "", err
+	}
+	if len(response.Errors) != 0 {
+		return "", errors.New(response.Errors[0].Message)
+	}
+	if response.Data.Node == nil || response.Data.Node.Body != pull.Body {
+		return "", workflow.Refuse("Submission content-edit evidence unavailable or changed; inspect the current body before retrying")
+	}
+	if response.Data.Node.LastEditedAt != "" {
+		return response.Data.Node.LastEditedAt, nil
+	}
+	return response.Data.Node.CreatedAt, nil
+}
 func implementationLabels(issue githubIssue) (workflow.State, bool, string) {
 	var state workflow.State
 	claimed := false
@@ -637,7 +682,9 @@ func (b *GitHubBackend) implementationComments(ctx context.Context, repository g
 			return nil, err
 		}
 		for _, comment := range batch {
-			comments = append(comments, skilldist.ReviewComment{Body: comment.Body, Author: comment.User.Login, Association: comment.Association, Commit: comment.Commit, Path: comment.Path, CreatedAt: comment.CreatedAt, Line: comment.Line, Side: comment.Side})
+			observed := skilldist.ReviewComment{Body: comment.Body, Author: comment.User.Login, Association: comment.Association, Commit: comment.Commit, Path: comment.Path, CreatedAt: comment.CreatedAt, Line: comment.Line, Side: comment.Side}
+			observed.EvidenceAuthorized = trustedMetadata(observed)
+			comments = append(comments, observed)
 		}
 		if len(batch) < 100 {
 			return comments, nil

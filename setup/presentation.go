@@ -20,7 +20,6 @@ type ImplementationOutput struct {
 type implementationItemOutput struct {
 	Synchronization bool
 	Problem         string
-	ResumeState     workflow.State
 	Submission      *submissionOutput
 	Branch          string
 	Number          int
@@ -28,7 +27,6 @@ type implementationItemOutput struct {
 	CreatedAt       string
 	Claimed         bool
 	Blockers        []int
-	Transition      *workflow.ImplementationTransition
 }
 
 type submissionOutput struct {
@@ -54,9 +52,9 @@ type StatusOutput struct {
 
 func presentItem(item workflow.ImplementationItem) (implementationItemOutput, error) {
 	output := implementationItemOutput{
-		Synchronization: item.Synchronization, Problem: item.Problem, ResumeState: item.ResumeState,
+		Synchronization: item.Synchronization, Problem: item.Problem,
 		Branch: item.Branch,
-		State:  item.State, CreatedAt: item.CreatedAt, Claimed: item.Claimed, Transition: item.Transition,
+		State:  item.State, CreatedAt: item.CreatedAt, Claimed: item.Claimed,
 	}
 	var err error
 	if item.ID != "" {
@@ -75,7 +73,8 @@ func presentItem(item workflow.ImplementationItem) (implementationItemOutput, er
 	if item.Submission != nil {
 		s := item.Submission
 		output.Submission = &submissionOutput{
-			PendingReview: s.PendingReview, Merged: s.Merged, Mergeability: s.Mergeability,
+			PendingReview: s.PendingReview,
+			Merged:        s.Merged, Mergeability: s.Mergeability,
 			CreatedAt: s.CreatedAt, State: s.State, Claimed: s.Claimed,
 			Head: s.Head, Base: s.Base, Body: s.Body, Draft: s.Draft, Comments: s.Comments,
 		}
