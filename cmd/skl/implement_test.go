@@ -2001,6 +2001,10 @@ func TestImplementationReviewProjectionBackendParity(t *testing.T) {
 			writes := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				path := strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets")
+				if path == "/graphql" && r.Method == http.MethodPost {
+					fmt.Fprint(w, `{"data":{"repository":{"issue":{"closedByPullRequestsReferences":{"nodes":[{"number":11,"repository":{"nameWithOwner":"acme/widgets"}}]}}}}}`)
+					return
+				}
 				if r.Method != http.MethodGet {
 					writes++
 				}
