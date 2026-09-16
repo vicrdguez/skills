@@ -85,10 +85,9 @@ func (b *GitHubBackend) QueuePage(ctx context.Context, queue workflow.QueueKind,
 
 func (b *GitHubBackend) readyQueuePage(ctx context.Context, cursor string) (workflow.QueuePage, error) {
 	page, err := strconv.Atoi(cursor)
-	if err != nil || page < 0 {
-		page = 0
+	if err != nil || page < 1 {
+		page = 1
 	}
-	page++
 	var issues []githubIssue
 	path := fmt.Sprintf("%s/issues?state=open&labels=ready&sort=created&direction=asc&filter=all&per_page=100&page=%d", b.repositoryPath(b.repository), page)
 	if err := b.request(ctx, http.MethodGet, path, nil, &issues); err != nil {
@@ -421,7 +420,7 @@ func (b *GitHubBackend) ImplementationDependencies(ctx context.Context, id workf
 			return nil, err
 		}
 		for _, blocker := range batch {
-			if !slicesContainsInt(blockers, blocker.Number) {
+			if !slices.Contains(blockers, blocker.Number) {
 				blockers = append(blockers, blocker.Number)
 			}
 		}
@@ -443,7 +442,7 @@ func (b *GitHubBackend) ImplementationDependencies(ctx context.Context, id workf
 			if err != nil || blocker <= 0 {
 				return nil, workflow.Refuse("invalid legacy Dependency projection; repair the Work Item body")
 			}
-			if !slicesContainsInt(blockers, blocker) {
+			if !slices.Contains(blockers, blocker) {
 				blockers = append(blockers, blocker)
 			}
 		}
@@ -533,16 +532,16 @@ func (b *GitHubBackend) claimSubmission(ctx context.Context, candidate workflow.
 	if err := b.implementationLabelMutation(ctx, b.repository, number, []string{"wip"}, nil, nil); err != nil {
 		observed, observeErr := b.pullRecord(ctx, number)
 		if observeErr != nil {
-			return workflow.ImplementationItem{}, err
+			return workflow.ImplementationItem{}, errors.New(err.Error() + "; inspect the selected Submission and explicitly resume instead of retrying next")
 		}
 		if _, observedClaimed, _ := implementationLabels(observed.githubIssue); observedClaimed {
 			return workflow.ImplementationItem{}, workflow.Refuse("Claim response was uncertain and a later Claim is now observed; inspect whether it belongs to this handoff before resuming")
 		}
-		return workflow.ImplementationItem{}, err
+		return workflow.ImplementationItem{}, errors.New(err.Error() + "; inspect the selected Submission and explicitly resume instead of retrying next")
 	}
 	observed, err := b.pullRecord(ctx, number)
 	if err != nil {
-		return workflow.ImplementationItem{}, err
+		return workflow.ImplementationItem{}, errors.New(err.Error() + "; Claim verification was interrupted; inspect the selected Submission and explicitly resume instead of retrying next")
 	}
 	if _, observedClaimed, observedProblem := implementationLabels(observed.githubIssue); observedProblem != "" || !observedClaimed {
 		return workflow.ImplementationItem{}, workflow.Refuse("Claim was not observed on the selected Submission; inspect it before retrying")
@@ -583,16 +582,16 @@ func (b *GitHubBackend) claimReady(ctx context.Context, candidate workflow.Queue
 	if err := b.implementationLabelMutation(ctx, b.repository, number, []string{"wip"}, nil, nil); err != nil {
 		observed, observeErr := b.issueRecord(ctx, number)
 		if observeErr != nil {
-			return workflow.ImplementationItem{}, err
+			return workflow.ImplementationItem{}, errors.New(err.Error() + "; inspect the selected Work Item and explicitly resume instead of retrying next")
 		}
 		if _, observedClaimed, _ := implementationLabels(observed); observedClaimed {
 			return workflow.ImplementationItem{}, workflow.Refuse("Claim response was uncertain and a later Claim is now observed; inspect whether it belongs to this handoff before resuming")
 		}
-		return workflow.ImplementationItem{}, err
+		return workflow.ImplementationItem{}, errors.New(err.Error() + "; inspect the selected Work Item and explicitly resume instead of retrying next")
 	}
 	observed, err := b.issueRecord(ctx, number)
 	if err != nil {
-		return workflow.ImplementationItem{}, err
+		return workflow.ImplementationItem{}, errors.New(err.Error() + "; Claim verification was interrupted; inspect the selected Work Item and explicitly resume instead of retrying next")
 	}
 	if _, observedClaimed, observedProblem := implementationLabels(observed); observedProblem != "" || !observedClaimed {
 		return workflow.ImplementationItem{}, workflow.Refuse("Claim was not observed on the selected Work Item; inspect it before retrying")
@@ -653,13 +652,4 @@ func firstProblem(current, next string) string {
 		return current
 	}
 	return next
-}
-
-func slicesContainsInt(values []int, wanted int) bool {
-	for _, value := range values {
-		if value == wanted {
-			return true
-		}
-	}
-	return false
 }

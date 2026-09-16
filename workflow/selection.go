@@ -117,7 +117,7 @@ func selectedImplementation(ctx context.Context, backend SelectionBackend, candi
 		return ImplementationItem{}, ImplementationOutcome{}, err
 	}
 	if item.Problem != "" {
-		return item, implementationRefusal(item, item.Problem+" ; repair the selected Work Item projections before continuing"), nil
+		return item, implementationRefusal(item, item.Problem+"; repair the selected Work Item projections before continuing"), nil
 	}
 	if item.Branch == "" {
 		return item, implementationRefusal(item, "the selected Work Item has no explicit branch attachment; repair it before continuing"), nil
