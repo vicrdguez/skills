@@ -440,7 +440,13 @@ func TestGitHubOwnershipIgnoresDisplayTitles(t *testing.T) {
 		pull := `{"number":11,"state":"open","body":"review\n\nCloses #7\n","labels":[{"name":"done"},{"name":"wip"}],"head":{"sha":"fixed","ref":"renamed","repo":{"full_name":"acme/widgets"}}}`
 		switch r.URL.Path {
 		case "/graphql":
-			fmt.Fprint(w, `{"data":{"repository":{"issue":{"closedByPullRequestsReferences":{"nodes":[{"number":11,"repository":{"nameWithOwner":"acme/widgets"}}]}}}}}`)
+			var query struct{ Variables struct{ Number int } }
+			json.NewDecoder(r.Body).Decode(&query)
+			if query.Variables.Number == 7 {
+				fmt.Fprint(w, `{"data":{"repository":{"issue":{"closedByPullRequestsReferences":{"nodes":[{"number":11,"repository":{"nameWithOwner":"acme/widgets"}}]}}}}}`)
+			} else {
+				fmt.Fprint(w, `{"data":{"repository":{"issue":{"closedByPullRequestsReferences":{"nodes":[]}}}}}`)
+			}
 		case "/repos/acme/widgets/issues":
 			json.NewEncoder(w).Encode([]map[string]any{
 				{"number": 7, "title": "renamed", "state": "open"},

@@ -84,6 +84,64 @@ func TestRA2StatusPreservesNativeOwnershipProblems(t *testing.T) {
 	}
 }
 
+func TestRA2StatusDiscoversUnlabeledNativeOwnerWithInvalidFooter(t *testing.T) {
+	for _, footer := range []string{"missing", "wrong issue"} {
+		t.Run(footer, func(t *testing.T) {
+			f := newReviewFixture(t)
+			f.forge.sourceLabels, f.forge.otherLabels = nil, nil
+			f.forge.labels = []string{"review", "wip"}
+			f.forge.timeline = append(f.forge.timeline, map[string]any{"event": "labeled", "created_at": "2026-01-01T00:00:02Z", "label": map[string]string{"name": "wip"}})
+			invalidBody := "audit without an owning footer"
+			if footer == "wrong issue" {
+				invalidBody = "audit\n\nCloses #8\n"
+			}
+			reads := map[int]int{}
+			ownershipHTTP(t, f, func(r *http.Request, request, body []byte) []byte {
+				if bytes.Contains(body, []byte("closedByPullRequestsReferences")) {
+					var query struct{ Variables struct{ Number int } }
+					_ = json.Unmarshal(request, &query)
+					reads[query.Variables.Number]++
+				}
+				if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/pulls") {
+					var pulls []map[string]any
+					_ = json.Unmarshal(body, &pulls)
+					pulls[0]["body"] = invalidBody
+					body, _ = json.Marshal(pulls)
+				} else if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/pulls/11") {
+					var pull map[string]any
+					_ = json.Unmarshal(body, &pull)
+					pull["body"] = invalidBody
+					body, _ = json.Marshal(pull)
+				}
+				return body
+			})
+			output, err := f.runJSON(f.root, "status")
+			var got setup.StatusOutput
+			if err != nil || json.Unmarshal(output, &got) != nil {
+				t.Fatalf("status: %s, %v", output, err)
+			}
+			found := false
+			for _, item := range got.Items {
+				if item.Number == 7 {
+					found = true
+					if item.State != workflow.NeedsHuman || !strings.Contains(item.Problem, "association") {
+						t.Fatalf("native owner lacks an actionable ownership problem: %s", output)
+					}
+				}
+				if item.Number == 8 && item.Submission != nil && item.Problem == "" {
+					t.Fatalf("footer redirected the native owning association: %s", output)
+				}
+			}
+			if !found {
+				t.Fatalf("status omitted unlabeled native owner #7: %s (native reads=%v)", output, reads)
+			}
+			if reads[7] != 1 || f.forge.writes != 0 || !slices.Contains(f.forge.labels, "wip") {
+				t.Fatalf("discovery repeated native reads or mutated the Claim: reads=%v writes=%d labels=%v", reads, f.forge.writes, f.forge.labels)
+			}
+		})
+	}
+}
+
 func TestRA2StatusRetainsClosedSubmissionHistory(t *testing.T) {
 	for _, merged := range []bool{false, true} {
 		t.Run(map[bool]string{false: "closed", true: "merged"}[merged], func(t *testing.T) {

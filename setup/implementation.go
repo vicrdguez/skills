@@ -403,13 +403,27 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 			continue
 		}
 		matches := owners[issue.Number]
-		if !hasWorkflowLabel(issue) && len(matches) == 0 {
-			continue
-		}
 		state, claimed, problem := implementationLabels(issue)
 		branch, branchProblem := declaredBranch(issue.Body)
 		item := workflow.ImplementationItem{ID: workflow.WorkItemID(strconv.Itoa(issue.Number)), Order: issue.Number, Branch: branch, CreatedAt: issue.CreatedAt, State: state, Claimed: claimed, Problem: firstProblem(problem, branchProblem)}
 		item.Source = implementationLifecycle(issue)
+		if !hasWorkflowLabel(issue) && len(matches) == 0 {
+			// Handoff removes source labels; a broken footer cannot erase native ownership.
+			references, err := b.closingReferences(ctx, issue.Number, true)
+			if err == nil && len(references) == 0 {
+				continue
+			}
+			item.Problem = "native owning association has no matching explicit Submission footer; inspect and repair the association before continuing"
+			if err != nil {
+				var refusal *workflow.InvariantError
+				if !errors.As(err, &refusal) {
+					return nil, err
+				}
+				item.Problem = refusal.Reason
+			}
+			items = append(items, workflow.ReconcileImplementation(item))
+			continue
+		}
 		if claimed {
 			item.SourceClaimAcquiredAt, err = b.issueClaimAcquiredAt(ctx, repository, issue.Number)
 			if err != nil {
