@@ -298,6 +298,8 @@ func implementationPacket(root, remote string, item ImplementationItem, endpoint
 	facts := skilldist.ImplementationFacts{Branch: item.Branch, Worktree: filepath.Join(main, ".worktrees", item.Branch), SuppliedArtifactBaseline: endpoints.Baseline, SuppliedArtifactCompletion: endpoints.Completion}
 	if item.Submission != nil {
 		facts.Comments = item.Submission.Comments
+	} else {
+		facts.Comments = item.Feedback
 	}
 	facts.ResultDirectory, err = os.MkdirTemp("", "skl-implement-")
 	if err != nil {

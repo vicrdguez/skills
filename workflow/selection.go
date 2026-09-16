@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"cmp"
 	"context"
 	"slices"
 	"strings"
@@ -22,8 +23,6 @@ type QueueCandidate struct {
 	SubmissionID SubmissionID
 	Number       int
 	CreatedAt    string
-	Branch       string
-	Head         string
 	Claimed      bool
 	Problem      string
 }
@@ -58,7 +57,7 @@ func compareCandidates(a, b QueueCandidate) int {
 	if order := strings.Compare(a.CreatedAt, b.CreatedAt); order != 0 {
 		return order
 	}
-	return a.Number - b.Number
+	return cmp.Compare(a.Number, b.Number)
 }
 
 // selectQueue observes just enough of one queue to identify its oldest

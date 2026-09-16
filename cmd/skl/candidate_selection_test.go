@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -393,11 +394,18 @@ func (f *candidateForge) serveGraphQL(w http.ResponseWriter, r *http.Request) {
 				nodes = append(nodes, node)
 			}
 		} else {
-			for _, number := range f.owners[issueNumber] {
+			owners := slices.Clone(f.owners[issueNumber])
+			for number, pull := range f.pulls {
+				body, _ := pull["body"].(string)
+				if strings.Contains(body, "Closes #"+strconv.Itoa(issueNumber)) && !slices.Contains(owners, number) {
+					owners = append(owners, number)
+				}
+			}
+			for _, number := range owners {
 				nodes = append(nodes, map[string]any{"number": number, "merged": false, "mergedAt": "", "state": "OPEN"})
 			}
 		}
-		response(map[string]any{"repository": map[string]any{"issue": map[string]any{"state": "OPEN", "closedByPullRequestsReferences": map[string]any{"nodes": nodes}}}})
+		response(map[string]any{"repository": map[string]any{"issue": map[string]any{"state": "OPEN", "closedByPullRequestsReferences": map[string]any{"nodes": nodes, "pageInfo": map[string]any{"hasNextPage": false, "endCursor": ""}}}}})
 	case strings.Contains(payload.Query, "lastEditedAt"):
 		id, _ := payload.Variables["id"].(string)
 		number, _ := strconv.Atoi(strings.TrimPrefix(id, "PR_"))
@@ -449,6 +457,35 @@ func selectionRun(t *testing.T, root string, forge *candidateForge, args ...stri
 		})
 	}
 	return result, nil
+}
+
+// assertNoProjectObjectReads fails when any recorded git subprocess inspected
+// commits, trees, or blobs instead of only refs and configuration.
+func assertNoProjectObjectReads(t *testing.T, traceFile string) {
+	t.Helper()
+	contents, err := os.ReadFile(traceFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(string(contents), "\n") {
+		var event struct {
+			Event string   `json:"event"`
+			Argv  []string `json:"argv"`
+		}
+		if line == "" || json.Unmarshal([]byte(line), &event) != nil || event.Event != "start" {
+			continue
+		}
+		command := strings.Join(event.Argv, " ")
+		if strings.Contains(command, "rev-parse --show-toplevel") || strings.Contains(command, "rev-parse --git-dir") {
+			// Repository layout discovery, not project object inspection.
+			continue
+		}
+		for _, forbidden := range []string{"cat-file", "rev-list", "rev-parse", " log ", "merge-base", " show "} {
+			if strings.Contains(command, forbidden) {
+				t.Fatalf("startup inspected project objects: %s", command)
+			}
+		}
+	}
 }
 
 func selectionStatusRun(t *testing.T, root string, forge *candidateForge) setup.StatusOutput {
@@ -588,6 +625,29 @@ func TestB3NoWorkSkipsUnrelatedDiscovery(t *testing.T) {
 	}
 }
 
+func TestB3ClaimedQueuesReturnNoWorkWithoutDiscussion(t *testing.T) {
+	root := selectionRepository(t)
+	forge := newCandidateForge()
+	forge.addPull(30, "2020-01-01T00:00:00Z", "claimed review\n\nCloses #7\n", "slice-seven", strings.Repeat("a", 40), "rework", "wip")
+	forge.addIssue(7, "2019-01-01T00:00:00Z", "Branch: `slice-seven`\n", "ready", "wip")
+	forge.comments["/issues/7/comments"] = []map[string]any{{"body": "unrelated discussion"}}
+	forge.reworkPages = [][]int{{30}}
+	forge.readyPages = [][]int{{7}}
+
+	got, err := selectionRun(t, root, forge, "implement", "next")
+	if err != nil || got.Status != "no_work" {
+		t.Fatalf("claimed queues = %#v, %v", got, err)
+	}
+	for _, forbidden := range []string{"/issues/7/comments", "/pulls/30/comments", "/pulls/30/reviews", "/issues/7/dependencies/blocked_by"} {
+		if forge.matching(func(request string) bool { return strings.Contains(request, forbidden) }) != 0 {
+			t.Fatalf("claimed candidate discussions requested: %v", forge.seen())
+		}
+	}
+	if forge.matching(func(request string) bool { return strings.Contains(request, "/labels") }) != 0 {
+		t.Fatalf("claimed candidate mutated: %v", forge.seen())
+	}
+}
+
 func TestB4DependenciesPrecedeReadyContextEnrichment(t *testing.T) {
 	root := selectionRepository(t)
 	forge := newCandidateForge()
@@ -665,6 +725,7 @@ func TestB6PaginationPreservesCandidateAndDependencyCompleteness(t *testing.T) {
 		forge.evidence[number] = []map[string]any{{"merged": true, "mergedAt": "2026-01-01T00:00:00Z"}}
 		page = append(page, map[string]any{"number": number})
 	}
+	page = append(page, map[string]any{"number": 200})
 	forge.dependencies[101] = page
 	forge.evidence[200] = nil
 
@@ -676,6 +737,11 @@ func TestB6PaginationPreservesCandidateAndDependencyCompleteness(t *testing.T) {
 		return strings.Contains(request, "labels=ready&") && strings.Contains(request, "page=2")
 	}) == 0 {
 		t.Fatalf("candidate continuation missing: %v", forge.seen())
+	}
+	if forge.matching(func(request string) bool {
+		return strings.Contains(request, "/issues/101/dependencies/blocked_by") && strings.Contains(request, "page=2")
+	}) == 0 {
+		t.Fatalf("dependency continuation missing: %v", forge.seen())
 	}
 	for _, forbidden := range []string{"/issues/101/comments", "/issues/200/comments"} {
 		if forge.matching(func(request string) bool { return strings.Contains(request, forbidden) }) != 0 {
@@ -852,6 +918,8 @@ func TestB10AcquisitionDriftCannotReturnAnInvalidHandoff(t *testing.T) {
 func TestB11StartupDoesNotRequireProjectObjects(t *testing.T) {
 	t.Run("implement", func(t *testing.T) {
 		root := selectionRepository(t)
+		traceFile := filepath.Join(t.TempDir(), "git-trace.json")
+		t.Setenv("GIT_TRACE2_EVENT", traceFile)
 		forge := newCandidateForge()
 		forge.addIssue(7, "2020-01-01T00:00:00Z", "Branch: `slice-seven`\n", "ready")
 		forge.reworkPages = [][]int{{}}
@@ -871,6 +939,7 @@ func TestB11StartupDoesNotRequireProjectObjects(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(root, ".worktrees", "slice-seven")); err == nil {
 			t.Fatal("startup created a worktree")
 		}
+		assertNoProjectObjectReads(t, traceFile)
 	})
 	t.Run("watchdog", func(t *testing.T) {
 		root := selectionRepository(t)
@@ -1002,8 +1071,23 @@ func TestB13OnlySelectedFeedbackIsHydratedComplete(t *testing.T) {
 		t.Fatalf("feedback truncated: %d comments", len(comments))
 	}
 	for _, comment := range comments {
-		if comment.Body == "inline finding" && (comment.Path != "main.go" || comment.Line != 12 || comment.Side != "RIGHT" || comment.Commit != strings.Repeat("a", 40)) {
-			t.Fatalf("anchor facts lost: %#v", comment)
+		switch comment.Body {
+		case "inline finding":
+			if comment.Path != "main.go" || comment.Line != 12 || comment.Side != "RIGHT" || comment.Commit != strings.Repeat("a", 40) {
+				t.Fatalf("anchor facts lost: %#v", comment)
+			}
+		case "last source finding":
+			if comment.Author != "owner" || comment.Association != "OWNER" || comment.CreatedAt != "2026-01-01T00:00:01Z" {
+				t.Fatalf("source provenance lost: %#v", comment)
+			}
+		case "pr discussion":
+			if comment.Author != "maintainer" || comment.Association != "OWNER" {
+				t.Fatalf("discussion provenance lost: %#v", comment)
+			}
+		case "human directive":
+			if comment.Author != "maintainer" || comment.Association != "OWNER" || comment.Commit != strings.Repeat("a", 40) {
+				t.Fatalf("directive provenance lost: %#v", comment)
+			}
 		}
 	}
 	for _, request := range forge.seen() {
@@ -1118,14 +1202,21 @@ func TestB16UnrelatedHistoryDoesNotScaleWorkStartCost(t *testing.T) {
 	for _, lane := range []string{"implement", "watchdog"} {
 		for _, work := range []bool{false, true} {
 			counts := map[int]int{}
-			var durations []time.Duration
+			medians := map[int]time.Duration{}
+			tails := map[int]time.Duration{}
+			purposes := map[int]map[string]int{}
 			for _, history := range []int{2, 200} {
 				iterations := 5
-				start := time.Now()
+				var durations []time.Duration
+				purposes[history] = map[string]int{}
 				for iteration := 0; iteration < iterations; iteration++ {
 					root := selectionRepository(t)
+					traceFile := filepath.Join(t.TempDir(), "git-trace.json")
+					t.Setenv("GIT_TRACE2_EVENT", traceFile)
 					forge := build(history, work, lane)
+					start := time.Now()
 					got, err := selectionRun(t, root, forge, lane, "next")
+					durations = append(durations, time.Since(start))
 					if err != nil {
 						t.Fatalf("history=%d: %v", history, err)
 					}
@@ -1133,13 +1224,36 @@ func TestB16UnrelatedHistoryDoesNotScaleWorkStartCost(t *testing.T) {
 						t.Fatalf("history=%d selection = %#v", history, got)
 					}
 					counts[history] += len(forge.seen())
+					for _, request := range forge.seen() {
+						purposes[history][purposeOf(request)]++
+					}
+					assertNoProjectObjectReads(t, traceFile)
 				}
-				durations = append(durations, time.Since(start)/time.Duration(iterations))
+				slices.Sort(durations)
+				medians[history] = durations[len(durations)/2]
+				tails[history] = durations[len(durations)-1]
 			}
-			if counts[2] != counts[200] {
-				t.Fatalf("%s work=%t request work grew with unrelated history: %d vs %d", lane, work, counts[2], counts[200])
+			if counts[2] != counts[200] || !reflect.DeepEqual(purposes[2], purposes[200]) {
+				t.Fatalf("%s work=%t request work grew with unrelated history: %d vs %d, %v vs %v", lane, work, counts[2], counts[200], purposes[2], purposes[200])
 			}
-			t.Logf("%s work=%t requests/op=%d (history=2: %s, history=200: %s)", lane, work, counts[2], durations[0], durations[1])
+			t.Logf("%s work=%t requests/op=%d by purpose=%v median history=2:%s history=200:%s tail history=2:%s history=200:%s", lane, work, counts[2]/5, purposes[2], medians[2], medians[200], tails[2], tails[200])
 		}
+	}
+}
+
+func purposeOf(request string) string {
+	switch {
+	case strings.HasPrefix(request, "graphql:queue"):
+		return "candidate-queue"
+	case strings.HasPrefix(request, "graphql:owners"):
+		return "owning-link"
+	case strings.HasPrefix(request, "graphql:body"):
+		return "body-evidence"
+	case strings.HasPrefix(request, "graphql:"):
+		return "graphql-other"
+	case strings.Contains(request, "/labels"):
+		return "label-mutation"
+	default:
+		return "rest-read"
 	}
 }

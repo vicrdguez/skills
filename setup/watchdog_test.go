@@ -85,7 +85,7 @@ func TestGitHubWatchdogClaimsSubmissionAndReadsReviewFacts(t *testing.T) {
 	if item.ID != "7" || item.Order != 7 || item.Submission.ID != "11" || item.Submission.CreatedAt != "2026-01-01" || len(item.Submission.Comments) != 3 {
 		t.Fatalf("review facts: %#v", item.Submission)
 	}
-	candidate := workflow.QueueCandidate{SubmissionID: "11", Number: 11, Branch: "widget", Head: "fixed"}
+	candidate := workflow.QueueCandidate{SubmissionID: "11", Number: 11}
 	if _, err := b.ClaimSelected(ctx, candidate, item); err != nil {
 		t.Fatal(err)
 	}

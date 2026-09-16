@@ -258,19 +258,19 @@ func (b *implementationMemory) QueuePage(_ context.Context, queue workflow.Queue
 		var candidate workflow.QueueCandidate
 		switch {
 		case queue == workflow.ReadyQueue && item.State == workflow.Ready:
-			candidate = workflow.QueueCandidate{ID: item.ID, Number: item.Order, CreatedAt: item.CreatedAt, Branch: item.Branch, Claimed: item.Claimed, Problem: item.Problem}
+			candidate = workflow.QueueCandidate{ID: item.ID, Number: item.Order, CreatedAt: item.CreatedAt, Claimed: item.Claimed, Problem: item.Problem}
 		case queue == workflow.ReworkQueue && item.State == workflow.Rework && item.Submission != nil:
 			number, err := strconv.Atoi(string(item.Submission.ID))
 			if err != nil {
 				number = item.Order
 			}
-			candidate = workflow.QueueCandidate{ID: item.ID, SubmissionID: item.Submission.ID, Number: number, CreatedAt: item.Submission.CreatedAt, Branch: item.Branch, Head: item.Submission.Head, Claimed: item.Claimed, Problem: item.Problem}
+			candidate = workflow.QueueCandidate{ID: item.ID, SubmissionID: item.Submission.ID, Number: number, CreatedAt: item.Submission.CreatedAt, Claimed: item.Claimed, Problem: item.Problem}
 		case queue == workflow.ReviewQueue && item.State == workflow.AwaitingReview && item.Submission != nil:
 			number, err := strconv.Atoi(string(item.Submission.ID))
 			if err != nil {
 				number = item.Order
 			}
-			candidate = workflow.QueueCandidate{ID: item.ID, SubmissionID: item.Submission.ID, Number: number, CreatedAt: item.Submission.CreatedAt, Branch: item.Branch, Head: item.Submission.Head, Claimed: item.Claimed, Problem: item.Problem}
+			candidate = workflow.QueueCandidate{ID: item.ID, SubmissionID: item.Submission.ID, Number: number, CreatedAt: item.Submission.CreatedAt, Claimed: item.Claimed, Problem: item.Problem}
 		default:
 			continue
 		}

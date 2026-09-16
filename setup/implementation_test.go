@@ -45,7 +45,7 @@ func TestGitHubImplementationRejectsInvalidOwningLinks(t *testing.T) {
 			}))
 			defer server.Close()
 			b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
-			item, err := b.SelectedImplementation(context.Background(), workflow.QueueCandidate{SubmissionID: "11", Number: 11, Branch: "widget", Head: "fixed"})
+			item, err := b.SelectedImplementation(context.Background(), workflow.QueueCandidate{SubmissionID: "11", Number: 11})
 			if err != nil || item.Problem == "" {
 				t.Fatalf("invalid ownership accepted: %#v %v", item, err)
 			}
@@ -74,7 +74,7 @@ func TestGitHubImplementationReportsMultipleActiveOwner(t *testing.T) {
 	}))
 	defer server.Close()
 	b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
-	item, err := b.SelectedImplementation(context.Background(), workflow.QueueCandidate{SubmissionID: "11", Number: 11, Branch: "widget", Head: "fixed"})
+	item, err := b.SelectedImplementation(context.Background(), workflow.QueueCandidate{SubmissionID: "11", Number: 11})
 	if err != nil || !strings.Contains(item.Problem, "another active Submission") {
 		t.Fatalf("competing owner accepted: %#v %v", item, err)
 	}
@@ -261,6 +261,10 @@ func TestGitHubImplementationReconcilesMutationTimeouts(t *testing.T) {
 		case path == "/graphql":
 			var payload map[string]any
 			json.NewDecoder(r.Body).Decode(&payload)
+			if query, _ := payload["query"].(string); strings.Contains(query, "closedByPullRequestsReferences") {
+				result = map[string]any{"data": map[string]any{"repository": map[string]any{"issue": map[string]any{"closedByPullRequestsReferences": map[string]any{"nodes": []any{map[string]any{"number": 11}}}}}}}
+				break
+			}
 			pulls[0]["draft"] = strings.Contains(payload["query"].(string), "convertPullRequestToDraft")
 			http.Error(w, "response lost after draft conversion", 500)
 			return
@@ -552,7 +556,7 @@ func TestGitHubImplementationUsesMainAndNeverRetargetsExistingSubmission(t *test
 			handlerErr := ""
 			pull := map[string]any{"number": 11, "state": "open", "body": "wanted", "head": map[string]any{"ref": "widget", "sha": "fixed", "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": existingBase}}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method != http.MethodGet {
+				if r.Method != http.MethodGet && r.URL.Path != "/graphql" {
 					writes++
 				}
 				switch r.URL.Path {
@@ -577,6 +581,8 @@ func TestGitHubImplementationUsesMainAndNeverRetargetsExistingSubmission(t *test
 					}
 				case "/repos/acme/widgets/pulls/11":
 					json.NewEncoder(w).Encode(pull)
+				case "/graphql":
+					fmt.Fprint(w, `{"data":{"repository":{"issue":{"closedByPullRequestsReferences":{"nodes":[{"number":11}]}}}}}`)
 				default:
 					handlerErr = fmt.Sprintf("unexpected %s %s", r.Method, r.URL)
 					http.Error(w, handlerErr, http.StatusNotFound)

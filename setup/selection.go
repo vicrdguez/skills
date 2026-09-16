@@ -123,12 +123,9 @@ func (b *GitHubBackend) submissionQueuePage(ctx context.Context, queue workflow.
 			Repository struct {
 				PullRequests struct {
 					Nodes []struct {
-						CreatedAt   string `json:"createdAt"`
-						HeadRefName string `json:"headRefName"`
-						HeadRefOid  string `json:"headRefOid"`
-						Number      int    `json:"number"`
-						IsDraft     bool   `json:"isDraft"`
-						Labels      struct {
+						CreatedAt string `json:"createdAt"`
+						Number    int    `json:"number"`
+						Labels    struct {
 							Nodes []struct {
 								Name string `json:"name"`
 							} `json:"nodes"`
@@ -145,7 +142,7 @@ func (b *GitHubBackend) submissionQueuePage(ctx context.Context, queue workflow.
 			Message string `json:"message"`
 		} `json:"errors"`
 	}
-	query := "query($owner:String!,$name:String!,$label:[String!],$after:String){repository(owner:$owner,name:$name){pullRequests(states:OPEN,labels:$label,first:100,after:$after,orderBy:{field:CREATED_AT,direction:ASC}){nodes{number createdAt headRefName headRefOid isDraft labels(first:50){nodes{name}}}pageInfo{hasNextPage endCursor}}}}"
+	query := "query($owner:String!,$name:String!,$label:[String!],$after:String){repository(owner:$owner,name:$name){pullRequests(states:OPEN,labels:$label,first:100,after:$after,orderBy:{field:CREATED_AT,direction:ASC}){nodes{number createdAt labels(first:100){nodes{name}}}pageInfo{hasNextPage endCursor}}}}"
 	variables := map[string]any{"owner": b.repository.Owner, "name": b.repository.Name, "label": []string{queueLabel(queue)}}
 	if cursor != "" {
 		variables["after"] = cursor
@@ -168,10 +165,11 @@ func (b *GitHubBackend) submissionQueuePage(ctx context.Context, queue workflow.
 		if paused || !queued {
 			continue
 		}
-		result.Candidates = append(result.Candidates, workflow.QueueCandidate{
-			SubmissionID: workflow.SubmissionID(strconv.Itoa(pull.Number)),
-			Number:       pull.Number, CreatedAt: pull.CreatedAt, Branch: pull.HeadRefName, Head: pull.HeadRefOid, Claimed: claimed,
-		})
+		candidate := workflow.QueueCandidate{SubmissionID: workflow.SubmissionID(strconv.Itoa(pull.Number)), Number: pull.Number, CreatedAt: pull.CreatedAt, Claimed: claimed}
+		if len(pull.Labels.Nodes) == 100 {
+			candidate.Problem = "label observation is truncated on Submission #" + strconv.Itoa(pull.Number) + "; repair the record before retrying"
+		}
+		result.Candidates = append(result.Candidates, candidate)
 	}
 	if pulls.PageInfo.HasNextPage {
 		result.Next = pulls.PageInfo.EndCursor
@@ -282,6 +280,16 @@ func (b *GitHubBackend) selectedReady(ctx context.Context, id workflow.WorkItemI
 	if len(owners) != 0 {
 		problem = "another active Submission already owns the Work Item; inspect its attachment instead of reassigning it"
 	}
+	comments, err := b.implementationComments(ctx, b.repository, fmt.Sprintf("/issues/%d/comments", issue.Number))
+	if err != nil {
+		return workflow.ImplementationItem{}, err
+	}
+	for _, comment := range comments {
+		if strings.HasPrefix(comment.Body, "<!-- skl.implement/v1\n") {
+			continue
+		}
+		item.Feedback = append(item.Feedback, comment)
+	}
 	item = workflow.ReconcileImplementation(item)
 	item.Problem = firstProblem(item.Problem, problem)
 	return item, nil
@@ -365,40 +373,135 @@ func (b *GitHubBackend) issueRecord(ctx context.Context, number int) (githubIssu
 	return issue, nil
 }
 
+type closingReference struct {
+	Number   int    `json:"number"`
+	Merged   bool   `json:"merged"`
+	MergedAt string `json:"mergedAt"`
+}
+
+// closingReferences observes GitHub's explicit issue/PR references for one
+// issue, following every continuation page.
+func (b *GitHubBackend) closingReferences(ctx context.Context, issueNumber int, includeClosed bool) ([]closingReference, error) {
+	closedPrs := "false"
+	if includeClosed {
+		closedPrs = "true"
+	}
+	var references []closingReference
+	after := ""
+	for {
+		var response struct {
+			Data struct {
+				Repository struct {
+					Issue *struct {
+						ClosedByPullRequestsReferences struct {
+							Nodes    []closingReference `json:"nodes"`
+							PageInfo struct {
+								HasNextPage bool   `json:"hasNextPage"`
+								EndCursor   string `json:"endCursor"`
+							} `json:"pageInfo"`
+						} `json:"closedByPullRequestsReferences"`
+					} `json:"issue"`
+				} `json:"repository"`
+			} `json:"data"`
+			Errors []struct {
+				Message string `json:"message"`
+			} `json:"errors"`
+		}
+		query := "query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){issue(number:$number){closedByPullRequestsReferences(first:100,includeClosedPrs:" + closedPrs + ",after:$after){nodes{number merged mergedAt}pageInfo{hasNextPage endCursor}}}}}"
+		variables := map[string]any{"owner": b.repository.Owner, "name": b.repository.Name, "number": issueNumber}
+		if after != "" {
+			variables["after"] = after
+		}
+		if err := b.request(ctx, http.MethodPost, "/graphql", map[string]any{"query": query, "variables": variables}, &response); err != nil {
+			return nil, err
+		}
+		if len(response.Errors) != 0 {
+			return nil, errors.New(response.Errors[0].Message)
+		}
+		if response.Data.Repository.Issue == nil {
+			return nil, workflow.Refuse("owning-link relationship for #" + strconv.Itoa(issueNumber) + " is unavailable; inspect the Work Item before retrying")
+		}
+		page := response.Data.Repository.Issue.ClosedByPullRequestsReferences
+		references = append(references, page.Nodes...)
+		if !page.PageInfo.HasNextPage {
+			return references, nil
+		}
+		after = page.PageInfo.EndCursor
+	}
+}
+
+// verifyOwningAssociation reads back GitHub's explicit relationship after
+// publication: the owning issue must list exactly this Submission.
+func (b *GitHubBackend) verifyOwningAssociation(ctx context.Context, issueNumber, submissionNumber int) error {
+	references, err := b.closingReferences(ctx, issueNumber, false)
+	if err != nil {
+		return err
+	}
+	present := false
+	for _, reference := range references {
+		if reference.Number == submissionNumber {
+			present = true
+		}
+	}
+	if !present {
+		return workflow.Refuse("owning-link relationship for #" + strconv.Itoa(issueNumber) + " does not observe Submission #" + strconv.Itoa(submissionNumber) + "; inspect the association before retrying")
+	}
+	return nil
+}
+
 // activeOwners observes GitHub's explicit open-PR references for one issue.
 func (b *GitHubBackend) activeOwners(ctx context.Context, issueNumber int) ([]int, error) {
-	var response struct {
-		Data struct {
-			Repository struct {
-				Issue *struct {
-					ClosedByPullRequestsReferences struct {
-						Nodes []struct {
-							Number int `json:"number"`
-						} `json:"nodes"`
-					} `json:"closedByPullRequestsReferences"`
-				} `json:"issue"`
-			} `json:"repository"`
-		} `json:"data"`
-		Errors []struct {
-			Message string `json:"message"`
-		} `json:"errors"`
-	}
-	query := "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){closedByPullRequestsReferences(first:100,includeClosedPrs:false){nodes{number}}}}}"
-	variables := map[string]any{"owner": b.repository.Owner, "name": b.repository.Name, "number": issueNumber}
-	if err := b.request(ctx, http.MethodPost, "/graphql", map[string]any{"query": query, "variables": variables}, &response); err != nil {
+	references, err := b.closingReferences(ctx, issueNumber, false)
+	if err != nil {
 		return nil, err
 	}
-	if len(response.Errors) != 0 {
-		return nil, errors.New(response.Errors[0].Message)
-	}
-	if response.Data.Repository.Issue == nil {
-		return nil, workflow.Refuse("owning-link relationship for #" + strconv.Itoa(issueNumber) + " is unavailable; inspect the Work Item before retrying")
-	}
 	var owners []int
-	for _, node := range response.Data.Repository.Issue.ClosedByPullRequestsReferences.Nodes {
-		owners = append(owners, node.Number)
+	for _, reference := range references {
+		owners = append(owners, reference.Number)
 	}
 	return owners, nil
+}
+
+// dependencyReferences observes one Ready Work Item's referenced blockers from
+// its native relationships and the supported explicit declaration. A non-empty
+// problem reports an invalid legacy projection; unavailability of the native
+// relationship API is not an unknown relationship, so its explicit declaration
+// still applies.
+func (b *GitHubBackend) dependencyReferences(ctx context.Context, number int, body string) ([]int, string, error) {
+	var blockers []int
+	for page := 1; ; page++ {
+		var batch []githubIssue
+		path := b.repositoryPath(b.repository) + fmt.Sprintf("/issues/%d/dependencies/blocked_by?per_page=100&page=%d", number, page)
+		status, err := b.requestStatus(ctx, http.MethodGet, path, nil, &batch)
+		if err != nil && status != http.StatusNotFound && status != http.StatusGone {
+			return nil, "", err
+		}
+		for _, blocker := range batch {
+			if !slices.Contains(blockers, blocker.Number) {
+				blockers = append(blockers, blocker.Number)
+			}
+		}
+		if len(batch) < 100 {
+			break
+		}
+	}
+	// Adopt the former workflow's explicit dependency projection only.
+	for _, line := range strings.Split(body, "\n") {
+		rest, ok := strings.CutPrefix(line, "Blocked by: ")
+		if !ok {
+			continue
+		}
+		for _, value := range strings.Split(rest, ",") {
+			blocker, err := strconv.Atoi(strings.TrimPrefix(strings.TrimSpace(value), "#"))
+			if err != nil || blocker <= 0 {
+				return nil, "invalid legacy Dependency projection", nil
+			}
+			if !slices.Contains(blockers, blocker) {
+				blockers = append(blockers, blocker)
+			}
+		}
+	}
+	return blockers, "", nil
 }
 
 // ImplementationDependencies observes only the tentative Ready candidate's
@@ -411,41 +514,16 @@ func (b *GitHubBackend) ImplementationDependencies(ctx context.Context, id workf
 	if err != nil {
 		return nil, workflow.Refuse("invalid Ready Work Item identity; repair its attachment")
 	}
-	var blockers []int
-	for page := 1; ; page++ {
-		var batch []githubIssue
-		path := b.repositoryPath(b.repository) + fmt.Sprintf("/issues/%d/dependencies/blocked_by?per_page=100&page=%d", number, page)
-		status, err := b.requestStatus(ctx, http.MethodGet, path, nil, &batch)
-		if err != nil && status != http.StatusNotFound && status != http.StatusGone {
-			return nil, err
-		}
-		for _, blocker := range batch {
-			if !slices.Contains(blockers, blocker.Number) {
-				blockers = append(blockers, blocker.Number)
-			}
-		}
-		if len(batch) < 100 {
-			break
-		}
-	}
 	issue, err := b.issueRecord(ctx, number)
 	if err != nil {
 		return nil, err
 	}
-	for _, line := range strings.Split(issue.Body, "\n") {
-		rest, ok := strings.CutPrefix(line, "Blocked by: ")
-		if !ok {
-			continue
-		}
-		for _, value := range strings.Split(rest, ",") {
-			blocker, err := strconv.Atoi(strings.TrimPrefix(strings.TrimSpace(value), "#"))
-			if err != nil || blocker <= 0 {
-				return nil, workflow.Refuse("invalid legacy Dependency projection; repair the Work Item body")
-			}
-			if !slices.Contains(blockers, blocker) {
-				blockers = append(blockers, blocker)
-			}
-		}
+	blockers, problem, err := b.dependencyReferences(ctx, number, issue.Body)
+	if err != nil {
+		return nil, err
+	}
+	if problem != "" {
+		return nil, workflow.Refuse(problem + "; repair the Work Item body")
 	}
 	var result []workflow.BlockerObservation
 	for _, blocker := range blockers {
@@ -459,39 +537,24 @@ func (b *GitHubBackend) ImplementationDependencies(ctx context.Context, id workf
 }
 
 func (b *GitHubBackend) blockerObservation(ctx context.Context, number int) (workflow.BlockerObservation, error) {
-	var response struct {
-		Data struct {
-			Repository struct {
-				Issue *struct {
-					ClosedByPullRequestsReferences struct {
-						Nodes []struct {
-							Merged   bool   `json:"merged"`
-							MergedAt string `json:"mergedAt"`
-						} `json:"nodes"`
-					} `json:"closedByPullRequestsReferences"`
-				} `json:"issue"`
-			} `json:"repository"`
-		} `json:"data"`
-		Errors []struct {
-			Message string `json:"message"`
-		} `json:"errors"`
-	}
-	query := "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){state closedByPullRequestsReferences(first:100,includeClosedPrs:true){nodes{merged mergedAt}}}}}"
-	variables := map[string]any{"owner": b.repository.Owner, "name": b.repository.Name, "number": number}
-	if err := b.request(ctx, http.MethodPost, "/graphql", map[string]any{"query": query, "variables": variables}, &response); err != nil {
+	references, err := b.closingReferences(ctx, number, true)
+	if err != nil {
 		return workflow.BlockerObservation{}, err
 	}
-	if len(response.Errors) != 0 {
-		return workflow.BlockerObservation{}, errors.New(response.Errors[0].Message)
-	}
-	if response.Data.Repository.Issue == nil {
-		return workflow.BlockerObservation{}, workflow.Refuse("Dependency #" + strconv.Itoa(number) + " is inaccessible; inspect the referenced Work Item")
-	}
 	merged := false
-	for _, node := range response.Data.Repository.Issue.ClosedByPullRequestsReferences.Nodes {
-		merged = merged || node.Merged || node.MergedAt != ""
+	for _, reference := range references {
+		merged = merged || reference.Merged || reference.MergedAt != ""
 	}
 	return workflow.BlockerObservation{ID: workflow.WorkItemID(strconv.Itoa(number)), Merged: merged}, nil
+}
+
+// claimWriteFailure reports a Claim write that could not be verified through
+// the selected record alone, never inventing a packet for an unverified Claim.
+func claimWriteFailure(writeErr, observeErr error, observedClaimed bool, subject string) error {
+	if observeErr == nil && observedClaimed {
+		return workflow.Refuse("Claim response was uncertain and a later Claim is now observed; inspect whether it belongs to this handoff before resuming")
+	}
+	return errors.New(writeErr.Error() + "; inspect the selected " + subject + " and explicitly resume instead of retrying next")
 }
 
 // ClaimSelected adds the queue record's additive `wip` Claim after refreshing
@@ -531,13 +594,11 @@ func (b *GitHubBackend) claimSubmission(ctx context.Context, candidate workflow.
 	}
 	if err := b.implementationLabelMutation(ctx, b.repository, number, []string{"wip"}, nil, nil); err != nil {
 		observed, observeErr := b.pullRecord(ctx, number)
-		if observeErr != nil {
-			return workflow.ImplementationItem{}, errors.New(err.Error() + "; inspect the selected Submission and explicitly resume instead of retrying next")
+		var observedClaimed bool
+		if observeErr == nil {
+			_, observedClaimed, _ = implementationLabels(observed.githubIssue)
 		}
-		if _, observedClaimed, _ := implementationLabels(observed.githubIssue); observedClaimed {
-			return workflow.ImplementationItem{}, workflow.Refuse("Claim response was uncertain and a later Claim is now observed; inspect whether it belongs to this handoff before resuming")
-		}
-		return workflow.ImplementationItem{}, errors.New(err.Error() + "; inspect the selected Submission and explicitly resume instead of retrying next")
+		return workflow.ImplementationItem{}, claimWriteFailure(err, observeErr, observedClaimed, "Submission")
 	}
 	observed, err := b.pullRecord(ctx, number)
 	if err != nil {
@@ -581,13 +642,11 @@ func (b *GitHubBackend) claimReady(ctx context.Context, candidate workflow.Queue
 	}
 	if err := b.implementationLabelMutation(ctx, b.repository, number, []string{"wip"}, nil, nil); err != nil {
 		observed, observeErr := b.issueRecord(ctx, number)
-		if observeErr != nil {
-			return workflow.ImplementationItem{}, errors.New(err.Error() + "; inspect the selected Work Item and explicitly resume instead of retrying next")
+		var observedClaimed bool
+		if observeErr == nil {
+			_, observedClaimed, _ = implementationLabels(observed)
 		}
-		if _, observedClaimed, _ := implementationLabels(observed); observedClaimed {
-			return workflow.ImplementationItem{}, workflow.Refuse("Claim response was uncertain and a later Claim is now observed; inspect whether it belongs to this handoff before resuming")
-		}
-		return workflow.ImplementationItem{}, errors.New(err.Error() + "; inspect the selected Work Item and explicitly resume instead of retrying next")
+		return workflow.ImplementationItem{}, claimWriteFailure(err, observeErr, observedClaimed, "Work Item")
 	}
 	observed, err := b.issueRecord(ctx, number)
 	if err != nil {

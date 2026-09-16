@@ -261,6 +261,9 @@ func (b *GitHubBackend) PublishImplementation(ctx context.Context, item workflow
 	if owner, problem := submissionOwner(observed.Body); problem != "" || owner != itemNumber {
 		return workflow.Submission{}, workflow.Refuse("Submission publication did not establish the explicit owning association; inspect it before retrying")
 	}
+	if err := b.verifyOwningAssociation(ctx, itemNumber, observed.Number); err != nil {
+		return workflow.Submission{}, err
+	}
 	wanted.ID = workflow.SubmissionID(strconv.Itoa(observed.Number))
 	wanted.Base = "main"
 	return wanted, nil
@@ -429,31 +432,15 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 		}
 		item = workflow.ReconcileImplementation(item)
 		if item.State == workflow.Ready {
-			for page := 1; ; page++ {
-				var blockers []githubIssue
-				status, err := b.requestStatus(ctx, http.MethodGet, b.repositoryPath(repository)+fmt.Sprintf("/issues/%d/dependencies/blocked_by?per_page=100&page=%d", issue.Number, page), nil, &blockers)
-				if err != nil && status != http.StatusNotFound && status != http.StatusGone {
-					return nil, err
-				}
-				for _, blocker := range blockers {
-					item.Blockers = append(item.Blockers, workflow.WorkItemID(strconv.Itoa(blocker.Number)))
-				}
-				if len(blockers) < 100 {
-					break
-				}
+			blockers, problem, err := b.dependencyReferences(ctx, issue.Number, issue.Body)
+			if err != nil {
+				return nil, err
 			}
-			// Adopt the former workflow's explicit dependency projection only.
-			for _, line := range strings.Split(issue.Body, "\n") {
-				if rest, ok := strings.CutPrefix(line, "Blocked by: "); ok {
-					for _, value := range strings.Split(rest, ",") {
-						number, err := strconv.Atoi(strings.TrimPrefix(strings.TrimSpace(value), "#"))
-						if err != nil || number <= 0 {
-							item.Problem = "invalid legacy Dependency projection"
-						} else if id := workflow.WorkItemID(strconv.Itoa(number)); !slices.Contains(item.Blockers, id) {
-							item.Blockers = append(item.Blockers, id)
-						}
-					}
-				}
+			if problem != "" {
+				item.Problem = problem
+			}
+			for _, blocker := range blockers {
+				item.Blockers = append(item.Blockers, workflow.WorkItemID(strconv.Itoa(blocker)))
 			}
 		}
 		comments, err := b.implementationComments(ctx, repository, fmt.Sprintf("/issues/%d/comments", issue.Number))
