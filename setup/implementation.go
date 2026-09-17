@@ -403,8 +403,10 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 		}
 	}
 	owners := make(map[int][]githubPull)
+	workflowPulls := make(map[int]bool)
 	for _, pull := range pulls {
 		owner, problem := submissionOwner(pull.Body)
+		workflowPulls[pull.Number] = hasWorkflowLabel(pull.githubIssue) || problem == ""
 		if problem != "" {
 			continue
 		}
@@ -421,9 +423,10 @@ func (b *GitHubBackend) ImplementationItems(ctx context.Context) ([]workflow.Imp
 		item := workflow.ImplementationItem{ID: workflow.WorkItemID(strconv.Itoa(issue.Number)), Order: issue.Number, Branch: branch, CreatedAt: issue.CreatedAt, State: state, Claimed: claimed, Problem: firstProblem(problem, branchProblem)}
 		item.Source = implementationLifecycle(issue)
 		if !hasWorkflowLabel(issue) && len(matches) == 0 {
-			// Handoff removes source labels; a broken footer cannot erase native ownership.
+			// Handoff removes source labels; retain damaged workflow attachments,
+			// not ordinary issues linked only by GitHub's other closing keywords.
 			references, err := b.closingReferences(ctx, issue.Number, true)
-			if err == nil && len(references) == 0 {
+			if err == nil && !slices.ContainsFunc(references, func(reference closingReference) bool { return workflowPulls[reference.Number] }) {
 				continue
 			}
 			item.Problem = "native owning association has no matching explicit Submission footer; inspect and repair the association before continuing"

@@ -185,6 +185,36 @@ func TestRA2StatusRetainsClosedSubmissionHistory(t *testing.T) {
 	}
 }
 
+func TestW16StatusIgnoresOrdinaryNativeLinkedHistory(t *testing.T) {
+	for _, state := range []string{"open", "closed"} {
+		t.Run(state, func(t *testing.T) {
+			root := selectionRepository(t)
+			forge := newCandidateForge()
+			forge.addIssue(7, "2020-01-01T00:00:00Z", "An ordinary repository issue.")
+			forge.issues[7]["state"] = state
+			forge.addPull(11, "2020-01-01T00:00:00Z", "Fixes #7", "ordinary", strings.Repeat("a", 40))
+			forge.pulls[11]["state"] = state
+			forge.evidence[7] = []map[string]any{{"number": 11}}
+			if state == "closed" {
+				forge.pulls[11]["merged_at"] = "2020-01-02T00:00:00Z"
+			}
+			// A damaged workflow footer must still expose its unlabeled source.
+			forge.addIssue(8, "2020-01-01T00:00:00Z", "Branch: `widget`")
+			forge.addPull(12, "2020-01-01T00:00:00Z", "damaged owning footer", "widget", strings.Repeat("b", 40), "review")
+			forge.evidence[8] = []map[string]any{{"number": 12}}
+			got := selectionStatusRun(t, root, forge)
+			if len(got.Items) != 1 || got.Items[0].Number != 8 || got.Items[0].State != workflow.NeedsHuman || !strings.Contains(got.Items[0].Problem, "association") {
+				t.Fatalf("ordinary history adopted or broken Workflow source lost: %#v", got)
+			}
+			for _, request := range forge.seen() {
+				if strings.HasPrefix(request, "POST ") || strings.HasPrefix(request, "PATCH ") || strings.HasPrefix(request, "DELETE ") || request == "graphql:mutation" {
+					t.Fatalf("status mutated native-linked history: %s", request)
+				}
+			}
+		})
+	}
+}
+
 func TestRA2WatchdogRefusesNativeOwnershipConflict(t *testing.T) {
 	for _, verdict := range []string{"rework", "needs-human", "pass"} {
 		for _, phase := range []string{"before submit", "after summary", "target visible", "before release", "footer drift"} {
