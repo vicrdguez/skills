@@ -98,7 +98,9 @@ func Cleanup(ctx context.Context, root string, backend Backend) (CleanupOutcome,
 		}
 		branch := item.Branch
 		if branch == "" {
-			branch = item.Title
+			// No explicit branch attachment: preserve local Git state instead of
+			// redirecting cleanup through a title.
+			continue
 		}
 		path := registered[branch]
 		expected := filepath.Join(root, ".worktrees", branch)

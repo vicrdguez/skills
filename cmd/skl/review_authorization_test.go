@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -234,7 +235,7 @@ func TestReviewInlineAuthorizationThroughPublicHTTP(t *testing.T) {
 			if got.Item == nil || got.Item.Submission == nil || len(got.Item.Submission.Comments) != inlineCount+1 {
 				t.Fatalf("completed review lost feedback or evidence: %#v", got.Item)
 			}
-			if got.Item.Submission.Comments[0] != comment {
+			if !reflect.DeepEqual(got.Item.Submission.Comments[0], comment) {
 				t.Fatalf("publication changed anchored feedback: %#v", got.Item.Submission.Comments[0])
 			}
 			if tc.findings {
