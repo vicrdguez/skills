@@ -21,11 +21,8 @@ func TestGitHubWatchdogBodyPassRetry(t *testing.T) {
 		for _, partial := range []bool{false, true} {
 			t.Run(fmt.Sprintf("footer=%t/partial=%t", footer, partial), func(t *testing.T) {
 				f := newReviewFixture(t)
-				writes, patches := 0, 0
+				patches := 0
 				f.server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					if r.Method != http.MethodGet {
-						writes++
-					}
 					if r.Method == http.MethodPatch {
 						patches++
 					}
@@ -62,13 +59,13 @@ func TestGitHubWatchdogBodyPassRetry(t *testing.T) {
 				if receipt, _ := f.forge.summaries[0]["body"].(string); !strings.Contains(receipt, `"final_head":"`+f.head+`"`) {
 					t.Fatalf("pass receipt lost the accepted head: %s", receipt)
 				}
-				before := writes
+				before := f.forge.writes
 				if err := os.WriteFile(bodyPath, []byte("changed "+body), 0600); err != nil {
 					t.Fatal(err)
 				}
 				changed := f.run(t, f.worktree, args...)
-				if changed.Status != "fix_required" || !strings.Contains(changed.Reason, "Result Documents") || writes != before {
-					t.Fatalf("changed Result Document accepted or mutated backend: %#v, writes=%d/%d", changed, writes, before)
+				if changed.Status != "fix_required" || !strings.Contains(changed.Reason, "Result Documents") || f.forge.writes != before {
+					t.Fatalf("changed Result Document accepted or mutated backend: %#v, writes=%d/%d", changed, f.forge.writes, before)
 				}
 				if err := os.WriteFile(bodyPath, []byte(body), 0600); err != nil {
 					t.Fatal(err)
@@ -78,10 +75,10 @@ func TestGitHubWatchdogBodyPassRetry(t *testing.T) {
 					if retried.Status != "ready_for_merge" || retried.Item.Claimed || retried.Item.Submission.Body != publishedBody {
 						t.Fatalf("unchanged pass retry: %#v", retried)
 					}
-					if f.forge.body != publishedBody || patches != 1 || len(f.forge.summaries) != 1 || !slices.Equal(f.forge.labels, []string{"done"}) || (!partial || attempt > 0) && writes != before {
-						t.Fatalf("retry republished or changed evidence: body=%q, patches=%d, summaries=%v, labels=%v, writes=%d/%d", f.forge.body, patches, f.forge.summaries, f.forge.labels, writes, before)
+					if f.forge.body != publishedBody || patches != 1 || len(f.forge.summaries) != 1 || !slices.Equal(f.forge.labels, []string{"done"}) || (!partial || attempt > 0) && f.forge.writes != before {
+						t.Fatalf("retry republished or changed evidence: body=%q, patches=%d, summaries=%v, labels=%v, writes=%d/%d", f.forge.body, patches, f.forge.summaries, f.forge.labels, f.forge.writes, before)
 					}
-					before = writes
+					before = f.forge.writes
 				}
 			})
 		}
@@ -90,7 +87,7 @@ func TestGitHubWatchdogBodyPassRetry(t *testing.T) {
 
 func TestGitHubWatchdogBodyObservation(t *testing.T) {
 	for name, body := range map[string]string{
-		"adopted":   "original",
+		"adopted":   "original\n\nCloses #7\n",
 		"published": "opaque\x00\r\n  prose\n\nCloses #7\n",
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -98,7 +95,7 @@ func TestGitHubWatchdogBodyObservation(t *testing.T) {
 			f.start(t, f.root)
 			f.forge.body = body
 			f.server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method != http.MethodGet {
+				if r.Method != http.MethodGet && !(r.Method == http.MethodPost && r.URL.Path == "/graphql") {
 					t.Errorf("observation mutated backend: %s %s", r.Method, r.URL)
 					http.Error(w, "unexpected mutation", 500)
 					return

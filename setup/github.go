@@ -203,16 +203,20 @@ func (b *GitHubBackend) ListMergedWorkItems(ctx context.Context) ([]workflow.Wor
 			}
 		}
 		if workflowItem && closed {
-			item := workflow.WorkItem{ID: workflow.WorkItemID(strconv.Itoa(issue.Number)), Title: issue.Title, Body: issue.Body, Branch: issue.Title, Merged: true}
+			item := workflow.WorkItem{ID: workflow.WorkItemID(strconv.Itoa(issue.Number)), Title: issue.Title, Body: issue.Body, Merged: true}
 			matches := 0
 			for _, commit := range commits {
 				for page := 1; ; page++ {
 					var pulls []struct {
+						Body        string `json:"body"`
 						MergedAt    string `json:"merged_at"`
 						MergeCommit string `json:"merge_commit_sha"`
 						Head        struct {
-							Ref string `json:"ref"`
-							SHA string `json:"sha"`
+							Ref  string `json:"ref"`
+							SHA  string `json:"sha"`
+							Repo struct {
+								FullName string `json:"full_name"`
+							} `json:"repo"`
 						} `json:"head"`
 					}
 					path := b.repositoryPath(repository) + fmt.Sprintf("/commits/%s/pulls?per_page=100&page=%d", url.PathEscape(commit), page)
@@ -220,9 +224,11 @@ func (b *GitHubBackend) ListMergedWorkItems(ctx context.Context) ([]workflow.Wor
 						return nil, err
 					}
 					for _, pull := range pulls {
-						if pull.MergedAt != "" && pull.MergeCommit == commit && pull.Head.Ref == item.Branch {
+						owner, problem := submissionOwner(pull.Body)
+						if problem == "" && owner == issue.Number && pull.MergedAt != "" && pull.MergeCommit == commit && strings.EqualFold(pull.Head.Repo.FullName, repository.Owner+"/"+repository.Name) {
 							matches++
 							item.AcceptedHead = pull.Head.SHA
+							item.Branch = pull.Head.Ref
 						}
 					}
 					if len(pulls) < 100 {
@@ -232,6 +238,7 @@ func (b *GitHubBackend) ListMergedWorkItems(ctx context.Context) ([]workflow.Wor
 			}
 			if matches != 1 {
 				item.AcceptedHead = ""
+				item.Branch = ""
 			}
 			if merged || matches > 0 {
 				items = append(items, item)
