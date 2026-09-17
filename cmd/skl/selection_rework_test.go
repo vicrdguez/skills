@@ -506,3 +506,98 @@ func TestW7PublicationRequiresExclusiveNativeOwner(t *testing.T) {
 		})
 	}
 }
+
+func TestW15ImplementationHandoffRefusesLateFooterDrift(t *testing.T) {
+	for _, command := range []string{"submit", "needs-human"} {
+		for _, phase := range []string{"after publication", "source cleanup", "final release", "unchanged"} {
+			t.Run(command+"/"+phase, func(t *testing.T) {
+				root := selectionRepository(t)
+				prepareSlice(t, root, "widget")
+				completeAndRetireSlice(t, root, "widget")
+				forge := newCandidateForge()
+				forge.addIssue(7, "2020-01-01T00:00:00Z", "Branch: `widget`\n", "ready")
+				forge.readyPages = [][]int{{7}}
+				forge.heads["widget"] = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+				start, err := selectionRun(t, root, forge, "implement", "next")
+				if err != nil || start.Packet == nil {
+					t.Fatalf("start: %#v, %v", start, err)
+				}
+				bodyPath := filepath.Join(start.Packet.Facts.Implementation.ResultDirectory, "submission.md")
+				if err := os.WriteFile(bodyPath, []byte("candidate"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				args := []string{"implement", command, "--item", "7", "--body", bodyPath}
+				documents := []string{bodyPath}
+				if command == "needs-human" {
+					decisionPath := filepath.Join(filepath.Dir(bodyPath), "decision.md")
+					if err := os.WriteFile(decisionPath, []byte("needs a decision"), 0600); err != nil {
+						t.Fatal(err)
+					}
+					args = append(args, "--reason", "mandatory_rule", "--decision", decisionPath)
+					documents = append(documents, decisionPath)
+				}
+				injected, observed := false, false
+				requestStart := 0
+				var sourceClaim, submissionClaim bool
+				got, err := selectionReworkRun(t, root, forge, func(r *http.Request, response *http.Response, body []byte) []byte {
+					if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/pulls") {
+						forge.pulls[11]["draft"] = command == "needs-human"
+						forge.pulls[11]["labels"] = []map[string]string{}
+						// Keep the original native link independent of later footer edits.
+						forge.owners[7] = []int{11}
+						forge.evidence[7] = []map[string]any{{"number": 11}}
+						body, _ = json.Marshal(forge.pulls[11])
+					}
+					if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/issues/11/comments") {
+						requestBody, _ := r.GetBody()
+						var comment map[string]any
+						_ = json.NewDecoder(requestBody).Decode(&comment)
+						requestBody.Close()
+						comment["author_association"], comment["created_at"] = "OWNER", "2026-01-01T00:00:03Z"
+						forge.comments["/issues/11/comments"] = append(forge.comments["/issues/11/comments"], comment)
+						response.StatusCode = http.StatusCreated
+						body, _ = json.Marshal(comment)
+					}
+					if injected && r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/pulls/11") && bytes.Contains(body, []byte("Closes #8")) {
+						observed = true
+					}
+					if !injected && forge.pulls[11] != nil && (phase == "after publication" && bytes.Contains(body, []byte("closedByPullRequestsReferences")) || phase == "source cleanup" && r.Method == http.MethodDelete && strings.HasSuffix(r.URL.Path, "/issues/7/labels/ready") || phase == "final release" && r.Method == http.MethodDelete && strings.HasSuffix(r.URL.Path, "/issues/7/labels/wip")) {
+						forge.pulls[11]["body"] = "candidate\n\nCloses #8\n"
+						injected, requestStart = true, len(forge.seen())
+						sourceClaim, submissionClaim = hasLabel(forge.issues[7], "wip"), hasLabel(forge.pulls[11], "wip")
+					}
+					return body
+				}, args...)
+				if phase == "unchanged" {
+					want := "awaiting_review"
+					if command == "needs-human" {
+						want = "needs_human"
+					}
+					if err != nil || got.Status != want || hasLabel(forge.issues[7], "wip") || hasLabel(forge.pulls[11], "wip") {
+						t.Fatalf("unchanged ownership did not complete: %#v, %v", got, err)
+					}
+					return
+				}
+				if !injected || !observed || err != nil || got.Status != "fix_required" || !strings.Contains(got.Reason, "association") {
+					t.Errorf("footer drift not refused: %#v, %v injected=%t observed=%t", got, err, injected, observed)
+				}
+				for _, request := range forge.seen()[requestStart:] {
+					if strings.HasPrefix(request, "POST ") || strings.HasPrefix(request, "PATCH ") || strings.HasPrefix(request, "DELETE ") || request == "graphql:mutation" {
+						t.Errorf("mutation after footer drift: %s", request)
+					}
+				}
+				if !sourceClaim && !submissionClaim || hasLabel(forge.issues[7], "wip") != sourceClaim || hasLabel(forge.pulls[11], "wip") != submissionClaim {
+					t.Error("ownership refusal changed or released the retained Claims")
+				}
+				if len(forge.owners[7]) != 1 || forge.owners[7][0] != 11 || forge.pulls[11]["body"] != "candidate\n\nCloses #8\n" {
+					t.Error("handoff repaired or reassigned the conflicting ownership")
+				}
+				for _, path := range documents {
+					if _, err := os.Stat(path); err != nil {
+						t.Fatalf("ownership refusal discarded Result Document: %v", err)
+					}
+				}
+			})
+		}
+	}
+}

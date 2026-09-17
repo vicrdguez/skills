@@ -445,12 +445,16 @@ func TestGitHubImplementationCompletesRequeuedSubmissionHandoff(t *testing.T) {
 					issue["title"] = "widget"
 					json.NewEncoder(w).Encode([]any{issue})
 					return
-				case path == "/pulls" && r.Method == http.MethodGet:
+				case (path == "/pulls" || path == "/pulls/11") && r.Method == http.MethodGet:
 					pull := issue(11)
 					pull["body"] = "original\n\nCloses #7\n"
 					pull["head"] = map[string]any{"ref": "widget", "sha": "fixed", "repo": map[string]string{"full_name": "acme/widgets"}}
 					pull["base"] = map[string]string{"ref": "main"}
-					json.NewEncoder(w).Encode([]any{pull})
+					if path == "/pulls/11" {
+						json.NewEncoder(w).Encode(pull)
+					} else {
+						json.NewEncoder(w).Encode([]any{pull})
+					}
 					return
 				case path == "/issues/7" && r.Method == http.MethodGet:
 					json.NewEncoder(w).Encode(issue(7))

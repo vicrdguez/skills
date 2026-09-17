@@ -275,6 +275,19 @@ func (b *GitHubBackend) PublishImplementation(ctx context.Context, item workflow
 	return wanted, nil
 }
 
+func (b *GitHubBackend) verifySubmissionOwnership(ctx context.Context, itemNumber, submissionNumber int) error {
+	if submissionNumber != 0 {
+		pull, err := b.pullRecord(ctx, submissionNumber)
+		if err != nil {
+			return err
+		}
+		if owner, problem := submissionOwner(pull.Body); problem != "" || owner != itemNumber || pull.Number != submissionNumber || !strings.EqualFold(pull.Head.Repo.FullName, b.repository.Owner+"/"+b.repository.Name) {
+			return workflow.Refuse("Submission owning association changed during handoff; retain the Claim and inspect before retrying")
+		}
+	}
+	return b.verifyOwningAssociation(ctx, itemNumber, submissionNumber)
+}
+
 func (b *GitHubBackend) AwaitImplementationReview(ctx context.Context, item workflow.ImplementationItem, guard func() error) error {
 	if err := b.requireRepository(); err != nil {
 		return err
@@ -294,7 +307,7 @@ func (b *GitHubBackend) AwaitImplementationReview(ctx context.Context, item work
 				return err
 			}
 		}
-		return b.verifyOwningAssociation(ctx, itemNumber, submissionNumber)
+		return b.verifySubmissionOwnership(ctx, itemNumber, submissionNumber)
 	}
 	var issue githubIssue
 	if err := b.request(ctx, http.MethodGet, b.repositoryPath(repository)+fmt.Sprintf("/issues/%d", submissionNumber), nil, &issue); err != nil {
@@ -328,7 +341,7 @@ func (b *GitHubBackend) PauseImplementation(ctx context.Context, item workflow.I
 				return err
 			}
 		}
-		return b.verifyOwningAssociation(ctx, itemNumber, submissionNumber)
+		return b.verifySubmissionOwnership(ctx, itemNumber, submissionNumber)
 	}
 	if err := guard(); err != nil {
 		return err

@@ -49,17 +49,6 @@ func parseReviewSummary(body string) (reviewSummaryMetadata, string, bool) {
 	return parsed, body, true
 }
 
-func (b *GitHubBackend) verifyReviewOwnership(ctx context.Context, itemNumber, submissionNumber int) error {
-	pull, err := b.pullRecord(ctx, submissionNumber)
-	if err != nil {
-		return err
-	}
-	if owner, problem := submissionOwner(pull.Body); problem != "" || owner != itemNumber || pull.Number != submissionNumber || !strings.EqualFold(pull.Head.Repo.FullName, b.repository.Owner+"/"+b.repository.Name) {
-		return workflow.Refuse("Submission owning association changed during review; retain the Claim and inspect before retrying")
-	}
-	return b.verifyOwningAssociation(ctx, itemNumber, submissionNumber)
-}
-
 func (b *GitHubBackend) CompleteReview(ctx context.Context, item workflow.ImplementationItem, target workflow.State, guard func() error) error {
 	if err := b.requireRepository(); err != nil {
 		return err
@@ -78,7 +67,7 @@ func (b *GitHubBackend) CompleteReview(ctx context.Context, item workflow.Implem
 		if err := checkHead(); err != nil {
 			return err
 		}
-		return b.verifyReviewOwnership(ctx, itemNumber, submissionNumber)
+		return b.verifySubmissionOwnership(ctx, itemNumber, submissionNumber)
 	}
 	if err := guard(); err != nil {
 		return err
@@ -221,7 +210,7 @@ func (b *GitHubBackend) PublishReview(ctx context.Context, item workflow.Impleme
 		if err := checkHead(); err != nil {
 			return err
 		}
-		return b.verifyReviewOwnership(ctx, itemNumber, number)
+		return b.verifySubmissionOwnership(ctx, itemNumber, number)
 	}
 	for _, comment := range comments {
 		if err := guard(); err != nil {
