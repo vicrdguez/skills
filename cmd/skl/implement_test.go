@@ -2016,6 +2016,8 @@ func TestImplementationReviewProjectionBackendParity(t *testing.T) {
 					return ls
 				}
 				switch {
+				case path == "/pulls/11" && r.Method == http.MethodGet:
+					json.NewEncoder(w).Encode(map[string]any{"number": 11, "body": "Closes #7", "head": map[string]any{"repo": map[string]string{"full_name": "acme/widgets"}}})
 				case path == "/issues/11" && r.Method == http.MethodGet:
 					json.NewEncoder(w).Encode(map[string]any{"number": 11, "state": "open", "labels": labelList(labels)})
 				case path == "/issues/7" && r.Method == http.MethodGet:
