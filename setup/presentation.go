@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	skilldist "github.com/vicrdguez/skills"
 	"github.com/vicrdguez/skills/workflow"
@@ -106,7 +105,7 @@ func PresentImplementation(outcome workflow.ImplementationOutcome) (Implementati
 		return output, fmt.Errorf("instruction facts require a Work Item")
 	}
 	facts := *outcome.Facts
-	quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'" }
+	quote := skilldist.ShellQuote
 	endpointFlags := func(baseline, completion string) string {
 		var flags string
 		if baseline != "" {
@@ -124,6 +123,12 @@ func PresentImplementation(outcome workflow.ImplementationOutcome) (Implementati
 		skill, directory = "implement", f.ResultDirectory
 		f.WorkItem = output.Item.Number
 		f.WorkItemReference = fmt.Sprintf("#%d", f.WorkItem)
+		// The reconciled Workflow State, not the presence of a preserved draft
+		// Submission, establishes which procedure this invocation follows.
+		f.Procedure = skilldist.InitialSubmission
+		if output.Item.State == workflow.Rework {
+			f.Procedure = skilldist.FindingDrivenRework
+		}
 		if output.Item.Submission != nil {
 			f.Submission = output.Item.Submission.Number
 		}
