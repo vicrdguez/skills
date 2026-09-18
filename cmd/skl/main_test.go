@@ -1933,6 +1933,54 @@ func TestRejectInvalidResourceInputs(t *testing.T) {
 	}
 }
 
+func TestPreserveLiteralResourceInputValues(t *testing.T) {
+	first := ` /tmp/one, two=three 'four' "five" {{.ResultDirectory}} `
+	second := `{{template "result-document" .}}/tmp/other`
+	var output bytes.Buffer
+	app := newApp(func(github.RepositoryID) (setup.Backend, error) {
+		t.Fatal("resource rendering reached the Workflow Backend")
+		return nil, nil
+	}, bytes.NewReader(nil), &output, &output)
+	render := func(inputs ...string) (string, error) {
+		output.Reset()
+		command := []string{"skl", "skill", "--resource", "reference/submission.md"}
+		for _, input := range inputs {
+			command = append(command, "--input", input)
+		}
+		err := app.Run(append(command, "implement"))
+		return output.String(), err
+	}
+
+	rendered, err := render("result_directory="+first, "procedure=initial")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(rendered, first+"/submission.md") {
+		t.Errorf("rendering did not preserve every supplied character:\n%s", rendered)
+	}
+
+	rendered, err = render("result_directory="+second, "procedure=rework")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(rendered, second+"/submission.md") || strings.Contains(rendered, "one, two=three") {
+		t.Errorf("a rendering reused an earlier call's inputs:\n%s", rendered)
+	}
+
+	if _, err := render("result_directory=" + second); err == nil || !strings.Contains(err.Error(), "procedure") {
+		t.Fatalf("omitted required input was reused instead of rejected: %v", err)
+	}
+
+	// The raw collector is local to --input: ordinary slice flags still split on
+	// commas and trim each element.
+	sliceErr := newApp(nil, bytes.NewReader(nil), &output, &output).Run([]string{
+		"skl", "propose", "publish", "--target", "main", "--slice", " one=/tmp/a.md , two ",
+	})
+	if sliceErr == nil || !strings.Contains(sliceErr.Error(), `invalid --slice "two"`) {
+		t.Fatalf("slice flag splitting or trimming changed: %v", sliceErr)
+	}
+}
+
 func TestRetrieveOneNamedResource(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, t.TempDir())
