@@ -1981,6 +1981,146 @@ func TestPreserveLiteralResourceInputValues(t *testing.T) {
 	}
 }
 
+func TestDeferredResourceCommandsFromParentInstructions(t *testing.T) {
+	directory := filepath.Join(t.TempDir(), `res,ult 'dir' "quoted" =a=`)
+	if err := os.MkdirAll(directory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	reviewedHead := strings.Repeat("ab", 20)
+	implementation := func(submission int) skilldist.InvocationFacts {
+		return skilldist.InvocationFacts{Implementation: &skilldist.ImplementationFacts{
+			WorkItemReference: "#48", Branch: "render-deferred-resources", Worktree: filepath.Join(directory, "worktree"),
+			ResultDirectory: directory, Submission: submission,
+		}}
+	}
+	cases := []struct {
+		name           string
+		skill          string
+		facts          skilldist.InvocationFacts
+		resource       string
+		laterValue     string
+		placeholder    string
+		bound          []string
+		want           []string
+		absentCommand  []string
+		absentResource []string
+	}{
+		{
+			name: "first implement invocation", skill: "implement", facts: implementation(0),
+			resource:       "reference/submission.md",
+			bound:          []string{"result_directory=" + directory, "procedure=initial"},
+			want:           []string{"`" + directory + "/submission.md`", "## Summary", "## Verification", "## Audit ledger"},
+			absentResource: []string{"## Rework", "resolution commit"},
+		},
+		{
+			name: "finding-driven rework invocation", skill: "implement", facts: implementation(7),
+			resource: "reference/submission.md",
+			bound:    []string{"result_directory=" + directory, "procedure=rework"},
+			want:     []string{"## Rework", "resolution commit", "Debt Marker", "## Audit ledger"},
+		},
+		{
+			name: "needs human decision", skill: "implement", facts: implementation(0),
+			resource: "reference/decision.md", laterValue: "preserve=true", placeholder: "preserve=<true|false>",
+			bound: []string{"result_directory=" + directory},
+			want:  []string{"`" + directory + "/decision.md`", "## Human Decision", "blocking requirement"},
+		},
+		{
+			name: "watchdog invocation", skill: "watchdog", resource: "reference/review.md",
+			facts: skilldist.InvocationFacts{Watchdog: &skilldist.WatchdogFacts{
+				WorkItemReference: "#48", SubmissionReference: "#7", ResultDirectory: directory,
+				ReviewNumber: 2, ReviewedHead: reviewedHead, Worktree: filepath.Join(directory, "worktree"),
+			}},
+			bound:          []string{"result_directory=" + directory, "round=2", "reviewed_head=" + reviewedHead},
+			want:           []string{"`" + directory + "/summary.md`", "round 2", reviewedHead, "latest authorized directive wins"},
+			absentCommand:  []string{"--verdict"},
+			absentResource: []string{"--verdict <"},
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			packet, err := skilldist.BuildPacket(testCase.skill, testCase.facts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, procedural := range []string{"# Submission Result Document", "# Decision Result Document", "# Review Result Documents"} {
+				if strings.Contains(packet.Instructions, procedural) {
+					t.Errorf("parent instructions disclosed deferred resource content %q", procedural)
+				}
+			}
+			entries, err := os.ReadDir(directory)
+			if err != nil || len(entries) != 0 {
+				t.Errorf("specialization prerendered files: %v, %v", entries, err)
+			}
+
+			command := deferredCommand(t, packet.Instructions, testCase.resource)
+			for _, unwanted := range testCase.absentCommand {
+				if strings.Contains(command, unwanted) {
+					t.Errorf("parent command includes %q: %s", unwanted, command)
+				}
+			}
+			if testCase.placeholder == "" {
+				if strings.ContainsAny(command, "<>") {
+					t.Errorf("parent command leaves a settled value as a placeholder: %s", command)
+				}
+			} else {
+				if !strings.Contains(command, testCase.placeholder) {
+					t.Errorf("parent command does not leave %q for the worker: %s", testCase.placeholder, command)
+				}
+				if !strings.Contains(packet.Instructions, "true") || !strings.Contains(packet.Instructions, "false") {
+					t.Errorf("parent instructions do not explain the later boolean value:\n%s", packet.Instructions)
+				}
+				command = strings.Replace(command, testCase.placeholder, testCase.laterValue, 1)
+			}
+
+			args := shellArgs(t, command)
+			if args[0] != "skl" || args[len(args)-1] != testCase.skill || !slices.Contains(args, "--input") {
+				t.Fatalf("parent command is not runnable verbatim: %v", args)
+			}
+			for _, want := range testCase.bound {
+				if !slices.Contains(args, want) {
+					t.Errorf("parent command does not bind %q: %v", want, args)
+				}
+			}
+
+			var output bytes.Buffer
+			app := newApp(func(github.RepositoryID) (setup.Backend, error) {
+				t.Fatal("resource rendering reached the Workflow Backend")
+				return nil, nil
+			}, bytes.NewReader(nil), &output, &output)
+			if err := app.Run(args); err != nil {
+				t.Fatalf("%s: %v", command, err)
+			}
+			instructions := output.String()
+			for _, want := range testCase.want {
+				if !strings.Contains(instructions, want) {
+					t.Errorf("retrieved resource is missing %q:\n%s", want, instructions)
+				}
+			}
+			for _, unwanted := range testCase.absentResource {
+				if strings.Contains(instructions, unwanted) {
+					t.Errorf("retrieved resource includes %q:\n%s", unwanted, instructions)
+				}
+			}
+		})
+	}
+}
+
+// deferredCommand returns the single deferred resource command a parent's
+// instructions publish for one resource.
+func deferredCommand(t *testing.T, instructions, resource string) string {
+	t.Helper()
+	var commands []string
+	for _, chunk := range strings.Split(instructions, "`") {
+		if strings.HasPrefix(chunk, "skl skill --resource "+resource+" ") {
+			commands = append(commands, chunk)
+		}
+	}
+	if len(commands) != 1 {
+		t.Fatalf("want exactly one %s command in the parent instructions, got %v", resource, commands)
+	}
+	return commands[0]
+}
+
 func TestRetrieveOneNamedResource(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, t.TempDir())
@@ -2103,54 +2243,60 @@ func TestBundleGuaranteedSupportingSkills(t *testing.T) {
 	if !slices.Equal(packet.IncludedSkills, want) {
 		t.Fatalf("included_skills = %v, want %v", packet.IncludedSkills, want)
 	}
-	wantInstructions := readRepositoryFile(t, "skills/dev/implement/SKILL.md")
-	for _, included := range []struct{ name, path string }{
-		{"tdd", "skills/dev/tdd/SKILL.md"},
-		{"audit", "skills/dev/audit/SKILL.md"},
-		{"design", "skills/dev/design/SKILL.md"},
-		{"domain", "skills/dev/domain/SKILL.md"},
-	} {
-		wantInstructions += "\n\n## Included Skill: " + included.name + "\n\n" + readRepositoryFile(t, included.path)
-	}
-	if packet.Instructions != wantInstructions {
-		t.Fatalf("bundled instructions differ from canonical definitions:\n%s", packet.Instructions)
-	}
 	if !slices.Equal(packet.Resources, []string{"reference/decision.md", "reference/submission.md"}) {
 		t.Fatalf("implementation resources changed: %v", packet.Resources)
 	}
+	// Definitions are authored templates, so the rendered outcome is what a
+	// worker reads: every guaranteed definition appears exactly once and the
+	// deferred resource bodies stay out of a no-facts packet.
+	for _, marker := range []struct{ name, text string }{
+		{"implement", "## The scope is already decided"},
+		{"implement", "## When only a human can decide"},
+		{"tdd", "## What a good test is"},
+		{"audit", "### 6. Aggregate"},
+		{"design", "## Deep vs shallow"},
+		{"domain", "### Offer ADRs sparingly"},
+	} {
+		if count := strings.Count(packet.Instructions, marker.text); count != 1 {
+			t.Errorf("%s marker %q appears %d times, want once", marker.name, marker.text, count)
+		}
+	}
+	for _, deferred := range []string{"# Submission Result Document", "# Decision Result Document"} {
+		if strings.Contains(packet.Instructions, deferred) {
+			t.Errorf("no-facts Implement packet disclosed the deferred %q body", deferred)
+		}
+	}
 	for _, format := range []string{"markdown", "json"} {
 		t.Run(format, func(t *testing.T) {
-			var direct, bundled bytes.Buffer
-			for _, request := range []struct {
-				name string
-				out  *bytes.Buffer
-			}{{"audit", &direct}, {"implement", &bundled}} {
-				app := newApp(nil, bytes.NewReader(nil), request.out, request.out)
-				if err := app.Run([]string{"skl", "skill", "--format", format, request.name}); err != nil {
+			raw := func(name string) string {
+				var out bytes.Buffer
+				if err := newApp(nil, bytes.NewReader(nil), &out, &out).Run([]string{"skl", "skill", "--format", format, name}); err != nil {
 					t.Fatal(err)
 				}
+				return out.String()
 			}
-			audit, implementation := direct.String(), bundled.String()
-			if format == "json" {
-				var directPacket, bundledPacket skilldist.Packet
-				if err := json.Unmarshal(direct.Bytes(), &directPacket); err != nil {
-					t.Fatal(err)
+			instructions := func(name string) string {
+				if format == "json" {
+					var rendered skilldist.Packet
+					if err := json.Unmarshal([]byte(raw(name)), &rendered); err != nil {
+						t.Fatal(err)
+					}
+					return rendered.Instructions
 				}
-				if err := json.Unmarshal(bundled.Bytes(), &bundledPacket); err != nil {
-					t.Fatal(err)
-				}
-				audit, implementation = directPacket.Instructions, bundledPacket.Instructions
-			} else {
-				_, audit, _ = strings.Cut(audit, "\n\n")
+				_, rendered, _ := strings.Cut(raw(name), "\n\n")
+				return rendered
+			}
+			if format == "markdown" {
 				wantHeader := "Protocol: skl.instructions/v1\nSkill: implement\nIncluded skills: tdd, audit, design, domain\nFacts: {}\nResources: reference/decision.md, reference/submission.md\n\n"
-				if bundled.String() != wantHeader+wantInstructions {
-					t.Fatal("rendered implementation manifest or supporting definitions changed")
+				if rendered := raw("implement"); !strings.HasPrefix(rendered, wantHeader) {
+					t.Fatalf("rendered implementation manifest changed:\n%s", rendered)
 				}
 			}
-			_, includedAudit, found := strings.Cut(implementation, "\n\n## Included Skill: audit\n\n")
-			includedAudit, _, _ = strings.Cut(includedAudit, "\n\n## Included Skill:")
-			if !found || includedAudit != audit {
-				t.Error("bundled Audit differs from direct retrieval")
+			implementation := instructions("implement")
+			for _, included := range want {
+				if section := bundledSection(t, implementation, included); section != instructions(included) {
+					t.Errorf("bundled %s differs from direct retrieval:\n%s", included, section)
+				}
 			}
 			for _, forbidden := range []string{"ponytail", "## simplicity"} {
 				if strings.Contains(strings.ToLower(implementation), forbidden) {
@@ -2167,6 +2313,17 @@ func TestBundleGuaranteedSupportingSkills(t *testing.T) {
 	if !strings.Contains(stub, "included_skills") || !strings.Contains(stub, "Skip activation") {
 		t.Fatalf("stub lacks included-skill guard:\n%s", stub)
 	}
+}
+
+// bundledSection returns one included definition's rendered section.
+func bundledSection(t *testing.T, instructions, name string) string {
+	t.Helper()
+	_, after, found := strings.Cut(instructions, "\n\n## Included Skill: "+name+"\n\n")
+	if !found {
+		t.Fatalf("bundled instructions lack the %s section", name)
+	}
+	section, _, _ := strings.Cut(after, "\n\n## Included Skill: ")
+	return section
 }
 
 func TestIgnoreConsumerRepositoryOverrides(t *testing.T) {

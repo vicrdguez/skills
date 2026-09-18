@@ -50,7 +50,7 @@ A repeat review with no new commits is legal: a human resolved everything by dis
 
 ## Findings
 
-Before assigning dispositions for any verdict, retrieve `skl skill --resource reference/review.md --describe-inputs watchdog` or the resource command this packet's invocation supplies for human-directive authorization and precedence, stable finding identities, and Result Document transport.
+Before assigning dispositions for any verdict, retrieve {{if .Watchdog}}`skl skill --resource reference/review.md --input result_directory={{quote .Watchdog.ResultDirectory}} --input round={{.Watchdog.ReviewNumber}} --input reviewed_head={{quote .Watchdog.ReviewedHead}} watchdog`{{else}}the resource command this packet's invocation supplies, or discover the accepted inputs with `skl skill --resource reference/review.md --describe-inputs watchdog`{{end}} for human-directive authorization and precedence, stable finding identities, and Result Document transport.
 
 Each carries one disposition — `BLOCK`, `HUMAN` or `NOTE` — and three things:
 

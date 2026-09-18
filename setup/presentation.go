@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	skilldist "github.com/vicrdguez/skills"
 	"github.com/vicrdguez/skills/workflow"
@@ -106,7 +105,7 @@ func PresentImplementation(outcome workflow.ImplementationOutcome) (Implementati
 		return output, fmt.Errorf("instruction facts require a Work Item")
 	}
 	facts := *outcome.Facts
-	quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'" }
+	quote := skilldist.ShellQuote
 	endpointFlags := func(baseline, completion string) string {
 		var flags string
 		if baseline != "" {

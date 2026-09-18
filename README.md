@@ -143,6 +143,8 @@ skl skill --resource reference/submission.md --describe-inputs implement
 skl skill --resource reference/submission.md --input result_directory=/tmp/skl-result --input procedure=initial implement
 ```
 
+A workflow packet binds every value its invocation already established — the private Result Document directory, the submission procedure, the review round, and the original reviewed head — and leaves the worker only genuinely later values, such as whether implementation work needs preservation at the Needs Human step. Converted resource bodies stay deferred until that step: a packet neither prerenders them nor advertises a bare retrieval that no longer satisfies their required inputs.
+
 Retrieve a parent definition with `skl skill <name>` only when it is not already supplied; `SKILL.md` is not a resource name. Raw source-tree registrations bypass this distribution arrangement. OpenCode can consume the installed Claude-compatible stubs rather than registering the authoring tree.
 
 ### Review and human completion

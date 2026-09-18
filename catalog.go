@@ -185,6 +185,15 @@ func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
 	}, nil
 }
 
+// templateFuncs is the deliberately small helper set authored templates share.
+var templateFuncs = template.FuncMap{"quote": ShellQuote}
+
+// ShellQuote renders value as one POSIX shell word without changing any of its
+// characters.
+func ShellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
+}
+
 func renderDefinition(file string, facts InvocationFacts) (string, error) {
 	return renderDocument(file, facts)
 }
@@ -197,7 +206,7 @@ func renderDocument(file string, data any) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	tmpl, err := template.New("document").Option("missingkey=error").Parse(string(source))
+	tmpl, err := template.New("document").Option("missingkey=error").Funcs(templateFuncs).Parse(string(source))
 	if err != nil {
 		return "", err
 	}
