@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	skilldist "github.com/vicrdguez/skills"
 	"github.com/vicrdguez/skills/workflow"
@@ -85,6 +84,11 @@ func presentItem(item workflow.ImplementationItem) (implementationItemOutput, er
 	return output, err
 }
 
+// primary returns the main worktree the conventional worktree is attached to.
+func primary(worktree string) string {
+	return filepath.Dir(filepath.Dir(worktree))
+}
+
 func PresentImplementation(outcome workflow.ImplementationOutcome) (ImplementationOutput, error) {
 	output := ImplementationOutput{ImplementationOutcome: outcome}
 	if outcome.Item != nil {
@@ -101,7 +105,7 @@ func PresentImplementation(outcome workflow.ImplementationOutcome) (Implementati
 		return output, fmt.Errorf("instruction facts require a Work Item")
 	}
 	facts := *outcome.Facts
-	quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'" }
+	quote := skilldist.ShellQuote
 	endpointFlags := func(baseline, completion string) string {
 		var flags string
 		if baseline != "" {
@@ -119,6 +123,12 @@ func PresentImplementation(outcome workflow.ImplementationOutcome) (Implementati
 		skill, directory = "implement", f.ResultDirectory
 		f.WorkItem = output.Item.Number
 		f.WorkItemReference = fmt.Sprintf("#%d", f.WorkItem)
+		// The reconciled Workflow State, not the presence of a preserved draft
+		// Submission, establishes which procedure this invocation follows.
+		f.Procedure = skilldist.InitialSubmission
+		if output.Item.State == workflow.Rework {
+			f.Procedure = skilldist.FindingDrivenRework
+		}
 		if output.Item.Submission != nil {
 			f.Submission = output.Item.Submission.Number
 		}
@@ -130,6 +140,8 @@ func PresentImplementation(outcome workflow.ImplementationOutcome) (Implementati
 			output.Reason += "; resume with `" + f.ResumeCommand + "`"
 			return output, nil
 		}
+		f.FetchCommand = fmt.Sprintf("git -C %s fetch %s %s", quote(primary(f.Worktree)), quote(f.Remote), quote("+refs/heads/"+f.Branch+":refs/remotes/"+f.Remote+"/"+f.Branch))
+		f.WorktreeCommand = fmt.Sprintf("git -C %s worktree add -b %s %s %s", quote(primary(f.Worktree)), quote(f.Branch), quote(f.Worktree), quote(f.Remote+"/"+f.Branch))
 		f.InspectCommand = fmt.Sprintf("skl implement inspect --repo %s --remote %s --item %d", quote(f.Worktree), quote(f.Remote), f.WorkItem)
 		f.SubmitCommand = fmt.Sprintf("skl implement submit --repo %s --remote %s --item %d --body %s", quote(f.Worktree), quote(f.Remote), f.WorkItem, quote(filepath.Join(directory, "submission.md")))
 		f.NeedsHumanCommand = fmt.Sprintf("skl implement needs-human --repo %s --remote %s --item %d --reason <permitted-reason> --decision %s", quote(f.Worktree), quote(f.Remote), f.WorkItem, quote(filepath.Join(directory, "decision.md")))
@@ -150,6 +162,10 @@ func PresentImplementation(outcome workflow.ImplementationOutcome) (Implementati
 		flags := endpointFlags(f.SuppliedArtifactBaseline, f.SuppliedArtifactCompletion)
 		f.ResumeCommand += flags
 		f.SubmitCommand += flags
+		f.FetchCommand = fmt.Sprintf("git -C %s fetch %s %s", quote(primary(f.Worktree)), quote(f.Remote), quote("+refs/heads/"+f.Branch+":refs/remotes/"+f.Remote+"/"+f.Branch))
+		f.WorktreeCommand = fmt.Sprintf("git -C %s worktree add -b %s %s %s", quote(primary(f.Worktree)), quote(f.Branch), quote(f.Worktree), quote(f.Remote+"/"+f.Branch))
+		f.InspectCommand = fmt.Sprintf("skl implement inspect --repo %s --remote %s --item %d", quote(f.Worktree), quote(f.Remote), f.WorkItem)
+		f.InspectCommand += flags
 	}
 	packet, err := skilldist.BuildPacket(skill, facts)
 	if err != nil {

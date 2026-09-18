@@ -62,6 +62,13 @@ func (b *GitHubBackend) CompleteReview(ctx context.Context, item workflow.Implem
 	if err != nil {
 		return err
 	}
+	checkHead := guard
+	guard = func() error {
+		if err := checkHead(); err != nil {
+			return err
+		}
+		return b.verifySubmissionOwnership(ctx, itemNumber, submissionNumber)
+	}
 	if err := guard(); err != nil {
 		return err
 	}
@@ -147,8 +154,12 @@ func (b *GitHubBackend) ReviewSubmission(ctx context.Context, id workflow.Submis
 	if err := b.request(ctx, http.MethodGet, b.repositoryPath(repository)+fmt.Sprintf("/pulls/%d", number), nil, &pull); err != nil {
 		return workflow.Submission{}, err
 	}
+	if pull.Number != number || !strings.EqualFold(pull.Head.Repo.FullName, repository.Owner+"/"+repository.Name) {
+		return workflow.Submission{}, workflow.Refuse("observed Submission identity or head repository is outside the selected repository attachment; inspect and repair its association")
+	}
 	state, claimed, _ := implementationLabels(pull.githubIssue)
-	result := workflow.Submission{ID: workflow.SubmissionID(strconv.Itoa(pull.Number)), Head: pull.Head.SHA, Base: pull.Base.Ref, Body: pull.Body, Draft: pull.Draft, State: state, Claimed: claimed, Merged: pull.Merged || pull.MergedAt != "", Mergeability: "unknown"}
+	result := workflow.Submission{ID: workflow.SubmissionID(strconv.Itoa(pull.Number)), Branch: pull.Head.Ref, Head: pull.Head.SHA, Base: pull.Base.Ref, Body: pull.Body, Draft: pull.Draft, State: state, Claimed: claimed, Merged: pull.Merged || pull.MergedAt != "", Mergeability: "unknown", Lifecycle: implementationLifecycle(pull.githubIssue)}
+	result.Lifecycle.Merged = result.Merged
 	if pull.Mergeable != nil {
 		result.Mergeability = "conflicting"
 		if *pull.Mergeable {
@@ -190,9 +201,16 @@ func (b *GitHubBackend) PublishReview(ctx context.Context, item workflow.Impleme
 	if item.Submission == nil {
 		return fmt.Errorf("review requires a Submission")
 	}
-	number, err := githubIssueNumber(workflow.WorkItemID(item.Submission.ID))
+	itemNumber, number, err := githubImplementationNumbers(item)
 	if err != nil {
 		return err
+	}
+	checkHead := guard
+	guard = func() error {
+		if err := checkHead(); err != nil {
+			return err
+		}
+		return b.verifySubmissionOwnership(ctx, itemNumber, number)
 	}
 	for _, comment := range comments {
 		if err := guard(); err != nil {
