@@ -33,15 +33,15 @@ Extend `skl skill --resource <owner-relative-name> [--input name=value ...] <own
 
 ## Definition of Done
 
-- [ ] DOD1: `--describe-inputs` describes accepted names, meanings, types and any allowed choices, and required status for each requested resource without requiring values or rendering procedural content.
-- [ ] DOD2: Implement submission retrieval renders the applicable first-implementation or finding-driven Rework instructions with bound references, current Audit evidence requirements, and unchanged opaque Result Document semantics.
-- [ ] DOD3: Implement decision retrieval specializes preservation instructions from an explicitly supplied boolean, accepting `false` as present and retaining the existing Needs Human and draft-preservation obligations.
-- [ ] DOD4: Watchdog review retrieval binds the review round and original reviewed head before dispositions, preserves existing finding IDs even after checkpoint loss, and retains authorization, precedence, and opaque result transport rules without requiring a verdict or finding choices.
-- [ ] DOD5: Malformed, unknown, duplicate, missing-required, invalid-type, and semantically invalid inputs fail actionably before rendering, without generic fallback, partial procedural output, or mutation.
-- [ ] DOD6: Repeated inputs preserve string spaces, commas, embedded equals, quotes, and literal template-looking data across independent calls; generated commands preserve those values through shell quoting, and other commands' flag behavior is unchanged.
-- [ ] DOD7: A worker can take each converted resource command from a concrete parent invocation, supply only explained later-established values, and retrieve complete applicable instructions through the public CLI at the existing procedural step. Callers and docs advertise no invalid bare retrieval of converted resources.
-- [ ] DOD8: The shared renderer preserves context-free no-input retrieval, owner-relative references, and once-only bundled definitions without eagerly disclosing deferred resource content or changing existing output defaults.
-- [ ] DOD9: Embedded private Skill Modules are neither listed as public resources nor retrievable or describable as resources; public resource ownership remains exact.
+- [x] DOD1: `--describe-inputs` describes accepted names, meanings, types and any allowed choices, and required status for each requested resource without requiring values or rendering procedural content.
+- [x] DOD2: Implement submission retrieval renders the applicable first-implementation or finding-driven Rework instructions with bound references, current Audit evidence requirements, and unchanged opaque Result Document semantics.
+- [x] DOD3: Implement decision retrieval specializes preservation instructions from an explicitly supplied boolean, accepting `false` as present and retaining the existing Needs Human and draft-preservation obligations.
+- [x] DOD4: Watchdog review retrieval binds the review round and original reviewed head before dispositions, preserves existing finding IDs even after checkpoint loss, and retains authorization, precedence, and opaque result transport rules without requiring a verdict or finding choices.
+- [x] DOD5: Malformed, unknown, duplicate, missing-required, invalid-type, and semantically invalid inputs fail actionably before rendering, without generic fallback, partial procedural output, or mutation.
+- [x] DOD6: Repeated inputs preserve string spaces, commas, embedded equals, quotes, and literal template-looking data across independent calls; generated commands preserve those values through shell quoting, and other commands' flag behavior is unchanged.
+- [x] DOD7: A worker can take each converted resource command from a concrete parent invocation, supply only explained later-established values, and retrieve complete applicable instructions through the public CLI at the existing procedural step. Callers and docs advertise no invalid bare retrieval of converted resources.
+- [x] DOD8: The shared renderer preserves context-free no-input retrieval, owner-relative references, and once-only bundled definitions without eagerly disclosing deferred resource content or changing existing output defaults.
+- [x] DOD9: Embedded private Skill Modules are neither listed as public resources nor retrievable or describable as resources; public resource ownership remains exact.
 
 ## Manual verification
 
