@@ -37,6 +37,7 @@ func watchdogCLI(t *testing.T, root string, backend *implementationMemory, args 
 	var output bytes.Buffer
 	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
 	command := append([]string{"skl", "watchdog"}, args...)
+	command = append(command, "--format", "json")
 	command = append(command, "--repo", root)
 	if err := app.Run(command); err != nil {
 		t.Fatalf("%v: %v\n%s", command, err, &output)

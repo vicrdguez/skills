@@ -14,7 +14,10 @@ import (
 func watchdogCommands(newBackend backendFactory, stdout io.Writer) []*cli.Command {
 	var commands []*cli.Command
 	for _, name := range []string{"next", "resume", "submit"} {
-		commands = append(commands, &cli.Command{Name: name, Flags: []cli.Flag{&cli.PathFlag{Name: "repo", Value: "."}, &cli.StringFlag{Name: "remote"}, &cli.IntFlag{Name: "item"}, &cli.Uint64Flag{Name: "review-number"}, &cli.StringFlag{Name: "verdict"}, &cli.StringFlag{Name: "reviewed-head"}, &cli.PathFlag{Name: "summary"}, &cli.PathFlag{Name: "findings"}, &cli.PathFlag{Name: "body"}, &cli.StringFlag{Name: "head"}, &cli.StringFlag{Name: "artifact-baseline"}, &cli.StringFlag{Name: "artifact-completion"}}, Action: func(c *cli.Context) error {
+		commands = append(commands, &cli.Command{Name: name, Flags: []cli.Flag{&cli.PathFlag{Name: "repo", Value: "."}, &cli.StringFlag{Name: "remote"}, &cli.IntFlag{Name: "item"}, &cli.StringFlag{Name: "format", Value: "markdown"}, &cli.Uint64Flag{Name: "review-number"}, &cli.StringFlag{Name: "verdict"}, &cli.StringFlag{Name: "reviewed-head"}, &cli.PathFlag{Name: "summary"}, &cli.PathFlag{Name: "findings"}, &cli.PathFlag{Name: "body"}, &cli.StringFlag{Name: "head"}, &cli.StringFlag{Name: "artifact-baseline"}, &cli.StringFlag{Name: "artifact-completion"}}, Action: func(c *cli.Context) error {
+			if c.String("format") != "markdown" && c.String("format") != "json" {
+				return fmt.Errorf("unsupported format %q: choose markdown or json", c.String("format"))
+			}
 			if c.NArg() != 0 || name == "resume" && c.Int("item") <= 0 || name == "next" && c.IsSet("item") {
 				return fmt.Errorf("resume requires --item; next selects its own Work Item")
 			}
@@ -54,7 +57,15 @@ func watchdogCommands(newBackend backendFactory, stdout io.Writer) []*cli.Comman
 			if err != nil {
 				return err
 			}
-			return json.NewEncoder(stdout).Encode(output)
+			if c.String("format") == "json" {
+				return json.NewEncoder(stdout).Encode(output)
+			}
+			if output.Packet != nil {
+				_, err = fmt.Fprint(stdout, output.Packet.Instructions)
+				return err
+			}
+			_, err = fmt.Fprintf(stdout, "Status: %s\n%s\n", output.Status, output.Reason)
+			return err
 		}})
 	}
 	commands[0].Flags = append(commands[0].Flags, waitFlags()...)
