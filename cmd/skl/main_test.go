@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -1654,6 +1655,71 @@ func TestRetrieveAuditWithoutPonytail(t *testing.T) {
 				if !strings.Contains(instructions, required) {
 					t.Errorf("Audit lost ordinary review instruction %q", required)
 				}
+			}
+		})
+	}
+}
+
+func TestRenderImplementSubmissionInstructions(t *testing.T) {
+	directory := t.TempDir()
+	cases := []struct {
+		procedure string
+		present   []string
+		absent    []string
+	}{
+		{
+			procedure: "initial",
+			present: []string{
+				"`" + filepath.Join(directory, "submission.md") + "`",
+				"## Summary",
+				"## Verification",
+				"## Audit ledger",
+				"scenario",
+				"Full Gate",
+				"fixed point",
+				"Closes #",
+			},
+			absent: []string{"## Rework", "resolution commit"},
+		},
+		{
+			procedure: "rework",
+			present: []string{
+				"`" + filepath.Join(directory, "submission.md") + "`",
+				"## Summary",
+				"## Verification",
+				"## Audit ledger",
+				"## Rework",
+				"stable",
+				"resolution commit",
+				"Debt Marker",
+			},
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.procedure, func(t *testing.T) {
+			var output bytes.Buffer
+			app := newApp(func(github.RepositoryID) (setup.Backend, error) {
+				t.Fatal("resource rendering reached the Workflow Backend")
+				return nil, nil
+			}, bytes.NewReader(nil), &output, &output)
+			command := []string{"skl", "skill", "--resource", "reference/submission.md",
+				"--input", "result_directory=" + directory, "--input", "procedure=" + testCase.procedure, "implement"}
+			if err := app.Run(command); err != nil {
+				t.Fatalf("%v: %v", command, err)
+			}
+			instructions := output.String()
+			for _, want := range testCase.present {
+				if !strings.Contains(instructions, want) {
+					t.Errorf("instructions are missing %q:\n%s", want, instructions)
+				}
+			}
+			for _, unwanted := range testCase.absent {
+				if strings.Contains(instructions, unwanted) {
+					t.Errorf("instructions include %q:\n%s", unwanted, instructions)
+				}
+			}
+			if sha := regexp.MustCompile(`[0-9a-f]{40}`).FindString(instructions); sha != "" {
+				t.Errorf("instructions authored the reviewed %s instead of leaving it to the worker:\n%s", sha, instructions)
 			}
 		})
 	}
