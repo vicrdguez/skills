@@ -2121,6 +2121,81 @@ func deferredCommand(t *testing.T, instructions, resource string) string {
 	return commands[0]
 }
 
+func TestContextFreeResourcesRetainOwnershipAndDefaults(t *testing.T) {
+	cases := []struct{ owner, resource, path, marker string }{
+		{"audit", "reference/smells.md", "skills/dev/audit/reference/smells.md", "# Smell Baseline"},
+		{"design", "reference/DEEPENING.md", "skills/dev/design/reference/DEEPENING.md", "# Deepening"},
+		{"design", "reference/DESIGN-IT-TWICE.md", "skills/dev/design/reference/DESIGN-IT-TWICE.md", "design constraint"},
+		{"domain", "reference/ADR-FORMAT.md", "skills/dev/domain/reference/ADR-FORMAT.md", "# ADR Format"},
+		{"domain", "reference/CONTEXT-FORMAT.md", "skills/dev/domain/reference/CONTEXT-FORMAT.md", "Context"},
+		{"propose", "reference/intent.md", "skills/dev/propose/reference/intent.md", "Definition of Done"},
+		{"propose", "reference/behavior.md", "skills/dev/propose/reference/behavior.md", "Gherkin"},
+		{"propose", "reference/plan.md", "skills/dev/propose/reference/plan.md", "Module shapes"},
+		{"propose", "reference/tasks.md", "skills/dev/propose/reference/tasks.md", "Tasks"},
+		{"tdd", "reference/mocking.md", "skills/dev/tdd/reference/mocking.md", "# When to Mock"},
+		{"tdd", "reference/tests.md", "skills/dev/tdd/reference/tests.md", "# Good and Bad Tests"},
+		{"writing-for-agents", "SKILL-MECHANICS.md", "skills/misc/writing-for-agents/SKILL-MECHANICS.md", "# Skill mechanics"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.owner+"/"+testCase.resource, func(t *testing.T) {
+			var output bytes.Buffer
+			app := newApp(func(github.RepositoryID) (setup.Backend, error) {
+				t.Fatal("context-free retrieval reached the Workflow Backend")
+				return nil, nil
+			}, bytes.NewReader(nil), &output, &output)
+			if err := app.Run([]string{"skl", "skill", "--resource", testCase.resource, testCase.owner}); err != nil {
+				t.Fatal(err)
+			}
+			resource := output.String()
+			if resource != readRepositoryFile(t, testCase.path) {
+				t.Errorf("context-free %s changed:\n%s", testCase.resource, resource)
+			}
+			if !strings.Contains(resource, testCase.marker) {
+				t.Errorf("%s is missing %q", testCase.resource, testCase.marker)
+			}
+			for _, other := range []string{"implement", "watchdog", "tdd"} {
+				if other == testCase.owner {
+					continue
+				}
+				output.Reset()
+				if err := app.Run([]string{"skl", "skill", "--resource", testCase.resource, other}); err == nil || !strings.Contains(err.Error(), "unknown resource") {
+					t.Errorf("%s became a resource of %s: %v", testCase.resource, other, err)
+				}
+			}
+		})
+	}
+
+	packet, err := skilldist.BuildPacket("implement", skilldist.InvocationFacts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, owned := range []string{"reference/smells.md audit", "reference/tests.md tdd", "reference/DEEPENING.md design", "reference/CONTEXT-FORMAT.md domain"} {
+		if !strings.Contains(packet.Instructions, owned) {
+			t.Errorf("bundled definition lost its owning reference %q", owned)
+		}
+	}
+	for _, stolen := range []string{"reference/smells.md implement", "reference/tests.md implement", "reference/smells.md, ", "reference/tests.md, "} {
+		if strings.Contains(packet.Instructions+strings.Join(packet.Resources, ", "), stolen) {
+			t.Errorf("bundled instructions took over %q", stolen)
+		}
+	}
+
+	var markdown, jsonPacket bytes.Buffer
+	if err := newApp(nil, bytes.NewReader(nil), &markdown, &markdown).Run([]string{"skl", "skill", "tdd"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(markdown.String(), "Protocol: skl.instructions/v1\nSkill: tdd\nIncluded skills: none\nFacts: {}\nResources: reference/mocking.md, reference/tests.md\n\n") {
+		t.Errorf("default Markdown rendering changed:\n%s", markdown.String())
+	}
+	if err := newApp(nil, bytes.NewReader(nil), &jsonPacket, &jsonPacket).Run([]string{"skl", "skill", "--format", "json", "tdd"}); err != nil {
+		t.Fatal(err)
+	}
+	var decoded skilldist.Packet
+	if err := json.Unmarshal(jsonPacket.Bytes(), &decoded); err != nil || decoded.Skill != "tdd" {
+		t.Fatalf("typed packet default changed: %v, %v", err, jsonPacket.String())
+	}
+}
+
 func TestRetrieveOneNamedResource(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, t.TempDir())
