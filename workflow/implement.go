@@ -201,7 +201,7 @@ func PermitImplementationReview(observation *LifecycleObservation) error {
 	return nil
 }
 
-func InspectImplementation(ctx context.Context, root string, id WorkItemID, endpoints ArtifactEndpoints, backend ImplementationBackend) (ImplementationOutcome, error) {
+func InspectImplementation(ctx context.Context, root, remote string, id WorkItemID, endpoints ArtifactEndpoints, backend ImplementationBackend) (ImplementationOutcome, error) {
 	items, err := loadImplementation(ctx, backend)
 	if err != nil {
 		return ImplementationOutcome{}, err
@@ -215,9 +215,43 @@ func InspectImplementation(ctx context.Context, root string, id WorkItemID, endp
 			return ImplementationOutcome{}, err
 		}
 		history, err := InspectLedger(root, head, item.Branch, endpoints, implementationLedgerPolicy(item.State))
-		return ImplementationOutcome{Status: "inspected", Item: &item, Head: head, Ledger: &history}, err
+		if err != nil {
+			return ImplementationOutcome{}, err
+		}
+		main, err := primaryWorktree(root)
+		if err != nil {
+			return ImplementationOutcome{}, err
+		}
+		facts := skilldist.ImplementationFacts{Branch: item.Branch, Remote: remote, Worktree: filepath.Join(main, ".worktrees", item.Branch), SuppliedArtifactBaseline: endpoints.Baseline, SuppliedArtifactCompletion: endpoints.Completion,
+			ArtifactBaseline: history.Baseline, ArtifactCompletion: history.Completion, Inspection: inspectionFacts(history, head)}
+		if item.State == Rework {
+			facts.Procedure = skilldist.FindingDrivenRework
+		} else {
+			facts.Procedure = skilldist.ResumedSubmission
+		}
+		return ImplementationOutcome{Status: "inspected", Item: &item, Head: head, Ledger: &history, Facts: &skilldist.InvocationFacts{Implementation: &facts}}, nil
 	}
 	return ImplementationOutcome{Status: "fix_required", Reason: "Work Item unavailable; supply its explicit stable --item identity"}, nil
+}
+
+// inspectionFacts narrows the observed ledger state to the continuation that
+// applies. Unresolved violations come first: an `inspected` status with
+// violations never authorizes completion.
+func inspectionFacts(history LedgerHistory, head string) *skilldist.InspectionFacts {
+	facts := &skilldist.InspectionFacts{Violations: history.Violations}
+	switch {
+	case len(history.Violations) != 0:
+		facts.Progress = skilldist.LedgerViolations
+	case history.Completion != "" && history.Phase == "retired":
+		facts.Progress = skilldist.RetiredLedger
+	case history.Completion != "":
+		facts.Progress = skilldist.CompletionPresent
+	case head == history.Baseline:
+		facts.Progress = skilldist.BaselineOnly
+	default:
+		facts.Progress = skilldist.ProvisionalLedger
+	}
+	return facts
 }
 
 func StartImplementation(ctx context.Context, root, remote string, id WorkItemID, endpoints ArtifactEndpoints, backend ImplementationBackend) (ImplementationOutcome, error) {

@@ -337,3 +337,218 @@ func TestB3MetadataOnlyStartupBindsEveryAlreadyEstablishedReference(t *testing.T
 		})
 	}
 }
+
+// inspectionLedger writes one two-task ledger so the fixture can produce every
+// observable progress state an inspection must distinguish.
+func inspectionLedger(t *testing.T, root, intent string) {
+	t.Helper()
+	directory := filepath.Join(root, ".changes", "widget")
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, contents := range map[string]string{"intent.md": intent, "behavior.md": "# Behavior\n\nOne accepted scenario.\n"} {
+		if err := os.WriteFile(filepath.Join(directory, name), []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func inspectionFixture(t *testing.T, stage string) (string, string, *implementationMemory) {
+	t.Helper()
+	root := proposalRepository(t)
+	root = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "--show-toplevel"))
+	runGit(t, root, "switch", "-c", "widget", "main")
+	partial := "# Intent\n\n- [ ] First accepted task\n- [ ] Second accepted task\n"
+	completed := "# Intent\n\n- [x] First accepted task\n- [x] Second accepted task\n"
+	inspectionLedger(t, root, partial)
+	runGit(t, root, "add", ".changes/widget")
+	runGit(t, root, "commit", "-m", "[baseline] widget")
+	baseline := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	switch stage {
+	case "baseline-only":
+	case "provisional":
+		inspectionLedger(t, root, "# Intent\n\n- [x] First accepted task\n- [ ] Second accepted task\n")
+		if err := os.WriteFile(filepath.Join(root, "progress.txt"), []byte("preserved work\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, root, "add", "progress.txt", ".changes/widget")
+		runGit(t, root, "commit", "-m", "preserve partial work")
+	case "completion-present":
+		inspectionLedger(t, root, completed)
+		runGit(t, root, "add", ".changes/widget")
+		runGit(t, root, "commit", "-m", "[completion] widget")
+	case "retired", "retired-rework":
+		inspectionLedger(t, root, completed)
+		runGit(t, root, "add", ".changes/widget")
+		runGit(t, root, "commit", "-m", "[completion] widget")
+		runGit(t, root, "rm", "-r", ".changes/widget")
+		runGit(t, root, "commit", "-m", "retire widget")
+	default:
+		t.Fatalf("unknown stage %q", stage)
+	}
+	runGit(t, root, "switch", "main")
+	worktree := filepath.Join(root, ".worktrees", "widget")
+	runGit(t, root, "worktree", "add", worktree, "widget")
+	state := workflow.Ready
+	claimed := false
+	if stage == "retired-rework" {
+		state, claimed = workflow.Rework, true
+	}
+	backend := &implementationMemory{work: []workflow.ImplementationItem{
+		{ID: "1", Branch: "other", State: workflow.Ready, CreatedAt: "2026-02-01T00:00:00Z"},
+		{ID: "7", Branch: "widget", State: state, Claimed: claimed, CreatedAt: "2026-01-01T00:00:00Z"},
+	}}
+	return worktree, baseline, backend
+}
+
+// TestB4InspectionContinuesTheActualLedgerProgress materializes the B4 outline.
+func TestB4InspectionContinuesTheActualLedgerProgress(t *testing.T) {
+	cases := []struct {
+		stage        string
+		continuation []string
+	}{
+		{"baseline-only", []string{
+			"Only the Artifact Baseline is resolved and no completed work is recorded",
+			"create Completion only once every automated box is provably done",
+		}},
+		{"provisional", []string{
+			"partial completion ticks and preserved work",
+			"without restarting the tasks already marked done",
+		}},
+		{"completion-present", []string{
+			"A valid Artifact Completion already exists and the ledger is still present",
+			"Reuse that resolved Completion instead of creating a second one",
+			"remove the entire `.changes/widget/` ledger",
+		}},
+		{"retired", []string{
+			"The completed ledger is already retired",
+			"Keep it absent, reuse the resolved endpoints",
+			"without recreating it",
+		}},
+		{"retired-rework", []string{
+			"already retired during finding-driven Rework",
+			"resolve the supplied findings against the current PR comparison",
+			"read the historical accepted artifacts at the resolved endpoints instead of recreating the ledger",
+		}},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.stage, func(t *testing.T) {
+			worktree, baseline, backend := inspectionFixture(t, testCase.stage)
+			got := implementCLI(t, worktree, backend, "inspect", "--item", "7")
+			if got.Status != "inspected" || got.Packet == nil || got.Packet.Facts.Implementation == nil {
+				t.Fatalf("inspection = %#v", got)
+			}
+			continuation := got.Packet.Instructions
+			if got.Packet.Facts.Implementation.ArtifactBaseline != baseline || got.Packet.Facts.Implementation.Repository != "acme/widgets" || got.Packet.Facts.Implementation.Remote != "origin" || got.Packet.Facts.Implementation.WorkItem != 7 || got.Head != strings.TrimSpace(runGitOutput(t, worktree, "rev-parse", "HEAD")) {
+				t.Fatalf("inspection lost an established identity: %#v", got.Packet.Facts.Implementation)
+			}
+			for _, required := range append(testCase.continuation,
+				"Repository: acme/widgets on the selected remote `origin`",
+				"Work Item: #7",
+				"Branch: `widget`",
+				"Artifact Baseline: `"+baseline+"`",
+				"git -C '"+filepath.Join(filepath.Dir(filepath.Dir(worktree)), ".worktrees", "widget")+"' show '"+baseline+":.changes/widget/intent.md'",
+				"git -C '"+filepath.Join(filepath.Dir(filepath.Dir(worktree)), ".worktrees", "widget")+"' show '"+baseline+":.changes/widget/behavior.md'",
+			) {
+				if !strings.Contains(continuation, required) {
+					t.Errorf("continuation lacks %q:\n%s", required, continuation)
+				}
+			}
+			for _, forbidden := range []string{"## Included Skill:", "## The scope is already decided", "--artifact-"} {
+				if strings.Contains(continuation, forbidden) {
+					t.Errorf("continuation returned a full skill or an invented override: %q", forbidden)
+				}
+			}
+			if len(got.Packet.IncludedSkills) != 0 {
+				t.Errorf("continuation bundled definitions: %v", got.Packet.IncludedSkills)
+			}
+			if backend.work[1].Claimed != (testCase.stage == "retired-rework") || backend.work[0].Claimed {
+				t.Fatalf("inspection selected or claimed work: %#v", backend.work)
+			}
+		})
+	}
+}
+
+// TestB5InspectionViolationsAndStaleIntegrityCannotImplyReadiness materializes
+// the B5 scenario: an `inspected` status with violations is not readiness, and a
+// repeated inspection re-reads the worktree instead of replaying success.
+func TestB5InspectionViolationsAndStaleIntegrityCannotImplyReadiness(t *testing.T) {
+	const prose = "Prose that the accepted contract keeps unchanged.\n"
+	root := proposalRepository(t)
+	root = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "--show-toplevel"))
+	runGit(t, root, "switch", "-c", "widget", "main")
+	inspectionLedger(t, root, "# Intent\n\n"+prose+"\n- [ ] First accepted task\n- [ ] Second accepted task\n")
+	runGit(t, root, "add", ".changes/widget")
+	runGit(t, root, "commit", "-m", "[baseline] widget")
+	baseline := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	inspectionLedger(t, root, "# Intent\n\nA rewritten contract line.\n\n- [x] First accepted task\n- [x] Second accepted task\n")
+	runGit(t, root, "add", ".changes/widget")
+	runGit(t, root, "commit", "-m", "[completion] widget")
+	invalidCompletion := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	runGit(t, root, "switch", "main")
+	worktree := filepath.Join(root, ".worktrees", "widget")
+	runGit(t, root, "worktree", "add", worktree, "widget")
+	backend := &implementationMemory{work: []workflow.ImplementationItem{
+		{ID: "1", Branch: "other", State: workflow.Ready, CreatedAt: "2026-02-01T00:00:00Z"},
+		{ID: "7", Branch: "widget", State: workflow.Ready, Claimed: true, CreatedAt: "2026-01-01T00:00:00Z"},
+	}}
+
+	got := implementCLI(t, worktree, backend, "inspect", "--item", "7")
+	if got.Status != "inspected" || got.Packet == nil || got.Packet.Facts.Implementation == nil || got.Packet.Facts.Implementation.Inspection == nil {
+		t.Fatalf("inspection = %#v", got)
+	}
+	violations := got.Packet.Facts.Implementation.Inspection.Violations
+	if len(violations) == 0 || got.Packet.Facts.Implementation.Inspection.Progress != "violations" {
+		t.Fatalf("violations not observed: %#v", got.Packet.Facts.Implementation.Inspection)
+	}
+	continuation := got.Packet.Instructions
+	for _, violation := range violations {
+		if !strings.Contains(continuation, violation) {
+			t.Errorf("continuation hides the reported violation %q", violation)
+		}
+	}
+	for _, required := range []string{
+		"Repair or stop before doing anything else",
+		"none of them authorizes completion",
+		"Refresh integrity with `skl implement inspect --repo '" + worktree + "' --remote 'origin' --item 7` before editing, before Audit, and before handoff",
+		"never replays a cached success",
+	} {
+		if !strings.Contains(continuation, required) {
+			t.Errorf("continuation lacks %q:\n%s", required, continuation)
+		}
+	}
+	for _, forbidden := range []string{"## Observed progress", "create Completion only once", "Reuse that resolved Completion", "Keep it absent, reuse the resolved endpoints"} {
+		if strings.Contains(continuation, forbidden) {
+			t.Errorf("violations authorized completion with %q", forbidden)
+		}
+	}
+
+	// Repair inside the worktree, then observe the current evidence again.
+	inspectionLedger(t, worktree, "# Intent\n\n"+prose+"\n- [x] First accepted task\n- [x] Second accepted task\n")
+	runGit(t, worktree, "add", ".changes/widget")
+	runGit(t, worktree, "commit", "--amend", "-m", "[completion] widget")
+	repaired := strings.TrimSpace(runGitOutput(t, worktree, "rev-parse", "HEAD"))
+	if repaired == invalidCompletion {
+		t.Fatal("repair did not move the observed head")
+	}
+	again := implementCLI(t, worktree, backend, "inspect", "--item", "7")
+	facts := again.Packet.Facts.Implementation
+	if again.Status != "inspected" || facts.Inspection.Progress != "completion-present" || len(facts.Inspection.Violations) != 0 || facts.ArtifactCompletion != repaired {
+		t.Fatalf("repeated inspection replayed stale evidence: %#v", facts.Inspection)
+	}
+	if !strings.Contains(again.Packet.Instructions, "Reuse that resolved Completion instead of creating a second one") {
+		t.Fatalf("repaired continuation is not the applicable one:\n%s", again.Packet.Instructions)
+	}
+	markers := 0
+	for _, line := range strings.Split(runGitOutput(t, worktree, "log", "--format=%s", "HEAD"), "\n") {
+		if line == "[completion] widget" {
+			markers++
+		}
+	}
+	if markers != 1 || baseline == repaired {
+		t.Fatalf("repair duplicated Completion or moved the Baseline: markers=%d baseline=%s repaired=%s", markers, baseline, repaired)
+	}
+	if !backend.work[1].Claimed || backend.work[0].Claimed || len(backend.work) != 2 {
+		t.Fatalf("repair released the Claim or restarted selection: %#v", backend.work)
+	}
+}

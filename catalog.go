@@ -75,6 +75,27 @@ type ImplementationFacts struct {
 	SuppliedArtifactBaseline   string             `json:"supplied_artifact_baseline,omitempty"`
 	SuppliedArtifactCompletion string             `json:"supplied_artifact_completion,omitempty"`
 	ResumeCommand              string             `json:"resume_command"`
+	Inspection                 *InspectionFacts   `json:"inspection,omitempty"`
+}
+
+// InspectionProgress is the observed artifact-ledger progress of one prepared
+// worktree. It comes from the read-only inspection, never from a lifecycle
+// label, a branch name, or an attached Submission.
+type InspectionProgress string
+
+const (
+	BaselineOnly      InspectionProgress = "baseline-only"
+	ProvisionalLedger InspectionProgress = "provisional"
+	CompletionPresent InspectionProgress = "completion-present"
+	RetiredLedger     InspectionProgress = "retired"
+	LedgerViolations  InspectionProgress = "violations"
+)
+
+// InspectionFacts narrows one read-only inspection to the applicable
+// continuation. It is not a second full Execution Skill.
+type InspectionFacts struct {
+	Progress   InspectionProgress `json:"progress"`
+	Violations []string           `json:"violations,omitempty"`
 }
 
 // ImplementProcedure is the engine-established submission procedure for one
@@ -163,12 +184,18 @@ func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
 	if err != nil {
 		return Packet{}, err
 	}
-	for _, included := range dependencies[name] {
-		rendered, err := renderDefinition(definitionPaths[included], facts)
+	// A read-only inspection returns a narrow continuation, not another copy of
+	// every bundled definition.
+	included := dependencies[name]
+	if facts.Implementation != nil && facts.Implementation.Inspection != nil {
+		included = nil
+	}
+	for _, bundled := range included {
+		rendered, err := renderDefinition(definitionPaths[bundled], facts)
 		if err != nil {
 			return Packet{}, err
 		}
-		instructions += "\n\n## Included Skill: " + included + "\n\n" + rendered
+		instructions += "\n\n## Included Skill: " + bundled + "\n\n" + rendered
 	}
 	if f := facts.Watchdog; f != nil {
 		instructions += fmt.Sprintf("\n\n## Review Start\n\nWork Item: %s\nSubmission: %s\nWorktree: %s\nReviewed head: %s\nCompleted reviews: %d\nReview number: %d\nScope: %s; the comparison rule below applies after Git preparation\nPrepare: `%s` then `%s`; safely reuse a clean existing worktree instead of recreating it\nInspect: `%s` resolves the Artifact Baseline and Completion from the fetched history\nResume: `%s`\n\nRun the Inspect command after preparing the worktree, read the endpoint files from Git at the resolved Baseline and Completion, then use the opaque Submission body, prior findings, and human comments. Review the invocation's current head; rerun the Full Gate, active-finding verification, artifact checks, and whole-change critical-class scan. The engine has not run Audit or project checks.\n\nWrite `summary.md`, optional anchored findings, and on pass `submission.md` in %s. Run `%s --verdict <pass|rework|needs-human>`. Pass also requires `--body <result>/submission.md`; optional inline inputs use `--findings <result>/findings.json`. After permitted Debt Marker comments, commit and push, run the Post-Marker Check, and supply `--head <final-sha>` while retaining the original `--reviewed-head`.\n", f.WorkItemReference, f.SubmissionReference, f.Worktree, f.ReviewedHead, f.ReviewCount, f.ReviewNumber, f.ReviewScope, f.FetchCommand, f.WorktreeCommand, f.InspectCommand, f.ResumeCommand, f.ResultDirectory, f.SubmitCommand)
@@ -185,7 +212,7 @@ func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
 	return Packet{
 		Protocol:       InstructionProtocol,
 		Skill:          name,
-		IncludedSkills: append([]string(nil), dependencies[name]...),
+		IncludedSkills: append([]string(nil), included...),
 		Facts:          facts,
 		Resources:      resources,
 		Instructions:   instructions,

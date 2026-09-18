@@ -1890,7 +1890,7 @@ func TestImplementRequiresLifecycleObservations(t *testing.T) {
 			ID: "7", Branch: "widget", State: workflow.Ready, Claimed: true, Source: source,
 			Submission: &workflow.Submission{ID: "11", State: workflow.Rework},
 		}}}}
-		got, err := workflow.InspectImplementation(context.Background(), root, "7", workflow.ArtifactEndpoints{}, b)
+		got, err := workflow.InspectImplementation(context.Background(), root, "origin", "7", workflow.ArtifactEndpoints{}, b)
 		if err != nil || got.Item == nil || !strings.Contains(got.Item.Problem, "missing lifecycle observations") {
 			t.Fatalf("incomplete observation accepted: %#v, %v; item=%#v", got, err, got.Item)
 		}
@@ -2128,7 +2128,7 @@ func TestImplementInspectionUsesCurrentLifecycleWithoutResumeCursor(t *testing.T
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
 	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", Source: &workflow.LifecycleObservation{Open: true, States: []workflow.State{workflow.Ready}}}}}
-	got, err := workflow.InspectImplementation(context.Background(), root, "7", workflow.ArtifactEndpoints{}, b)
+	got, err := workflow.InspectImplementation(context.Background(), root, "origin", "7", workflow.ArtifactEndpoints{}, b)
 	if err != nil || got.Item.State != workflow.Ready {
 		t.Fatalf("inspection changed current lifecycle evidence: %#v, %v", got, err)
 	}

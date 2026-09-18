@@ -4,7 +4,7 @@ description: Implement a single claimed change following TDD, driven by the arti
 disable-model-invocation: true
 ---
 
-Implement a single change proposal, materializing each Gherkin scenario in `behavior.md` into an idiomatic test and following a red -> green loop using the `tdd` skill at the seams pinned in the change artifacts.
+{{if and .Implementation .Implementation.Inspection}}{{template "inspection" .Implementation}}{{else}}Implement a single change proposal, materializing each Gherkin scenario in `behavior.md` into an idiomatic test and following a red -> green loop using the `tdd` skill at the seams pinned in the change artifacts.
 
 If this packet carries Implementation facts, continue with that Work Item. Otherwise run `skl implement next` and follow its concrete packet. `no_work` ends the invocation. Resume interrupted work with `skl implement resume --item <number>` or from its conventional worktree with `skl implement resume`; ordinary selection skips Claims. On resume, inspect the selected branch, preserved files, applicable artifacts, and visible feedback to determine what remains; do not expect a persisted execution cursor. Keep the packet's retry commands. If the invocation supplied `--artifact-baseline <full-sha>` or `--artifact-completion <full-sha>`, preserve those exact flags and full SHAs on every generated or manually run resume, inspect, submit, and Needs Human command for this Work Item; never add override flags for endpoints resolved from markers.
 
@@ -90,4 +90,5 @@ The dedicated worktree, the selected project commits, and the artifact objects m
 {{template "evidence" .Implementation}}
 
 Write the opaque Result Document using the named template, then run `{{.Implementation.SubmitCommand}}`. If pausing, run `{{.Implementation.NeedsHumanCommand}}` and add `--body <result>/submission.md` when preserving implementation changes.
+{{end}}
 {{end}}

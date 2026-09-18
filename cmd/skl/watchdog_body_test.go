@@ -105,7 +105,7 @@ func TestGitHubWatchdogBodyObservation(t *testing.T) {
 			backend := setup.NewGitHubBackend(f.server.URL, "token", f.server.Client())
 			backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
 			ctx := context.Background()
-			inspected, err := workflow.InspectImplementation(ctx, f.root, "7", workflow.ArtifactEndpoints{}, backend)
+			inspected, err := workflow.InspectImplementation(ctx, f.root, "origin", "7", workflow.ArtifactEndpoints{}, backend)
 			if err != nil || inspected.Item == nil {
 				t.Fatalf("inspect: %#v, %v", inspected, err)
 			}

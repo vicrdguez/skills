@@ -99,3 +99,4 @@ A collection that was fetched completely and is empty is `fetched empty`. A stre
 
 Write the opaque Result Document using the named template, then run `skl implement submit --repo '<worktree>' --remote 'origin' --item 7 --body '<result>/submission.md'`. If pausing, run `skl implement needs-human --repo '<worktree>' --remote 'origin' --item 7 --reason <permitted-reason> --decision '<result>/decision.md'` and add `--body <result>/submission.md` when preserving implementation changes.
 
+
