@@ -43,3 +43,27 @@ func TestWatchdogNextDeliversCompleteFirstReviewInMarkdown(t *testing.T) {
 		t.Fatalf("startup prepared a worktree: %v", err)
 	}
 }
+
+func TestWatchdogInspectResolvesHistoricalReadsForFixedReview(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "widget")
+	completeAndRetireSlice(t, root, "widget")
+	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	backend := &implementationMemory{work: []workflow.ImplementationItem{{
+		ID: "7", Branch: "widget", State: workflow.AwaitingReview,
+		Submission: &workflow.Submission{ID: "11", Head: head, Base: "main"},
+	}}, remoteHeads: map[string]string{"widget": head}}
+	start := watchdogCLI(t, root, backend, "next")
+	facts := start.Packet.Facts.Watchdog
+	var output bytes.Buffer
+	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+	if err := app.Run([]string{"skl", "watchdog", "inspect", "--repo", facts.Worktree, "--item", "7", "--submission", "11", "--review-number", "1", "--reviewed-head", head, "--result-directory", facts.ResultDirectory}); err != nil {
+		t.Fatal(err)
+	}
+	got := output.String()
+	for _, want := range []string{"Work Item #7", head, "Artifact Baseline", "Artifact Completion", " show ", "intent.md", "behavior.md", "plan.md", "tasks.md", " diff ", "full"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("inspection missing %q: %.600s", want, got)
+		}
+	}
+}
