@@ -164,11 +164,17 @@ func PresentImplementation(outcome workflow.ImplementationOutcome) (Implementati
 		f.SubmitCommand += flags
 		f.FetchCommand = fmt.Sprintf("git -C %s fetch %s %s", quote(primary(f.Worktree)), quote(f.Remote), quote("+refs/heads/"+f.Branch+":refs/remotes/"+f.Remote+"/"+f.Branch))
 		f.WorktreeCommand = fmt.Sprintf("git -C %s worktree add -b %s %s %s", quote(primary(f.Worktree)), quote(f.Branch), quote(f.Worktree), quote(f.Remote+"/"+f.Branch))
-		f.InspectCommand = fmt.Sprintf("skl watchdog inspect --repo %s --remote %s --item %d --submission %d --review-number %d --reviewed-head %s --result-directory %s", quote(f.Worktree), quote(f.Remote), f.WorkItem, f.Submission, f.ReviewNumber, quote(f.ReviewedHead), quote(f.ResultDirectory))
+		f.InspectCommand = fmt.Sprintf("skl watchdog inspect --repo %s --remote %s --item %d --submission %d --base %s --submission-body-sha256 %s --review-number %d --reviewed-head %s --result-directory %s", quote(f.Worktree), quote(f.Remote), f.WorkItem, f.Submission, quote(f.SubmissionBase), quote(f.SubmissionBodySHA256), f.ReviewNumber, quote(f.ReviewedHead), quote(f.ResultDirectory))
 		if f.PreviousReviewedHead != "" {
 			f.InspectCommand += " --previous-reviewed-head " + quote(f.PreviousReviewedHead)
 		}
 		f.InspectCommand += flags
+		if f.Repository == "" {
+			if selected, err := ResolveRepository(primary(f.Worktree), f.Remote); err == nil {
+				f.Repository = selected.Repository.Owner + "/" + selected.Repository.Name
+			}
+		}
+		f.EvidenceInstructions = watchdogEvidenceInstructions(f)
 	}
 	packet, err := skilldist.BuildPacket(skill, facts)
 	if err != nil {

@@ -447,6 +447,9 @@ func selectionRun(t *testing.T, root string, forge *candidateForge, args ...stri
 	}, bytes.NewReader(nil), &output, &output)
 	command := append([]string{"skl"}, args...)
 	command = append(command, "--repo", root)
+	if len(args) > 0 && args[0] == "watchdog" {
+		command = append(command, "--format", "json")
+	}
 	err := app.Run(command)
 	if err != nil {
 		return setup.ImplementationOutput{}, err

@@ -14,7 +14,7 @@ import (
 func watchdogCommands(newBackend backendFactory, stdout io.Writer) []*cli.Command {
 	var commands []*cli.Command
 	for _, name := range []string{"next", "resume", "inspect", "submit"} {
-		commands = append(commands, &cli.Command{Name: name, Flags: []cli.Flag{&cli.PathFlag{Name: "repo", Value: "."}, &cli.StringFlag{Name: "remote"}, &cli.IntFlag{Name: "item"}, &cli.IntFlag{Name: "submission"}, &cli.StringFlag{Name: "format", Value: "markdown"}, &cli.Uint64Flag{Name: "review-number"}, &cli.StringFlag{Name: "previous-reviewed-head"}, &cli.StringFlag{Name: "result-directory"}, &cli.StringFlag{Name: "verdict"}, &cli.StringFlag{Name: "reviewed-head"}, &cli.PathFlag{Name: "summary"}, &cli.PathFlag{Name: "findings"}, &cli.PathFlag{Name: "body"}, &cli.StringFlag{Name: "head"}, &cli.StringFlag{Name: "artifact-baseline"}, &cli.StringFlag{Name: "artifact-completion"}}, Action: func(c *cli.Context) error {
+		commands = append(commands, &cli.Command{Name: name, Flags: []cli.Flag{&cli.PathFlag{Name: "repo", Value: "."}, &cli.StringFlag{Name: "remote"}, &cli.IntFlag{Name: "item"}, &cli.IntFlag{Name: "submission"}, &cli.StringFlag{Name: "base"}, &cli.StringFlag{Name: "submission-body-sha256"}, &cli.StringFlag{Name: "format", Value: "markdown"}, &cli.Uint64Flag{Name: "review-number"}, &cli.StringFlag{Name: "previous-reviewed-head"}, &cli.StringFlag{Name: "result-directory"}, &cli.StringFlag{Name: "verdict"}, &cli.StringFlag{Name: "reviewed-head"}, &cli.PathFlag{Name: "summary"}, &cli.PathFlag{Name: "findings"}, &cli.PathFlag{Name: "body"}, &cli.StringFlag{Name: "head"}, &cli.StringFlag{Name: "artifact-baseline"}, &cli.StringFlag{Name: "artifact-completion"}}, Action: func(c *cli.Context) error {
 			if c.String("format") != "markdown" && c.String("format") != "json" {
 				return fmt.Errorf("unsupported format %q: choose markdown or json", c.String("format"))
 			}
@@ -36,7 +36,7 @@ func watchdogCommands(newBackend backendFactory, stdout io.Writer) []*cli.Comman
 			var outcome workflow.ImplementationOutcome
 			endpoints := workflow.ArtifactEndpoints{Baseline: c.String("artifact-baseline"), Completion: c.String("artifact-completion")}
 			if name == "inspect" {
-				inspected, err := workflow.InspectWatchdog(c.Context, repository.Root, repository.Remote, workItemID(c.Int("item")), workflow.SubmissionID(workItemID(c.Int("submission"))), c.String("reviewed-head"), c.Uint64("review-number"), c.String("previous-reviewed-head"), c.String("result-directory"), endpoints, port)
+				inspected, err := workflow.InspectWatchdog(c.Context, repository.Root, repository.Remote, workItemID(c.Int("item")), workflow.SubmissionID(workItemID(c.Int("submission"))), c.String("base"), c.String("submission-body-sha256"), c.String("reviewed-head"), c.Uint64("review-number"), c.String("previous-reviewed-head"), c.String("result-directory"), endpoints, port)
 				if err != nil {
 					return err
 				}
@@ -61,9 +61,17 @@ func watchdogCommands(newBackend backendFactory, stdout io.Writer) []*cli.Comman
 			if err != nil {
 				var violation *workflow.InvariantError
 				if errors.As(err, &violation) {
-					return json.NewEncoder(stdout).Encode(workflow.ImplementationOutcome{Status: "fix_required", Reason: violation.Reason})
+					refusal := setup.ImplementationOutput{ImplementationOutcome: workflow.ImplementationOutcome{Status: "fix_required", Reason: violation.Reason}}
+					if c.String("format") == "json" {
+						return json.NewEncoder(stdout).Encode(refusal)
+					}
+					_, writeErr := fmt.Fprint(stdout, setup.WatchdogOutcomeMarkdown(refusal))
+					return writeErr
 				}
 				return err
+			}
+			if outcome.Facts != nil && outcome.Facts.Watchdog != nil {
+				outcome.Facts.Watchdog.Repository = repository.Repository.Owner + "/" + repository.Repository.Name
 			}
 			output, err := setup.PresentImplementation(outcome)
 			if err != nil {
@@ -76,7 +84,7 @@ func watchdogCommands(newBackend backendFactory, stdout io.Writer) []*cli.Comman
 				_, err = fmt.Fprint(stdout, output.Packet.Instructions)
 				return err
 			}
-			_, err = fmt.Fprintf(stdout, "Status: %s\n%s\n", output.Status, output.Reason)
+			_, err = fmt.Fprint(stdout, setup.WatchdogOutcomeMarkdown(output))
 			return err
 		}})
 	}

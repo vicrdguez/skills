@@ -42,22 +42,24 @@ type ImplementationItem struct {
 }
 
 type Submission struct {
-	Lifecycle       *LifecycleObservation
-	PendingReview   State
-	ClaimAcquiredAt string
-	BodyUpdatedAt   string
-	Merged          bool
-	Mergeability    string
-	CreatedAt       string
-	State           State
-	Claimed         bool
-	ID              SubmissionID
-	Branch          string
-	Head            string
-	Base            string
-	Body            string
-	Draft           bool
-	Comments        []skilldist.ReviewComment
+	Lifecycle        *LifecycleObservation
+	PendingReview    State
+	ClaimAcquiredAt  string
+	BodyUpdatedAt    string
+	Merged           bool
+	Mergeability     string
+	CreatedAt        string
+	State            State
+	Claimed          bool
+	ID               SubmissionID
+	Branch           string
+	Head             string
+	Base             string
+	Body             string
+	Draft            bool
+	Comments         []skilldist.ReviewComment
+	EvidenceComments []skilldist.ReviewComment
+	EvidenceStreams  []skilldist.EvidenceStream
 }
 
 // LifecycleObservation retains overlaps while a multi-record transition is in flight.

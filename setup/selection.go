@@ -342,11 +342,21 @@ func (b *GitHubBackend) submissionItem(ctx context.Context, pull githubPull) (wo
 		item.Synchronization = item.Synchronization || label.Name == "sync"
 	}
 	item = workflow.ReconcileImplementation(item)
-	comments, err := b.implementationComments(ctx, b.repository, fmt.Sprintf("/issues/%d/comments", owner))
+	recordEvidence := func(stream string, count int) {
+		state := "fetched"
+		if count == 0 {
+			state = "fetched_empty"
+		}
+		item.Submission.EvidenceStreams = append(item.Submission.EvidenceStreams, skilldist.EvidenceStream{Path: b.repositoryPath(b.repository) + stream, State: state})
+	}
+	sourceStream := fmt.Sprintf("/issues/%d/comments", owner)
+	comments, err := b.implementationComments(ctx, b.repository, sourceStream)
 	if err != nil {
 		return workflow.ImplementationItem{}, "", err
 	}
+	recordEvidence(sourceStream, len(comments))
 	for _, comment := range comments {
+		item.Submission.EvidenceComments = append(item.Submission.EvidenceComments, comment)
 		if strings.HasPrefix(comment.Body, "<!-- skl.implement/v1\n") {
 			continue
 		}
@@ -358,13 +368,17 @@ func (b *GitHubBackend) submissionItem(ctx context.Context, pull githubPull) (wo
 		if err != nil {
 			return workflow.ImplementationItem{}, "", err
 		}
+		recordEvidence(stream, len(comments))
 		item.Submission.Comments = append(item.Submission.Comments, comments...)
+		item.Submission.EvidenceComments = append(item.Submission.EvidenceComments, comments...)
 	}
 	reviews, err := b.implementationReviews(ctx, pull.Number)
 	if err != nil {
 		return workflow.ImplementationItem{}, "", err
 	}
+	recordEvidence(fmt.Sprintf("/pulls/%d/reviews", pull.Number), len(reviews))
 	item.Submission.Comments = append(item.Submission.Comments, reviews...)
+	item.Submission.EvidenceComments = append(item.Submission.EvidenceComments, reviews...)
 	return workflow.ReconcileImplementation(item), problem, nil
 }
 
@@ -735,7 +749,8 @@ func (b *GitHubBackend) implementationReviews(ctx context.Context, number int) (
 			} `json:"user"`
 		}
 		if err := b.request(ctx, http.MethodGet, b.repositoryPath(b.repository)+fmt.Sprintf("/pulls/%d/reviews?per_page=100&page=%d", number, page), nil, &reviews); err != nil {
-			return nil, err
+			path := strings.TrimPrefix(b.repositoryPath(b.repository)+fmt.Sprintf("/pulls/%d/reviews", number), "/")
+			return nil, fmt.Errorf("selected review summary stream %s page %d was not read completely: %w; retry the selected request or retrieve every page with `gh api --paginate %s` before judgment", path, page, err, skilldist.ShellQuote(path))
 		}
 		for _, review := range reviews {
 			verdict := map[string]string{"CHANGES_REQUESTED": "rework", "APPROVED": "pass", "COMMENTED": "needs-human"}[review.State]
@@ -751,7 +766,7 @@ func (b *GitHubBackend) implementationReviews(ctx context.Context, number int) (
 					finalHead = metadata.FinalHead
 				}
 			}
-			comments = append(comments, skilldist.ReviewComment{Body: body, Author: review.User.Login, Association: review.Association, Commit: review.Commit, FinalHead: finalHead, CreatedAt: review.SubmittedAt, Verdict: verdict, ReviewNumber: reviewNumber})
+			comments = append(comments, skilldist.ReviewComment{Source: b.repositoryPath(b.repository) + fmt.Sprintf("/pulls/%d/reviews", number), Body: body, Author: review.User.Login, Association: review.Association, Commit: review.Commit, FinalHead: finalHead, CreatedAt: review.SubmittedAt, Verdict: verdict, ReviewNumber: reviewNumber})
 		}
 		if len(reviews) < 100 {
 			return comments, nil

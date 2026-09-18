@@ -10,11 +10,15 @@ import (
 
 type WatchdogInspectionOutput struct {
 	workflow.ReviewInspection
-	Instructions string `json:"instructions"`
+	Item         *implementationItemOutput `json:"item,omitempty"`
+	Instructions string                    `json:"instructions"`
 }
 
 func PresentWatchdogInspection(root string, result workflow.ReviewInspection) WatchdogInspectionOutput {
 	output := WatchdogInspectionOutput{ReviewInspection: result}
+	if number, err := githubIssueNumber(result.Item); err == nil {
+		output.Item = &implementationItemOutput{Number: number, Branch: result.Branch}
+	}
 	var body strings.Builder
 	if result.Status != "inspected" {
 		fmt.Fprintf(&body, "Status: %s\n%s\n", result.Status, result.Reason)
@@ -28,9 +32,9 @@ func PresentWatchdogInspection(root string, result workflow.ReviewInspection) Wa
 	fmt.Fprintf(&body, "# Watchdog Inspection Continuation\n\nWork Item #%s, Submission #%s, review number %d. The original reviewed head remains `%s`. This is a read-only continuation of the same Claim; it neither selects work nor publishes a verdict. Preserve Result Documents in %s.\n\n", result.Item, result.Submission, result.ReviewNumber, result.ReviewedHead, q(result.ResultDirectory))
 	fmt.Fprintf(&body, "Artifact Baseline: `%s`\nArtifact Completion: `%s`\nLedger phase: %s. No endpoint violations were found.\n\n", result.Ledger.Baseline, result.Ledger.Completion, result.Ledger.Phase)
 	fmt.Fprintf(&body, "Read the complete historical contract at these exact endpoints:\n\n")
-	for _, file := range []string{"intent.md", "behavior.md", "plan.md", "tasks.md"} {
-		fmt.Fprintf(&body, "- `git -C %s show %s`\n", q(root), q(result.Ledger.Baseline+":.changes/"+result.Branch+"/"+file))
-		fmt.Fprintf(&body, "- `git -C %s show %s`\n", q(root), q(result.Ledger.Completion+":.changes/"+result.Branch+"/"+file))
+	for _, file := range result.Ledger.Files {
+		fmt.Fprintf(&body, "- `git -C %s show %s`\n", q(root), q(result.Ledger.Baseline+":"+file))
+		fmt.Fprintf(&body, "- `git -C %s show %s`\n", q(root), q(result.Ledger.Completion+":"+file))
 	}
 	fmt.Fprintf(&body, "\nCompare with `git -C %s diff %s`. ", q(root), q(result.Comparison))
 	if result.FallbackReason != "" {

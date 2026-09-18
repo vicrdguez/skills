@@ -8,6 +8,7 @@ import (
 	"path"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"text/template"
 )
@@ -27,30 +28,40 @@ const (
 )
 
 type WatchdogFacts struct {
-	WorkItemReference          string          `json:"-"`
-	SubmissionReference        string          `json:"-"`
-	Remote                     string          `json:"remote"`
-	Worktree                   string          `json:"worktree"`
-	FetchCommand               string          `json:"fetch_command"`
-	WorktreeCommand            string          `json:"worktree_command"`
-	InspectCommand             string          `json:"inspect_command"`
-	ResultDirectory            string          `json:"result_directory"`
-	SubmitCommand              string          `json:"submit_command"`
-	ResumeCommand              string          `json:"resume_command"`
-	ReviewCount                uint64          `json:"review_count"`
-	ReviewNumber               uint64          `json:"review_number"`
-	ReviewScope                ReviewScope     `json:"review_scope"`
-	PreviousReviewedHead       string          `json:"previous_reviewed_head,omitempty"`
-	WorkItem                   int             `json:"work_item"`
-	Submission                 int             `json:"submission"`
-	Branch                     string          `json:"branch"`
-	ReviewedHead               string          `json:"reviewed_head"`
-	ArtifactBaseline           string          `json:"artifact_baseline"`
-	ArtifactCompletion         string          `json:"artifact_completion"`
-	SuppliedArtifactBaseline   string          `json:"supplied_artifact_baseline,omitempty"`
-	SuppliedArtifactCompletion string          `json:"supplied_artifact_completion,omitempty"`
-	AuditBody                  string          `json:"audit_body"`
-	Comments                   []ReviewComment `json:"comments,omitempty"`
+	Repository                 string           `json:"repository,omitempty"`
+	EvidenceStreams            []EvidenceStream `json:"evidence_streams,omitempty"`
+	EvidenceInstructions       string           `json:"evidence_instructions,omitempty"`
+	WorkItemReference          string           `json:"-"`
+	SubmissionReference        string           `json:"-"`
+	Remote                     string           `json:"remote"`
+	Worktree                   string           `json:"worktree"`
+	FetchCommand               string           `json:"fetch_command"`
+	WorktreeCommand            string           `json:"worktree_command"`
+	InspectCommand             string           `json:"inspect_command"`
+	ResultDirectory            string           `json:"result_directory"`
+	SubmitCommand              string           `json:"submit_command"`
+	ResumeCommand              string           `json:"resume_command"`
+	ReviewCount                uint64           `json:"review_count"`
+	ReviewNumber               uint64           `json:"review_number"`
+	ReviewScope                ReviewScope      `json:"review_scope"`
+	PreviousReviewedHead       string           `json:"previous_reviewed_head,omitempty"`
+	WorkItem                   int              `json:"work_item"`
+	Submission                 int              `json:"submission"`
+	Branch                     string           `json:"branch"`
+	ReviewedHead               string           `json:"reviewed_head"`
+	SubmissionBase             string           `json:"submission_base"`
+	SubmissionBodySHA256       string           `json:"submission_body_sha256"`
+	ArtifactBaseline           string           `json:"artifact_baseline"`
+	ArtifactCompletion         string           `json:"artifact_completion"`
+	SuppliedArtifactBaseline   string           `json:"supplied_artifact_baseline,omitempty"`
+	SuppliedArtifactCompletion string           `json:"supplied_artifact_completion,omitempty"`
+	AuditBody                  string           `json:"audit_body"`
+	Comments                   []ReviewComment  `json:"comments,omitempty"`
+}
+
+type EvidenceStream struct {
+	Path  string `json:"path"`
+	State string `json:"state"`
 }
 
 type ImplementationFacts struct {
@@ -86,6 +97,7 @@ const (
 )
 
 type ReviewComment struct {
+	Source          string `json:"source,omitempty"`
 	Line            int    `json:"line,omitempty"`
 	Side            string `json:"side,omitempty"`
 	Body            string `json:"body"`
@@ -189,7 +201,23 @@ func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
 }
 
 // templateFuncs is the deliberately small helper set authored templates share.
-var templateFuncs = template.FuncMap{"quote": ShellQuote}
+var templateFuncs = template.FuncMap{"quote": ShellQuote, "evidence": evidenceBlock, "anchor": anchorValue}
+
+func anchorValue(line *int) string {
+	if line == nil {
+		return "null"
+	}
+	return strconv.Itoa(*line)
+}
+
+// evidenceBlock chooses a fence that cannot be closed by opaque Markdown data.
+func evidenceBlock(body string) string {
+	fence := "```"
+	for strings.Contains(body, fence) {
+		fence += "`"
+	}
+	return fence + "\n" + body + "\n" + fence
+}
 
 // ShellQuote renders value as one POSIX shell word without changing any of its
 // characters.

@@ -78,6 +78,9 @@ func waitingCLI(t *testing.T, ctx context.Context, root, lane string, b *waiting
 		return b, nil
 	}, nil, &out, &stderr)
 	args := append([]string{"skl", lane, "next", "--repo", root, "--remote", "upstream"}, options...)
+	if lane == "watchdog" {
+		args = append(args, "--format", "json")
+	}
 	err := app.RunContext(ctx, args)
 	var got setup.ImplementationOutput
 	if err != nil && out.Len() != 0 {

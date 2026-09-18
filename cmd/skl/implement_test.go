@@ -1364,7 +1364,16 @@ func TestImplementBundlesInstructionsWithoutTargetPin(t *testing.T) {
 		"audit":    {"merge-base with `main`", "explicitly supplies", "Artifact Baseline"},
 	} {
 		output.Reset()
-		err := app.Run([]string{"skl", "skill", skill})
+		var err error
+		if skill == "watchdog" {
+			var packet skilldist.Packet
+			packet, err = skilldist.BuildPacket("watchdog", skilldist.InvocationFacts{Watchdog: &skilldist.WatchdogFacts{WorkItem: 7, Submission: 11}})
+			if err == nil {
+				output.WriteString(packet.Instructions)
+			}
+		} else {
+			err = app.Run([]string{"skl", "skill", skill})
+		}
 		missing := ""
 		for _, text := range required {
 			if !strings.Contains(output.String(), text) {

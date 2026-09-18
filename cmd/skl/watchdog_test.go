@@ -562,7 +562,7 @@ func TestWatchdogPacketCarriesHistoricalContractAndSemanticHandoff(t *testing.T)
 	baseline := prepareSlice(t, root, "widget")
 	completeAndRetireSlice(t, root, "widget")
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
-	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Submission: &workflow.Submission{ID: "11", Head: head, Body: "opaque audit", Comments: []skilldist.ReviewComment{{Body: "W1 prior", Commit: baseline}}}}}}
+	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Submission: &workflow.Submission{ID: "11", Head: head, Base: "main", Body: "opaque audit", Comments: []skilldist.ReviewComment{{Body: "W1 prior", Commit: baseline}}}}}}
 	got := watchdogCLI(t, root, b, "next")
 	f := got.Packet.Facts.Watchdog
 	if f.InspectCommand == "" || f.FetchCommand == "" || f.WorktreeCommand == "" || f.ReviewCount != 0 || f.ReviewNumber != 1 || !strings.Contains(f.SubmitCommand, "--review-number 1 --reviewed-head "+head) {
@@ -572,7 +572,8 @@ func TestWatchdogPacketCarriesHistoricalContractAndSemanticHandoff(t *testing.T)
 	if !ok {
 		t.Fatal("missing concrete review instructions")
 	}
-	normalized := strings.NewReplacer(f.Worktree, "<worktree>", f.ResultDirectory, "<result>", head, "<head>", filepath.Dir(filepath.Dir(f.Worktree)), "<main>", baseline, "<baseline>").Replace("## Review Start\n" + body)
+	header, _, _ := strings.Cut("## Review Start\n"+body, "\n\n## Supplied Submission body and Audit ledger")
+	normalized := strings.NewReplacer(f.Worktree, "<worktree>", f.ResultDirectory, "<result>", head, "<head>", filepath.Dir(filepath.Dir(f.Worktree)), "<main>", baseline, "<baseline>").Replace(header + "\n")
 	if want := readRepositoryFile(t, "cmd/skl/testdata/watchdog-start.golden.md"); normalized != want {
 		t.Fatalf("packet golden mismatch:\n%s", normalized)
 	}

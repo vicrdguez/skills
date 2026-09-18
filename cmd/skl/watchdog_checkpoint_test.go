@@ -1749,6 +1749,9 @@ func (f *reviewFixture) runJSON(caller string, args ...string) ([]byte, error) {
 	}, bytes.NewReader(nil), &output, &output)
 	command := append([]string{"skl"}, args...)
 	command = append(command, "--repo", caller)
+	if len(args) > 0 && args[0] == "watchdog" {
+		command = append(command, "--format", "json")
+	}
 	if err := app.Run(command); err != nil {
 		return nil, fmt.Errorf("%v: %w: %s", command, err, &output)
 	}
@@ -1868,14 +1871,14 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 				for _, started := range []setup.ImplementationOutput{f.start(t, f.root), f.run(t, f.root, "watchdog", "resume", "--item", "7")} {
 					facts := started.Packet.Facts.Watchdog
 					// Scope is decided after Git preparation; startup defers it.
-					if facts.ReviewCount != tc.count || facts.ReviewNumber != tc.number || string(facts.ReviewScope) != "full" {
+					if facts.ReviewCount != tc.count || facts.ReviewNumber != tc.number || facts.ReviewScope != "" {
 						t.Fatalf("facts = %#v", facts)
 					}
 					if tc.count > 0 {
-						if facts.PreviousReviewedHead != checkpointHead || !strings.Contains(started.Packet.Instructions, checkpointHead+"..."+f.head) {
+						if facts.PreviousReviewedHead != checkpointHead || !strings.Contains(facts.InspectCommand, "--previous-reviewed-head '"+checkpointHead+"'") {
 							t.Fatalf("previous revision fallback missing: %#v\n%s", facts, started.Packet.Instructions)
 						}
-					} else if facts.PreviousReviewedHead != "" || !strings.Contains(started.Packet.Instructions, "Review the full PR comparison") {
+					} else if facts.PreviousReviewedHead != "" || !strings.Contains(started.Packet.Instructions, "No previous completed review reference") {
 						t.Fatalf("full fallback missing: %#v\n%s", facts, started.Packet.Instructions)
 					}
 					if checkpointSnapshot(f.checkpoint) != before {
@@ -1923,7 +1926,7 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 		before := checkpointSnapshot(f.checkpoint)
 		started := f.start(t, f.root)
 		first := started.Packet.Facts.Watchdog
-		if first.ReviewedHead != f.head || first.ReviewCount != 1 || first.ReviewNumber != 2 || first.PreviousReviewedHead != prior || started.Packet.Facts.Watchdog.WorkItem != 7 || checkpointSnapshot(f.checkpoint) != before || len(first.Comments) != 0 {
+		if first.ReviewedHead != f.head || first.ReviewCount != 1 || first.ReviewNumber != 2 || first.PreviousReviewedHead != prior || started.Packet.Facts.Watchdog.WorkItem != 7 || checkpointSnapshot(f.checkpoint) != before || len(first.Comments) != 1 || first.Comments[0].Body != stale {
 			t.Fatalf("stale forge metadata affected local checkpoint: %#v", first)
 		}
 		runGit(t, f.worktree, "commit", "--allow-empty", "-m", "move")
@@ -1989,7 +1992,7 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 				}
 				got := f.run(t, f.root, args...)
 				facts := got.Packet.Facts.Watchdog
-				if got.Status != "work_available" || facts.ReviewCount != 0 || facts.ReviewNumber != 1 || facts.ReviewScope != "full" || facts.PreviousReviewedHead != "" || !slices.Contains(f.forge.labels, "wip") || command == "resume" && !slices.Equal(f.forge.labels, labels) {
+				if got.Status != "work_available" || facts.ReviewCount != 0 || facts.ReviewNumber != 1 || facts.ReviewScope != "" || facts.PreviousReviewedHead != "" || !slices.Contains(f.forge.labels, "wip") || command == "resume" && !slices.Equal(f.forge.labels, labels) {
 					t.Fatalf("missing selected worktree did not start a fresh review through %s: %#v", command, got)
 				}
 			})
@@ -2814,7 +2817,7 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 			}
 			for _, result := range []setup.ImplementationOutput{f.start(t, f.root), f.run(t, f.root, "watchdog", "resume", "--item", "7")} {
 				facts := result.Packet.Facts.Watchdog
-				if facts.ReviewCount != 1 || facts.ReviewNumber != 2 || facts.ReviewScope != "full" || facts.PreviousReviewedHead != prior || !strings.Contains(result.Packet.Instructions, prior+"..."+facts.ReviewedHead) || checkpointSnapshot(f.checkpoint) != before {
+				if facts.ReviewCount != 1 || facts.ReviewNumber != 2 || facts.ReviewScope != "" || facts.PreviousReviewedHead != prior || !strings.Contains(facts.InspectCommand, "--previous-reviewed-head '"+prior+"'") || checkpointSnapshot(f.checkpoint) != before {
 					t.Fatalf("retained review facts: %#v checkpoint=%q", facts, checkpointSnapshot(f.checkpoint))
 				}
 			}
@@ -2999,7 +3002,7 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 		f.checkpoint = filepath.Join(newGitDir, ".watchdog")
 		f.forge.checkpointPath = f.checkpoint
 		facts := f.start(t, f.root).Packet.Facts.Watchdog
-		if facts.ReviewCount != 0 || facts.ReviewNumber != 1 || facts.ReviewScope != "full" {
+		if facts.ReviewCount != 0 || facts.ReviewNumber != 1 || facts.ReviewScope != "" {
 			t.Fatalf("recreated facts: %#v", facts)
 		}
 		dir := t.TempDir()
