@@ -66,6 +66,8 @@ type ImplementationFacts struct {
 	SubmitCommand              string              `json:"submit_command"`
 	Procedure                  ImplementProcedure  `json:"procedure,omitempty"`
 	Submission                 int                 `json:"submission,omitempty"`
+	SubmissionBody             *SubmissionEvidence `json:"submission_body,omitempty"`
+	EvidenceStreams            []EvidenceStream    `json:"evidence_streams,omitempty"`
 	Comments                   []ReviewComment     `json:"comments,omitempty"`
 	WorkItem                   int                 `json:"work_item"`
 	Branch                     string              `json:"branch"`
@@ -148,6 +150,30 @@ type ReviewComment struct {
 
 	// EvidenceAuthorized is the backend's assertion that a comment may count as published evidence.
 	EvidenceAuthorized bool `json:"evidence_authorized,omitempty"`
+	// Source is the observed repository-bound stream this body came from. It is
+	// part of the labeled evidence, never a rendering input.
+	Source string `json:"source,omitempty"`
+}
+
+// EvidenceStream is one required repository-bound evidence source. Bodies is how
+// many source bodies the invocation actually observed on it; Command is the
+// retrieval command the worker still has to run when it was never observed.
+// `fetched empty` (observed, zero bodies), `pending` (Command set), and
+// `retrieval failure` (an error rather than a rendered state) are different.
+type EvidenceStream struct {
+	Source  string `json:"source"`
+	Bodies  int    `json:"bodies"`
+	Command string `json:"command,omitempty"`
+}
+
+// SubmissionEvidence is the attached Submission's own source body, preserved
+// whole and labeled as data.
+type SubmissionEvidence struct {
+	Source      string `json:"source"`
+	Author      string `json:"author,omitempty"`
+	Association string `json:"association,omitempty"`
+	CreatedAt   string `json:"created_at,omitempty"`
+	Body        string `json:"body"`
 }
 
 type Packet struct {

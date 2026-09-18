@@ -28,6 +28,7 @@ type implementationItemOutput struct {
 	Synchronization bool
 	Problem         string
 	Submission      *submissionOutput
+	EvidenceSources []string
 	Branch          string
 	Number          int
 	State           workflow.State
@@ -37,18 +38,21 @@ type implementationItemOutput struct {
 }
 
 type submissionOutput struct {
-	PendingReview workflow.State
-	Merged        bool
-	Mergeability  string
-	CreatedAt     string
-	State         workflow.State
-	Claimed       bool
-	Number        int
-	Head          string
-	Base          string
-	Body          string
-	Draft         bool
-	Comments      []skilldist.ReviewComment
+	PendingReview   workflow.State
+	Merged          bool
+	Mergeability    string
+	CreatedAt       string
+	State           workflow.State
+	Claimed         bool
+	Number          int
+	Head            string
+	Base            string
+	Body            string
+	Author          string
+	Association     string
+	Draft           bool
+	Comments        []skilldist.ReviewComment
+	EvidenceSources []string
 }
 
 type StatusOutput struct {
@@ -60,8 +64,9 @@ type StatusOutput struct {
 func presentItem(item workflow.ImplementationItem) (implementationItemOutput, error) {
 	output := implementationItemOutput{
 		Synchronization: item.Synchronization, Problem: item.Problem,
-		Branch: item.Branch,
-		State:  item.State, CreatedAt: item.CreatedAt, Claimed: item.Claimed,
+		EvidenceSources: item.EvidenceSources,
+		Branch:          item.Branch,
+		State:           item.State, CreatedAt: item.CreatedAt, Claimed: item.Claimed,
 	}
 	var err error
 	if item.ID != "" {
@@ -83,13 +88,61 @@ func presentItem(item workflow.ImplementationItem) (implementationItemOutput, er
 			PendingReview: s.PendingReview,
 			Merged:        s.Merged, Mergeability: s.Mergeability,
 			CreatedAt: s.CreatedAt, State: s.State, Claimed: s.Claimed,
-			Head: s.Head, Base: s.Base, Body: s.Body, Draft: s.Draft, Comments: s.Comments,
+			Head: s.Head, Base: s.Base, Body: s.Body, Author: s.Author, Association: s.Association, Draft: s.Draft, Comments: s.Comments, EvidenceSources: s.EvidenceSources,
 		}
 		if item.Submission.ID != "" {
 			output.Submission.Number, err = githubIssueNumber(workflow.WorkItemID(item.Submission.ID))
 		}
 	}
 	return output, err
+}
+
+// requiredEvidenceStreams is the complete set of repository-bound sources one
+// Implement execution may need: the attached Submission's own body and its three
+// discussion streams, plus the source Work Item's comments. A stream the
+// invocation never observed keeps its retrieval command, so `pending` is never
+// reported as `fetched empty`.
+func evidenceStreams(item *implementationItemOutput, f skilldist.ImplementationFacts) []skilldist.EvidenceStream {
+	observed := map[string]bool{}
+	for _, source := range item.EvidenceSources {
+		observed[source] = true
+	}
+	if item.Submission != nil {
+		for _, source := range item.Submission.EvidenceSources {
+			observed[source] = true
+		}
+	}
+	counts := map[string]int{}
+	for _, comment := range f.Comments {
+		if comment.Source == "" {
+			continue
+		}
+		counts[comment.Source]++
+	}
+	required := []struct{ source, command string }{
+		{fmt.Sprintf("repos/%s/issues/%d/comments", f.Repository, f.WorkItem), fmt.Sprintf("gh api --paginate repos/%s/issues/%d/comments", f.Repository, f.WorkItem)},
+	}
+	if f.Submission != 0 {
+		required = append(required,
+			struct{ source, command string }{fmt.Sprintf("repos/%s/pulls/%d", f.Repository, f.Submission), fmt.Sprintf("gh api repos/%s/pulls/%d", f.Repository, f.Submission)},
+			struct{ source, command string }{fmt.Sprintf("repos/%s/issues/%d/comments", f.Repository, f.Submission), fmt.Sprintf("gh api --paginate repos/%s/issues/%d/comments", f.Repository, f.Submission)},
+			struct{ source, command string }{fmt.Sprintf("repos/%s/pulls/%d/reviews", f.Repository, f.Submission), fmt.Sprintf("gh api --paginate repos/%s/pulls/%d/reviews", f.Repository, f.Submission)},
+			struct{ source, command string }{fmt.Sprintf("repos/%s/pulls/%d/comments", f.Repository, f.Submission), fmt.Sprintf("gh api --paginate repos/%s/pulls/%d/comments", f.Repository, f.Submission)},
+		)
+	}
+	var streams []skilldist.EvidenceStream
+	for _, stream := range required {
+		if !observed[stream.source] {
+			streams = append(streams, skilldist.EvidenceStream{Source: stream.source, Command: stream.command})
+			continue
+		}
+		bodies := counts[stream.source]
+		if f.SubmissionBody != nil && f.SubmissionBody.Source == stream.source {
+			bodies++
+		}
+		streams = append(streams, skilldist.EvidenceStream{Source: stream.source, Bodies: bodies})
+	}
+	return streams
 }
 
 // primary returns the main worktree the conventional worktree is attached to.
@@ -138,9 +191,17 @@ func PresentImplementation(outcome workflow.ImplementationOutcome, invocation In
 		if f.Procedure == "" {
 			f.Procedure = skilldist.InitialSubmission
 		}
-		if output.Item.Submission != nil {
-			f.Submission = output.Item.Submission.Number
+		if submission := output.Item.Submission; submission != nil {
+			f.Submission = submission.Number
+			f.SubmissionBody = &skilldist.SubmissionEvidence{
+				Source:      fmt.Sprintf("repos/%s/pulls/%d", f.Repository, submission.Number),
+				Author:      submission.Author,
+				Association: submission.Association,
+				CreatedAt:   submission.CreatedAt,
+				Body:        submission.Body,
+			}
 		}
+		f.EvidenceStreams = evidenceStreams(output.Item, f)
 		f.ResumeCommand = fmt.Sprintf("skl implement resume --item %d", f.WorkItem)
 		f.ResumeCommand += " --remote " + quote(f.Remote)
 		flags := endpointFlags(f.SuppliedArtifactBaseline, f.SuppliedArtifactCompletion)

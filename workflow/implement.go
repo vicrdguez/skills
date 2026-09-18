@@ -26,11 +26,15 @@ const (
 )
 
 type ImplementationItem struct {
-	Source                *LifecycleObservation
-	Synchronization       bool
-	Problem               string
-	Submission            *Submission
-	Feedback              []skilldist.ReviewComment
+	Source          *LifecycleObservation
+	Synchronization bool
+	Problem         string
+	Submission      *Submission
+	Feedback        []skilldist.ReviewComment
+	// EvidenceSources names the repository-bound feedback streams the last
+	// observation actually read. A required stream missing from this list is
+	// pending for the worker, not evidence of an empty review.
+	EvidenceSources       []string
 	Branch                string
 	ID                    WorkItemID
 	Order                 int
@@ -56,8 +60,14 @@ type Submission struct {
 	Head            string
 	Base            string
 	Body            string
+	Author          string
+	Association     string
 	Draft           bool
 	Comments        []skilldist.ReviewComment
+	// EvidenceSources names the repository-bound streams the last observation
+	// actually read for this Submission. A required stream missing from this
+	// list is pending for the worker, not evidence of an empty review.
+	EvidenceSources []string
 }
 
 // LifecycleObservation retains overlaps while a multi-record transition is in flight.

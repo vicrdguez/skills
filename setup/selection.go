@@ -293,10 +293,12 @@ func (b *GitHubBackend) selectedReady(ctx context.Context, id workflow.WorkItemI
 	if len(owners) != 0 {
 		problem = "another active Submission already owns the Work Item; inspect its attachment instead of reassigning it"
 	}
-	comments, err := b.implementationComments(ctx, b.repository, fmt.Sprintf("/issues/%d/comments", issue.Number))
+	stream := fmt.Sprintf("/issues/%d/comments", issue.Number)
+	comments, err := b.implementationComments(ctx, b.repository, stream)
 	if err != nil {
 		return workflow.ImplementationItem{}, err
 	}
+	item.EvidenceSources = append(item.EvidenceSources, fmt.Sprintf("repos/%s/%s%s", b.repository.Owner, b.repository.Name, stream))
 	for _, comment := range comments {
 		if strings.HasPrefix(comment.Body, "<!-- skl.implement/v1\n") {
 			continue
@@ -334,6 +336,7 @@ func (b *GitHubBackend) submissionItem(ctx context.Context, pull githubPull) (wo
 		Source: implementationLifecycle(issue),
 		Submission: &workflow.Submission{
 			ID: workflow.SubmissionID(strconv.Itoa(pull.Number)), Head: pull.Head.SHA, Base: pull.Base.Ref, Draft: pull.Draft, Body: pull.Body,
+			Author: pull.User.Login, Association: pull.AuthorAssociation,
 			CreatedAt: pull.CreatedAt, Lifecycle: implementationLifecycle(pull.githubIssue),
 		},
 	}
@@ -353,17 +356,24 @@ func (b *GitHubBackend) submissionItem(ctx context.Context, pull githubPull) (wo
 		item.Feedback = append(item.Feedback, comment)
 		item.Submission.Comments = append(item.Submission.Comments, comment)
 	}
+	prefix := fmt.Sprintf("repos/%s/%s", b.repository.Owner, b.repository.Name)
+	item.Submission.EvidenceSources = []string{
+		fmt.Sprintf("%s/pulls/%d", prefix, pull.Number),
+		fmt.Sprintf("%s/issues/%d/comments", prefix, owner),
+	}
 	for _, stream := range []string{fmt.Sprintf("/issues/%d/comments", pull.Number), fmt.Sprintf("/pulls/%d/comments", pull.Number)} {
 		comments, err := b.implementationComments(ctx, b.repository, stream)
 		if err != nil {
 			return workflow.ImplementationItem{}, "", err
 		}
+		item.Submission.EvidenceSources = append(item.Submission.EvidenceSources, prefix+stream)
 		item.Submission.Comments = append(item.Submission.Comments, comments...)
 	}
 	reviews, err := b.implementationReviews(ctx, pull.Number)
 	if err != nil {
 		return workflow.ImplementationItem{}, "", err
 	}
+	item.Submission.EvidenceSources = append(item.Submission.EvidenceSources, fmt.Sprintf("%s/pulls/%d/reviews", prefix, pull.Number))
 	item.Submission.Comments = append(item.Submission.Comments, reviews...)
 	return workflow.ReconcileImplementation(item), problem, nil
 }
@@ -751,7 +761,8 @@ func (b *GitHubBackend) implementationReviews(ctx context.Context, number int) (
 					finalHead = metadata.FinalHead
 				}
 			}
-			comments = append(comments, skilldist.ReviewComment{Body: body, Author: review.User.Login, Association: review.Association, Commit: review.Commit, FinalHead: finalHead, CreatedAt: review.SubmittedAt, Verdict: verdict, ReviewNumber: reviewNumber})
+			comments = append(comments, skilldist.ReviewComment{Body: body, Author: review.User.Login, Association: review.Association, Commit: review.Commit, FinalHead: finalHead, CreatedAt: review.SubmittedAt, Verdict: verdict, ReviewNumber: reviewNumber,
+				Source: fmt.Sprintf("repos/%s/%s/pulls/%d/reviews", b.repository.Owner, b.repository.Name, number)})
 		}
 		if len(reviews) < 100 {
 			return comments, nil
