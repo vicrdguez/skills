@@ -1,3 +1,9 @@
+Protocol: skl.instructions/v1
+Skill: tdd
+Included skills: none
+Facts: {}
+Resources: reference/mocking.md, reference/tests.md
+
 ---
 name: tdd
 description: Test-driven development. Use it when the user wants to build features or fix bugs test-first. mentions red-green-refactor, or wants integration tests.
@@ -20,11 +26,10 @@ See `skl skill --resource reference/tests.md tdd` for examples and `skl skill --
 
 A **seam** is the public boundary you test at: the interface where you observe behavior without reaching inside (full vocabulary in `design`). Tests live at seams, never against internals.
 
-{{if .Implementation}}**Test only at the pinned seams.** This execution's seams are pinned in the accepted artifacts, `plan.md` and `behavior.md`, which are the pre-agreement: no test is written at an unconfirmed seam, and you never ask again for a seam the accepted artifacts already name. A scenario that genuinely needs a seam the artifacts do not name is a contradiction to raise at the human pause, not a new question here. You can't test everything — the pinned seams are where testing effort lands.
-{{else}}**Test only at pre-agreed seams.** Before writing any test, write down the seams under test and confirm them with the user — unless they are already pinned in the change artifacts (`plan.md` / `behavior.md`), which count as the pre-agreement. No test is written at an unconfirmed seam. You can't test everything — agreeing the seams up front is how testing effort lands on the critical paths and complex logic instead of every edge case.
+**Test only at pre-agreed seams.** Before writing any test, write down the seams under test and confirm them with the user — unless they are already pinned in the change artifacts (`plan.md` / `behavior.md`), which count as the pre-agreement. No test is written at an unconfirmed seam. You can't test everything — agreeing the seams up front is how testing effort lands on the critical paths and complex logic instead of every edge case.
 
 Ask: "What's the public interface, and which seams should we test?"
-{{end}}
+
 
 ## Anti-patterns
 

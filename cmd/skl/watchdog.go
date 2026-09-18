@@ -50,7 +50,7 @@ func watchdogCommands(newBackend backendFactory, stdout io.Writer) []*cli.Comman
 				}
 				return err
 			}
-			output, err := setup.PresentImplementation(outcome)
+			output, err := setup.PresentImplementation(outcome, setup.InvocationContext{Repository: repository.Repository})
 			if err != nil {
 				return err
 			}
