@@ -106,7 +106,7 @@ func TestCommandSignalProcess(t *testing.T) {
 		if r.Method == http.MethodGet && r.URL.Path == "/repos/acme/widgets" {
 			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"default_branch":"main"}`)), Header: make(http.Header)}, nil
 		}
-		if r.Method == http.MethodGet && r.URL.Path == "/repos/acme/widgets/issues" {
+		if r.Method == http.MethodGet && r.URL.Path == "/repos/acme/widgets/issues" || r.Method == http.MethodPost && r.URL.Path == "/graphql" {
 			fmt.Fprintln(os.Stdout, "observation")
 			<-r.Context().Done()
 			return nil, r.Context().Err()

@@ -26,6 +26,11 @@ func loadReviewCheckpoint(root, branch string) (reviewCheckpoint, error) {
 		return reviewCheckpoint{}, fmt.Errorf("resolve selected Work Item worktree: %w", err)
 	}
 	worktree := filepath.Join(main, ".worktrees", branch)
+	if _, err := os.Stat(worktree); errors.Is(err, os.ErrNotExist) {
+		// Startup must not require a prepared checkout; a missing dedicated
+		// worktree has no retained checkpoint and starts a full review.
+		return reviewCheckpoint{ObjectIDWidth: 40}, nil
+	}
 	gitDir, err := git(worktree, "rev-parse", "--absolute-git-dir")
 	if err != nil {
 		return reviewCheckpoint{}, fmt.Errorf("resolve private Git directory for selected Work Item worktree %s: %w", worktree, err)
