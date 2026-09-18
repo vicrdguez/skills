@@ -1781,6 +1781,59 @@ func TestRenderImplementDecisionInstructions(t *testing.T) {
 	}
 }
 
+func TestRenderWatchdogReviewInstructions(t *testing.T) {
+	obligations := []string{
+		"W<n>",
+		"identity",
+		"monotonic",
+		"owner",
+		"member",
+		"collaborator",
+		"after the finding",
+		"case-insensitive",
+		"latest authorized directive wins",
+		"WAIVE",
+		"BLOCK",
+		"NOTE",
+		"reactions",
+		"silence",
+		"deleted",
+		"findings.json",
+		"verdict",
+		"Manual Verification",
+		"unchecked",
+		"Audit",
+		"original reviewed head",
+	}
+	for round, head := range []string{strings.Repeat("a", 40), strings.Repeat("b", 40), strings.Repeat("c", 40)} {
+		t.Run(fmt.Sprintf("round %d", round+1), func(t *testing.T) {
+			directory := t.TempDir()
+			var output bytes.Buffer
+			app := newApp(func(github.RepositoryID) (setup.Backend, error) {
+				t.Fatal("resource rendering reached the Workflow Backend")
+				return nil, nil
+			}, bytes.NewReader(nil), &output, &output)
+			// No verdict, finding disposition, or Result Document prose is supplied:
+			// the authorization and precedence guidance must already be available.
+			command := []string{"skl", "skill", "--resource", "reference/review.md",
+				"--input", "result_directory=" + directory,
+				"--input", fmt.Sprintf("round=%d", round+1),
+				"--input", "reviewed_head=" + head, "watchdog"}
+			if err := app.Run(command); err != nil {
+				t.Fatalf("%v: %v", command, err)
+			}
+			instructions := output.String()
+			for _, want := range append(slices.Clone(obligations),
+				fmt.Sprintf("round %d", round+1), head,
+				filepath.Join(directory, "summary.md"), filepath.Join(directory, "submission.md")) {
+				if !strings.Contains(instructions, want) {
+					t.Errorf("instructions are missing %q:\n%s", want, instructions)
+				}
+			}
+		})
+	}
+}
+
 func TestRetrieveOneNamedResource(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, t.TempDir())
