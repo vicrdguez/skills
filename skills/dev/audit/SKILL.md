@@ -67,13 +67,24 @@ These two produce facts, not judgements — a diff read or an exit code. Run the
 1. **The documented gate** — the project's full suite, typecheck and lint, exactly once per invocation. A red gate is worth knowing before spending two reviewer contexts on it.
 2. **Artifact integrity** — record the engine's endpoint inspection: Baseline, optional Completion, provisional/present/retired phase, and every violation. Compare only the resolved Baseline and Completion, or Baseline and current provisional head before Completion; do not inspect intermediate artifact contents, infer Completion from deletion, or require monotonic intermediate ticks. First-pass Audit may precede final ticks and retirement, so label those facts pending rather than claim review readiness. Normal submission requires completed automated boxes at Completion and ledger absence at the review head; Rework keeps it absent. For an independent Audit without engine facts, compare the supplied endpoint snapshots directly and report missing integrity evidence explicitly.
 
-### 5. Spawn both sub-agents in parallel
+{{if .Implementation}}### 5. Spawn both sub-agents in parallel
+
+Dispatch both axes in fresh contexts using exactly this invocation's established execution capability:
+
+{{if eq .Implementation.Capability "claude-agents"}}- **Established Claude Agent parallel-review capability**: a single message with two `Agent` tool calls, using the `general-purpose` subagent for both. This is the only supported recipe for this invocation.
+{{else if eq .Implementation.Capability "pi-subagents"}}- **Established Pi subagent workflow capability**: a single asynchronous `subagent` call with a `workflowScript` using `runs.all` to launch both reviewers in fresh contexts. Set `timeoutMs: 3600000` on the workflow call and both reviewer items. This is the only supported recipe for this invocation.
+{{else if eq .Implementation.Capability "sequential"}}- **Established absence of a subagent mechanism**: run the two axes sequentially, Standards first. This is the only supported recipe for this invocation.
+{{else}}- **Capability unknown**: the invocation established no execution capability, and an adapter or harness name alone proves nothing. Choose among the supported recipes at runtime — the Claude parallel `Agent` calls, the Pi asynchronous parallel `subagent` workflow, or the sequential Standards-then-Artifacts fallback — and use exactly one of them.
+{{end}}
+The recipe changes how the two axes are dispatched, never what they check: both axes still run, in fresh contexts, and this skill still aggregates them.
+{{else}}### 5. Spawn both sub-agents in parallel
 
 Dispatch both axes as parallel sub-agents, each in a fresh context carrying its brief:
 
 - **Claude Code**: a single message with two `Agent` tool calls, using the `general-purpose` subagent for both.
 - **pi** ([pi-subagents](https://github.com/nicobailon/pi-subagents)): a single asynchronous `subagent` call with a `workflowScript` using `runs.all` to launch both reviewers in fresh contexts. Set `timeoutMs: 3600000` on the workflow call and both reviewer items.
 - **No sub-agent mechanism available**: run the two axes sequentially, Standards first.
+{{end}}
 
 **Standards sub-agent prompt** — include:
 

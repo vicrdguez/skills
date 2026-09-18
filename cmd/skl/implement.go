@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/urfave/cli/v2"
+	skilldist "github.com/vicrdguez/skills"
 	"github.com/vicrdguez/skills/setup"
 	"github.com/vicrdguez/skills/workflow"
 )
@@ -16,12 +17,16 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 	var commands []*cli.Command
 	for _, name := range []string{"next", "resume", "inspect", "submit", "needs-human"} {
 		commands = append(commands, &cli.Command{Name: name,
-			Flags: []cli.Flag{&cli.PathFlag{Name: "repo", Value: "."}, &cli.StringFlag{Name: "remote"}, &cli.IntFlag{Name: "item"}, &cli.PathFlag{Name: "body"}, &cli.PathFlag{Name: "decision"}, &cli.StringFlag{Name: "reason"}, &cli.StringFlag{Name: "artifact-baseline"}, &cli.StringFlag{Name: "artifact-completion"}, implementationFormatFlag()},
+			Flags: []cli.Flag{&cli.PathFlag{Name: "repo", Value: "."}, &cli.StringFlag{Name: "remote"}, &cli.IntFlag{Name: "item"}, &cli.PathFlag{Name: "body"}, &cli.PathFlag{Name: "decision"}, &cli.StringFlag{Name: "reason"}, &cli.StringFlag{Name: "artifact-baseline"}, &cli.StringFlag{Name: "artifact-completion"}, implementationFormatFlag(), implementationCapabilityFlag()},
 			Action: func(command *cli.Context) error {
 				if command.Int("item") < 0 || command.NArg() != 0 {
 					return fmt.Errorf("invalid implementation invocation: use flags and a positive Work Item identity")
 				}
 				format, err := implementationFormat(command.String("format"))
+				if err != nil {
+					return err
+				}
+				capability, err := implementationCapability(command.String("capability"))
 				if err != nil {
 					return err
 				}
@@ -60,7 +65,7 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 				if err != nil {
 					var violation *workflow.InvariantError
 					if errors.As(err, &violation) {
-						output, presentErr := setup.PresentImplementation(workflow.ImplementationOutcome{Status: "fix_required", Reason: violation.Reason}, repository.Repository)
+						output, presentErr := setup.PresentImplementation(workflow.ImplementationOutcome{Status: "fix_required", Reason: violation.Reason}, setup.InvocationContext{Repository: repository.Repository, Capability: capability})
 						if presentErr != nil {
 							return presentErr
 						}
@@ -72,7 +77,7 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 					}
 					return err
 				}
-				output, err := setup.PresentImplementation(outcome, repository.Repository)
+				output, err := setup.PresentImplementation(outcome, setup.InvocationContext{Repository: repository.Repository, Capability: capability})
 				if err != nil {
 					return err
 				}
@@ -87,6 +92,30 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 	commands[0].Aliases = []string{"start"}
 	commands[0].Flags = append(commands[0].Flags, waitFlags()...)
 	return commands
+}
+
+// implementationCapabilities is the complete set of established execution
+// capabilities. It is never inferred from a harness name.
+var implementationCapabilities = map[string]skilldist.ExecutionCapability{
+	string(skilldist.UnknownCapability): skilldist.UnknownCapability,
+	string(skilldist.ClaudeAgentReview): skilldist.ClaudeAgentReview,
+	string(skilldist.PiSubagentReview):  skilldist.PiSubagentReview,
+	string(skilldist.SequentialReview):  skilldist.SequentialReview,
+}
+
+func implementationCapabilityFlag() cli.Flag {
+	return &cli.StringFlag{Name: "capability", Usage: "Established execution capability: claude-agents, pi-subagents, or sequential; omit it when the capability is unknown"}
+}
+
+// implementationCapability validates a supplied capability before any
+// avoidable backend call, selection, Claim, publication, or result-directory
+// creation. An omitted or empty value keeps the runtime choice.
+func implementationCapability(value string) (skilldist.ExecutionCapability, error) {
+	capability, ok := implementationCapabilities[value]
+	if !ok {
+		return "", fmt.Errorf("invalid execution capability %q; use claude-agents, pi-subagents, or sequential, or omit the flag when the capability is unknown", value)
+	}
+	return capability, nil
 }
 
 // implementationFormatKind is the complete set of supported transports. Explicit

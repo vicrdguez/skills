@@ -15,7 +15,7 @@ func TestGitHubLifecyclePresentationKeepsNativeJSON(t *testing.T) {
 			ID: "7", Order: 7, Blockers: []workflow.WorkItemID{"2"},
 			Submission: &workflow.Submission{ID: "11"},
 		},
-	}, github.RepositoryID{Owner: "acme", Name: "widgets"})
+	}, InvocationContext{Repository: github.RepositoryID{Owner: "acme", Name: "widgets"}})
 	if err != nil {
 		t.Fatal(err)
 	}

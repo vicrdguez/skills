@@ -614,3 +614,63 @@ func TestB6TheCompleteBundlePreservesTheCurrentImplementationContract(t *testing
 	}
 	_ = baseline
 }
+
+// capabilityRecipes are the established execution capabilities and the one
+// Audit recipe each of them selects. A harness name is never enough.
+var capabilityRecipes = []struct {
+	capability string
+	recipe     string
+	others     []string
+}{
+	{"claude-agents", "a single message with two `Agent` tool calls", []string{"a single asynchronous `subagent` call with a `workflowScript` using `runs.all`", "run the two axes sequentially, Standards first"}},
+	{"pi-subagents", "a single asynchronous `subagent` call with a `workflowScript` using `runs.all`", []string{"a single message with two `Agent` tool calls", "run the two axes sequentially, Standards first"}},
+	{"sequential", "run the two axes sequentially, Standards first", []string{"a single message with two `Agent` tool calls", "a single asynchronous `subagent` call with a `workflowScript` using `runs.all`"}},
+	{"", "Choose among the supported recipes at runtime", nil},
+}
+
+// TestB7AuditRecipesFollowCapabilitiesNotHarnessNames materializes the B7 outline.
+func TestB7AuditRecipesFollowCapabilitiesRatherThanHarnessNames(t *testing.T) {
+	for _, testCase := range capabilityRecipes {
+		name := testCase.capability
+		if name == "" {
+			name = "capability unknown"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := proposalRepository(t)
+			prepareSlice(t, root, "widget")
+			backend := &implementationMemory{work: []workflow.ImplementationItem{
+				{ID: "1", Branch: "other", State: workflow.Ready, CreatedAt: "2026-02-01T00:00:00Z"},
+				{ID: "7", Branch: "widget", State: workflow.Ready, CreatedAt: "2026-01-01T00:00:00Z"},
+			}}
+			args := []string{"next"}
+			if testCase.capability != "" {
+				args = append(args, "--capability", testCase.capability)
+			}
+			got := implementCLI(t, root, backend, args...)
+			if got.Status != "work_available" || got.Packet == nil {
+				t.Fatalf("start = %#v", got)
+			}
+			if string(got.Packet.Facts.Implementation.Capability) != testCase.capability {
+				t.Fatalf("capability = %q, want %q", got.Packet.Facts.Implementation.Capability, testCase.capability)
+			}
+			instructions := got.Packet.Instructions
+			if !strings.Contains(instructions, testCase.recipe) {
+				t.Errorf("bundle lacks the applicable Audit recipe %q", testCase.recipe)
+			}
+			for _, other := range testCase.others {
+				if strings.Contains(instructions, other) {
+					t.Errorf("bundle retains a recipe this capability does not support: %q", other)
+				}
+			}
+			for _, axis := range []string{"- **Standards** — does the code conform", "- **Artifacts** — does the code faithfully implement", "Do **not** merge or rerank findings"} {
+				if !strings.Contains(instructions, axis) {
+					t.Errorf("capability changed the review contract: %q missing", axis)
+				}
+			}
+			// Capability knowledge changes instructions only, never the workflow.
+			if !backend.work[1].Claimed || backend.work[0].Claimed || len(backend.work) != 2 {
+				t.Fatalf("capability changed eligibility or the Claim: %#v", backend.work)
+			}
+		})
+	}
+}

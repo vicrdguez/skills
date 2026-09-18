@@ -54,28 +54,29 @@ type WatchdogFacts struct {
 }
 
 type ImplementationFacts struct {
-	WorkItemReference          string             `json:"-"`
-	Repository                 string             `json:"repository,omitempty"`
-	Remote                     string             `json:"remote"`
-	FetchCommand               string             `json:"fetch_command"`
-	WorktreeCommand            string             `json:"worktree_command"`
-	PushCommand                string             `json:"push_command"`
-	InspectCommand             string             `json:"inspect_command"`
-	NeedsHumanCommand          string             `json:"needs_human_command"`
-	ResultDirectory            string             `json:"result_directory"`
-	SubmitCommand              string             `json:"submit_command"`
-	Procedure                  ImplementProcedure `json:"procedure,omitempty"`
-	Submission                 int                `json:"submission,omitempty"`
-	Comments                   []ReviewComment    `json:"comments,omitempty"`
-	WorkItem                   int                `json:"work_item"`
-	Branch                     string             `json:"branch"`
-	Worktree                   string             `json:"worktree"`
-	ArtifactBaseline           string             `json:"artifact_baseline,omitempty"`
-	ArtifactCompletion         string             `json:"artifact_completion,omitempty"`
-	SuppliedArtifactBaseline   string             `json:"supplied_artifact_baseline,omitempty"`
-	SuppliedArtifactCompletion string             `json:"supplied_artifact_completion,omitempty"`
-	ResumeCommand              string             `json:"resume_command"`
-	Inspection                 *InspectionFacts   `json:"inspection,omitempty"`
+	WorkItemReference          string              `json:"-"`
+	Repository                 string              `json:"repository,omitempty"`
+	Remote                     string              `json:"remote"`
+	FetchCommand               string              `json:"fetch_command"`
+	WorktreeCommand            string              `json:"worktree_command"`
+	PushCommand                string              `json:"push_command"`
+	InspectCommand             string              `json:"inspect_command"`
+	NeedsHumanCommand          string              `json:"needs_human_command"`
+	ResultDirectory            string              `json:"result_directory"`
+	SubmitCommand              string              `json:"submit_command"`
+	Procedure                  ImplementProcedure  `json:"procedure,omitempty"`
+	Submission                 int                 `json:"submission,omitempty"`
+	Comments                   []ReviewComment     `json:"comments,omitempty"`
+	WorkItem                   int                 `json:"work_item"`
+	Branch                     string              `json:"branch"`
+	Worktree                   string              `json:"worktree"`
+	ArtifactBaseline           string              `json:"artifact_baseline,omitempty"`
+	ArtifactCompletion         string              `json:"artifact_completion,omitempty"`
+	SuppliedArtifactBaseline   string              `json:"supplied_artifact_baseline,omitempty"`
+	SuppliedArtifactCompletion string              `json:"supplied_artifact_completion,omitempty"`
+	ResumeCommand              string              `json:"resume_command"`
+	Inspection                 *InspectionFacts    `json:"inspection,omitempty"`
+	Capability                 ExecutionCapability `json:"capability,omitempty"`
 }
 
 // InspectionProgress is the observed artifact-ledger progress of one prepared
@@ -89,6 +90,18 @@ const (
 	CompletionPresent InspectionProgress = "completion-present"
 	RetiredLedger     InspectionProgress = "retired"
 	LedgerViolations  InspectionProgress = "violations"
+)
+
+// ExecutionCapability is the adapter capability an invocation established. It
+// selects only the Audit review recipe; a harness name alone establishes
+// nothing, and an unknown capability keeps a runtime choice.
+type ExecutionCapability string
+
+const (
+	ClaudeAgentReview ExecutionCapability = "claude-agents"
+	PiSubagentReview  ExecutionCapability = "pi-subagents"
+	SequentialReview  ExecutionCapability = "sequential"
+	UnknownCapability ExecutionCapability = ""
 )
 
 // InspectionFacts narrows one read-only inspection to the applicable

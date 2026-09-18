@@ -10,6 +10,13 @@ import (
 	"github.com/vicrdguez/skills/workflow"
 )
 
+// InvocationContext is the presentation-only metadata the CLI established
+// before the engine operation ran. It never carries workflow authority.
+type InvocationContext struct {
+	Repository github.RepositoryID
+	Capability skilldist.ExecutionCapability
+}
+
 // These projections retain the numeric GitHub CLI contract, not engine identity.
 type ImplementationOutput struct {
 	workflow.ImplementationOutcome
@@ -90,10 +97,7 @@ func primary(worktree string) string {
 	return filepath.Dir(filepath.Dir(worktree))
 }
 
-// PresentImplementation renders one Implement outcome. The repository identity
-// is invocation metadata the engine already resolved, so a bound command never
-// has to re-derive it from a remote URL.
-func PresentImplementation(outcome workflow.ImplementationOutcome, repository github.RepositoryID) (ImplementationOutput, error) {
+func PresentImplementation(outcome workflow.ImplementationOutcome, invocation InvocationContext) (ImplementationOutput, error) {
 	output := ImplementationOutput{ImplementationOutcome: outcome}
 	if outcome.Item != nil {
 		item, err := presentItem(*outcome.Item)
@@ -127,7 +131,8 @@ func PresentImplementation(outcome workflow.ImplementationOutcome, repository gi
 		skill, directory = "implement", f.ResultDirectory
 		f.WorkItem = output.Item.Number
 		f.WorkItemReference = fmt.Sprintf("#%d", f.WorkItem)
-		f.Repository = repository.Owner + "/" + repository.Name
+		f.Repository = invocation.Repository.Owner + "/" + invocation.Repository.Name
+		f.Capability = invocation.Capability
 		// The engine established the procedure from authoritative Workflow State;
 		// presentation never reselects it from the attached records.
 		if f.Procedure == "" {
