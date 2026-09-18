@@ -1227,10 +1227,15 @@ func TestInstalledImplementActivationLoadsDefinitionsOnce(t *testing.T) {
 				instructions += outcome.Packet.Instructions
 				break
 			}
-			for _, name := range []string{"implement", "tdd", "audit", "design", "domain"} {
-				definition := readRepositoryFile(t, "skills/dev/"+name+"/SKILL.md")
-				if count := strings.Count(instructions, definition); count != 1 {
-					t.Errorf("activation loaded %s %d times", name, count)
+			for _, marker := range []struct{ name, text string }{
+				{"implement", "## The scope is already decided"},
+				{"tdd", "\n\n## Included Skill: tdd\n\n"},
+				{"audit", "\n\n## Included Skill: audit\n\n"},
+				{"design", "\n\n## Included Skill: design\n\n"},
+				{"domain", "\n\n## Included Skill: domain\n\n"},
+			} {
+				if count := strings.Count(instructions, marker.text); count != 1 {
+					t.Errorf("activation loaded %s %d times", marker.name, count)
 				}
 			}
 			if !b.work[0].Claimed {
