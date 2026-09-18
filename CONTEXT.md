@@ -31,7 +31,7 @@ A backend-specific representation of canonical **Workflow State**, such as label
 _Avoid_: Workflow state, source of workflow semantics
 
 **Setup**:
-The deterministic operation that validates a Consumer Repository, installs the minimal agent-facing guidance, and prepares its inferred Workflow Backend.
+The deterministic operation that associates a **Consumer Repository** with its **Project** and prepares the guidance needed to participate in the **Workflow**.
 _Avoid_: Agent skill, workflow definition
 
 **Adoption**:
@@ -45,6 +45,14 @@ _Avoid_: Consumer repository
 **Consumer Repository**:
 A code repository in which the distributed **Workflow** coordinates software changes. It consumes one workflow rather than defining a custom one.
 _Avoid_: Workflow definition repository
+
+**Project**:
+The grouping of **Proposals** and **Work Items** for exactly one **Consumer Repository**, named after that repository. Separate checkouts and worktrees of that repository belong to the same Project.
+_Avoid_: Checkout, worktree, cross-repository initiative
+
+**Workflow Ledger**:
+The private, durable record of accepted work, phase results, human decisions, and **Workflow State** across **Consumer Repositories**. It is distinct from the **Workflow Definition Repository** and an individual Work Item's **Contract**.
+_Avoid_: Implementation ledger, public collaboration history
 
 **Agent Worker**:
 The nondeterministic participant that owns reasoning, judgment, and source-code changes while following decisions produced by the **Workflow Engine**.
@@ -67,7 +75,7 @@ A coherent authored unit of instructions used to compose a **Skill Definition**.
 _Avoid_: Execution skill, skill stub
 
 **Execution Skill**:
-A **Skill Definition** specialized for one invocation and its known situation. It is the instruction content delivered to the **Agent Worker**, distinct from its authored **Skill Modules** and any transport metadata.
+A **Skill Definition** specialized for one invocation and its known situation, supplying task facts and actions without requiring the **Agent Worker** to understand workflow storage or bookkeeping. It is the delivered instruction content, distinct from its authored **Skill Modules** and any transport metadata.
 _Avoid_: Rendered skill, instruction packet
 
 **Skill Stub**:
@@ -83,52 +91,76 @@ The structured delivery representation of a skill invocation's instructions, fac
 _Avoid_: Execution skill, skill definition, model-generated prompt
 
 **Result Document**:
-Ephemeral, template-guided Markdown written by an Agent Worker for the Workflow Engine to publish as an opaque backend projection. It lives in a private temporary directory rather than the Consumer Repository; the engine does not parse or judge its prose.
-_Avoid_: Implementation ledger, durable project knowledge
+Ephemeral, agent-authored material prepared for a phase handoff or human-facing publication. It is distinct from a durable **Phase Report**; a public body may be reconstructed from recorded evidence rather than retained as workflow history.
+_Avoid_: Phase report, implementation ledger, durable project knowledge
+
+**Phase Report**:
+An **Agent Worker**'s recorded outcome, evidence, and input references for one implementation or **Watchdog Review** phase. Its outcome is distinct from the resulting **Workflow State**.
+_Avoid_: Agent transcript, workflow state
+
+**Completion Declaration**:
+An **Agent Worker**'s explicit statement that an identified **Contract Item** is complete or incomplete at the reported source revision. Complete means the required outcome is satisfied and its applicable verification has succeeded; **Manual Verification** remains human-owned.
+_Avoid_: Implied completion, contract checkbox mutation, engine judgment
 
 **Proposal**:
-An approved definition of one change materialized as one or more **Work Items**. A multi-slice Proposal also has one **Coordination Item** and explicit Dependencies between its Work Items.
+An approved definition of one change materialized as one or more **Work Items**, with a **Coordination Item** for multi-slice work and explicit Dependencies between its Work Items. Changed contractual obligations require a replacement Proposal rather than rewriting the existing contracts.
 _Avoid_: Work item, implementation ledger
 
 **Work Item**:
-One implementation slice whose identity remains stable from publication through merge or supersession. Backend issues, submissions, branches, worktrees, and active artifacts are attachments or projections of it.
+One implementation slice whose identity remains stable from acceptance through merge or supersession. Issues, submissions, branches, worktrees, and contract documents are attachments or projections of it.
 _Avoid_: Agent session, issue, pull request
+
+**Contract**:
+The frozen obligations accepted for one **Work Item**, covering its agreed behavior, architecture, delivery requirements, and **Manual Verification**. Changed obligations require renewed proposal rather than amendment of the existing Contract.
+_Avoid_: Mutable plan, implementation ledger, incidental implementation detail
+
+**Contract Item**:
+An individually identified obligation or task within a **Contract**, carrying a local label and descriptive title. Labels distinguish behavior (`B<n>`), architecture (`A<n>`), tasks (`T<n>`), and **Manual Verification** (`M<n>`).
+_Avoid_: Review finding, test case, document row number
 
 **Submission**:
 The proposed code changes explicitly attached to exactly one **Work Item** for independent review and human merge. A Work Item has at most one Submission; ownership is independent of names.
 _Avoid_: Work item, claim
+
+**Integration Target**:
+The destination branch in a **Consumer Repository** into which the **Merge Authority** intends to merge a **Submission**. It is distinct from any particular observed revision of that branch.
+_Avoid_: Target snapshot, submitted revision
 
 **Dependency**:
 A relationship in which one **Work Item** cannot become eligible until every blocking Work Item is **Merged**.
 _Avoid_: Ready-for-merge prerequisite
 
 **Claim**:
-The V1 best-effort reservation of a **Work Item** by one **Agent Worker**, projected as `wip` under a single-operator assumption. Interrupted work resumes by Work Item identity, while ordinary queue selection skips it until successful handoff, explicit abandon, or administrative release.
-_Avoid_: Atomic lease, ownership guarantee
-
-**Claim Token**:
-The optional durable identity of a future exclusive **Claim**. V1 does not require one because concurrent claim attempts are outside its supported operating model.
-_Avoid_: V1 `wip` projection, operation identifier
+The exclusive reservation of a **Work Item** by one **Agent Worker**, orthogonal to **Workflow State**. Claims do not expire automatically; ordinary selection skips reserved work, and interrupted work requires explicit resume or release.
+_Avoid_: Workflow state, issue label, time-limited lease
 
 **Transition Operation**:
 An attempt to move a **Work Item** toward a valid target **Workflow State**. Recovery observes already completed effects and stops for explicit inspection when safe continuation cannot be established.
 _Avoid_: Shell command, rollback transaction
 
 **Work Start**:
-A **Transition Operation** that selects and claims one eligible **Work Item** and returns its **Execution Skill**.
+A project-scoped **Transition Operation** that selects and claims one eligible **Work Item** and returns its **Execution Skill**.
 _Avoid_: Read-only queue lookup, instruction rendering
 
 **Ready for Merge**:
-The **Workflow State** in which **Watchdog Review** has passed and integration and merge remain human-owned. It is distinct from **Merged** and does not assert that integration is conflict-free.
+The endpoint of autonomous delivery, where **Watchdog Review** has passed and final integration and merge remain human-owned. It is distinct from **Merged** and does not assert that integration is conflict-free.
 _Avoid_: Done, merged
 
 **Needs Human**:
 The paused **Workflow State** for a decision automation cannot make. Any existing **Submission** remains attached while the human decides how the Workflow should continue.
 _Avoid_: Failed, abandoned
 
+**Human Decision**:
+Explicitly authorized human direction answering an identified request for judgment and specifying how the **Workflow** should continue within the accepted contract. Changed contractual obligations require renewed proposal rather than amendment of the existing Work Item's contract.
+_Avoid_: Inferred approval, agent recommendation
+
+**Decision Inbox**:
+The unresolved requests attached to **Work Items** in **Needs Human** across **Projects**, considered together for human triage and resolution. Its scope is distinct from project-scoped worker selection.
+_Avoid_: Worker queue, final review queue
+
 **Merged**:
-The terminal **Workflow State** reached when the accepted code change has actually entered its target branch.
-_Avoid_: Ready for merge, approved
+The observed terminal **Workflow State** in which the accepted code change has entered its **Integration Target**. It closes the Work Item and satisfies Dependencies without making merge an engine-owned phase.
+_Avoid_: Ready for merge, approved, engine-owned merge phase
 
 **Superseded**:
 The terminal **Workflow State** of an abandoned Work Item whose replacement requires renewed exploration and proposal.
@@ -139,28 +171,24 @@ The human who decides how to integrate an approved **Submission**, resolves inte
 _Avoid_: Reviewer, agent worker
 
 **Manual Verification**:
-A human-owned check copied from the Artifact Baseline into the Submission at **Ready for Merge**. The Merge Authority decides whether it is satisfied.
+A human-owned check required by the accepted contract, whose satisfaction is decided by the **Merge Authority**. Its complete obligations remain available privately even when public presentation omits operational details.
 _Avoid_: Validation gate, agent-verifiable scenario
 
+**Final Review Package**:
+The human-facing account of a **Submission**'s commitments, delivered outcome, verification evidence, deviations, and remaining risks. It supports the **Merge Authority** without exposing the full worker history or replacing the underlying evidence.
+_Avoid_: Agent handoff, worker transcript
+
+**Forge Publication**:
+Delivery of human-facing work descriptions, progress, or outcomes to an external collaboration service. Publication is distinct from recording a **Phase Report** or advancing **Workflow State** in the **Workflow Ledger**.
+_Avoid_: Worker handoff, authoritative phase result
+
 **Human Finding Directive**:
-An authorized human comment that gives a Watchdog Worker a disposition for an existing Review Finding. The Workflow Engine supplies these comments to the worker without replacing its judgment.
+An explicitly authorized human disposition for an existing **Review Finding** within the accepted contract. It informs Watchdog Worker judgment without replacing it.
 _Avoid_: Validation result, inferred intent
 
 **Coordination Item**:
-A non-claimable parent that groups multiple child Work Items. It has no branch or Submission and completes when every child is **Merged**.
+A non-claimable parent that groups multiple child Work Items, with no branch or Submission of its own. It completes when every child is **Merged**; retiring a partially delivered Proposal does not assert completion.
 _Avoid_: Work item, implementation slice
-
-**Implementation Ledger**:
-The ephemeral Markdown contract used while implementing a **Work Item**. It is removed before review and is not durable project knowledge.
-_Avoid_: Archived plan
-
-**Artifact Baseline**:
-The immutable Git snapshot containing the initially accepted **Implementation Ledger**.
-_Avoid_: Review head, mutable plan
-
-**Artifact Completion**:
-The immutable Git snapshot of the finished **Implementation Ledger**, before its removal. Its paths, modes, and contents match the **Artifact Baseline** except for permitted completion ticks.
-_Avoid_: Review head, artifact archive
 
 **Full Gate**:
 The Consumer Repository's complete test, typecheck, and lint verification run by implementers and watchdog reviewers. It remains Agent Worker behavior rather than a Workflow Engine operation.
@@ -171,28 +199,28 @@ The narrow check Watchdog performs after adding Debt Markers: record the final h
 _Avoid_: Full gate, audit
 
 **Audit**:
-Implementation-phase agent judgment invoked by the implementer to find standards and artifact-conformance problems before submission. It has no independent Workflow State or Claim.
+Implementation-phase agent judgment against repository **Standards** and applicable **Contracts** before submission. It has no independent Workflow State or Claim.
 _Avoid_: Validation gate, watchdog review
+
+**Audit Finding**:
+An observation from **Audit** with an `F<n>` identity, an axis of Standards or Contracts, severity, evidence, and disposition. It describes a problem with conformance rather than defining a new **Contract Item**.
+_Avoid_: Architectural commitment, contract item, watchdog finding
 
 **Watchdog Review**:
 Independent agent judgment performed in a fresh Worker Session after submission. It may change workflow disposition and may add only permitted **Debt Markers** to the Submission.
 _Avoid_: Audit, validation gate
 
-**Review Checkpoint**:
-A **Workflow Engine**-owned record of a **Work Item**'s **Review Count** and the revision examined by its latest completed **Watchdog Review**. It supports repeat-review scope and review-limit decisions without replacing findings or requiring the Agent Worker to maintain it.
-_Avoid_: Claim, in-progress review, review verdict
-
 **Review Count**:
-The number of completed **Watchdog Reviews** recorded in a **Work Item**'s retained **Review Checkpoint**, including reviews ending in **Needs Human**, but excluding interrupted attempts and repeated publication of the same review. Its limit restricts further automatic **Rework**, never approval of a passing review; losing the checkpoint starts a fresh count rather than preserving a lifetime cap.
+The number of completed **Watchdog Reviews** recorded for a **Work Item**, including reviews ending in **Needs Human** but excluding interrupted attempts and repeated recording or publication of the same review. Its limit restricts further automatic **Rework**, never approval of a passing review; recreating a worktree or receiving human direction does not reset it.
 _Avoid_: Finding count, submission retry count, rework bounce count
 
 **Review Finding**:
-A watchdog observation with a stable identity, disposition, evidence, review round, and reviewed commit. Findings form the human-readable ledger that drives rework and human decisions.
+A **Watchdog Review** observation with a stable Work-Item-local `W<n>` identity, disposition, evidence, review round, and reviewed source revision. Findings drive rework and human decisions without defining new **Contract Items**.
 _Avoid_: Validation failure, free-form comment
 
 **Debt Marker**:
-A non-functional source comment linked to a nonblocking **Review Finding** so deferred work remains visible near the affected code.
-_Avoid_: Functional code change, blocking finding
+A succinct, self-contained, non-functional source comment explaining nonblocking technical debt or a potential issue near the affected code. It is a maintenance anchor, not a record of review provenance.
+_Avoid_: Functional code change, blocking finding, review transcript
 
 **Worker Session**:
 One fresh **Agent Worker** context dedicated to one **Work Item**. A **Harness Adapter** may start successive sessions while the **Workflow Engine** continues to report eligible work.
@@ -202,9 +230,13 @@ _Avoid_: Queue, workflow
 A **Workflow Backend** that supports a complete workflow without a hosted forge.
 _Avoid_: Local Git helper, GitHub cache
 
+## Flagged ambiguities
+
+- **Contract** names a Work Item's accepted obligations; **Workflow Ledger** names the private cross-project record. They are not interchangeable concepts.
+
 ## Example dialogue
 
-> **Developer:** Can the Codex harness choose a different ready issue than Pi?
+> **Developer:** Can the Codex harness choose a different eligible Work Item than Pi?
 >
 > **Domain expert:** No. The Workflow Engine applies the same Workflow Mechanics to the same Workflow Backend state. The Harness Adapter only gives each Agent Worker access to that decision.
 >
@@ -214,7 +246,7 @@ _Avoid_: Local Git helper, GitHub cache
 >
 > **Developer:** What happens when two Worker Sessions request the same Work Item?
 >
-> **Domain expert:** V1 does not promise atomic exclusion between concurrent sessions. Under its single-operator model, the first observed `wip` projection causes ordinary queue selection to skip that Work Item; atomic Claim Tokens are a possible later extension.
+> **Domain expert:** Only one may hold its Claim. Workers may act concurrently on different Work Items, but interrupted reservations require explicit recovery rather than automatic expiry.
 >
 > **Developer:** Does the Claude Skill Stub define different behavior from the Pi one?
 >
@@ -234,20 +266,20 @@ _Avoid_: Local Git helper, GitHub cache
 >
 > **Developer:** What does an unavailable previously reviewed revision mean for review scope?
 >
-> **Domain expert:** The worker performs a full review instead of focusing on changes since that revision and retains an available Review Count; a lost checkpoint starts at zero.
+> **Domain expert:** The worker performs a full review instead of focusing on changes since that revision and retains the recorded Review Count. Recreating its worktree does not erase completed reviews.
 >
 > **Developer:** Can I start a dependent Work Item because its blocker passed review?
 >
 > **Domain expert:** No. The Dependency remains unsatisfied until the blocking Work Item is Merged into the target branch.
 >
-> **Developer:** Where is the accepted contract after the Implementation Ledger is deleted?
+> **Developer:** Where does a worker read the accepted Contract?
 >
-> **Domain expert:** The Workflow Engine resolves the Artifact Baseline and Artifact Completion snapshots for review; durable project knowledge belongs in the glossary and ADRs.
+> **Domain expert:** Through the Workflow Engine, which supplies its frozen version from the Workflow Ledger. Completing work updates Phase Reports, not the Contract; durable project knowledge still belongs in the project's glossary and ADRs.
 >
 > **Developer:** Does the Full Gate replace Audit or Watchdog Review?
 >
 > **Domain expert:** No. It proves project checks only. Audit and Watchdog Review still provide the judgment the Workflow Engine cannot.
 >
-> **Developer:** Who checks a Manual Verification box?
+> **Developer:** Who completes Manual Verification?
 >
-> **Domain expert:** The Merge Authority. The Workflow Engine carries it into the Submission but does not claim to verify it.
+> **Domain expert:** The Merge Authority. The human receives the complete obligations even when the public presentation omits private operational details; the engine does not claim to verify them.
