@@ -1725,6 +1725,62 @@ func TestRenderImplementSubmissionInstructions(t *testing.T) {
 	}
 }
 
+func TestRenderImplementDecisionInstructions(t *testing.T) {
+	directory := t.TempDir()
+	obligations := []string{
+		"`" + filepath.Join(directory, "decision.md") + "`",
+		"blocking requirement",
+		"current state",
+		"completed work",
+		"options",
+		"consequences",
+		"recommendation",
+		"--reason",
+		"Do not invent Completion, tick unfinished work, or retire an incomplete ledger during this pause.",
+	}
+	cases := []struct {
+		preserve string
+		present  []string
+		absent   []string
+	}{
+		{
+			preserve: "false",
+			present:  append(slices.Clone(obligations), "no implementation work"),
+			absent:   []string{"--body", "push the branch"},
+		},
+		{
+			preserve: "true",
+			present: append(slices.Clone(obligations),
+				"--body", "push the branch", "`"+filepath.Join(directory, "submission.md")+"`"),
+		},
+	}
+	for _, testCase := range cases {
+		t.Run("preserve="+testCase.preserve, func(t *testing.T) {
+			var output bytes.Buffer
+			app := newApp(func(github.RepositoryID) (setup.Backend, error) {
+				t.Fatal("resource rendering reached the Workflow Backend")
+				return nil, nil
+			}, bytes.NewReader(nil), &output, &output)
+			command := []string{"skl", "skill", "--resource", "reference/decision.md",
+				"--input", "result_directory=" + directory, "--input", "preserve=" + testCase.preserve, "implement"}
+			if err := app.Run(command); err != nil {
+				t.Fatalf("%v: %v", command, err)
+			}
+			instructions := output.String()
+			for _, want := range testCase.present {
+				if !strings.Contains(instructions, want) {
+					t.Errorf("instructions are missing %q:\n%s", want, instructions)
+				}
+			}
+			for _, unwanted := range testCase.absent {
+				if strings.Contains(instructions, unwanted) {
+					t.Errorf("instructions include %q:\n%s", unwanted, instructions)
+				}
+			}
+		})
+	}
+}
+
 func TestRetrieveOneNamedResource(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, t.TempDir())
