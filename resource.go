@@ -4,6 +4,8 @@ import (
 	"flag"
 	"fmt"
 	"path"
+	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -11,6 +13,18 @@ import (
 )
 
 const resultDirectoryUsage = "Absolute path of the private Result Document directory this invocation created."
+
+// reviewedHeadPattern matches the full commit SHA the engine records.
+var reviewedHeadPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
+
+// checkResultDirectory rejects a private directory that could not name the
+// invocation's own result location.
+func checkResultDirectory(resource, value string) error {
+	if !filepath.IsAbs(value) {
+		return fmt.Errorf("invalid input %q for resource %q: want the absolute path of the private Result Document directory", "result_directory", resource)
+	}
+	return nil
+}
 
 // submissionData, decisionData and reviewData are the ordinary typed values a
 // converted resource renders from. They are never a CLI context or an
@@ -82,7 +96,7 @@ func (i resourceInput) wanted() string {
 type resourceSpec struct {
 	data     any
 	inputs   []resourceInput
-	validate func(name, resource string) error
+	validate func(resource string) error
 }
 
 func resourceSpecFor(resource string) resourceSpec {
@@ -92,12 +106,16 @@ func resourceSpecFor(resource string) resourceSpec {
 		return resourceSpec{data: data, inputs: []resourceInput{
 			{flag: &cli.StringFlag{Name: "result_directory", Required: true, Usage: resultDirectoryUsage, Destination: &data.ResultDirectory}},
 			{flag: &cli.StringFlag{Name: "procedure", Required: true, Usage: "Which submission procedure to render.", Destination: &data.Procedure}, choices: []string{"initial", "rework"}},
+		}, validate: func(resource string) error {
+			return checkResultDirectory(resource, data.ResultDirectory)
 		}}
 	case "reference/decision.md":
 		data := &decisionData{}
 		return resourceSpec{data: data, inputs: []resourceInput{
 			{flag: &cli.StringFlag{Name: "result_directory", Required: true, Usage: resultDirectoryUsage, Destination: &data.ResultDirectory}},
 			{flag: &cli.BoolFlag{Name: "preserve", Required: true, Usage: "Whether implementation work exists that a draft Submission must preserve.", Destination: &data.Preserve}},
+		}, validate: func(resource string) error {
+			return checkResultDirectory(resource, data.ResultDirectory)
 		}}
 	case "reference/review.md":
 		data := &reviewData{}
@@ -105,9 +123,15 @@ func resourceSpecFor(resource string) resourceSpec {
 			{flag: &cli.StringFlag{Name: "result_directory", Required: true, Usage: resultDirectoryUsage, Destination: &data.ResultDirectory}},
 			{flag: &cli.IntFlag{Name: "round", Required: true, Usage: "Review round number for this Submission.", Destination: &data.Round}},
 			{flag: &cli.StringFlag{Name: "reviewed_head", Required: true, Usage: "Original full SHA of the reviewed head.", Destination: &data.ReviewedHead}},
-		}, validate: func(_, resource string) error {
+		}, validate: func(resource string) error {
 			if data.Round < 1 {
 				return fmt.Errorf("invalid input %q for resource %q: want a positive review round", "round", resource)
+			}
+			if err := checkResultDirectory(resource, data.ResultDirectory); err != nil {
+				return err
+			}
+			if !reviewedHeadPattern.MatchString(data.ReviewedHead) {
+				return fmt.Errorf("invalid input %q for resource %q: want the full 40-character SHA of the original reviewed head", "reviewed_head", resource)
 			}
 			return nil
 		}}
@@ -171,7 +195,7 @@ func (s resourceSpec) parse(name, resource string, assignments []string) error {
 		}
 	}
 	if s.validate != nil {
-		return s.validate(name, resource)
+		return s.validate(resource)
 	}
 	return nil
 }

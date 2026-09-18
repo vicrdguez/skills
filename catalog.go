@@ -54,25 +54,36 @@ type WatchdogFacts struct {
 }
 
 type ImplementationFacts struct {
-	WorkItemReference          string          `json:"-"`
-	Remote                     string          `json:"remote"`
-	FetchCommand               string          `json:"fetch_command"`
-	WorktreeCommand            string          `json:"worktree_command"`
-	InspectCommand             string          `json:"inspect_command"`
-	NeedsHumanCommand          string          `json:"needs_human_command"`
-	ResultDirectory            string          `json:"result_directory"`
-	SubmitCommand              string          `json:"submit_command"`
-	Submission                 int             `json:"submission,omitempty"`
-	Comments                   []ReviewComment `json:"comments,omitempty"`
-	WorkItem                   int             `json:"work_item"`
-	Branch                     string          `json:"branch"`
-	Worktree                   string          `json:"worktree"`
-	ArtifactBaseline           string          `json:"artifact_baseline,omitempty"`
-	ArtifactCompletion         string          `json:"artifact_completion,omitempty"`
-	SuppliedArtifactBaseline   string          `json:"supplied_artifact_baseline,omitempty"`
-	SuppliedArtifactCompletion string          `json:"supplied_artifact_completion,omitempty"`
-	ResumeCommand              string          `json:"resume_command"`
+	WorkItemReference          string             `json:"-"`
+	Remote                     string             `json:"remote"`
+	FetchCommand               string             `json:"fetch_command"`
+	WorktreeCommand            string             `json:"worktree_command"`
+	InspectCommand             string             `json:"inspect_command"`
+	NeedsHumanCommand          string             `json:"needs_human_command"`
+	ResultDirectory            string             `json:"result_directory"`
+	SubmitCommand              string             `json:"submit_command"`
+	Procedure                  ImplementProcedure `json:"procedure,omitempty"`
+	Submission                 int                `json:"submission,omitempty"`
+	Comments                   []ReviewComment    `json:"comments,omitempty"`
+	WorkItem                   int                `json:"work_item"`
+	Branch                     string             `json:"branch"`
+	Worktree                   string             `json:"worktree"`
+	ArtifactBaseline           string             `json:"artifact_baseline,omitempty"`
+	ArtifactCompletion         string             `json:"artifact_completion,omitempty"`
+	SuppliedArtifactBaseline   string             `json:"supplied_artifact_baseline,omitempty"`
+	SuppliedArtifactCompletion string             `json:"supplied_artifact_completion,omitempty"`
+	ResumeCommand              string             `json:"resume_command"`
 }
+
+// ImplementProcedure is the engine-established submission procedure for one
+// Implement invocation, decided from authoritative Workflow State rather than
+// inferred from an attached Submission.
+type ImplementProcedure string
+
+const (
+	InitialSubmission   ImplementProcedure = "initial"
+	FindingDrivenRework ImplementProcedure = "rework"
+)
 
 type ReviewComment struct {
 	Line            int    `json:"line,omitempty"`
@@ -158,7 +169,7 @@ func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
 	if facts.Implementation != nil {
 		f := facts.Implementation
 		instructions += fmt.Sprintf("\n\n## Work Start\n\nWork Item: %s\nBranch: %s\nWorktree: %s\nPrepare: `%s` then `%s`; safely reuse a clean existing worktree instead of recreating it\nInspect: `%s` resolves the Artifact Baseline and Completion from the fetched history\nResume: `%s`\n", f.WorkItemReference, f.Branch, f.Worktree, f.FetchCommand, f.WorktreeCommand, f.InspectCommand, f.ResumeCommand)
-		if f.Submission != 0 {
+		if f.Procedure == FindingDrivenRework {
 			instructions += "\nFinding-driven Rework: sync nothing; inspect the current PR comparison, supplied summary, inline evidence, and human comments. Keep the ledger retired.\n"
 		}
 		instructions += "\nWrite the opaque Result Document using the named template, then run `" + f.SubmitCommand + "`. If pausing, run `" + f.NeedsHumanCommand + "` and add `--body <result>/submission.md` when preserving implementation changes.\n"

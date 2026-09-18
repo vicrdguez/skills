@@ -123,6 +123,12 @@ func PresentImplementation(outcome workflow.ImplementationOutcome) (Implementati
 		skill, directory = "implement", f.ResultDirectory
 		f.WorkItem = output.Item.Number
 		f.WorkItemReference = fmt.Sprintf("#%d", f.WorkItem)
+		// The reconciled Workflow State, not the presence of a preserved draft
+		// Submission, establishes which procedure this invocation follows.
+		f.Procedure = skilldist.InitialSubmission
+		if output.Item.State == workflow.Rework {
+			f.Procedure = skilldist.FindingDrivenRework
+		}
 		if output.Item.Submission != nil {
 			f.Submission = output.Item.Submission.Number
 		}
