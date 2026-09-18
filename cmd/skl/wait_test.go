@@ -77,7 +77,12 @@ func waitingCLI(t *testing.T, ctx context.Context, root, lane string, b *waiting
 		b.repository = repository
 		return b, nil
 	}, nil, &out, &stderr)
-	args := append([]string{"skl", lane, "next", "--repo", root, "--remote", "upstream"}, options...)
+	args := []string{"skl", lane, "next", "--repo", root, "--remote", "upstream"}
+	if lane == "implement" {
+		// The Implement default transport is the Execution Skill Markdown.
+		args = append(args, "--format", "json")
+	}
+	args = append(args, options...)
 	err := app.RunContext(ctx, args)
 	var got setup.ImplementationOutput
 	if err != nil && out.Len() != 0 {

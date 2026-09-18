@@ -24,6 +24,16 @@ import (
 	"github.com/vicrdguez/skills/workflow"
 )
 
+// structuredStageCommand preserves the legacy typed-test seam for both stages:
+// Watchdog is JSON by default, while Implement now opts in explicitly.
+func structuredStageCommand(args ...string) []string {
+	command := append([]string{"skl"}, args...)
+	if len(args) > 0 && args[0] == "implement" {
+		command = append(command, "--format", "json")
+	}
+	return command
+}
+
 type memoryBackend struct {
 	repository     github.RepositoryID
 	prepared       bool
@@ -387,6 +397,20 @@ func TestPublishExplicitRemoteChecksItsOwnGitEvidence(t *testing.T) {
 	}
 }
 
+// implementBundle renders the complete Implement Execution Skill the way its
+// lane delivers it, so checks never depend on the refused read-only retrieval.
+func implementBundle(t *testing.T) skilldist.Packet {
+	t.Helper()
+	root := proposalRepository(t)
+	prepareSlice(t, root, "widget")
+	backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}}
+	got := implementCLI(t, root, backend, "next")
+	if got.Packet == nil {
+		t.Fatalf("no Execution Skill: %#v", got)
+	}
+	return *got.Packet
+}
+
 func TestDocumentedResourceCommands(t *testing.T) {
 	cases := []struct {
 		file  string
@@ -400,7 +424,9 @@ func TestDocumentedResourceCommands(t *testing.T) {
 	for _, testCase := range cases {
 		t.Run(testCase.file, func(t *testing.T) {
 			source := readRepositoryFile(t, testCase.file)
-			if testCase.skill != "" {
+			if testCase.skill == "implement" {
+				source = implementBundle(t).Instructions
+			} else if testCase.skill != "" {
 				var rendered bytes.Buffer
 				if err := newApp(nil, bytes.NewReader(nil), &rendered, &rendered).Run([]string{"skl", "skill", testCase.skill}); err != nil {
 					t.Fatal(err)
@@ -414,7 +440,9 @@ func TestDocumentedResourceCommands(t *testing.T) {
 					if !strings.HasPrefix(command, "skl skill ") || !strings.Contains(command, "--resource") || !strings.Contains(command, "reference/") {
 						continue
 					}
-					args := shellArgs(t, command)
+					// The decision resource documents its genuine later value as a
+					// choice; resolve it the way a worker would before running.
+					args := shellArgs(t, strings.ReplaceAll(command, "preserve=<true|false>", "preserve=true"))
 					resource := ""
 					for _, arg := range args {
 						if strings.HasPrefix(arg, "reference/") {
@@ -562,10 +590,10 @@ func TestEmbeddedResourceDelegationSmoke(t *testing.T) {
 		return stdout.String()
 	}
 	run(t, "skl install")
+	bundle := implementBundle(t).Instructions
 	for _, command := range []string{
 		"skl skill --format json domain",
 		"skl skill --format json explore",
-		"skl skill --format json implement",
 		"skl skill --format json propose",
 		"skl skill --resource reference/tasks.md propose",
 	} {
@@ -633,6 +661,13 @@ func TestEmbeddedResourceDelegationSmoke(t *testing.T) {
 					skills = append(skills, "implement")
 				}
 				for _, skill := range skills {
+					if skill == "implement" {
+						_, instructions, _ := strings.Cut(bundle, "\n\n## Included Skill: "+tc.skill+"\n\n")
+						if !strings.Contains(instructions, tc.pointer) {
+							t.Errorf("bundled %s instructions lack %q", tc.skill, tc.pointer)
+						}
+						continue
+					}
 					for _, format := range []string{"markdown", "json"} {
 						got := run(t, "skl skill --format "+format+" "+skill)
 						if format == "json" {
@@ -644,9 +679,6 @@ func TestEmbeddedResourceDelegationSmoke(t *testing.T) {
 								t.Fatalf("included skills = %v", packet.IncludedSkills)
 							}
 							got = packet.Instructions
-						}
-						if skill == "implement" {
-							_, got, _ = strings.Cut(got, "\n\n## Included Skill: "+tc.skill+"\n\n")
 						}
 						got, _, _ = strings.Cut(got, "\n\n## Included Skill:")
 						if !strings.Contains(got, tc.pointer) {
@@ -764,9 +796,14 @@ func TestRetrieveRenderedSkillInstructions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	want := "Protocol: skl.instructions/v1\nSkill: tdd\nIncluded skills: none\nFacts: {}\nResources: reference/mocking.md, reference/tests.md\n\n" + readRepositoryFile(t, "skills/dev/tdd/SKILL.md")
-	if got := stdout.String(); got != want {
-		t.Fatalf("rendered packet differs from canonical definition:\n%s", got)
+	header := "Protocol: skl.instructions/v1\nSkill: tdd\nIncluded skills: none\nFacts: {}\nResources: reference/mocking.md, reference/tests.md\n\n"
+	if got, want := stdout.String(), readRepositoryFile(t, "cmd/skl/testdata/tdd-standalone.golden.md"); got != want {
+		t.Fatalf("rendered TDD packet differs from the independently reviewed golden:\n%s", got)
+	}
+	instructions := strings.TrimPrefix(stdout.String(), header)
+	// A standalone retrieval keeps the independent-mode seam agreement.
+	if !strings.Contains(instructions, "confirm them with the user") || strings.Contains(instructions, "at the human pause") {
+		t.Fatalf("standalone retrieval lost its own mode:\n%s", instructions)
 	}
 }
 
@@ -828,18 +865,22 @@ func TestRetrieveRetiredLedgerInstructions(t *testing.T) {
 			"The change now awaits the **human's merge**. The watchdog does not merge.",
 		},
 		"implement": {
-			"remove the entire `.changes/<slug>/` ledger in a separate subsequent commit before review",
+			"then remove `.changes/widget/` in a later commit",
 			"Never bless the changes — that is the watchdog's job.",
-			"rework must not recreate or revise it",
 		},
 	} {
 		t.Run(skill, func(t *testing.T) {
-			var output bytes.Buffer
-			app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, t.TempDir())
-			if err := app.Run([]string{"skl", "skill", skill}); err != nil {
-				t.Fatal(err)
+			var got string
+			if skill == "implement" {
+				got = implementBundle(t).Instructions
+			} else {
+				var output bytes.Buffer
+				app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, t.TempDir())
+				if err := app.Run([]string{"skl", "skill", skill}); err != nil {
+					t.Fatal(err)
+				}
+				got, _, _ = strings.Cut(output.String(), "\n\n## Included Skill:")
 			}
-			got, _, _ := strings.Cut(output.String(), "\n\n## Included Skill:")
 			for _, want := range required {
 				if !strings.Contains(got, want) {
 					t.Errorf("%s instructions lack %q", skill, want)
@@ -1593,9 +1634,8 @@ func TestCleanupPreservesUnacceptedLocalHead(t *testing.T) {
 }
 
 func TestRetrieveEquivalentTypedInstructions(t *testing.T) {
-	wantInstructions := readRepositoryFile(t, "skills/dev/tdd/SKILL.md")
 	wantResources := []string{"reference/mocking.md", "reference/tests.md"}
-	wantMarkdown := "Protocol: skl.instructions/v1\nSkill: tdd\nIncluded skills: none\nFacts: {}\nResources: reference/mocking.md, reference/tests.md\n\n" + wantInstructions
+	wantHeader := "Protocol: skl.instructions/v1\nSkill: tdd\nIncluded skills: none\nFacts: {}\nResources: reference/mocking.md, reference/tests.md\n\n"
 	var markdown bytes.Buffer
 	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &markdown, &markdown, t.TempDir())
 	if err := app.Run([]string{"skl", "skill", "tdd"}); err != nil {
@@ -1611,8 +1651,11 @@ func TestRetrieveEquivalentTypedInstructions(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &packet); err != nil {
 		t.Fatalf("stdout is not a JSON packet: %v\n%s", err, stdout.String())
 	}
-	if packet.Protocol != "skl.instructions/v1" || packet.Skill != "tdd" || packet.Facts != (skilldist.InvocationFacts{}) || len(packet.IncludedSkills) != 0 || !slices.Equal(packet.Resources, wantResources) || packet.Instructions != wantInstructions || markdown.String() != wantMarkdown {
+	if packet.Protocol != "skl.instructions/v1" || packet.Skill != "tdd" || packet.Facts != (skilldist.InvocationFacts{}) || len(packet.IncludedSkills) != 0 || !slices.Equal(packet.Resources, wantResources) || packet.Instructions == "" || markdown.String() != wantHeader+packet.Instructions {
 		t.Fatalf("JSON and Markdown packets differ: %#v", packet)
+	}
+	if want := strings.TrimPrefix(readRepositoryFile(t, "cmd/skl/testdata/tdd-standalone.golden.md"), wantHeader); packet.Instructions != want {
+		t.Fatalf("JSON TDD instructions differ from the independently reviewed golden:\n%s", packet.Instructions)
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q", stderr.String())
@@ -1644,8 +1687,13 @@ func TestRetrieveAuditWithoutPonytail(t *testing.T) {
 				}
 				instructions = strings.TrimPrefix(instructions, header)
 			}
-			if instructions != readRepositoryFile(t, "skills/dev/audit/SKILL.md") {
-				t.Error("retrieved Audit differs from its authoritative definition")
+			header := "Protocol: skl.instructions/v1\nSkill: audit\nIncluded skills: none\nFacts: {}\nResources: reference/smells.md\n\n"
+			if want := strings.TrimPrefix(readRepositoryFile(t, "cmd/skl/testdata/audit-standalone.golden.md"), header); instructions != want {
+				t.Fatalf("rendered Audit instructions differ from the independently reviewed golden:\n%s", instructions)
+			}
+			// A standalone Audit keeps its own caller-driven discovery.
+			if !strings.Contains(instructions, "If no PR comparison or fixed point can be resolved, ask for one") || strings.Contains(instructions, "This bundled Audit reviews one claimed change") {
+				t.Error("standalone Audit lost its own mode")
 			}
 			for _, forbidden := range []string{"ponytail", "750", "net-lines", "## Simplicity"} {
 				if strings.Contains(strings.ToLower(instructions), strings.ToLower(forbidden)) {
@@ -2306,14 +2354,7 @@ func TestPrivateSkillModulesAreNotPublicResources(t *testing.T) {
 		}
 	}
 
-	var rendered bytes.Buffer
-	if err := newApp(nil, bytes.NewReader(nil), &rendered, &rendered).Run([]string{"skl", "skill", "--format", "json", "implement"}); err != nil {
-		t.Fatal(err)
-	}
-	var packet skilldist.Packet
-	if err := json.Unmarshal(rendered.Bytes(), &packet); err != nil {
-		t.Fatal(err)
-	}
+	packet := implementBundle(t)
 	for _, resource := range packet.Resources {
 		if strings.HasPrefix(resource, "modules/") {
 			t.Errorf("private module %s is listed as a public resource", resource)
@@ -2364,7 +2405,7 @@ func TestDescribeNamedResourceInputs(t *testing.T) {
 			inputs: []string{"result_directory=/tmp/result", "procedure=initial"},
 			described: []string{
 				"result_directory (string, required): Absolute path of the private Result Document directory this invocation created.",
-				"procedure (string, required, one of: initial, rework): Which submission procedure to render.",
+				"procedure (string, required, one of: initial, resumed, rework): Which submission procedure to render.",
 			},
 			procedural: "# Submission Result Document",
 		},
@@ -2439,16 +2480,8 @@ func TestDescribeNamedResourceInputs(t *testing.T) {
 }
 
 func TestBundleGuaranteedSupportingSkills(t *testing.T) {
+	packet := implementBundle(t)
 	root := t.TempDir()
-	var stdout, stderr bytes.Buffer
-	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, root)
-	if err := app.Run([]string{"skl", "skill", "--format", "json", "implement"}); err != nil {
-		t.Fatal(err)
-	}
-	var packet skilldist.Packet
-	if err := json.Unmarshal(stdout.Bytes(), &packet); err != nil {
-		t.Fatal(err)
-	}
 	want := []string{"tdd", "audit", "design", "domain"}
 	if !slices.Equal(packet.IncludedSkills, want) {
 		t.Fatalf("included_skills = %v, want %v", packet.IncludedSkills, want)
@@ -2476,47 +2509,41 @@ func TestBundleGuaranteedSupportingSkills(t *testing.T) {
 			t.Errorf("no-facts Implement packet disclosed the deferred %q body", deferred)
 		}
 	}
-	for _, format := range []string{"markdown", "json"} {
-		t.Run(format, func(t *testing.T) {
-			raw := func(name string) string {
-				var out bytes.Buffer
-				if err := newApp(nil, bytes.NewReader(nil), &out, &out).Run([]string{"skl", "skill", "--format", format, name}); err != nil {
-					t.Fatal(err)
-				}
-				return out.String()
+	// Each bundled definition is the authored one specialized for this
+	// execution: it keeps the shared obligations and replaces the
+	// independent-mode alternatives the invocation already resolved.
+	specialized := map[string][]string{
+		"tdd":    {"pinned in the accepted artifacts"},
+		"audit":  {"merge-base with `main` and the parent of this change's first commit"},
+		"design": {"does not require a new design exercise"},
+		"domain": {"outside the accepted change"},
+	}
+	for _, included := range want {
+		section := bundledSection(t, packet.Instructions, included)
+		for _, marker := range specialized[included] {
+			if !strings.Contains(section, marker) {
+				t.Errorf("bundled %s lacks the specialized reference %q:\n%s", included, marker, section)
 			}
-			instructions := func(name string) string {
-				if format == "json" {
-					var rendered skilldist.Packet
-					if err := json.Unmarshal([]byte(raw(name)), &rendered); err != nil {
-						t.Fatal(err)
-					}
-					return rendered.Instructions
-				}
-				_, rendered, _ := strings.Cut(raw(name), "\n\n")
-				return rendered
+		}
+		for _, forbidden := range []string{"ponytail", "## simplicity"} {
+			if strings.Contains(strings.ToLower(section), forbidden) {
+				t.Errorf("bundled %s retains or injects %q", included, forbidden)
 			}
-			if format == "markdown" {
-				wantHeader := "Protocol: skl.instructions/v1\nSkill: implement\nIncluded skills: tdd, audit, design, domain\nFacts: {}\nResources: reference/decision.md, reference/submission.md\n\n"
-				if rendered := raw("implement"); !strings.HasPrefix(rendered, wantHeader) {
-					t.Fatalf("rendered implementation manifest changed:\n%s", rendered)
-				}
-			}
-			implementation := instructions("implement")
-			for _, included := range want {
-				if section := bundledSection(t, implementation, included); section != instructions(included) {
-					t.Errorf("bundled %s differs from direct retrieval:\n%s", included, section)
-				}
-			}
-			for _, forbidden := range []string{"ponytail", "## simplicity"} {
-				if strings.Contains(strings.ToLower(implementation), forbidden) {
-					t.Errorf("implementation packet retains or injects %q", forbidden)
-				}
-			}
-		})
+		}
+	}
+	// The authored definition stays retrievable on its own for an independent
+	// caller, which keeps the standalone branch instead.
+	var standalone bytes.Buffer
+	if err := newApp(nil, bytes.NewReader(nil), &standalone, &standalone).Run([]string{"skl", "skill", "tdd"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(standalone.String(), "confirm them with the user") || strings.Contains(standalone.String(), "at the human pause") {
+		t.Errorf("standalone TDD lost its own mode:\n%s", standalone.String())
 	}
 
-	if err := app.Run([]string{"skl", "install"}); err != nil {
+	var installOutput bytes.Buffer
+	install := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &installOutput, &installOutput, root)
+	if err := install.Run([]string{"skl", "install"}); err != nil {
 		t.Fatal(err)
 	}
 	stub := readFile(t, filepath.Join(root, ".codex/skills/implement/SKILL.md"))

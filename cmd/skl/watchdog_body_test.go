@@ -105,14 +105,14 @@ func TestGitHubWatchdogBodyObservation(t *testing.T) {
 			backend := setup.NewGitHubBackend(f.server.URL, "token", f.server.Client())
 			backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
 			ctx := context.Background()
-			inspected, err := workflow.InspectImplementation(ctx, f.root, "7", workflow.ArtifactEndpoints{}, backend)
+			inspected, err := workflow.InspectImplementation(ctx, f.root, "origin", "7", workflow.ArtifactEndpoints{}, backend)
 			if err != nil || inspected.Item == nil {
 				t.Fatalf("inspect: %#v, %v", inspected, err)
 			}
 			if inspected.Item.Submission.Body != body {
 				t.Errorf("observed body = %q, want %q", inspected.Item.Submission.Body, body)
 			}
-			output, err := setup.PresentImplementation(inspected)
+			output, err := setup.PresentImplementation(inspected, setup.InvocationContext{Repository: github.RepositoryID{Owner: "acme", Name: "widgets"}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -125,7 +125,7 @@ func TestGitHubWatchdogBodyObservation(t *testing.T) {
 				t.Fatalf("Watchdog resume: %#v, %v", started, err)
 			}
 			t.Cleanup(func() { os.RemoveAll(started.Facts.Watchdog.ResultDirectory) })
-			packet, err := setup.PresentImplementation(started)
+			packet, err := setup.PresentImplementation(started, setup.InvocationContext{Repository: github.RepositoryID{Owner: "acme", Name: "widgets"}})
 			if err != nil {
 				t.Fatal(err)
 			}

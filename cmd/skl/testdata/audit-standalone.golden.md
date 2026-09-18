@@ -1,3 +1,9 @@
+Protocol: skl.instructions/v1
+Skill: audit
+Included skills: none
+Facts: {}
+Resources: reference/smells.md
+
 ---
 name: audit
 description: Review the changes since a fixed point (commit, branch, tag or merge-base) along two axes - Standards (does the code follow this repo documented coding standards) and change Artifacts (does the code match what the originating change asked for?) Runs both reviews in parallel subagents and reports them side by side. Use when the user wants to review a branch, a PR, work-in-progress changes or asks to "review since X"
@@ -24,20 +30,17 @@ Use the supplied Work Item and Submission facts for originating context. This sk
 
 ### 1. Pin the fixed point
 
-{{if .Implementation}}This bundled Audit reviews one claimed change. Pin the fixed point to the merge-base with `main` and the parent of this change's first commit; never that first commit itself, because `git diff <it>...HEAD` would omit everything it introduced. Implement's finding-driven Rework reviews the current PR comparison and the supplied findings instead of inventing a previous-review cache. First-pass Audit may precede the final completion ticks and the ledger retirement, and it reports those endpoints as pending rather than inferring them. An explicit fixed point the caller supplies replaces the default above.
-{{else}}The goal is to review the work done for the single claimed unit of work. Which point that is depends on the round:
+The goal is to review the work done for the single claimed unit of work. Which point that is depends on the round:
 
 - **First workflow review of a change** — the merge-base with `main`, or the parent of the implementor's first commit. Never that first commit itself: `git diff <it>...HEAD` would omit everything it introduced. An independent Audit still uses any fixed point its caller explicitly supplies.
 - **Repeat review after a bounce** — the `Reviewed head` recorded in the previous reviewer's summary, so the round reads only what changed since.
-{{end}}
 
-{{if .Implementation}}Artifact integrity uses its own, unmoving Artifact Baseline and Artifact Completion from the engine's endpoint inspection. They never advance with review rounds.{{if .Implementation.ArtifactBaseline}} The resolved endpoints are Artifact Baseline `{{.Implementation.ArtifactBaseline}}`{{if .Implementation.ArtifactCompletion}} and Artifact Completion `{{.Implementation.ArtifactCompletion}}`{{end}}.{{else}} They are not resolved in this invocation yet: run `{{.Implementation.InspectCommand}}` to resolve the Artifact Baseline and Completion from the fetched history, and never invent an endpoint or take one from the working tree.{{end}}{{if .Implementation.SuppliedArtifactBaseline}} The caller supplied `--artifact-baseline {{.Implementation.SuppliedArtifactBaseline}}`{{if .Implementation.SuppliedArtifactCompletion}} and `--artifact-completion {{.Implementation.SuppliedArtifactCompletion}}`{{end}}; preserve those exact full SHAs on every inspection, resume, submit, and Needs Human command.{{end}} The engine validates endpoint identity and snapshots, while you read and judge the historical contract.
-{{else}}Artifact integrity uses its own, unmoving Artifact Baseline and, when available, Artifact Completion from the engine's endpoint inspection. It never advances with review rounds. Refresh fixed Git facts with the packet's `inspect_command`, or `skl implement inspect --remote <name> --item <number>` when invoked independently; preserve any caller-supplied `--artifact-baseline <full-sha>` and `--artifact-completion <full-sha>`. The engine validates endpoint identity and snapshots, while you read and judge the historical contract.
-{{end}}
 
-{{if .Implementation}}An explicit fixed point the caller supplies — a commit SHA, branch name, tag, `main`, `HEAD~5`, etc. — replaces the default above; the default never has to be asked for.
-{{else}}If the user provides a fixed point — a commit SHA, branch name, tag, `main`, `HEAD~5`, etc. — use that instead. If no PR comparison or fixed point can be resolved, ask for one.
-{{end}}
+Artifact integrity uses its own, unmoving Artifact Baseline and, when available, Artifact Completion from the engine's endpoint inspection. It never advances with review rounds. Refresh fixed Git facts with the packet's `inspect_command`, or `skl implement inspect --remote <name> --item <number>` when invoked independently; preserve any caller-supplied `--artifact-baseline <full-sha>` and `--artifact-completion <full-sha>`. The engine validates endpoint identity and snapshots, while you read and judge the historical contract.
+
+
+If the user provides a fixed point — a commit SHA, branch name, tag, `main`, `HEAD~5`, etc. — use that instead. If no PR comparison or fixed point can be resolved, ask for one.
+
 
 Capture the diff command once: `git diff <fixed-point>...HEAD` (three-dot, so the comparison is against the merge-base). Also note the list of commits via `git log <fixed-point>..HEAD --oneline`.
 
@@ -45,14 +48,13 @@ Before going further, confirm the fixed point resolves (`git rev-parse <fixed-po
 
 ### 2. Identify the artifacts source
 
-{{if .Implementation}}The artifacts are the accepted `.changes/{{.Implementation.Branch}}/` files of this Work Item. Read them from the resolved Artifact Baseline and Completion snapshots with `git show <snapshot>:.changes/{{.Implementation.Branch}}/<file>`. After retirement, read them from those historical snapshots and never recreate the ledger.
-{{else}}Look for the originating artifacts, in this order:
+Look for the originating artifacts, in this order:
 
 1. The supplied Work Item's exact Artifact Baseline and Completion; read with `git show <snapshot>:.changes/<slug>/<file>`.
 2. A path the user passed as an argument.
 3. Artifacts in `.changes/<slug>` for the in-flight unit of work matching the branch name or feature; after retirement, read them from the historical Artifact Baseline and Completion without recreating them
 4. If nothing is found, ask the user where the artifacts are. If they say there isn't one, the **Artifacts** sub-agent will skip and report "no Artifacts available".
-{{end}}
+
 
 ### 3. Identify the standards sources
 
@@ -67,24 +69,14 @@ These two produce facts, not judgements — a diff read or an exit code. Run the
 1. **The documented gate** — the project's full suite, typecheck and lint, exactly once per invocation. A red gate is worth knowing before spending two reviewer contexts on it.
 2. **Artifact integrity** — record the engine's endpoint inspection: Baseline, optional Completion, provisional/present/retired phase, and every violation. Compare only the resolved Baseline and Completion, or Baseline and current provisional head before Completion; do not inspect intermediate artifact contents, infer Completion from deletion, or require monotonic intermediate ticks. First-pass Audit may precede final ticks and retirement, so label those facts pending rather than claim review readiness. Normal submission requires completed automated boxes at Completion and ledger absence at the review head; Rework keeps it absent. For an independent Audit without engine facts, compare the supplied endpoint snapshots directly and report missing integrity evidence explicitly.
 
-{{if .Implementation}}### 5. Spawn both sub-agents in parallel
-
-Dispatch both axes in fresh contexts using exactly this invocation's established execution capability:
-
-{{if eq .Implementation.Capability "claude-agents"}}- **Established Claude Agent parallel-review capability**: a single message with two `Agent` tool calls, using the `general-purpose` subagent for both. This is the only supported recipe for this invocation.
-{{else if eq .Implementation.Capability "pi-subagents"}}- **Established Pi subagent workflow capability**: a single asynchronous `subagent` call with a `workflowScript` using `runs.all` to launch both reviewers in fresh contexts. Set `timeoutMs: 3600000` on the workflow call and both reviewer items. This is the only supported recipe for this invocation.
-{{else if eq .Implementation.Capability "sequential"}}- **Established absence of a subagent mechanism**: run the two axes sequentially, Standards first. This is the only supported recipe for this invocation.
-{{else}}- **Capability unknown**: the invocation established no execution capability, and an adapter or harness name alone proves nothing. Choose among the supported recipes at runtime — the Claude parallel `Agent` calls, the Pi asynchronous parallel `subagent` workflow, or the sequential Standards-then-Artifacts fallback — and use exactly one of them.
-{{end}}
-The recipe changes how the two axes are dispatched, never what they check: both axes still run, in fresh contexts, and this skill still aggregates them.
-{{else}}### 5. Spawn both sub-agents in parallel
+### 5. Spawn both sub-agents in parallel
 
 Dispatch both axes as parallel sub-agents, each in a fresh context carrying its brief:
 
 - **Claude Code**: a single message with two `Agent` tool calls, using the `general-purpose` subagent for both.
 - **pi** ([pi-subagents](https://github.com/nicobailon/pi-subagents)): a single asynchronous `subagent` call with a `workflowScript` using `runs.all` to launch both reviewers in fresh contexts. Set `timeoutMs: 3600000` on the workflow call and both reviewer items.
 - **No sub-agent mechanism available**: run the two axes sequentially, Standards first.
-{{end}}
+
 
 **Standards sub-agent prompt** — include:
 

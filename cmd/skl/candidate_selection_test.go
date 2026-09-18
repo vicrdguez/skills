@@ -445,7 +445,7 @@ func selectionRun(t *testing.T, root string, forge *candidateForge, args ...stri
 		backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
 		return backend, nil
 	}, bytes.NewReader(nil), &output, &output)
-	command := append([]string{"skl"}, args...)
+	command := structuredStageCommand(args...)
 	command = append(command, "--repo", root)
 	err := app.Run(command)
 	if err != nil {

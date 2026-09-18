@@ -44,7 +44,8 @@ func selectionReworkRun(t *testing.T, root string, forge *candidateForge, change
 		backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
 		return backend, nil
 	}, bytes.NewReader(nil), &output, &output)
-	err := app.Run(append(append([]string{"skl"}, args...), "--repo", root))
+	command := structuredStageCommand(args...)
+	err := app.Run(append(command, "--repo", root))
 	if err != nil {
 		return setup.ImplementationOutput{}, err
 	}

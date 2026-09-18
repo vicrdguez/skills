@@ -23,7 +23,11 @@ type githubPull struct {
 	NodeID    string `json:"node_id"`
 	Draft     bool   `json:"draft"`
 	MergedAt  string `json:"merged_at"`
-	Head      struct {
+	User      struct {
+		Login string `json:"login"`
+	} `json:"user"`
+	AuthorAssociation string `json:"author_association"`
+	Head              struct {
 		Ref  string `json:"ref"`
 		SHA  string `json:"sha"`
 		Repo struct {
@@ -688,6 +692,7 @@ func (b *GitHubBackend) implementationComments(ctx context.Context, repository g
 			observed := skilldist.ReviewComment{
 				Body: comment.Body, Author: comment.User.Login, Association: comment.Association, Commit: comment.Commit, Path: comment.Path, CreatedAt: comment.CreatedAt, Side: comment.Side,
 				CurrentLine: comment.Line, OriginalLine: comment.OriginalLine, StartLine: comment.StartLine, OriginalStartLine: comment.OriginalStartLine, StartSide: comment.StartSide, OriginalCommit: comment.OriginalCommit,
+				Source: skilldist.RepositoryEvidenceSource(repository.Owner+"/"+repository.Name, stream),
 			}
 			if comment.Line != nil {
 				observed.Line = *comment.Line
