@@ -1332,15 +1332,20 @@ func TestImplementBundlesInstructionsWithoutTargetPin(t *testing.T) {
 	if strings.Contains(got.Packet.Markdown(), "git merge ") || strings.Contains(got.Packet.Facts.Implementation.ResumeCommand, "target-snapshot") {
 		t.Fatalf("packet retained target integration: %s", got.Packet.Markdown())
 	}
-	_, markdown, found := strings.Cut(got.Packet.Markdown(), "\n\n## Work Start\n")
+	definition, _, found := strings.Cut(got.Packet.Instructions, "\n\n## Included Skill: tdd\n\n")
 	if !found {
-		t.Fatal("packet lacks Work Start instructions")
+		t.Fatal("packet lacks the specialized Implement definition")
 	}
 	facts := got.Packet.Facts.Implementation
 	golden := readRepositoryFile(t, "cmd/skl/testdata/implement-start.golden.md")
-	normalized := strings.NewReplacer(facts.Worktree, "<worktree>", facts.ResultDirectory, "<result>", filepath.Dir(filepath.Dir(facts.Worktree)), "<main>", baseline, "<baseline>").Replace("## Work Start\n" + markdown)
+	normalized := strings.NewReplacer(facts.Worktree, "<worktree>", facts.ResultDirectory, "<result>", filepath.Dir(filepath.Dir(facts.Worktree)), "<main>", baseline, "<baseline>").Replace(definition)
 	if normalized != golden {
-		t.Fatalf("Work Start Markdown differs from golden:\n%s", normalized)
+		t.Fatalf("specialized Implement definition differs from golden:\n%s", normalized)
+	}
+	for _, unresolved := range []string{"{{if", "{{else", "{{end", "{{.Implementation"} {
+		if strings.Contains(definition, unresolved) {
+			t.Fatalf("specialized definition left %q unrendered", unresolved)
+		}
 	}
 	if strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD")) != baseline {
 		t.Fatal("Work Start changed Git")

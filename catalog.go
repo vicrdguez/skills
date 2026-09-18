@@ -55,9 +55,11 @@ type WatchdogFacts struct {
 
 type ImplementationFacts struct {
 	WorkItemReference          string             `json:"-"`
+	Repository                 string             `json:"repository,omitempty"`
 	Remote                     string             `json:"remote"`
 	FetchCommand               string             `json:"fetch_command"`
 	WorktreeCommand            string             `json:"worktree_command"`
+	PushCommand                string             `json:"push_command"`
 	InspectCommand             string             `json:"inspect_command"`
 	NeedsHumanCommand          string             `json:"needs_human_command"`
 	ResultDirectory            string             `json:"result_directory"`
@@ -168,12 +170,6 @@ func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
 		}
 		instructions += "\n\n## Included Skill: " + included + "\n\n" + rendered
 	}
-	if facts.Implementation != nil {
-		f := facts.Implementation
-		instructions += fmt.Sprintf("\n\n## Work Start\n\nWork Item: %s\nBranch: %s\nWorktree: %s\nPrepare: `%s` then `%s`; safely reuse a clean existing worktree instead of recreating it\nInspect: `%s` resolves the Artifact Baseline and Completion from the fetched history\nResume: `%s`\n", f.WorkItemReference, f.Branch, f.Worktree, f.FetchCommand, f.WorktreeCommand, f.InspectCommand, f.ResumeCommand)
-		instructions += "\n" + implementationProcedure(f) + "\n"
-		instructions += "\nWrite the opaque Result Document using the named template, then run `" + f.SubmitCommand + "`. If pausing, run `" + f.NeedsHumanCommand + "` and add `--body <result>/submission.md` when preserving implementation changes.\n"
-	}
 	if f := facts.Watchdog; f != nil {
 		instructions += fmt.Sprintf("\n\n## Review Start\n\nWork Item: %s\nSubmission: %s\nWorktree: %s\nReviewed head: %s\nCompleted reviews: %d\nReview number: %d\nScope: %s; the comparison rule below applies after Git preparation\nPrepare: `%s` then `%s`; safely reuse a clean existing worktree instead of recreating it\nInspect: `%s` resolves the Artifact Baseline and Completion from the fetched history\nResume: `%s`\n\nRun the Inspect command after preparing the worktree, read the endpoint files from Git at the resolved Baseline and Completion, then use the opaque Submission body, prior findings, and human comments. Review the invocation's current head; rerun the Full Gate, active-finding verification, artifact checks, and whole-change critical-class scan. The engine has not run Audit or project checks.\n\nWrite `summary.md`, optional anchored findings, and on pass `submission.md` in %s. Run `%s --verdict <pass|rework|needs-human>`. Pass also requires `--body <result>/submission.md`; optional inline inputs use `--findings <result>/findings.json`. After permitted Debt Marker comments, commit and push, run the Post-Marker Check, and supply `--head <final-sha>` while retaining the original `--reviewed-head`.\n", f.WorkItemReference, f.SubmissionReference, f.Worktree, f.ReviewedHead, f.ReviewCount, f.ReviewNumber, f.ReviewScope, f.FetchCommand, f.WorktreeCommand, f.InspectCommand, f.ResumeCommand, f.ResultDirectory, f.SubmitCommand)
 		if f.PreviousReviewedHead != "" {
@@ -194,20 +190,6 @@ func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
 		Resources:      resources,
 		Instructions:   instructions,
 	}, nil
-}
-
-// implementationProcedure states the consequences of the engine-established
-// procedure. A template never selects it from a branch name, an attached
-// Submission, feedback contents, or an unobserved artifact phase.
-func implementationProcedure(f *ImplementationFacts) string {
-	switch f.Procedure {
-	case FindingDrivenRework:
-		return "This invocation follows finding-driven Rework: the latest Watchdog summary and its inline evidence are the ledger of what was found. Map every finding to its resolution commit and supporting evidence in the Result Document, and update the `## Audit ledger` in the PR body to the current head. Resolve every `BLOCK`; materialize code-local `NOTE` findings as `DEBT(#<pr>/W<n>)` comments. This obligation holds even when the supplied feedback is empty or still pending: read the retired Implementation Ledger at its historical Artifact Baseline and Completion, inspect the current PR comparison, and retrieve required feedback before concluding there are no findings."
-	case ResumedSubmission:
-		return "This invocation resumes existing work: inspect the branch, the preserved files, the applicable artifacts, and the visible feedback; do not restart completed work. Continue the remaining accepted scenarios, and an attached draft Submission is preserved rather than replaced."
-	default:
-		return "This invocation starts the accepted change: read the accepted artifacts at their Artifact Baseline before changing code, and implement every accepted scenario. No progress is preserved yet, and a draft Submission, a branch name, or a nonempty comment stream does not change this procedure."
-	}
 }
 
 // templateFuncs is the deliberately small helper set authored templates share.

@@ -65,3 +65,29 @@ That is a claim, not proof. The next watchdog verifies it independently. Update 
 Finish everything that is not blocked first. This handoff is for contradictory or impossible artifacts, a mandatory project/language/security/accessibility conflict, an unavoidable change to frozen behavior or interface, a disputed blocker, or the bounce cap; adjacent improvements and implementation preferences do not justify it. Write `decision.md` using {{if .Implementation}}`skl skill --resource reference/decision.md --input result_directory={{quote .Implementation.ResultDirectory}} --input preserve=<true|false> implement`, setting `preserve` to `true` when implementation work exists that the draft Submission must preserve and to `false` otherwise{{else}}the resource command this packet's invocation supplies, or discover the accepted inputs and the preservation boolean with `skl skill --resource reference/decision.md --describe-inputs implement`{{end}}; then run `skl implement needs-human --item <number> --reason <reason> --decision <absolute-file>`. Reasons are `contradictory_artifacts`, `mandatory_rule`, `frozen_interface`, `disputed_blocker`, and `bounce_cap`.
 
 When implementation work exists, push it and also supply `--body <absolute-submission.md>` from the same private directory to preserve one draft Submission. Incomplete artifacts may remain during this pause; preserve any supplied endpoint flags, but do not invent Completion, tick unfinished work, or retire the ledger. The semantic command publishes the decision and preserves the state to resume; never leave the question only in your own session.
+{{if .Implementation}}
+## Work Start
+
+Repository: {{.Implementation.Repository}} on the selected remote `{{.Implementation.Remote}}`
+Work Item: {{.Implementation.WorkItemReference}}
+Branch: `{{.Implementation.Branch}}`
+Worktree: `{{.Implementation.Worktree}}`
+Private result location: `{{.Implementation.ResultDirectory}}`, which this invocation already created
+
+Prepare: `{{.Implementation.FetchCommand}}` then `{{.Implementation.WorktreeCommand}}`; safely reuse a clean existing worktree instead of recreating it, and preserve dirty files, the index, and existing branch progress. Never reset, stash, rebase, force-push, or merge the target merely to make preparation or presentation convenient.
+Push: `{{.Implementation.PushCommand}}`
+Inspect: `{{.Implementation.InspectCommand}}` resolves the Artifact Baseline and Completion from the fetched history.
+Resume: `{{.Implementation.ResumeCommand}}`
+{{if or .Implementation.SuppliedArtifactBaseline .Implementation.SuppliedArtifactCompletion}}
+Supplied Artifact Baseline `{{.Implementation.SuppliedArtifactBaseline}}` and Artifact Completion `{{.Implementation.SuppliedArtifactCompletion}}` are known pointers, not validated contents or ancestry: keep these exact full SHAs on every command above and below, and add no override flag for an endpoint the history already resolves. The Inspect command is what validates them.
+{{end}}
+{{if eq .Implementation.Procedure "rework"}}This invocation follows finding-driven Rework: the latest Watchdog summary and its inline evidence are the ledger of what was found. Map every finding to its resolution commit and supporting evidence in the Result Document, and update the `## Audit ledger` in the PR body to the current head. Resolve every `BLOCK`; materialize code-local `NOTE` findings as `DEBT(#<pr>/W<n>)` comments. This obligation holds even when the supplied feedback is empty or still pending: read the retired Implementation Ledger at its historical Artifact Baseline and Completion, inspect the current PR comparison, and retrieve required feedback before concluding there are no findings.
+{{else if eq .Implementation.Procedure "resumed"}}This invocation resumes existing work: inspect the branch, the preserved files, the applicable artifacts, and the visible feedback; do not restart completed work. Continue the remaining accepted scenarios, and an attached draft Submission is preserved rather than replaced.
+{{else}}This invocation starts the accepted change: read the accepted artifacts at their Artifact Baseline before changing code, and implement every accepted scenario. No progress is preserved yet, and a draft Submission, a branch name, or a nonempty comment stream does not change this procedure.
+{{end}}
+The dedicated worktree, the selected project commits, and the artifact objects may still be unavailable locally. Preparing the branch and running the Inspect command establish them; do not derive any of them from the branch name, from the presence of a Submission, or from a lifecycle label.
+
+{{template "evidence" .Implementation}}
+
+Write the opaque Result Document using the named template, then run `{{.Implementation.SubmitCommand}}`. If pausing, run `{{.Implementation.NeedsHumanCommand}}` and add `--body <result>/submission.md` when preserving implementation changes.
+{{end}}

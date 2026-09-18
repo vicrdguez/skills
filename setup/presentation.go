@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	skilldist "github.com/vicrdguez/skills"
+	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/workflow"
 )
 
@@ -89,7 +90,10 @@ func primary(worktree string) string {
 	return filepath.Dir(filepath.Dir(worktree))
 }
 
-func PresentImplementation(outcome workflow.ImplementationOutcome) (ImplementationOutput, error) {
+// PresentImplementation renders one Implement outcome. The repository identity
+// is invocation metadata the engine already resolved, so a bound command never
+// has to re-derive it from a remote URL.
+func PresentImplementation(outcome workflow.ImplementationOutcome, repository github.RepositoryID) (ImplementationOutput, error) {
 	output := ImplementationOutput{ImplementationOutcome: outcome}
 	if outcome.Item != nil {
 		item, err := presentItem(*outcome.Item)
@@ -123,6 +127,7 @@ func PresentImplementation(outcome workflow.ImplementationOutcome) (Implementati
 		skill, directory = "implement", f.ResultDirectory
 		f.WorkItem = output.Item.Number
 		f.WorkItemReference = fmt.Sprintf("#%d", f.WorkItem)
+		f.Repository = repository.Owner + "/" + repository.Name
 		// The engine established the procedure from authoritative Workflow State;
 		// presentation never reselects it from the attached records.
 		if f.Procedure == "" {
@@ -141,6 +146,7 @@ func PresentImplementation(outcome workflow.ImplementationOutcome) (Implementati
 		}
 		f.FetchCommand = fmt.Sprintf("git -C %s fetch %s %s", quote(primary(f.Worktree)), quote(f.Remote), quote("+refs/heads/"+f.Branch+":refs/remotes/"+f.Remote+"/"+f.Branch))
 		f.WorktreeCommand = fmt.Sprintf("git -C %s worktree add -b %s %s %s", quote(primary(f.Worktree)), quote(f.Branch), quote(f.Worktree), quote(f.Remote+"/"+f.Branch))
+		f.PushCommand = fmt.Sprintf("git -C %s push %s %s", quote(f.Worktree), quote(f.Remote), quote(f.Branch))
 		f.InspectCommand = fmt.Sprintf("skl implement inspect --repo %s --remote %s --item %d", quote(f.Worktree), quote(f.Remote), f.WorkItem)
 		f.SubmitCommand = fmt.Sprintf("skl implement submit --repo %s --remote %s --item %d --body %s", quote(f.Worktree), quote(f.Remote), f.WorkItem, quote(filepath.Join(directory, "submission.md")))
 		f.NeedsHumanCommand = fmt.Sprintf("skl implement needs-human --repo %s --remote %s --item %d --reason <permitted-reason> --decision %s", quote(f.Worktree), quote(f.Remote), f.WorkItem, quote(filepath.Join(directory, "decision.md")))

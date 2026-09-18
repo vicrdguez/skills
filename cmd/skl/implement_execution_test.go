@@ -249,3 +249,91 @@ func TestB2ProcedureSelectionIgnoresIncidentalEvidence(t *testing.T) {
 		})
 	}
 }
+
+// TestB3MetadataOnlyStartupBindsEveryAlreadyEstablishedReference materializes
+// the B3 outline. Startup may only use metadata the invocation already
+// established, so every bound command must be literal and usable as printed.
+func TestB3MetadataOnlyStartupBindsEveryAlreadyEstablishedReference(t *testing.T) {
+	quote := skilldist.ShellQuote
+	for _, availability := range []string{"unavailable locally", "available locally with artifact marker history"} {
+		freshFixture := func() (string, *implementationMemory) {
+			root := selectionRepository(t)
+			runGit(t, root, "remote", "rename", "origin", "upstream")
+			runGit(t, root, "remote", "add", "origin", "https://github.com/other/widgets.git")
+			root = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "--show-toplevel"))
+			if availability == "available locally with artifact marker history" {
+				prepareSlice(t, root, "slice-seven")
+				runGit(t, root, "switch", "main")
+				runGit(t, root, "worktree", "add", filepath.Join(root, ".worktrees", "slice-seven"), "slice-seven")
+			}
+			return root, &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "slice-seven", State: workflow.Ready}}}
+		}
+		t.Run(availability, func(t *testing.T) {
+			root, backend := freshFixture()
+			baseline, completion := strings.Repeat("a", 40), strings.Repeat("b", 40)
+			flags := []string{"--artifact-baseline", baseline, "--artifact-completion", completion}
+			got := implementCLI(t, root, backend, append([]string{"next", "--remote", "upstream"}, flags...)...)
+			if got.Packet == nil || got.Status != "work_available" {
+				t.Fatalf("start = %#v", got)
+			}
+			facts := got.Packet.Facts.Implementation
+			rendered := got.Packet.Instructions
+			worktree := filepath.Join(root, ".worktrees", "slice-seven")
+			if facts.Repository != "acme/widgets" || facts.Remote != "upstream" || facts.Worktree != worktree || facts.ResultDirectory == "" {
+				t.Fatalf("established identities = %#v", facts)
+			}
+			for _, bound := range []string{
+				"Repository: acme/widgets on the selected remote `upstream`",
+				"Work Item: #7",
+				"Branch: `slice-seven`",
+				"Worktree: `" + worktree + "`",
+				"Private result location: `" + facts.ResultDirectory + "`",
+				"Prepare: `git -C " + quote(root) + " fetch " + quote("upstream") + " " + quote("+refs/heads/slice-seven:refs/remotes/upstream/slice-seven") + "` then `git -C " + quote(root) + " worktree add -b " + quote("slice-seven") + " " + quote(worktree) + " " + quote("upstream/slice-seven") + "`",
+				"Push: `git -C " + quote(worktree) + " push " + quote("upstream") + " " + quote("slice-seven") + "`",
+				"Inspect: `skl implement inspect --repo " + quote(worktree) + " --remote " + quote("upstream") + " --item 7 --artifact-baseline " + baseline + " --artifact-completion " + completion + "`",
+				"Resume: `skl implement resume --item 7 --remote " + quote("upstream") + " --artifact-baseline " + baseline + " --artifact-completion " + completion + "`",
+				"`skl implement submit --repo " + quote(worktree) + " --remote " + quote("upstream") + " --item 7 --body " + quote(filepath.Join(facts.ResultDirectory, "submission.md")) + " --artifact-baseline " + baseline + " --artifact-completion " + completion + "`",
+				"`skl implement needs-human --repo " + quote(worktree) + " --remote " + quote("upstream") + " --item 7 --reason <permitted-reason> --decision " + quote(filepath.Join(facts.ResultDirectory, "decision.md")) + " --artifact-baseline " + baseline + " --artifact-completion " + completion + "`",
+				"gh api --paginate repos/acme/widgets/issues/7/comments",
+				"are known pointers, not validated contents or ancestry",
+			} {
+				if !strings.Contains(rendered, bound) {
+					t.Errorf("Execution Skill lacks the bound reference:\n%s", bound)
+				}
+			}
+			if info, err := os.Stat(facts.ResultDirectory); err != nil || !info.IsDir() {
+				t.Fatalf("private result location is not established: %v", err)
+			}
+			if availability == "unavailable locally" {
+				if gitRefExists(root, "refs/heads/slice-seven") || gitRefExists(root, "refs/remotes/upstream/slice-seven") {
+					t.Fatal("startup fetched or created the local branch")
+				}
+				if _, err := os.Stat(worktree); err == nil {
+					t.Fatal("startup prepared the worktree")
+				}
+			}
+
+			// No override is invented for an endpoint a normal invocation never supplies.
+			plainRoot, plainBackend := freshFixture()
+			plain := implementCLI(t, plainRoot, plainBackend, "next", "--remote", "upstream")
+			if plain.Packet == nil {
+				t.Fatalf("plain start = %#v", plain)
+			}
+			plainFacts := plain.Packet.Facts.Implementation
+			if plainFacts.SuppliedArtifactBaseline != "" || plainFacts.SuppliedArtifactCompletion != "" {
+				t.Fatalf("plain invocation carried endpoints: %#v", plainFacts)
+			}
+			worktree = filepath.Join(plainRoot, ".worktrees", "slice-seven")
+			for _, unoverridden := range []string{
+				"Inspect: `skl implement inspect --repo " + quote(worktree) + " --remote " + quote("upstream") + " --item 7`",
+				"Resume: `skl implement resume --item 7 --remote " + quote("upstream") + "`",
+				"`skl implement submit --repo " + quote(worktree) + " --remote " + quote("upstream") + " --item 7 --body " + quote(filepath.Join(plainFacts.ResultDirectory, "submission.md")) + "`",
+				"`skl implement needs-human --repo " + quote(worktree) + " --remote " + quote("upstream") + " --item 7 --reason <permitted-reason> --decision " + quote(filepath.Join(plainFacts.ResultDirectory, "decision.md")) + "`",
+			} {
+				if !strings.Contains(plain.Packet.Instructions, unoverridden) {
+					t.Errorf("plain invocation invented an override or lost a bound value:\n%s", unoverridden)
+				}
+			}
+		})
+	}
+}

@@ -60,7 +60,7 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 				if err != nil {
 					var violation *workflow.InvariantError
 					if errors.As(err, &violation) {
-						output, presentErr := setup.PresentImplementation(workflow.ImplementationOutcome{Status: "fix_required", Reason: violation.Reason})
+						output, presentErr := setup.PresentImplementation(workflow.ImplementationOutcome{Status: "fix_required", Reason: violation.Reason}, repository.Repository)
 						if presentErr != nil {
 							return presentErr
 						}
@@ -72,7 +72,7 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 					}
 					return err
 				}
-				output, err := setup.PresentImplementation(outcome)
+				output, err := setup.PresentImplementation(outcome, repository.Repository)
 				if err != nil {
 					return err
 				}
