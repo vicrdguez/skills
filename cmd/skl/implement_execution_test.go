@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	skilldist "github.com/vicrdguez/skills"
 	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/setup"
 	"github.com/vicrdguez/skills/workflow"
@@ -139,6 +140,110 @@ func TestB1StartupTransportDoesNotRepeatTheOperation(t *testing.T) {
 			for _, claim := range []*implementationMemory{markdownBackend, jsonBackend} {
 				if !claim.work[1].Claimed || claim.work[0].Claimed {
 					t.Fatalf("formatting changed the underlying operation: %#v", claim.work)
+				}
+			}
+		})
+	}
+}
+
+// procedureMarkers are the applicable-procedure statements every Execution
+// Skill must carry exactly once. They are deliberately independent of branch
+// names, PR presence, artifact phase, and feedback contents.
+var procedureMarkers = map[skilldist.ImplementProcedure]string{
+	skilldist.InitialSubmission:   "This invocation starts the accepted change:",
+	skilldist.ResumedSubmission:   "This invocation resumes existing work:",
+	skilldist.FindingDrivenRework: "This invocation follows finding-driven Rework:",
+}
+
+// TestB2ProcedureSelectionIgnoresIncidentalEvidence materializes the B2 outline.
+func TestB2ProcedureSelectionIgnoresIncidentalEvidence(t *testing.T) {
+	cases := []struct {
+		name       string
+		item       workflow.ImplementationItem
+		action     []string
+		want       skilldist.ImplementProcedure
+		wantText   []string
+		absentText []string
+	}{
+		{
+			name: "initial work",
+			item: workflow.ImplementationItem{ID: "7", Branch: "rework", State: workflow.Ready,
+				Feedback: []skilldist.ReviewComment{{Body: "looks like a rework finding", Author: "reviewer"}}},
+			action:     []string{"next"},
+			want:       skilldist.InitialSubmission,
+			wantText:   []string{"read the accepted artifacts at their Artifact Baseline before changing code"},
+			absentText: nil,
+		},
+		{
+			name:   "resumed implementation",
+			item:   workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Ready, Claimed: true},
+			action: []string{"resume", "--item", "7"},
+			want:   skilldist.ResumedSubmission,
+			wantText: []string{
+				"inspect the branch, the preserved files, the applicable artifacts, and the visible feedback",
+				"do not restart completed work",
+			},
+		},
+		{
+			name: "resumed draft progress",
+			item: workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Ready, Claimed: true,
+				Submission: &workflow.Submission{ID: "11", Base: "main", Draft: true, Body: "draft body",
+					Comments: []skilldist.ReviewComment{{Body: "draft comment", Author: "owner", Association: "OWNER"}}}},
+			action: []string{"resume", "--item", "7"},
+			want:   skilldist.ResumedSubmission,
+			wantText: []string{
+				"an attached draft Submission is preserved rather than replaced",
+			},
+		},
+		{
+			name: "finding-driven rework with fetched empty comments",
+			item: workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Rework, Claimed: true,
+				Submission: &workflow.Submission{ID: "11", Base: "main"}},
+			action:     []string{"resume", "--item", "7"},
+			want:       skilldist.FindingDrivenRework,
+			wantText:   []string{"Map every finding to its resolution", "even when the supplied feedback is empty or still pending"},
+			absentText: []string{"This invocation starts the accepted change:", "This invocation resumes existing work:"},
+		},
+		{
+			name: "finding-driven rework whose feedback is not fetched yet",
+			item: workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Rework, Claimed: true,
+				Submission: &workflow.Submission{ID: "11", Base: "main"}},
+			action:   []string{"resume", "--item", "7"},
+			want:     skilldist.FindingDrivenRework,
+			wantText: []string{"Map every finding to its resolution", "even when the supplied feedback is empty or still pending"},
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			root := proposalRepository(t)
+			prepareSlice(t, root, "widget")
+			backend := &implementationMemory{work: []workflow.ImplementationItem{testCase.item}}
+			got := implementCLI(t, root, backend, testCase.action...)
+			if got.Packet == nil || got.Packet.Facts.Implementation == nil {
+				t.Fatalf("no Execution Skill: %#v", got)
+			}
+			facts := got.Packet.Facts.Implementation
+			if facts.Procedure != testCase.want {
+				t.Fatalf("procedure = %q, want %q", facts.Procedure, testCase.want)
+			}
+			rendered := got.Packet.Instructions
+			for procedure, marker := range procedureMarkers {
+				present := strings.Contains(rendered, marker)
+				if procedure == testCase.want && !present {
+					t.Errorf("Execution Skill lacks the applicable procedure %q", procedure)
+				}
+				if procedure != testCase.want && present {
+					t.Errorf("Execution Skill retains the resolved alternative %q", procedure)
+				}
+			}
+			for _, text := range testCase.wantText {
+				if !strings.Contains(rendered, text) {
+					t.Errorf("Execution Skill lacks %q", text)
+				}
+			}
+			for _, text := range testCase.absentText {
+				if strings.Contains(rendered, text) {
+					t.Errorf("Execution Skill asserts an unobserved phase with %q", text)
 				}
 			}
 		})

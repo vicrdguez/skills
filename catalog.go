@@ -77,11 +77,13 @@ type ImplementationFacts struct {
 
 // ImplementProcedure is the engine-established submission procedure for one
 // Implement invocation, decided from authoritative Workflow State rather than
-// inferred from an attached Submission.
+// inferred from an attached Submission, branch name, feedback contents, or any
+// unobserved artifact phase.
 type ImplementProcedure string
 
 const (
 	InitialSubmission   ImplementProcedure = "initial"
+	ResumedSubmission   ImplementProcedure = "resumed"
 	FindingDrivenRework ImplementProcedure = "rework"
 )
 
@@ -169,9 +171,7 @@ func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
 	if facts.Implementation != nil {
 		f := facts.Implementation
 		instructions += fmt.Sprintf("\n\n## Work Start\n\nWork Item: %s\nBranch: %s\nWorktree: %s\nPrepare: `%s` then `%s`; safely reuse a clean existing worktree instead of recreating it\nInspect: `%s` resolves the Artifact Baseline and Completion from the fetched history\nResume: `%s`\n", f.WorkItemReference, f.Branch, f.Worktree, f.FetchCommand, f.WorktreeCommand, f.InspectCommand, f.ResumeCommand)
-		if f.Procedure == FindingDrivenRework {
-			instructions += "\nFinding-driven Rework: sync nothing; inspect the current PR comparison, supplied summary, inline evidence, and human comments. Keep the ledger retired.\n"
-		}
+		instructions += "\n" + implementationProcedure(f) + "\n"
 		instructions += "\nWrite the opaque Result Document using the named template, then run `" + f.SubmitCommand + "`. If pausing, run `" + f.NeedsHumanCommand + "` and add `--body <result>/submission.md` when preserving implementation changes.\n"
 	}
 	if f := facts.Watchdog; f != nil {
@@ -194,6 +194,20 @@ func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
 		Resources:      resources,
 		Instructions:   instructions,
 	}, nil
+}
+
+// implementationProcedure states the consequences of the engine-established
+// procedure. A template never selects it from a branch name, an attached
+// Submission, feedback contents, or an unobserved artifact phase.
+func implementationProcedure(f *ImplementationFacts) string {
+	switch f.Procedure {
+	case FindingDrivenRework:
+		return "This invocation follows finding-driven Rework: the latest Watchdog summary and its inline evidence are the ledger of what was found. Map every finding to its resolution commit and supporting evidence in the Result Document, and update the `## Audit ledger` in the PR body to the current head. Resolve every `BLOCK`; materialize code-local `NOTE` findings as `DEBT(#<pr>/W<n>)` comments. This obligation holds even when the supplied feedback is empty or still pending: read the retired Implementation Ledger at its historical Artifact Baseline and Completion, inspect the current PR comparison, and retrieve required feedback before concluding there are no findings."
+	case ResumedSubmission:
+		return "This invocation resumes existing work: inspect the branch, the preserved files, the applicable artifacts, and the visible feedback; do not restart completed work. Continue the remaining accepted scenarios, and an attached draft Submission is preserved rather than replaced."
+	default:
+		return "This invocation starts the accepted change: read the accepted artifacts at their Artifact Baseline before changing code, and implement every accepted scenario. No progress is preserved yet, and a draft Submission, a branch name, or a nonempty comment stream does not change this procedure."
+	}
 }
 
 // templateFuncs is the deliberately small helper set authored templates share.

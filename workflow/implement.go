@@ -258,7 +258,13 @@ func StartImplementation(ctx context.Context, root, remote string, id WorkItemID
 	if err != nil || outcome.Status != "" {
 		return outcome, err
 	}
-	return implementationPacket(root, remote, observed, endpoints)
+	// The claimed record's reconciled Workflow State decides the procedure;
+	// a queue name or a branch name never does.
+	procedure := skilldist.InitialSubmission
+	if observed.State == Rework {
+		procedure = skilldist.FindingDrivenRework
+	}
+	return implementationPacket(root, remote, observed, endpoints, procedure)
 }
 
 func resumeImplementation(ctx context.Context, root, remote string, id WorkItemID, endpoints ArtifactEndpoints, selection SelectionBackend) (ImplementationOutcome, error) {
@@ -284,19 +290,25 @@ func resumeImplementation(ctx context.Context, root, remote string, id WorkItemI
 	if !validConventionalBranch(root, item.Branch) {
 		return implementationRefusal(item, "invalid conventional branch identity; repair the Work Item attachment"), nil
 	}
-	return implementationPacket(root, remote, item, endpoints)
+	// The reconciled Workflow State decides whether this resume follows
+	// finding-driven Rework or simply continues an existing implementation.
+	procedure := skilldist.ResumedSubmission
+	if item.State == Rework {
+		procedure = skilldist.FindingDrivenRework
+	}
+	return implementationPacket(root, remote, item, endpoints, procedure)
 }
 
 func validConventionalBranch(root, branch string) bool {
 	return branch != "" && gitOK(root, "check-ref-format", "--branch", branch) == nil && !strings.Contains(branch, "/")
 }
 
-func implementationPacket(root, remote string, item ImplementationItem, endpoints ArtifactEndpoints) (ImplementationOutcome, error) {
+func implementationPacket(root, remote string, item ImplementationItem, endpoints ArtifactEndpoints, procedure skilldist.ImplementProcedure) (ImplementationOutcome, error) {
 	main, err := primaryWorktree(root)
 	if err != nil {
 		return ImplementationOutcome{}, err
 	}
-	facts := skilldist.ImplementationFacts{Branch: item.Branch, Worktree: filepath.Join(main, ".worktrees", item.Branch), SuppliedArtifactBaseline: endpoints.Baseline, SuppliedArtifactCompletion: endpoints.Completion}
+	facts := skilldist.ImplementationFacts{Branch: item.Branch, Worktree: filepath.Join(main, ".worktrees", item.Branch), SuppliedArtifactBaseline: endpoints.Baseline, SuppliedArtifactCompletion: endpoints.Completion, Procedure: procedure}
 	if item.Submission != nil {
 		facts.Comments = item.Submission.Comments
 	} else {

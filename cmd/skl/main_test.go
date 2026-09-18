@@ -2364,7 +2364,7 @@ func TestDescribeNamedResourceInputs(t *testing.T) {
 			inputs: []string{"result_directory=/tmp/result", "procedure=initial"},
 			described: []string{
 				"result_directory (string, required): Absolute path of the private Result Document directory this invocation created.",
-				"procedure (string, required, one of: initial, rework): Which submission procedure to render.",
+				"procedure (string, required, one of: initial, resumed, rework): Which submission procedure to render.",
 			},
 			procedural: "# Submission Result Document",
 		},
