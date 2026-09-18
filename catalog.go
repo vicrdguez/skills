@@ -195,36 +195,65 @@ func ShellQuote(value string) string {
 }
 
 func renderDefinition(file string, facts InvocationFacts) (string, error) {
-	return renderDocument(file, facts)
+	return renderDocument(path.Dir(file), file, facts)
 }
 
-// renderDocument executes one embedded authored template with ordinary typed
+// renderDocument executes one embedded authored document with ordinary typed
 // data. Definitions and parameterized resources share it so specialization
-// never grows a second rendering mechanism.
-func renderDocument(file string, data any) (string, error) {
+// never grows a second rendering mechanism, and the owning skill's private
+// modules compose into both.
+func renderDocument(skillDirectory, file string, data any) (string, error) {
+	tmpl := template.New("modules").Option("missingkey=error").Funcs(templateFuncs)
+	modules, err := fs.Glob(embedded, path.Join(skillDirectory, modulesDirectory, "*.md"))
+	if err != nil {
+		return "", err
+	}
+	for _, module := range modules {
+		source, err := fs.ReadFile(embedded, module)
+		if err != nil {
+			return "", err
+		}
+		if _, err := tmpl.Parse(string(source)); err != nil {
+			return "", fmt.Errorf("%s: %w", module, err)
+		}
+	}
 	source, err := fs.ReadFile(embedded, file)
 	if err != nil {
 		return "", err
 	}
-	tmpl, err := template.New("document").Option("missingkey=error").Funcs(templateFuncs).Parse(string(source))
+	document, err := tmpl.New("document").Parse(string(source))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%s: %w", file, err)
 	}
 	var rendered bytes.Buffer
-	if err := tmpl.Execute(&rendered, data); err != nil {
+	if err := document.Execute(&rendered, data); err != nil {
 		return "", err
 	}
 	return rendered.String(), nil
 }
 
+// modulesDirectory holds a skill's authored internal modules: embedded and
+// composable into that skill's documents, but never public resources.
+const modulesDirectory = "modules"
+
 func resourceNames(definition string) ([]string, error) {
 	directory := path.Dir(definition)
+	private := path.Join(directory, modulesDirectory)
 	var names []string
 	err := fs.WalkDir(embedded, directory, func(file string, entry fs.DirEntry, err error) error {
-		if err == nil && !entry.IsDir() && file != definition {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			if file == private {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if file != definition {
 			names = append(names, strings.TrimPrefix(file, directory+"/"))
 		}
-		return err
+		return nil
 	})
 	sort.Strings(names)
 	return names, err

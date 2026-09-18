@@ -1,6 +1,6 @@
 # Decision Result Document
 
-Write `{{.ResultDirectory}}/decision.md` and replace this guidance with your own prose. The semantic Needs Human command carries the permitted decision `--reason` separately; the engine publishes this file unchanged, and does not parse or judge the prose.
+Write `{{.ResultDirectory}}/decision.md` and replace this guidance with your own prose. {{template "result-document" .}} The permitted decision `--reason` is carried by the semantic Needs Human command, not parsed from this file.
 
 ## Human Decision
 

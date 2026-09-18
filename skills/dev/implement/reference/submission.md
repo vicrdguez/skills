@@ -1,6 +1,7 @@
 # Submission Result Document
 
-Write `{{.ResultDirectory}}/submission.md` and replace this guidance with your own prose. The engine publishes the file unchanged and appends its machine-owned issue-closing footer (`Closes #<issue>`); it does not parse, judge, or cross-check your prose against the semantic command.
+{{template "result-document" .}}
+Write `{{.ResultDirectory}}/submission.md` and replace this guidance with your own prose. The engine appends its machine-owned issue-closing footer (`Closes #<issue>`) to this body.
 
 ## Summary
 

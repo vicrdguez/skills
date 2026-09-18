@@ -187,7 +187,7 @@ func RenderResource(name, resource string, assignments []string) ([]byte, error)
 	if err := spec.parse(name, resource, assignments); err != nil {
 		return nil, err
 	}
-	rendered, err := renderDocument(file, spec.data)
+	rendered, err := renderDocument(path.Dir(definitionPaths[name]), file, spec.data)
 	if err != nil {
 		return nil, err
 	}

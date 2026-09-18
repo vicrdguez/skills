@@ -2196,6 +2196,65 @@ func TestContextFreeResourcesRetainOwnershipAndDefaults(t *testing.T) {
 	}
 }
 
+func TestPrivateSkillModulesAreNotPublicResources(t *testing.T) {
+	var output bytes.Buffer
+	app := newApp(func(github.RepositoryID) (setup.Backend, error) {
+		t.Fatal("private module request reached the Workflow Backend")
+		return nil, nil
+	}, bytes.NewReader(nil), &output, &output)
+
+	// SKILL.md is a definition and authored modules are internal: neither is a
+	// public resource, by enumeration, retrieval, or input discovery.
+	for _, resource := range []string{"modules/result-document.md", "SKILL.md"} {
+		for _, request := range [][]string{
+			{"skl", "skill", "--resource", resource, "implement"},
+			{"skl", "skill", "--resource", resource, "--describe-inputs", "implement"},
+		} {
+			output.Reset()
+			err := app.Run(request)
+			if err == nil || !strings.Contains(err.Error(), "unknown resource") {
+				t.Errorf("%v = %v, want an unavailable resource", request, err)
+			}
+			if output.Len() != 0 || (err != nil && strings.Contains(err.Error(), "never parses or judges")) {
+				t.Errorf("%v disclosed private content: %q", request, output.String())
+			}
+		}
+	}
+
+	var rendered bytes.Buffer
+	if err := newApp(nil, bytes.NewReader(nil), &rendered, &rendered).Run([]string{"skl", "skill", "--format", "json", "implement"}); err != nil {
+		t.Fatal(err)
+	}
+	var packet skilldist.Packet
+	if err := json.Unmarshal(rendered.Bytes(), &packet); err != nil {
+		t.Fatal(err)
+	}
+	for _, resource := range packet.Resources {
+		if strings.HasPrefix(resource, "modules/") {
+			t.Errorf("private module %s is listed as a public resource", resource)
+		}
+	}
+
+	// The embedded module composes into both Implement result documents.
+	caseInputs := map[string][]string{
+		"reference/submission.md": {"result_directory=" + t.TempDir(), "procedure=initial"},
+		"reference/decision.md":   {"result_directory=" + t.TempDir(), "preserve=false"},
+	}
+	for resource, inputs := range caseInputs {
+		output.Reset()
+		command := []string{"skl", "skill", "--resource", resource}
+		for _, input := range inputs {
+			command = append(command, "--input", input)
+		}
+		if err := app.Run(append(command, "implement")); err != nil {
+			t.Fatalf("%v: %v", command, err)
+		}
+		if !strings.Contains(output.String(), "never parses or judges the prose") {
+			t.Errorf("%s did not compose the shared Result Document module:\n%s", resource, output.String())
+		}
+	}
+}
+
 func TestRetrieveOneNamedResource(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, t.TempDir())
