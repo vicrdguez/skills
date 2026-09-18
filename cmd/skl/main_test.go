@@ -385,40 +385,72 @@ func TestPublishExplicitRemoteChecksItsOwnGitEvidence(t *testing.T) {
 	}
 }
 
-func TestDocumentedImplementResourceCommands(t *testing.T) {
-	for _, file := range []string{"skills/dev/implement/SKILL.md", "README.md"} {
-		t.Run(file, func(t *testing.T) {
-			seen := map[string]bool{}
-			for _, command := range strings.Split(readRepositoryFile(t, file), "`") {
-				if !strings.HasPrefix(command, "skl skill ") || !strings.Contains(command, "--resource") {
-					continue
+func TestDocumentedResourceCommands(t *testing.T) {
+	cases := []struct {
+		file  string
+		skill string
+		want  []string
+	}{
+		{file: "README.md", want: []string{"reference/submission.md", "reference/decision.md", "reference/review.md", "reference/DEEPENING.md"}},
+		{file: "skills/dev/implement/SKILL.md", skill: "implement", want: []string{"reference/submission.md", "reference/decision.md"}},
+		{file: "skills/dev/watchdog/SKILL.md", skill: "watchdog", want: []string{"reference/review.md"}},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.file, func(t *testing.T) {
+			source := readRepositoryFile(t, testCase.file)
+			if testCase.skill != "" {
+				var rendered bytes.Buffer
+				if err := newApp(nil, bytes.NewReader(nil), &rendered, &rendered).Run([]string{"skl", "skill", testCase.skill}); err != nil {
+					t.Fatal(err)
 				}
-				args := strings.Fields(command)
-				resource := ""
-				for _, arg := range args {
-					if strings.HasPrefix(arg, "reference/") {
-						resource = arg
+				source = rendered.String()
+			}
+			seen := map[string]bool{}
+			for _, chunk := range strings.Split(source, "`") {
+				for _, line := range strings.Split(chunk, "\n") {
+					command := strings.TrimSpace(line)
+					if !strings.HasPrefix(command, "skl skill ") || !strings.Contains(command, "--resource") || !strings.Contains(command, "reference/") {
+						continue
+					}
+					args := shellArgs(t, command)
+					resource := ""
+					for _, arg := range args {
+						if strings.HasPrefix(arg, "reference/") {
+							resource = arg
+						}
+					}
+					if resource == "" {
+						continue
+					}
+					seen[resource] = true
+					var output bytes.Buffer
+					app := newApp(func(github.RepositoryID) (setup.Backend, error) {
+						t.Fatalf("%s reached the Workflow Backend", command)
+						return nil, nil
+					}, bytes.NewReader(nil), &output, &output)
+					if err := app.Run(args); err != nil {
+						t.Errorf("%s: %v", command, err)
 					}
 				}
-				if resource == "" {
-					continue
-				}
-				seen[resource] = true
-				var output bytes.Buffer
-				app := newApp(nil, bytes.NewReader(nil), &output, &output)
-				if err := app.Run(args); err != nil {
-					t.Errorf("%s: %v", command, err)
-					continue
-				}
-				if output.String() != readRepositoryFile(t, "skills/dev/"+args[len(args)-1]+"/"+resource) {
-					t.Errorf("%s returned the wrong resource", command)
-				}
 			}
-			if !seen["reference/submission.md"] || !seen["reference/decision.md"] {
-				t.Errorf("missing concrete template commands: %v", seen)
+			for _, want := range testCase.want {
+				if !seen[want] {
+					t.Errorf("missing documented command for %s: %v", want, seen)
+				}
 			}
 		})
 	}
+}
+
+// shellArgs resolves a documented command the way a shell would, so quoted
+// values survive as the single arguments they name.
+func shellArgs(t *testing.T, command string) []string {
+	t.Helper()
+	output, err := exec.Command("sh", "-c", "printf '%s\\000' "+command).Output()
+	if err != nil {
+		t.Fatalf("cannot resolve %q: %v", command, err)
+	}
+	return strings.Split(strings.TrimSuffix(string(output), "\x00"), "\x00")
 }
 
 func TestInstallSupportedSkillStubs(t *testing.T) {
@@ -1644,6 +1676,93 @@ func TestRetrieveOneNamedResource(t *testing.T) {
 	}
 	if stdout.Len() != 0 {
 		t.Fatalf("retired capability resource returned content: %q", stdout.String())
+	}
+}
+
+func TestDescribeNamedResourceInputs(t *testing.T) {
+	cases := []struct {
+		owner      string
+		resource   string
+		inputs     []string
+		described  []string
+		procedural string
+	}{
+		{
+			owner: "implement", resource: "reference/submission.md",
+			inputs: []string{"result_directory=/tmp/result", "procedure=initial"},
+			described: []string{
+				"result_directory (string, required): Absolute path of the private Result Document directory this invocation created.",
+				"procedure (string, required, one of: initial, rework): Which submission procedure to render.",
+			},
+			procedural: "# Submission Result Document",
+		},
+		{
+			owner: "implement", resource: "reference/decision.md",
+			inputs: []string{"result_directory=/tmp/result", "preserve=true"},
+			described: []string{
+				"result_directory (string, required): Absolute path of the private Result Document directory this invocation created.",
+				"preserve (boolean, required): Whether implementation work exists that a draft Submission must preserve.",
+			},
+			procedural: "# Decision Result Document",
+		},
+		{
+			owner: "watchdog", resource: "reference/review.md",
+			inputs: []string{"result_directory=/tmp/result", "round=2", "reviewed_head=" + strings.Repeat("a", 40)},
+			described: []string{
+				"result_directory (string, required): Absolute path of the private Result Document directory this invocation created.",
+				"round (integer, required): Review round number for this Submission.",
+				"reviewed_head (string, required): Original full SHA of the reviewed head.",
+			},
+			procedural: "# Review Result Documents",
+		},
+		{
+			owner: "tdd", resource: "reference/tests.md",
+			described:  []string{"reference/tests.md accepts no inputs."},
+			procedural: "# Good and Bad Tests",
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.owner+"/"+testCase.resource, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			app := newApp(func(github.RepositoryID) (setup.Backend, error) {
+				t.Fatal("resource discovery reached the Workflow Backend")
+				return nil, nil
+			}, bytes.NewReader(nil), &stdout, &stderr)
+			describe := []string{"skl", "skill", "--resource", testCase.resource, "--describe-inputs", testCase.owner}
+			if err := app.Run(describe); err != nil {
+				t.Fatalf("%v: %v", describe, err)
+			}
+			description := stdout.String()
+			if !strings.Contains(description, testCase.resource+" accepts") {
+				t.Errorf("description does not report the requested resource:\n%s", description)
+			}
+			for _, want := range testCase.described {
+				if !strings.Contains(description, want) {
+					t.Errorf("description is missing %q:\n%s", want, description)
+				}
+			}
+			if strings.Contains(description, testCase.procedural) {
+				t.Errorf("description rendered procedural content %q:\n%s", testCase.procedural, description)
+			}
+
+			run := func(inputs []string) error {
+				stdout.Reset()
+				command := []string{"skl", "skill", "--resource", testCase.resource}
+				for _, input := range inputs {
+					command = append(command, "--input", input)
+				}
+				return app.Run(append(command, testCase.owner))
+			}
+			if err := run(testCase.inputs); err != nil {
+				t.Fatalf("described inputs are not retrievable: %v", err)
+			}
+			if !strings.Contains(stdout.String(), testCase.procedural) {
+				t.Errorf("retrieval with described inputs lacks %q:\n%s", testCase.procedural, stdout.String())
+			}
+			if err := run(append(slices.Clone(testCase.inputs), "undeclared=1")); err == nil || !strings.Contains(err.Error(), "undeclared") {
+				t.Fatalf("description described more inputs than retrieval accepts: %v", err)
+			}
+		})
 	}
 }
 

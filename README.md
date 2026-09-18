@@ -96,7 +96,7 @@ The worker preserves existing branch progress, writes code and scenario tests in
 
 Write the Audit-bearing `submission.md` in the packet's private temporary directory, then run `skl implement submit --item <number> --body <absolute-file>` with any supplied artifact endpoint flags. New and updated Submissions target `main`; an existing non-`main` PR is preserved and refused for explicit human base repair. A repairable refusal retains the Claim and prose. Successful publication reports `awaiting_review`, removes the temporary directory, and leaves the issue open until human merge. `skl implement inspect --item <number>` supplies current fixed Git and endpoint-only ledger evidence for Audit.
 
-For a permitted human decision, use `skl implement needs-human --item <number> --reason <reason> --decision <absolute-decision.md>`; also supply `--body` and push when a draft Submission must preserve implementation work. Retrieve both Result Document templates through `skl skill --resource reference/submission.md implement` or `skl skill --resource reference/decision.md implement`.
+For a permitted human decision, use `skl implement needs-human --item <number> --reason <reason> --decision <absolute-decision.md>`; also supply `--body` and push when a draft Submission must preserve implementation work. Retrieve both Result Document instructions with the resource command the packet's invocation supplies, or discover their accepted inputs with `skl skill --resource reference/submission.md --describe-inputs implement` and `skl skill --resource reference/decision.md --describe-inputs implement`.
 
 Existing in-flight work stays on its former CLI unless an operator explicitly hands it to this endpoint contract with full SHAs. The handoff is per invocation: it writes no Adoption record, never overrides a unique marker, and never resolves ambiguous markers by choosing one.
 
@@ -136,6 +136,13 @@ skl skill --resource reference/DEEPENING.md design
 skl skill --resource SKILL-MECHANICS.md writing-for-agents
 ```
 
+Parameterized resources take repeated `--input name=value` flags, split at the first `=`, and `--describe-inputs` reports the accepted names, types, choices, and required status without rendering the procedure:
+
+```sh
+skl skill --resource reference/submission.md --describe-inputs implement
+skl skill --resource reference/submission.md --input result_directory=/tmp/skl-result --input procedure=initial implement
+```
+
 Retrieve a parent definition with `skl skill <name>` only when it is not already supplied; `SKILL.md` is not a resource name. Raw source-tree registrations bypass this distribution arrangement. OpenCode can consume the installed Claude-compatible stubs rather than registering the authoring tree.
 
 ### Review and human completion
@@ -144,7 +151,7 @@ In a fresh session, run `skl watchdog next`, or resume the fixed Claim with `skl
 
 Startup never inspects the Review Checkpoint's prior revision: when a retained checkpoint exists the packet supplies the completed count and previous revision, and the worker compares that revision to the reviewed head only after preparation confirms it is an ancestor, otherwise it reviews the full PR comparison. Workers never locate, parse, or edit the `.watchdog` checkpoint.
 
-Write the summary and optional anchored findings in the packet's private temporary directory. Submit its concrete command with `--verdict pass`, `--verdict rework`, or `--verdict needs-human`. A pass also takes `--body <absolute-submission.md>` containing the complete final PR body and unchecked Manual Verification checklist. Retrieve the transport template with `skl skill --resource reference/review.md watchdog`. If passing Notes need Debt Marker comments, the worker commits and pushes them, runs the formatter/parser and `git diff --check`, and supplies `--head <final-sha>` without replacing `--reviewed-head`.
+Write the summary and optional anchored findings in the packet's private temporary directory. Submit its concrete command with `--verdict pass`, `--verdict rework`, or `--verdict needs-human`. A pass also takes `--body <absolute-submission.md>` containing the complete final PR body and unchecked Manual Verification checklist. Retrieve the transport instructions with the resource command the packet's invocation supplies, or discover the accepted inputs with `skl skill --resource reference/review.md --describe-inputs watchdog`. If passing Notes need Debt Marker comments, the worker commits and pushes them, runs the formatter/parser and `git diff --check`, and supplies `--head <final-sha>` without replacing `--reviewed-head`.
 
 `ready_for_merge` projects `done` without closing the source issue. Only a human merges; GitHub then closes the issue through the PR's `Closes #N` footer. `skl status` observes Merged, releases Dependencies, closes Coordination Items whose children are all Merged, and safely reconciles partial projections. Contradictions are reported as Needs Human without overwriting them. An unmerged closed Submission is Superseded, preserving its branch reference for later Explore.
 

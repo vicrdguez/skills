@@ -186,16 +186,23 @@ func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
 }
 
 func renderDefinition(file string, facts InvocationFacts) (string, error) {
+	return renderDocument(file, facts)
+}
+
+// renderDocument executes one embedded authored template with ordinary typed
+// data. Definitions and parameterized resources share it so specialization
+// never grows a second rendering mechanism.
+func renderDocument(file string, data any) (string, error) {
 	source, err := fs.ReadFile(embedded, file)
 	if err != nil {
 		return "", err
 	}
-	tmpl, err := template.New(file).Option("missingkey=error").Parse(string(source))
+	tmpl, err := template.New("document").Option("missingkey=error").Parse(string(source))
 	if err != nil {
 		return "", err
 	}
 	var rendered bytes.Buffer
-	if err := tmpl.Execute(&rendered, facts); err != nil {
+	if err := tmpl.Execute(&rendered, data); err != nil {
 		return "", err
 	}
 	return rendered.String(), nil
@@ -212,23 +219,6 @@ func resourceNames(definition string) ([]string, error) {
 	})
 	sort.Strings(names)
 	return names, err
-}
-
-func Resource(name, resource string) ([]byte, error) {
-	definition, ok := definitionPaths[name]
-	if !ok {
-		return nil, fmt.Errorf("unknown skill %q", name)
-	}
-	resources, err := resourceNames(definition)
-	if err != nil {
-		return nil, err
-	}
-	for _, available := range resources {
-		if resource == available {
-			return fs.ReadFile(embedded, path.Join(path.Dir(definition), resource))
-		}
-	}
-	return nil, fmt.Errorf("unknown resource %q for skill %q", resource, name)
 }
 
 func (packet Packet) Markdown() string {
