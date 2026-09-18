@@ -404,7 +404,7 @@ func implementCLI(t *testing.T, root string, backend *implementationMemory, args
 		return backend, nil
 	}, bytes.NewReader(nil), &output, &output)
 	command := append([]string{"skl", "implement"}, args...)
-	command = append(command, "--repo", root)
+	command = append(command, "--format", "json", "--repo", root)
 	if err := app.Run(command); err != nil {
 		t.Fatalf("%v: %v\n%s", command, err, &output)
 	}

@@ -16,10 +16,14 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 	var commands []*cli.Command
 	for _, name := range []string{"next", "resume", "inspect", "submit", "needs-human"} {
 		commands = append(commands, &cli.Command{Name: name,
-			Flags: []cli.Flag{&cli.PathFlag{Name: "repo", Value: "."}, &cli.StringFlag{Name: "remote"}, &cli.IntFlag{Name: "item"}, &cli.PathFlag{Name: "body"}, &cli.PathFlag{Name: "decision"}, &cli.StringFlag{Name: "reason"}, &cli.StringFlag{Name: "artifact-baseline"}, &cli.StringFlag{Name: "artifact-completion"}},
+			Flags: []cli.Flag{&cli.PathFlag{Name: "repo", Value: "."}, &cli.StringFlag{Name: "remote"}, &cli.IntFlag{Name: "item"}, &cli.PathFlag{Name: "body"}, &cli.PathFlag{Name: "decision"}, &cli.StringFlag{Name: "reason"}, &cli.StringFlag{Name: "artifact-baseline"}, &cli.StringFlag{Name: "artifact-completion"}, implementationFormatFlag()},
 			Action: func(command *cli.Context) error {
 				if command.Int("item") < 0 || command.NArg() != 0 {
 					return fmt.Errorf("invalid implementation invocation: use flags and a positive Work Item identity")
+				}
+				format, err := implementationFormat(command.String("format"))
+				if err != nil {
+					return err
 				}
 				repository, err := setup.ResolveRepository(command.Path("repo"), command.String("remote"))
 				if err != nil {
@@ -56,12 +60,24 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 				if err != nil {
 					var violation *workflow.InvariantError
 					if errors.As(err, &violation) {
-						return json.NewEncoder(stdout).Encode(workflow.ImplementationOutcome{Status: "fix_required", Reason: violation.Reason})
+						output, presentErr := setup.PresentImplementation(workflow.ImplementationOutcome{Status: "fix_required", Reason: violation.Reason})
+						if presentErr != nil {
+							return presentErr
+						}
+						if format == formatMarkdown {
+							_, err = fmt.Fprint(stdout, setup.ImplementationMarkdown(output))
+							return err
+						}
+						return json.NewEncoder(stdout).Encode(output)
 					}
 					return err
 				}
 				output, err := setup.PresentImplementation(outcome)
 				if err != nil {
+					return err
+				}
+				if format == formatMarkdown {
+					_, err = fmt.Fprint(stdout, setup.ImplementationMarkdown(output))
 					return err
 				}
 				return json.NewEncoder(stdout).Encode(output)
@@ -71,6 +87,30 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 	commands[0].Aliases = []string{"start"}
 	commands[0].Flags = append(commands[0].Flags, waitFlags()...)
 	return commands
+}
+
+// implementationFormatKind is the complete set of supported transports. Explicit
+// JSON preserves the same operation and outcome; it never names a second
+// operation or an alternative authority for success.
+type implementationFormatKind string
+
+const (
+	formatMarkdown implementationFormatKind = "markdown"
+	formatJSON     implementationFormatKind = "json"
+)
+
+func implementationFormatFlag() cli.Flag {
+	return &cli.StringFlag{Name: "format", Value: string(formatMarkdown), Usage: "Output transport: markdown (default) or json"}
+}
+
+// implementationFormat validates the requested transport before any avoidable
+// backend call, selection, Claim, publication, or result-directory creation.
+func implementationFormat(value string) (implementationFormatKind, error) {
+	format := implementationFormatKind(value)
+	if format != formatMarkdown && format != formatJSON {
+		return "", fmt.Errorf("unsupported format %q; use markdown or json", value)
+	}
+	return format, nil
 }
 
 func workItemID(number int) workflow.WorkItemID {

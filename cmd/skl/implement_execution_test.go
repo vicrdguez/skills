@@ -1,0 +1,146 @@
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"testing"
+
+	"github.com/vicrdguez/skills/github"
+	"github.com/vicrdguez/skills/setup"
+	"github.com/vicrdguez/skills/workflow"
+)
+
+// runImplementationTransport runs one Implement invocation in the requested
+// transport and returns the raw stdout. It fails the check when the invocation
+// returns an operational error.
+func runImplementationTransport(t *testing.T, root string, backend *implementationMemory, args ...string) string {
+	t.Helper()
+	if backend.remoteHeads == nil {
+		backend.remoteHeads = make(map[string]string)
+	}
+	if _, ok := backend.remoteHeads["main"]; !ok {
+		backend.remoteHeads["main"] = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "refs/heads/main"))
+	}
+	var output bytes.Buffer
+	app := newApp(func(repository github.RepositoryID) (setup.Backend, error) {
+		backend.repository = repository
+		return backend, nil
+	}, bytes.NewReader(nil), &output, &output)
+	command := append([]string{"skl", "implement"}, args...)
+	command = append(command, "--repo", root)
+	if err := app.Run(command); err != nil {
+		t.Fatalf("%v: %v\n%s", command, err, &output)
+	}
+	return output.String()
+}
+
+func implementationJSON(t *testing.T, text string) setup.ImplementationOutput {
+	t.Helper()
+	var output setup.ImplementationOutput
+	if err := json.Unmarshal([]byte(text), &output); err != nil {
+		t.Fatalf("json transport is not structured: %v\n%s", err, text)
+	}
+	if output.Packet != nil && output.Packet.Facts.Implementation.ResultDirectory != "" {
+		directory := output.Packet.Facts.Implementation.ResultDirectory
+		t.Cleanup(func() { os.RemoveAll(directory) })
+	}
+	return output
+}
+
+// cleanupResultDirectories removes the private Result Document directories a
+// transport printed, so a Markdown invocation leaves no temporary state behind.
+func cleanupResultDirectories(t *testing.T, text string) {
+	t.Helper()
+	for _, directory := range regexp.MustCompile(`[^\s'"`+"`"+`]*skl-implement-[0-9]+`).FindAllString(text, -1) {
+		t.Cleanup(func() { os.RemoveAll(directory) })
+	}
+}
+
+// normalizeExecution replaces the invocation-specific temporary paths that do
+// not carry meaning for transport parity.
+func normalizeExecution(text string, root string) string {
+	text = strings.ReplaceAll(text, root, "<root>")
+	text = strings.ReplaceAll(text, filepath.Dir(filepath.Dir(root)), "<repo>")
+	return regexp.MustCompile(`skl-implement-[0-9]+`).ReplaceAllString(text, "<result>")
+}
+
+// TestB1StartupTransportDoesNotRepeatTheOperation materializes the B1 outline:
+// the default transport is the complete Execution Skill, explicit JSON carries
+// the same operation, and formatting never performs a second workflow action.
+func TestB1StartupTransportDoesNotRepeatTheOperation(t *testing.T) {
+	nextFixture := func(t *testing.T) (string, *implementationMemory) {
+		root := proposalRepository(t)
+		prepareSlice(t, root, "widget")
+		backend := &implementationMemory{work: []workflow.ImplementationItem{
+			{ID: "1", Branch: "other", State: workflow.Ready, CreatedAt: "2026-02-01T00:00:00Z"},
+			{ID: "7", Branch: "widget", State: workflow.Ready, CreatedAt: "2026-01-01T00:00:00Z"},
+		}}
+		return root, backend
+	}
+	resumeItemFixture := func(t *testing.T) (string, *implementationMemory) {
+		root := proposalRepository(t)
+		prepareSlice(t, root, "widget")
+		backend := &implementationMemory{work: []workflow.ImplementationItem{
+			{ID: "1", Branch: "other", State: workflow.Ready, CreatedAt: "2026-02-01T00:00:00Z"},
+			{ID: "7", Branch: "widget", State: workflow.Ready, CreatedAt: "2026-01-01T00:00:00Z", Claimed: true},
+		}}
+		return root, backend
+	}
+	resumeWorktreeFixture := func(t *testing.T) (string, *implementationMemory) {
+		root := proposalRepository(t)
+		prepareSlice(t, root, "widget")
+		runGit(t, root, "switch", "main")
+		worktree := filepath.Join(root, ".worktrees", "widget")
+		runGit(t, root, "worktree", "add", worktree, "widget")
+		backend := &implementationMemory{work: []workflow.ImplementationItem{
+			{ID: "1", Branch: "other", State: workflow.Ready, CreatedAt: "2026-02-01T00:00:00Z"},
+			{ID: "7", Branch: "widget", State: workflow.Ready, CreatedAt: "2026-01-01T00:00:00Z", Claimed: true},
+		}}
+		return worktree, backend
+	}
+	for _, entrypoint := range []struct {
+		name  string
+		args  []string
+		build func(*testing.T) (string, *implementationMemory)
+	}{
+		{"implement next", []string{"next"}, nextFixture},
+		{"implement start", []string{"start"}, nextFixture},
+		{"implement resume --item", []string{"resume", "--item", "7"}, resumeItemFixture},
+		{"implement resume", []string{"resume"}, resumeWorktreeFixture},
+	} {
+		t.Run(entrypoint.name, func(t *testing.T) {
+			markdownRoot, markdownBackend := entrypoint.build(t)
+			markdown := runImplementationTransport(t, markdownRoot, markdownBackend, entrypoint.args...)
+			cleanupResultDirectories(t, markdown)
+
+			jsonRoot, jsonBackend := entrypoint.build(t)
+			encoded := runImplementationTransport(t, jsonRoot, jsonBackend, append(append([]string{}, entrypoint.args...), "--format", "json")...)
+			structured := implementationJSON(t, encoded)
+
+			if structured.Status != "work_available" || structured.Item == nil || structured.Item.Number != 7 {
+				t.Fatalf("json outcome = %#v", structured)
+			}
+			if structured.Packet == nil {
+				t.Fatal("json outcome lacks the Execution Skill")
+			}
+			if normalizeExecution(markdown, markdownRoot) != normalizeExecution(structured.Packet.Instructions, jsonRoot) {
+				t.Fatalf("default transport is not the complete Execution Skill:\n--- markdown ---\n%s\n--- instructions ---\n%s", markdown, structured.Packet.Instructions)
+			}
+			if strings.HasPrefix(strings.TrimSpace(markdown), "{") || strings.Contains(markdown, "\"instructions\"") || strings.Contains(markdown, "\nFacts: {") {
+				t.Fatalf("default transport repeats the envelope or assembles facts:\n%s", markdown)
+			}
+			if !strings.Contains(markdown, "#7") || !strings.Contains(markdown, "widget") {
+				t.Fatalf("Execution Skill does not name the selected identity:\n%s", markdown)
+			}
+			for _, claim := range []*implementationMemory{markdownBackend, jsonBackend} {
+				if !claim.work[1].Claimed || claim.work[0].Claimed {
+					t.Fatalf("formatting changed the underlying operation: %#v", claim.work)
+				}
+			}
+		})
+	}
+}
