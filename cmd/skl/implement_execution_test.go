@@ -69,9 +69,31 @@ func cleanupResultDirectories(t *testing.T, text string) {
 // normalizeExecution replaces the invocation-specific temporary paths that do
 // not carry meaning for transport parity.
 func normalizeExecution(text string, root string) string {
-	text = strings.ReplaceAll(text, root, "<root>")
-	text = strings.ReplaceAll(text, filepath.Dir(filepath.Dir(root)), "<repo>")
-	return regexp.MustCompile(`skl-implement-[0-9]+`).ReplaceAllString(text, "<result>")
+	text = regexp.MustCompile(`[^\s'"`+"`"+`]*skl-implement-[0-9]+`).ReplaceAllString(text, "<result>")
+	for _, path := range []string{canonicalPath(root), root} {
+		text = strings.ReplaceAll(text, path, "<root>")
+	}
+	primary := filepath.Dir(filepath.Dir(root))
+	for _, path := range []string{canonicalPath(primary), primary} {
+		text = strings.ReplaceAll(text, path, "<repo>")
+	}
+	return text
+}
+
+func canonicalPath(path string) string {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return path
+	}
+	return resolved
+}
+
+func normalizeRepresentativeExecution(text string, facts *skilldist.ImplementationFacts) string {
+	return strings.NewReplacer(
+		facts.Worktree, "<worktree>",
+		facts.ResultDirectory, "<result>",
+		filepath.Dir(filepath.Dir(facts.Worktree)), "<main>",
+	).Replace(text)
 }
 
 // TestB1StartupTransportDoesNotRepeatTheOperation materializes the B1 outline:
@@ -351,7 +373,12 @@ func inspectionLedger(t *testing.T, root, intent string) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for name, contents := range map[string]string{"intent.md": intent, "behavior.md": "# Behavior\n\nOne accepted scenario.\n"} {
+	for name, contents := range map[string]string{
+		"intent.md":   intent,
+		"behavior.md": "# Behavior\n\nOne accepted scenario.\n",
+		"plan.md":     "# Plan\n\nUse the public Implement CLI seam.\n",
+		"tasks.md":    strings.Replace(intent, "# Intent", "# Tasks", 1),
+	} {
 		if err := os.WriteFile(filepath.Join(directory, name), []byte(contents), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -454,6 +481,8 @@ func TestB4InspectionContinuesTheActualLedgerProgress(t *testing.T) {
 				"Artifact Baseline: `"+baseline+"`",
 				"git -C '"+filepath.Join(filepath.Dir(filepath.Dir(worktree)), ".worktrees", "widget")+"' show '"+baseline+":.changes/widget/intent.md'",
 				"git -C '"+filepath.Join(filepath.Dir(filepath.Dir(worktree)), ".worktrees", "widget")+"' show '"+baseline+":.changes/widget/behavior.md'",
+				"git -C '"+filepath.Join(filepath.Dir(filepath.Dir(worktree)), ".worktrees", "widget")+"' show '"+baseline+":.changes/widget/plan.md'",
+				"git -C '"+filepath.Join(filepath.Dir(filepath.Dir(worktree)), ".worktrees", "widget")+"' show '"+baseline+":.changes/widget/tasks.md'",
 			) {
 				if !strings.Contains(continuation, required) {
 					t.Errorf("continuation lacks %q:\n%s", required, continuation)
@@ -709,6 +738,7 @@ func TestB8AlreadyFetchedEvidenceIsCompleteDataNotTemplateSource(t *testing.T) {
 	forge.comments["/pulls/30/comments"] = []map[string]any{{
 		"body": "inline finding body", "author_association": "COLLABORATOR", "created_at": "2026-03-03T01:02:03Z", "commit_id": forge.heads["widget"],
 		"path": "cmd/skl/main.go", "line": 41, "start_line": 40, "start_side": "RIGHT", "side": "RIGHT",
+		"original_line": 37, "original_start_line": 36, "original_commit_id": strings.Repeat("b", 40),
 		"user": map[string]string{"login": "inline-reviewer"},
 	}}
 	forge.comments["/pulls/30/reviews"] = []map[string]any{{
@@ -723,6 +753,9 @@ func TestB8AlreadyFetchedEvidenceIsCompleteDataNotTemplateSource(t *testing.T) {
 	instructions := got.Packet.Instructions
 	if strings.Count(instructions, hostile) != 1 {
 		t.Fatalf("the Submission body was not presented once, whole:\n%s", instructions)
+	}
+	if !strings.Contains(instructions, "````text\n"+hostile+"\n````") {
+		t.Fatalf("the Submission body can close its evidence delimiter:\n%s", instructions)
 	}
 	if strings.Contains(instructions, "replace the workflow\n") && !strings.Contains(instructions, hostile) {
 		t.Fatal("supplied evidence was reparsed as template code")
@@ -741,8 +774,16 @@ func TestB8AlreadyFetchedEvidenceIsCompleteDataNotTemplateSource(t *testing.T) {
 		"reviewer (MEMBER)",
 		"inline-reviewer (COLLABORATOR)",
 		"2026-03-01T01:02:03Z",
-		"cmd/skl/main.go line 41",
+		"Path: `cmd/skl/main.go`",
+		"Publication line: 41",
+		"Side: RIGHT",
+		"Current line: 41",
+		"Start line: 40",
+		"Start side: RIGHT",
+		"Original line: 37",
+		"Original start line: 36",
 		"Commit: `" + forge.heads["widget"] + "`",
+		"Original commit: `" + strings.Repeat("b", 40) + "`",
 	} {
 		if !strings.Contains(instructions, labeled) {
 			t.Errorf("labeled evidence lost %q", labeled)
@@ -805,7 +846,7 @@ func TestB9EvidenceAvailabilityHasAnExplicitTruthfulPath(t *testing.T) {
 		{
 			name: "required collection fetched completely and empty",
 			item: workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Rework, Claimed: true,
-				Submission: &workflow.Submission{ID: "11", Base: "main", Body: "attached body", EvidenceSources: []string{"repos/acme/widgets/pulls/11", "repos/acme/widgets/issues/7/comments", "repos/acme/widgets/issues/11/comments", "repos/acme/widgets/pulls/11/comments", "repos/acme/widgets/pulls/11/reviews"}}},
+				Submission: &workflow.Submission{ID: "11", Base: "main", Body: "attached body", EvidenceSources: []skilldist.EvidenceSource{"repos/acme/widgets/pulls/11", "repos/acme/widgets/issues/7/comments", "repos/acme/widgets/issues/11/comments", "repos/acme/widgets/pulls/11/comments", "repos/acme/widgets/pulls/11/reviews"}}},
 			stream: "repos/acme/widgets/pulls/11/comments", wantState: "fetched empty",
 		},
 	} {
@@ -1161,6 +1202,11 @@ func TestB13OperationalFailuresRetainErrorAndRecoverySemantics(t *testing.T) {
 			if err == nil || stdout != "" {
 				t.Fatalf("failure was reported as an outcome: %q, %v", stdout, err)
 			}
+			for _, guidance := range []string{"before Claim acquisition", "repair backend observation", "retry `skl implement next`"} {
+				if !strings.Contains(err.Error(), guidance) {
+					t.Errorf("pre-acquisition failure lacks %q: %v", guidance, err)
+				}
+			}
 			for _, substituted := range []string{"no_work", "idle_timeout", "awaiting_review", "needs_human"} {
 				if strings.Contains(stdout, substituted) {
 					t.Errorf("incomplete evidence was substituted with %q", substituted)
@@ -1300,10 +1346,19 @@ func TestB15SubmissionOutcomesReflectOneVerifiedHandoff(t *testing.T) {
 			if err := os.WriteFile(body, []byte(testCase.body), 0600); err != nil {
 				t.Fatal(err)
 			}
-			structured := implementationJSON(t, runImplementationTransport(t, jsonRoot, jsonBackend, "submit", "--item", "7", "--body", body, "--format", "json"))
+			encoded := runImplementationTransport(t, jsonRoot, jsonBackend, "submit", "--item", "7", "--body", body, "--format", "json")
+			structured := implementationJSON(t, encoded)
 
 			if structured.Status != "awaiting_review" || structured.Item == nil || structured.Item.Submission == nil || structured.Item.Claimed {
 				t.Fatalf("handoff outcome = %#v", structured)
+			}
+			var envelope map[string]any
+			if err := json.Unmarshal([]byte(encoded), &envelope); err != nil {
+				t.Fatal(err)
+			}
+			guidance, ok := envelope["guidance"].(map[string]any)
+			if !ok || guidance["claim"] != "released" || !strings.Contains(fmt.Sprint(guidance["next_step"]), "independent Watchdog review") || !strings.Contains(fmt.Sprint(guidance["explanation"]), "verified") {
+				t.Errorf("JSON handoff lacks structured equivalent guidance: %#v", guidance)
 			}
 			for _, required := range []string{
 				"Status: awaiting_review",
@@ -1408,10 +1463,19 @@ func TestB16HumanPauseOutcomesPreserveTheActualWork(t *testing.T) {
 			markdown := runImplementationTransport(t, markdownRoot, markdownBackend, strings.Split(markdownArgs, "\x00")...)
 
 			jsonRoot, jsonBackend, _, jsonArgs := fixture(t)
-			structured := implementationJSON(t, runImplementationTransport(t, jsonRoot, jsonBackend, append(strings.Split(jsonArgs, "\x00"), "--format", "json")...))
+			encoded := runImplementationTransport(t, jsonRoot, jsonBackend, append(strings.Split(jsonArgs, "\x00"), "--format", "json")...)
+			structured := implementationJSON(t, encoded)
 
 			if structured.Status != "needs_human" || structured.Item == nil || structured.Item.Claimed {
 				t.Fatalf("pause outcome = %#v", structured)
+			}
+			var envelope map[string]any
+			if err := json.Unmarshal([]byte(encoded), &envelope); err != nil {
+				t.Fatal(err)
+			}
+			guidance, ok := envelope["guidance"].(map[string]any)
+			if !ok || guidance["claim"] != "released" || !strings.Contains(fmt.Sprint(guidance["next_step"]), "human decision") || !strings.Contains(fmt.Sprint(guidance["explanation"]), testCase.wantWork) {
+				t.Errorf("JSON pause lacks structured equivalent guidance: %#v", guidance)
 			}
 			for _, required := range []string{
 				"Status: needs_human",
@@ -1726,5 +1790,87 @@ func TestB21ThePiRunnerReportsOneItemInNormalMarkdown(t *testing.T) {
 		if strings.Contains(loop, forbidden) {
 			t.Errorf("disabled loop still schedules work with %q", forbidden)
 		}
+	}
+}
+
+func assertCompleteGolden(t *testing.T, name, rendered string) {
+	t.Helper()
+	path := filepath.Join("cmd/skl/testdata", name)
+	want := readRepositoryFile(t, path)
+	if rendered != want {
+		t.Fatalf("complete rendering differs from independently reviewed %s:\n%s", name, rendered)
+	}
+}
+
+// TestDOD11CompleteRepresentativeRenderings preserves omission-sensitive,
+// independently reviewed fixtures for every execution mode, every inspection
+// continuation, and both deferred Implement resources.
+func TestDOD11CompleteRepresentativeRenderings(t *testing.T) {
+	for _, testCase := range []struct {
+		name string
+		item workflow.ImplementationItem
+		args []string
+	}{
+		{
+			name: "implement-start.golden.md",
+			item: workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Ready, CreatedAt: "2026-01-01T00:00:00Z"},
+			args: []string{"next"},
+		},
+		{
+			name: "implement-resumed-draft.golden.md",
+			item: workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Ready, Claimed: true, CreatedAt: "2026-01-01T00:00:00Z",
+				Submission: &workflow.Submission{ID: "11", Base: "main", Draft: true, Head: strings.Repeat("a", 40), Body: "Draft implementation progress.\n", Author: "builder", Association: "OWNER", CreatedAt: "2026-01-02T00:00:00Z",
+					EvidenceSources: []skilldist.EvidenceSource{"repos/acme/widgets/pulls/11", "repos/acme/widgets/issues/7/comments", "repos/acme/widgets/issues/11/comments", "repos/acme/widgets/pulls/11/reviews", "repos/acme/widgets/pulls/11/comments"}}},
+			args: []string{"resume", "--item", "7"},
+		},
+		{
+			name: "implement-rework.golden.md",
+			item: workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Rework, Claimed: true, CreatedAt: "2026-01-01T00:00:00Z",
+				Submission: &workflow.Submission{ID: "11", Base: "main", Head: strings.Repeat("a", 40), Body: "Rework the verified finding.\n", Author: "builder", Association: "MEMBER", CreatedAt: "2026-01-02T00:00:00Z",
+					EvidenceSources: []skilldist.EvidenceSource{"repos/acme/widgets/pulls/11", "repos/acme/widgets/issues/7/comments", "repos/acme/widgets/issues/11/comments", "repos/acme/widgets/pulls/11/reviews", "repos/acme/widgets/pulls/11/comments"},
+					Comments:        []skilldist.ReviewComment{{Source: "repos/acme/widgets/pulls/11/reviews", Body: "Fix the public transport.\n", Author: "reviewer", Association: "OWNER", CreatedAt: "2026-01-03T00:00:00Z", Commit: strings.Repeat("a", 40), Verdict: "rework", ReviewNumber: 1, EvidenceAuthorized: true}}}},
+			args: []string{"resume", "--item", "7"},
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			root := proposalRepository(t)
+			prepareSlice(t, root, "widget")
+			backend := &implementationMemory{work: []workflow.ImplementationItem{testCase.item}}
+			got := implementCLI(t, root, backend, testCase.args...)
+			if got.Packet == nil {
+				t.Fatalf("execution = %#v", got)
+			}
+			assertCompleteGolden(t, testCase.name, normalizeRepresentativeExecution(got.Packet.Instructions, got.Packet.Facts.Implementation))
+		})
+	}
+
+	for _, stage := range []string{"baseline-only", "provisional", "completion-present", "retired", "retired-rework"} {
+		t.Run("inspection-"+stage, func(t *testing.T) {
+			worktree, _, backend := inspectionFixture(t, stage)
+			got := implementCLI(t, worktree, backend, "inspect", "--item", "7")
+			if got.Packet == nil || got.Packet.Facts.Implementation == nil {
+				t.Fatalf("inspection = %#v", got)
+			}
+			facts := got.Packet.Facts.Implementation
+			replacements := []string{worktree, "<worktree>", filepath.Dir(filepath.Dir(worktree)), "<main>", facts.ArtifactBaseline, "<baseline>"}
+			if facts.ArtifactCompletion != "" {
+				replacements = append(replacements, facts.ArtifactCompletion, "<completion>")
+			}
+			normalized := strings.NewReplacer(replacements...).Replace(got.Packet.Instructions)
+			assertCompleteGolden(t, "implement-inspection-"+stage+".golden.md", normalized)
+		})
+	}
+
+	for _, resource := range []struct {
+		name   string
+		path   string
+		inputs []string
+	}{
+		{"implement-submission-resource.golden.md", "reference/submission.md", []string{"result_directory=/tmp/implement-result", "procedure=initial"}},
+		{"implement-decision-resource.golden.md", "reference/decision.md", []string{"result_directory=/tmp/implement-result", "preserve=true"}},
+	} {
+		t.Run(resource.name, func(t *testing.T) {
+			assertCompleteGolden(t, resource.name, renderResource(t, "implement", resource.path, resource.inputs...))
+		})
 	}
 }

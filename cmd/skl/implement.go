@@ -32,15 +32,15 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 				}
 				repository, err := setup.ResolveRepository(command.Path("repo"), command.String("remote"))
 				if err != nil {
-					return err
+					return implementationSetupFailure(name, command.Int("item"), "repository or remote resolution", err)
 				}
 				backend, err := newBackend(repository.Repository)
 				if err != nil {
-					return err
+					return implementationSetupFailure(name, command.Int("item"), "backend construction", err)
 				}
 				port, ok := backend.(workflow.ImplementationBackend)
 				if !ok {
-					return fmt.Errorf("workflow backend does not support implementation")
+					return implementationSetupFailure(name, command.Int("item"), "backend construction", fmt.Errorf("workflow backend does not support implementation"))
 				}
 				var outcome workflow.ImplementationOutcome
 				endpoints := workflow.ArtifactEndpoints{Baseline: command.String("artifact-baseline"), Completion: command.String("artifact-completion")}
@@ -71,21 +71,29 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 						}
 						if format == formatMarkdown {
 							_, err = fmt.Fprint(stdout, setup.ImplementationMarkdown(output))
-							return err
+						} else {
+							err = json.NewEncoder(stdout).Encode(output)
 						}
-						return json.NewEncoder(stdout).Encode(output)
+						if err != nil {
+							return implementationDeliveryFailure(name, outcome, err)
+						}
+						return nil
 					}
-					return err
+					return implementationOperationFailure(name, command.Int("item"), err)
 				}
 				output, err := setup.PresentImplementation(outcome, setup.InvocationContext{Repository: repository.Repository, Capability: capability})
 				if err != nil {
-					return err
+					return implementationDeliveryFailure(name, outcome, err)
 				}
 				if format == formatMarkdown {
 					_, err = fmt.Fprint(stdout, setup.ImplementationMarkdown(output))
-					return err
+				} else {
+					err = json.NewEncoder(stdout).Encode(output)
 				}
-				return json.NewEncoder(stdout).Encode(output)
+				if err != nil {
+					return implementationDeliveryFailure(name, outcome, err)
+				}
+				return nil
 			},
 		})
 	}
@@ -147,4 +155,36 @@ func workItemID(number int) workflow.WorkItemID {
 		return ""
 	}
 	return workflow.WorkItemID(strconv.Itoa(number))
+}
+
+func implementationSetupFailure(operation string, item int, step string, err error) error {
+	if item > 0 {
+		return fmt.Errorf("implement %s stopped during %s before a Workflow operation ran; the existing Claim for Work Item #%d was not released, so repair access and retry the same command: %w", operation, step, item, err)
+	}
+	return fmt.Errorf("implement %s stopped during %s before Claim acquisition; repair access and retry `skl implement %s`: %w", operation, step, operation, err)
+}
+
+func implementationOperationFailure(operation string, item int, err error) error {
+	switch operation {
+	case "next":
+		// StartImplementation classifies pre-acquisition observation failures and
+		// uncertain post-acquisition failures at the point that knows which one occurred.
+		return err
+	case "resume":
+		return fmt.Errorf("implement resume failed without releasing the existing Claim; inspect Work Item #%d and retry the same resume rather than selecting replacement work: %w", item, err)
+	case "inspect":
+		return fmt.Errorf("read-only Implement inspection failed and authorized no transition; repair the observation and retry inspect for Work Item #%d: %w", item, err)
+	case "submit", "needs-human":
+		return fmt.Errorf("implement %s failed before a verified handoff was reported; effects may already exist, so inspect Work Item #%d and retry the same operation with the same Result Documents instead of selecting or publishing replacement work: %w", operation, item, err)
+	default:
+		return err
+	}
+}
+
+func implementationDeliveryFailure(operation string, outcome workflow.ImplementationOutcome, err error) error {
+	identity := "the Work Item"
+	if outcome.Item != nil && outcome.Item.ID != "" {
+		identity = "Work Item #" + string(outcome.Item.ID)
+	}
+	return fmt.Errorf("implement %s established status %q but output delivery failed; that failure does not undo or prove the operation, so inspect %s and explicitly resume or retry the same operation rather than running next blindly: %w", operation, outcome.Status, identity, err)
 }

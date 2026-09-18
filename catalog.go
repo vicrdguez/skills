@@ -125,6 +125,35 @@ const (
 	FindingDrivenRework ImplementProcedure = "rework"
 )
 
+// EvidenceSource is a canonical repository-bound identity for one observed or
+// required evidence stream.
+type EvidenceSource string
+
+// RepositoryEvidenceSource binds an API path to one owner/name repository.
+func RepositoryEvidenceSource(repository, apiPath string) EvidenceSource {
+	return EvidenceSource("repos/" + strings.Trim(repository, "/") + "/" + strings.TrimPrefix(apiPath, "/"))
+}
+
+func IssueCommentsEvidenceSource(repository string, number int) EvidenceSource {
+	return RepositoryEvidenceSource(repository, fmt.Sprintf("issues/%d/comments", number))
+}
+
+func PullEvidenceSource(repository string, number int) EvidenceSource {
+	return RepositoryEvidenceSource(repository, fmt.Sprintf("pulls/%d", number))
+}
+
+func PullDiscussionEvidenceSource(repository string, number int) EvidenceSource {
+	return RepositoryEvidenceSource(repository, fmt.Sprintf("issues/%d/comments", number))
+}
+
+func PullReviewsEvidenceSource(repository string, number int) EvidenceSource {
+	return RepositoryEvidenceSource(repository, fmt.Sprintf("pulls/%d/reviews", number))
+}
+
+func PullCommentsEvidenceSource(repository string, number int) EvidenceSource {
+	return RepositoryEvidenceSource(repository, fmt.Sprintf("pulls/%d/comments", number))
+}
+
 type ReviewComment struct {
 	Line            int    `json:"line,omitempty"`
 	Side            string `json:"side,omitempty"`
@@ -152,7 +181,7 @@ type ReviewComment struct {
 	EvidenceAuthorized bool `json:"evidence_authorized,omitempty"`
 	// Source is the observed repository-bound stream this body came from. It is
 	// part of the labeled evidence, never a rendering input.
-	Source string `json:"source,omitempty"`
+	Source EvidenceSource `json:"source,omitempty"`
 }
 
 // EvidenceStream is one required repository-bound evidence source. Bodies is how
@@ -161,19 +190,19 @@ type ReviewComment struct {
 // `fetched empty` (observed, zero bodies), `pending` (Command set), and
 // `retrieval failure` (an error rather than a rendered state) are different.
 type EvidenceStream struct {
-	Source  string `json:"source"`
-	Bodies  int    `json:"bodies"`
-	Command string `json:"command,omitempty"`
+	Source  EvidenceSource `json:"source"`
+	Bodies  int            `json:"bodies"`
+	Command string         `json:"command,omitempty"`
 }
 
 // SubmissionEvidence is the attached Submission's own source body, preserved
 // whole and labeled as data.
 type SubmissionEvidence struct {
-	Source      string `json:"source"`
-	Author      string `json:"author,omitempty"`
-	Association string `json:"association,omitempty"`
-	CreatedAt   string `json:"created_at,omitempty"`
-	Body        string `json:"body"`
+	Source      EvidenceSource `json:"source"`
+	Author      string         `json:"author,omitempty"`
+	Association string         `json:"association,omitempty"`
+	CreatedAt   string         `json:"created_at,omitempty"`
+	Body        string         `json:"body"`
 }
 
 type Packet struct {
@@ -259,12 +288,28 @@ func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
 }
 
 // templateFuncs is the deliberately small helper set authored templates share.
-var templateFuncs = template.FuncMap{"quote": ShellQuote}
+var templateFuncs = template.FuncMap{"quote": ShellQuote, "fence": markdownFence}
 
 // ShellQuote renders value as one POSIX shell word without changing any of its
 // characters.
 func ShellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
+}
+
+// markdownFence returns a CommonMark fence that source text cannot close.
+// Evidence remains verbatim between the delimiters even when it contains
+// ordinary Markdown fences.
+func markdownFence(value string) string {
+	longest, current := 0, 0
+	for _, character := range value {
+		if character == '`' {
+			current++
+			longest = max(longest, current)
+			continue
+		}
+		current = 0
+	}
+	return strings.Repeat("`", max(3, longest+1))
 }
 
 func renderDefinition(file string, facts InvocationFacts) (string, error) {

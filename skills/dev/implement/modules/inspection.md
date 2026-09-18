@@ -30,7 +30,11 @@ Read the historical accepted artifacts from the resolved endpoints rather than f
 
 {{if .ArtifactBaseline}}- `git -C {{quote .Worktree}} show {{quote (printf "%s:.changes/%s/intent.md" .ArtifactBaseline .Branch)}}`
 - `git -C {{quote .Worktree}} show {{quote (printf "%s:.changes/%s/behavior.md" .ArtifactBaseline .Branch)}}`
-{{end}}{{if .ArtifactCompletion}}- `git -C {{quote .Worktree}} show {{quote (printf "%s:.changes/%s/tasks.md" .ArtifactCompletion .Branch)}}`
+- `git -C {{quote .Worktree}} show {{quote (printf "%s:.changes/%s/plan.md" .ArtifactBaseline .Branch)}}`
+- `git -C {{quote .Worktree}} show {{quote (printf "%s:.changes/%s/tasks.md" .ArtifactBaseline .Branch)}}`
+{{end}}{{if .ArtifactCompletion}}Read the completed task ledger from Artifact Completion while preserving the Baseline contract above:
+
+- `git -C {{quote .Worktree}} show {{quote (printf "%s:.changes/%s/tasks.md" .ArtifactCompletion .Branch)}}`
 {{end}}
 {{end}}
 Refresh integrity with `{{.InspectCommand}}` before editing, before Audit, and before handoff, wherever the current procedure needs current evidence.

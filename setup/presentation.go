@@ -20,15 +20,26 @@ type InvocationContext struct {
 // These projections retain the numeric GitHub CLI contract, not engine identity.
 type ImplementationOutput struct {
 	workflow.ImplementationOutcome
-	Packet *skilldist.Packet         `json:"packet,omitempty"`
-	Item   *implementationItemOutput `json:"item,omitempty"`
+	Packet   *skilldist.Packet         `json:"packet,omitempty"`
+	Item     *implementationItemOutput `json:"item,omitempty"`
+	Guidance *ImplementationGuidance   `json:"guidance,omitempty"`
+}
+
+// ImplementationGuidance carries the same claim certainty and applicable next
+// action as the default Markdown report without making prose authoritative for
+// workflow success.
+type ImplementationGuidance struct {
+	Claim       string `json:"claim"`
+	Explanation string `json:"explanation"`
+	Recovery    string `json:"recovery,omitempty"`
+	NextStep    string `json:"next_step,omitempty"`
 }
 
 type implementationItemOutput struct {
 	Synchronization bool
 	Problem         string
 	Submission      *submissionOutput
-	EvidenceSources []string
+	EvidenceSources []skilldist.EvidenceSource
 	Branch          string
 	Number          int
 	State           workflow.State
@@ -52,7 +63,7 @@ type submissionOutput struct {
 	Association     string
 	Draft           bool
 	Comments        []skilldist.ReviewComment
-	EvidenceSources []string
+	EvidenceSources []skilldist.EvidenceSource
 }
 
 type StatusOutput struct {
@@ -103,7 +114,7 @@ func presentItem(item workflow.ImplementationItem) (implementationItemOutput, er
 // invocation never observed keeps its retrieval command, so `pending` is never
 // reported as `fetched empty`.
 func evidenceStreams(item *implementationItemOutput, f skilldist.ImplementationFacts) []skilldist.EvidenceStream {
-	observed := map[string]bool{}
+	observed := map[skilldist.EvidenceSource]bool{}
 	for _, source := range item.EvidenceSources {
 		observed[source] = true
 	}
@@ -112,22 +123,26 @@ func evidenceStreams(item *implementationItemOutput, f skilldist.ImplementationF
 			observed[source] = true
 		}
 	}
-	counts := map[string]int{}
+	counts := map[skilldist.EvidenceSource]int{}
 	for _, comment := range f.Comments {
 		if comment.Source == "" {
 			continue
 		}
 		counts[comment.Source]++
 	}
-	required := []struct{ source, command string }{
-		{fmt.Sprintf("repos/%s/issues/%d/comments", f.Repository, f.WorkItem), fmt.Sprintf("gh api --paginate repos/%s/issues/%d/comments", f.Repository, f.WorkItem)},
+	type requiredEvidence struct {
+		source  skilldist.EvidenceSource
+		command string
+	}
+	required := []requiredEvidence{
+		{skilldist.IssueCommentsEvidenceSource(f.Repository, f.WorkItem), fmt.Sprintf("gh api --paginate repos/%s/issues/%d/comments", f.Repository, f.WorkItem)},
 	}
 	if f.Submission != 0 {
 		required = append(required,
-			struct{ source, command string }{fmt.Sprintf("repos/%s/pulls/%d", f.Repository, f.Submission), fmt.Sprintf("gh api repos/%s/pulls/%d", f.Repository, f.Submission)},
-			struct{ source, command string }{fmt.Sprintf("repos/%s/issues/%d/comments", f.Repository, f.Submission), fmt.Sprintf("gh api --paginate repos/%s/issues/%d/comments", f.Repository, f.Submission)},
-			struct{ source, command string }{fmt.Sprintf("repos/%s/pulls/%d/reviews", f.Repository, f.Submission), fmt.Sprintf("gh api --paginate repos/%s/pulls/%d/reviews", f.Repository, f.Submission)},
-			struct{ source, command string }{fmt.Sprintf("repos/%s/pulls/%d/comments", f.Repository, f.Submission), fmt.Sprintf("gh api --paginate repos/%s/pulls/%d/comments", f.Repository, f.Submission)},
+			requiredEvidence{skilldist.PullEvidenceSource(f.Repository, f.Submission), fmt.Sprintf("gh api repos/%s/pulls/%d", f.Repository, f.Submission)},
+			requiredEvidence{skilldist.PullDiscussionEvidenceSource(f.Repository, f.Submission), fmt.Sprintf("gh api --paginate repos/%s/issues/%d/comments", f.Repository, f.Submission)},
+			requiredEvidence{skilldist.PullReviewsEvidenceSource(f.Repository, f.Submission), fmt.Sprintf("gh api --paginate repos/%s/pulls/%d/reviews", f.Repository, f.Submission)},
+			requiredEvidence{skilldist.PullCommentsEvidenceSource(f.Repository, f.Submission), fmt.Sprintf("gh api --paginate repos/%s/pulls/%d/comments", f.Repository, f.Submission)},
 		)
 	}
 	var streams []skilldist.EvidenceStream
@@ -159,6 +174,7 @@ func PresentImplementation(outcome workflow.ImplementationOutcome, invocation In
 		}
 		output.Item = &item
 	}
+	output.Guidance = implementationGuidance(output)
 	if outcome.Facts == nil {
 		return output, nil
 	}
@@ -194,7 +210,7 @@ func PresentImplementation(outcome workflow.ImplementationOutcome, invocation In
 		if submission := output.Item.Submission; submission != nil {
 			f.Submission = submission.Number
 			f.SubmissionBody = &skilldist.SubmissionEvidence{
-				Source:      fmt.Sprintf("repos/%s/pulls/%d", f.Repository, submission.Number),
+				Source:      skilldist.PullEvidenceSource(f.Repository, submission.Number),
 				Author:      submission.Author,
 				Association: submission.Association,
 				CreatedAt:   submission.CreatedAt,

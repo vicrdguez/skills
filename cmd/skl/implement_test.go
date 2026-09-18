@@ -1338,9 +1338,9 @@ func TestImplementBundlesInstructionsWithoutTargetPin(t *testing.T) {
 	}
 	facts := got.Packet.Facts.Implementation
 	golden := readRepositoryFile(t, "cmd/skl/testdata/implement-start.golden.md")
-	normalized := strings.NewReplacer(facts.Worktree, "<worktree>", facts.ResultDirectory, "<result>", filepath.Dir(filepath.Dir(facts.Worktree)), "<main>", baseline, "<baseline>").Replace(definition)
+	normalized := normalizeRepresentativeExecution(got.Packet.Instructions, facts)
 	if normalized != golden {
-		t.Fatalf("specialized Implement definition differs from golden:\n%s", normalized)
+		t.Fatalf("complete specialized Implement execution differs from golden:\n%s", normalized)
 	}
 	for _, unresolved := range []string{"{{if", "{{else", "{{end", "{{.Implementation"} {
 		if strings.Contains(definition, unresolved) {

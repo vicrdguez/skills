@@ -24,6 +24,16 @@ import (
 	"github.com/vicrdguez/skills/workflow"
 )
 
+// structuredStageCommand preserves the legacy typed-test seam for both stages:
+// Watchdog is JSON by default, while Implement now opts in explicitly.
+func structuredStageCommand(args ...string) []string {
+	command := append([]string{"skl"}, args...)
+	if len(args) > 0 && args[0] == "implement" {
+		command = append(command, "--format", "json")
+	}
+	return command
+}
+
 type memoryBackend struct {
 	repository     github.RepositoryID
 	prepared       bool
@@ -778,25 +788,6 @@ func TestInstallPreservesOpenCodeSkillsAndConfiguration(t *testing.T) {
 	}
 }
 
-// assertFaithfulRendering fails when a rendered definition contains text its
-// authored source does not, or orders it differently. Authored templates may
-// select one conditional branch, but they never rewrite, truncate, or inject
-// prose.
-func assertFaithfulRendering(t *testing.T, rendered, source string) {
-	t.Helper()
-	remaining := strings.Split(regexp.MustCompile(`\{\{[^}]*\}\}`).ReplaceAllString(source, ""), "\n")
-	for _, line := range strings.Split(rendered, "\n") {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		index := slices.Index(remaining, line)
-		if index < 0 {
-			t.Fatalf("rendered definition changed or injected %q", line)
-		}
-		remaining = remaining[index+1:]
-	}
-}
-
 func TestRetrieveRenderedSkillInstructions(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, t.TempDir())
@@ -806,11 +797,10 @@ func TestRetrieveRenderedSkillInstructions(t *testing.T) {
 	}
 
 	header := "Protocol: skl.instructions/v1\nSkill: tdd\nIncluded skills: none\nFacts: {}\nResources: reference/mocking.md, reference/tests.md\n\n"
-	if got := stdout.String(); !strings.HasPrefix(got, header) {
-		t.Fatalf("rendered packet has an unexpected manifest:\n%s", got)
+	if got, want := stdout.String(), readRepositoryFile(t, "cmd/skl/testdata/tdd-standalone.golden.md"); got != want {
+		t.Fatalf("rendered TDD packet differs from the independently reviewed golden:\n%s", got)
 	}
 	instructions := strings.TrimPrefix(stdout.String(), header)
-	assertFaithfulRendering(t, instructions, readRepositoryFile(t, "skills/dev/tdd/SKILL.md"))
 	// A standalone retrieval keeps the independent-mode seam agreement.
 	if !strings.Contains(instructions, "confirm them with the user") || strings.Contains(instructions, "at the human pause") {
 		t.Fatalf("standalone retrieval lost its own mode:\n%s", instructions)
@@ -1665,7 +1655,9 @@ func TestRetrieveEquivalentTypedInstructions(t *testing.T) {
 	if packet.Protocol != "skl.instructions/v1" || packet.Skill != "tdd" || packet.Facts != (skilldist.InvocationFacts{}) || len(packet.IncludedSkills) != 0 || !slices.Equal(packet.Resources, wantResources) || packet.Instructions == "" || markdown.String() != wantHeader+packet.Instructions {
 		t.Fatalf("JSON and Markdown packets differ: %#v", packet)
 	}
-	assertFaithfulRendering(t, packet.Instructions, readRepositoryFile(t, "skills/dev/tdd/SKILL.md"))
+	if want := strings.TrimPrefix(readRepositoryFile(t, "cmd/skl/testdata/tdd-standalone.golden.md"), wantHeader); packet.Instructions != want {
+		t.Fatalf("JSON TDD instructions differ from the independently reviewed golden:\n%s", packet.Instructions)
+	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q", stderr.String())
 	}
@@ -1696,7 +1688,10 @@ func TestRetrieveAuditWithoutPonytail(t *testing.T) {
 				}
 				instructions = strings.TrimPrefix(instructions, header)
 			}
-			assertFaithfulRendering(t, instructions, readRepositoryFile(t, "skills/dev/audit/SKILL.md"))
+			header := "Protocol: skl.instructions/v1\nSkill: audit\nIncluded skills: none\nFacts: {}\nResources: reference/smells.md\n\n"
+			if want := strings.TrimPrefix(readRepositoryFile(t, "cmd/skl/testdata/audit-standalone.golden.md"), header); instructions != want {
+				t.Fatalf("rendered Audit instructions differ from the independently reviewed golden:\n%s", instructions)
+			}
 			// A standalone Audit keeps its own caller-driven discovery.
 			if !strings.Contains(instructions, "If no PR comparison or fixed point can be resolved, ask for one") || strings.Contains(instructions, "This bundled Audit reviews one claimed change") {
 				t.Error("standalone Audit lost its own mode")

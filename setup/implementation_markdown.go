@@ -5,6 +5,58 @@ import (
 	"strings"
 )
 
+func implementationGuidance(output ImplementationOutput) *ImplementationGuidance {
+	identity := "The invocation"
+	claimed := false
+	var submission *submissionOutput
+	if output.Item != nil {
+		identity = fmt.Sprintf("Work Item #%d", output.Item.Number)
+		claimed, submission = output.Item.Claimed, output.Item.Submission
+	}
+	switch output.Status {
+	case "no_work":
+		return &ImplementationGuidance{Claim: "not_acquired", Explanation: "The immediate queue observation found no eligible work; nothing was selected or claimed.", NextStep: "Retry `skl implement next` later when work may have appeared; this is not global completion."}
+	case "idle_timeout":
+		return &ImplementationGuidance{Claim: "not_acquired", Explanation: "The local bounded wait ended without claimable work; nothing was selected or claimed.", NextStep: "Retry `skl implement next` when work may have appeared; this is not global completion."}
+	case "fix_required":
+		guidance := &ImplementationGuidance{Explanation: identity + " was refused, and this outcome made no successful transition."}
+		switch {
+		case output.Item == nil:
+			guidance.Claim = "unknown"
+			guidance.Recovery = "Inspect the Work Item before retrying; do not run `skl implement next` blindly or assume any reservation was released."
+		case claimed:
+			guidance.Claim = "retained"
+			guidance.Recovery = "Inspect the Work Item and explicitly resume the same identity rather than selecting replacement work."
+		default:
+			guidance.Claim = "not_acquired"
+			guidance.Recovery = "Repair the reported refusal and retry the same operation; this outcome released no Claim."
+		}
+		return guidance
+	case "awaiting_review":
+		claim := "released"
+		if claimed {
+			claim = "retained"
+		}
+		explanation := identity + " was published and verified after the handoff check."
+		if submission != nil {
+			explanation += fmt.Sprintf(" Submission #%d holds the reviewed head.", submission.Number)
+		}
+		return &ImplementationGuidance{Claim: claim, Explanation: explanation, NextStep: "The next step is independent Watchdog review; do not resubmit, roll back, approve, or merge from this outcome."}
+	case "needs_human":
+		claim := "released"
+		if claimed {
+			claim = "retained"
+		}
+		preserved := "Preserved work: none. The decision was published without inventing a Submission."
+		if submission != nil {
+			preserved = fmt.Sprintf("Preserved work: Submission #%d stays attached to this Work Item.%s", submission.Number, draftNote(submission.Draft))
+		}
+		return &ImplementationGuidance{Claim: claim, Explanation: preserved, NextStep: "A human decision is required; this does not approve, merge, automatically requeue, complete, or retire the change."}
+	default:
+		return nil
+	}
+}
+
 // ImplementationMarkdown renders one Implement outcome as its default Markdown
 // transport. An instruction outcome is the complete Execution Skill itself; the
 // other outcomes are short reports that name the established status, the

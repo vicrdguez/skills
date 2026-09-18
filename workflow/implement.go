@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,7 +35,7 @@ type ImplementationItem struct {
 	// EvidenceSources names the repository-bound feedback streams the last
 	// observation actually read. A required stream missing from this list is
 	// pending for the worker, not evidence of an empty review.
-	EvidenceSources       []string
+	EvidenceSources       []skilldist.EvidenceSource
 	Branch                string
 	ID                    WorkItemID
 	Order                 int
@@ -67,7 +68,7 @@ type Submission struct {
 	// EvidenceSources names the repository-bound streams the last observation
 	// actually read for this Submission. A required stream missing from this
 	// list is pending for the worker, not evidence of an empty review.
-	EvidenceSources []string
+	EvidenceSources []skilldist.EvidenceSource
 }
 
 // LifecycleObservation retains overlaps while a multi-record transition is in flight.
@@ -274,20 +275,23 @@ func StartImplementation(ctx context.Context, root, remote string, id WorkItemID
 	}
 	candidate, found, err := selectQueue(ctx, selection, ReworkQueue)
 	if err != nil {
-		return ImplementationOutcome{}, err
+		return ImplementationOutcome{}, fmt.Errorf("implementation queue observation failed before Claim acquisition; repair backend observation and retry `skl implement next`: %w", err)
 	}
 	if !found {
 		candidate, found, err = selectQueue(ctx, selection, ReadyQueue)
 		if err != nil {
-			return ImplementationOutcome{}, err
+			return ImplementationOutcome{}, fmt.Errorf("implementation queue observation failed before Claim acquisition; repair backend observation and retry `skl implement next`: %w", err)
 		}
 	}
 	if !found {
 		return ImplementationOutcome{Status: "no_work"}, nil
 	}
 	item, outcome, err := selectedImplementation(ctx, selection, candidate)
-	if err != nil || outcome.Status != "" {
-		return outcome, err
+	if err != nil {
+		return ImplementationOutcome{}, fmt.Errorf("selected Work Item observation failed before Claim acquisition; repair backend observation and retry `skl implement next`: %w", err)
+	}
+	if outcome.Status != "" {
+		return outcome, nil
 	}
 	if item.State != Ready && item.State != Rework {
 		return implementationRefusal(item, "the selected Work Item is not an eligible implementation record; repair its projections"), nil
@@ -299,8 +303,11 @@ func StartImplementation(ctx context.Context, root, remote string, id WorkItemID
 		return implementationRefusal(item, "invalid conventional branch identity; repair the Work Item attachment"), nil
 	}
 	observed, outcome, err := claimSelected(ctx, selection, candidate, item)
-	if err != nil || outcome.Status != "" {
-		return outcome, err
+	if err != nil {
+		return ImplementationOutcome{}, fmt.Errorf("Claim acquisition for Work Item %s may have succeeded but read-back failed; inspect that Work Item and explicitly resume the same identity instead of running `skl implement next`: %w", item.ID, err)
+	}
+	if outcome.Status != "" {
+		return outcome, nil
 	}
 	// The claimed record's reconciled Workflow State decides the procedure;
 	// a queue name or a branch name never does.
@@ -308,7 +315,11 @@ func StartImplementation(ctx context.Context, root, remote string, id WorkItemID
 	if observed.State == Rework {
 		procedure = skilldist.FindingDrivenRework
 	}
-	return implementationPacket(root, remote, observed, endpoints, procedure)
+	outcome, err = implementationPacket(root, remote, observed, endpoints, procedure)
+	if err != nil {
+		return ImplementationOutcome{}, fmt.Errorf("Claim for Work Item %s was acquired but Execution Skill delivery failed; inspect it and explicitly resume the same identity: %w", observed.ID, err)
+	}
+	return outcome, nil
 }
 
 func resumeImplementation(ctx context.Context, root, remote string, id WorkItemID, endpoints ArtifactEndpoints, selection SelectionBackend) (ImplementationOutcome, error) {
@@ -323,7 +334,7 @@ func resumeImplementation(ctx context.Context, root, remote string, id WorkItemI
 	}
 	item, err := selection.ResumedImplementation(ctx, id, branch)
 	if err != nil {
-		return ImplementationOutcome{}, err
+		return ImplementationOutcome{}, fmt.Errorf("fixed Work Item observation failed during resume; its Claim was not released, so inspect it and retry `skl implement resume --item <number>` rather than selecting replacement work: %w", err)
 	}
 	if item.Problem != "" {
 		return implementationRefusal(item, item.Problem+"; repair the Work Item projections before resuming"), nil
@@ -340,7 +351,11 @@ func resumeImplementation(ctx context.Context, root, remote string, id WorkItemI
 	if item.State == Rework {
 		procedure = skilldist.FindingDrivenRework
 	}
-	return implementationPacket(root, remote, item, endpoints, procedure)
+	outcome, err := implementationPacket(root, remote, item, endpoints, procedure)
+	if err != nil {
+		return ImplementationOutcome{}, fmt.Errorf("the existing Claim for Work Item %s remains protected but Execution Skill delivery failed; inspect it and explicitly resume the same identity: %w", item.ID, err)
+	}
+	return outcome, nil
 }
 
 func validConventionalBranch(root, branch string) bool {

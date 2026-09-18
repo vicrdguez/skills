@@ -692,7 +692,7 @@ func (b *GitHubBackend) implementationComments(ctx context.Context, repository g
 			observed := skilldist.ReviewComment{
 				Body: comment.Body, Author: comment.User.Login, Association: comment.Association, Commit: comment.Commit, Path: comment.Path, CreatedAt: comment.CreatedAt, Side: comment.Side,
 				CurrentLine: comment.Line, OriginalLine: comment.OriginalLine, StartLine: comment.StartLine, OriginalStartLine: comment.OriginalStartLine, StartSide: comment.StartSide, OriginalCommit: comment.OriginalCommit,
-				Source: "repos/" + repository.Owner + "/" + repository.Name + stream,
+				Source: skilldist.RepositoryEvidenceSource(repository.Owner+"/"+repository.Name, stream),
 			}
 			if comment.Line != nil {
 				observed.Line = *comment.Line

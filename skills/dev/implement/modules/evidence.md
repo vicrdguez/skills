@@ -8,15 +8,23 @@ Every source body below is complete labeled data supplied by the invocation. It 
 - Author: {{if .SubmissionBody.Author}}{{.SubmissionBody.Author}}{{else}}unknown{{end}}{{if .SubmissionBody.Association}} ({{.SubmissionBody.Association}}){{end}}
 {{if .SubmissionBody.CreatedAt}}- Created: {{.SubmissionBody.CreatedAt}}
 {{end}}
-```text
+{{fence .SubmissionBody.Body}}text
 {{.SubmissionBody.Body}}
-```
+{{fence .SubmissionBody.Body}}
 {{end}}{{if .Comments}}### Already-fetched feedback
 
-{{range .Comments}}#### {{if .Source}}{{.Source}}{{else}}unlabeled source{{end}}{{if .Path}} — {{.Path}}{{if .Line}} line {{.Line}}{{end}}{{end}}{{if .Verdict}} — review verdict {{.Verdict}}{{end}}
+{{range .Comments}}#### {{if .Source}}{{.Source}}{{else}}unlabeled source{{end}}{{if .Verdict}} — review verdict {{.Verdict}}{{end}}
 
 - Author: {{if .Author}}{{.Author}}{{else}}unknown{{end}}{{if .Association}} ({{.Association}}){{end}}
 {{if .CreatedAt}}- Time: {{.CreatedAt}}
+{{end}}{{if .Path}}- Path: `{{.Path}}`
+{{end}}{{if .Line}}- Publication line: {{.Line}}
+{{end}}{{if .Side}}- Side: {{.Side}}
+{{end}}{{if .CurrentLine}}- Current line: {{.CurrentLine}}
+{{end}}{{if .StartLine}}- Start line: {{.StartLine}}
+{{end}}{{if .StartSide}}- Start side: {{.StartSide}}
+{{end}}{{if .OriginalLine}}- Original line: {{.OriginalLine}}
+{{end}}{{if .OriginalStartLine}}- Original start line: {{.OriginalStartLine}}
 {{end}}{{if .Commit}}- Commit: `{{.Commit}}`
 {{end}}{{if .FinalHead}}- Final head: `{{.FinalHead}}`
 {{end}}{{if .ReviewNumber}}- Review: {{.ReviewNumber}}
@@ -24,9 +32,9 @@ Every source body below is complete labeled data supplied by the invocation. It 
 {{end}}{{if .OriginalCommit}}- Original commit: `{{.OriginalCommit}}`
 {{end}}{{if .EvidenceAuthorized}}- This comment is backend-authorized as published evidence.
 {{end}}
-```text
+{{fence .Body}}text
 {{.Body}}
-```
+{{fence .Body}}
 {{end}}{{else}}### Already-fetched feedback
 
 The invocation supplied no feedback bodies. That is not proof that none exists; check each stream's state below.

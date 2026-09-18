@@ -1747,11 +1747,7 @@ func (f *reviewFixture) runJSON(caller string, args ...string) ([]byte, error) {
 		backend.BindRepository(repository)
 		return backend, nil
 	}, bytes.NewReader(nil), &output, &output)
-	command := append([]string{"skl"}, args...)
-	if args[0] == "implement" {
-		// The Implement default transport is the Execution Skill Markdown.
-		command = append(command, "--format", "json")
-	}
+	command := structuredStageCommand(args...)
 	command = append(command, "--repo", caller)
 	if err := app.Run(command); err != nil {
 		return nil, fmt.Errorf("%v: %w: %s", command, err, &output)
