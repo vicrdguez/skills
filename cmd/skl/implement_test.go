@@ -1369,15 +1369,22 @@ func TestImplementBundlesInstructionsWithoutTargetPin(t *testing.T) {
 		"audit":    {"merge-base with `main`", "explicitly supplies", "Artifact Baseline"},
 	} {
 		output.Reset()
-		err := app.Run([]string{"skl", "skill", skill})
+		rendered := got.Packet.Instructions
+		if skill != "implement" {
+			err := app.Run([]string{"skl", "skill", skill})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rendered = output.String()
+		}
 		missing := ""
 		for _, text := range required {
-			if !strings.Contains(output.String(), text) {
+			if !strings.Contains(rendered, text) {
 				missing = text
 			}
 		}
-		if err != nil || strings.Contains(output.String(), "--target-snapshot") || strings.Contains(output.String(), "resolve merge conflicts with `main`") || missing != "" {
-			t.Fatalf("%s guidance retained integration obligation or lacks %q: %v\n%s", skill, missing, err, &output)
+		if strings.Contains(rendered, "--target-snapshot") || strings.Contains(rendered, "resolve merge conflicts with `main`") || missing != "" {
+			t.Fatalf("%s guidance retained integration obligation or lacks %q:\n%s", skill, missing, rendered)
 		}
 	}
 }
