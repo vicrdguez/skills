@@ -7,6 +7,7 @@ import (
 	"io"
 
 	"github.com/urfave/cli/v2"
+	skilldist "github.com/vicrdguez/skills"
 	"github.com/vicrdguez/skills/setup"
 	"github.com/vicrdguez/skills/workflow"
 )
@@ -61,14 +62,24 @@ func watchdogCommands(newBackend backendFactory, stdout io.Writer) []*cli.Comman
 			if err != nil {
 				var violation *workflow.InvariantError
 				if errors.As(err, &violation) {
-					refusal := setup.ImplementationOutput{ImplementationOutcome: workflow.ImplementationOutcome{Status: "fix_required", Reason: violation.Reason}}
+					reason := violation.Reason
+					if name == "submit" {
+						reason += watchdogSubmitRecovery(c, repository)
+					}
+					refusal := setup.ImplementationOutput{ImplementationOutcome: workflow.ImplementationOutcome{Status: "fix_required", Reason: reason}}
 					if c.String("format") == "json" {
 						return json.NewEncoder(stdout).Encode(refusal)
 					}
 					_, writeErr := fmt.Fprint(stdout, setup.WatchdogOutcomeMarkdown(refusal))
 					return writeErr
 				}
+				if name == "submit" {
+					return fmt.Errorf("%w%s", err, watchdogSubmitRecovery(c, repository))
+				}
 				return err
+			}
+			if name == "submit" && outcome.Status == "fix_required" {
+				outcome.Reason += watchdogSubmitRecovery(c, repository)
 			}
 			if outcome.Facts != nil && outcome.Facts.Watchdog != nil {
 				outcome.Facts.Watchdog.Repository = repository.Repository.Owner + "/" + repository.Repository.Name
@@ -90,4 +101,19 @@ func watchdogCommands(newBackend backendFactory, stdout io.Writer) []*cli.Comman
 	}
 	commands[0].Flags = append(commands[0].Flags, waitFlags()...)
 	return commands
+}
+
+func watchdogSubmitRecovery(c *cli.Context, repository setup.RepositoryContext) string {
+	q := skilldist.ShellQuote
+	command := fmt.Sprintf("skl watchdog submit --repo %s --remote %s --item %d --review-number %d --reviewed-head %s --verdict %s --summary %s", q(repository.Root), q(repository.Remote), c.Int("item"), c.Uint64("review-number"), q(c.String("reviewed-head")), q(c.String("verdict")), q(c.Path("summary")))
+	for _, flag := range []string{"findings", "body", "head", "artifact-baseline", "artifact-completion"} {
+		if c.IsSet(flag) {
+			value := c.String(flag)
+			if flag == "findings" || flag == "body" {
+				value = c.Path(flag)
+			}
+			command += " --" + flag + " " + q(value)
+		}
+	}
+	return "; preserve the fixed Claim and Result Documents, inspect any partial publication, then retry the original command after repair: `" + command + "`"
 }

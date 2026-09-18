@@ -46,6 +46,8 @@ Source: {{printf "%q" .Source}}. Author: {{printf "%q" .Author}}. Association: {
 
 ## Required evidence streams
 
+The selected PR body and Audit ledger were supplied above, including when empty. A feedback stream is empty only after a successful complete read. For pending streams, run the bound command for every page before judgment and preserve raw author, association, time, commit, and inline anchors. Repair and retry any failed or truncated read; stop if evidence remains incomplete.
+
 {{.Watchdog.EvidenceInstructions}}
 {{end}}
  

@@ -349,7 +349,8 @@ func (b *GitHubBackend) submissionItem(ctx context.Context, pull githubPull) (wo
 		}
 		item.Submission.EvidenceStreams = append(item.Submission.EvidenceStreams, skilldist.EvidenceStream{Path: b.repositoryPath(b.repository) + stream, State: state})
 	}
-	sourceStream := fmt.Sprintf("/issues/%d/comments", owner)
+	streams := selectedWatchdogStreams(owner, pull.Number)
+	sourceStream := streams.source
 	comments, err := b.implementationComments(ctx, b.repository, sourceStream)
 	if err != nil {
 		return workflow.ImplementationItem{}, "", err
@@ -363,7 +364,7 @@ func (b *GitHubBackend) submissionItem(ctx context.Context, pull githubPull) (wo
 		item.Feedback = append(item.Feedback, comment)
 		item.Submission.Comments = append(item.Submission.Comments, comment)
 	}
-	for _, stream := range []string{fmt.Sprintf("/issues/%d/comments", pull.Number), fmt.Sprintf("/pulls/%d/comments", pull.Number)} {
+	for _, stream := range []string{streams.discussion, streams.inline} {
 		comments, err := b.implementationComments(ctx, b.repository, stream)
 		if err != nil {
 			return workflow.ImplementationItem{}, "", err
@@ -376,9 +377,15 @@ func (b *GitHubBackend) submissionItem(ctx context.Context, pull githubPull) (wo
 	if err != nil {
 		return workflow.ImplementationItem{}, "", err
 	}
-	recordEvidence(fmt.Sprintf("/pulls/%d/reviews", pull.Number), len(reviews))
+	recordEvidence(streams.summaries, len(reviews))
 	item.Submission.Comments = append(item.Submission.Comments, reviews...)
-	item.Submission.EvidenceComments = append(item.Submission.EvidenceComments, reviews...)
+	for _, review := range reviews {
+		if review.RawBody != "" {
+			review.Body = review.RawBody
+		}
+		review.RawBody = ""
+		item.Submission.EvidenceComments = append(item.Submission.EvidenceComments, review)
+	}
 	return workflow.ReconcileImplementation(item), problem, nil
 }
 
@@ -766,7 +773,11 @@ func (b *GitHubBackend) implementationReviews(ctx context.Context, number int) (
 					finalHead = metadata.FinalHead
 				}
 			}
-			comments = append(comments, skilldist.ReviewComment{Source: b.repositoryPath(b.repository) + fmt.Sprintf("/pulls/%d/reviews", number), Body: body, Author: review.User.Login, Association: review.Association, Commit: review.Commit, FinalHead: finalHead, CreatedAt: review.SubmittedAt, Verdict: verdict, ReviewNumber: reviewNumber})
+			comment := skilldist.ReviewComment{Source: b.repositoryPath(b.repository) + fmt.Sprintf("/pulls/%d/reviews", number), Body: body, Author: review.User.Login, Association: review.Association, Commit: review.Commit, FinalHead: finalHead, CreatedAt: review.SubmittedAt, Verdict: verdict, ReviewNumber: reviewNumber}
+			if body != review.Body {
+				comment.RawBody = review.Body
+			}
+			comments = append(comments, comment)
 		}
 		if len(reviews) < 100 {
 			return comments, nil

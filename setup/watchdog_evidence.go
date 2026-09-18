@@ -7,31 +7,40 @@ import (
 	skilldist "github.com/vicrdguez/skills"
 )
 
+type watchdogStreamPaths struct {
+	source, discussion, summaries, inline string
+}
+
+func selectedWatchdogStreams(item, submission int) watchdogStreamPaths {
+	return watchdogStreamPaths{
+		source: fmt.Sprintf("/issues/%d/comments", item), discussion: fmt.Sprintf("/issues/%d/comments", submission),
+		summaries: fmt.Sprintf("/pulls/%d/reviews", submission), inline: fmt.Sprintf("/pulls/%d/comments", submission),
+	}
+}
+
+func (paths watchdogStreamPaths) all() []string {
+	return []string{paths.source, paths.discussion, paths.summaries, paths.inline}
+}
+
 func watchdogEvidenceInstructions(f skilldist.WatchdogFacts) string {
 	var body strings.Builder
-	fmt.Fprintf(&body, "The selected PR body and Audit ledger were supplied above, including when the body is empty. For feedback, only a successful complete read establishes an empty stream. A failed or truncated read must be repaired and retried before judgment; stop if it remains incomplete.\n\n")
 	if f.Repository == "" {
-		body.WriteString("Selected repository identity is unavailable in this transport; resolve it before retrieving missing feedback.\n")
+		body.WriteString("Selected repository identity unavailable; resolve it before retrieving missing feedback.\n")
 		return body.String()
-	}
-	paths := []string{
-		fmt.Sprintf("repos/%s/issues/%d/comments", f.Repository, f.WorkItem),
-		fmt.Sprintf("repos/%s/issues/%d/comments", f.Repository, f.Submission),
-		fmt.Sprintf("repos/%s/pulls/%d/reviews", f.Repository, f.Submission),
-		fmt.Sprintf("repos/%s/pulls/%d/comments", f.Repository, f.Submission),
 	}
 	states := make(map[string]string, len(f.EvidenceStreams))
 	for _, stream := range f.EvidenceStreams {
 		states[strings.TrimPrefix(stream.Path, "/")] = stream.State
 	}
-	for _, path := range paths {
+	for _, stream := range selectedWatchdogStreams(f.WorkItem, f.Submission).all() {
+		path := "repos/" + f.Repository + stream
 		switch states[path] {
 		case "fetched_empty":
 			fmt.Fprintf(&body, "- `%s`: fetched completely and empty.\n", path)
 		case "fetched":
 			fmt.Fprintf(&body, "- `%s`: fetched completely; supplied records appear above.\n", path)
 		default:
-			fmt.Fprintf(&body, "- `%s`: pending delivery. Retrieve every page with `gh api --paginate %s` before judgment. Preserve the raw author, association, time, commit, and inline anchors.\n", path, skilldist.ShellQuote(path))
+			fmt.Fprintf(&body, "- `%s`: pending delivery; `gh api --paginate %s`.\n", path, skilldist.ShellQuote(path))
 		}
 	}
 	return body.String()

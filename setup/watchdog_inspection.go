@@ -21,7 +21,8 @@ func PresentWatchdogInspection(root string, result workflow.ReviewInspection) Wa
 	}
 	var body strings.Builder
 	if result.Status != "inspected" {
-		fmt.Fprintf(&body, "Status: %s\n%s\n", result.Status, result.Reason)
+		fmt.Fprintf(&body, "Status: %s\n%s\n\nFixed invocation: Work Item #%s, Submission #%s, remote %s, reviewed head %s, review number %d, Result Documents %s.\n", result.Status, result.Reason, result.Item, result.Submission, skilldist.ShellQuote(result.Remote), skilldist.ShellQuote(result.ReviewedHead), result.ReviewNumber, skilldist.ShellQuote(result.ResultDirectory))
+		fmt.Fprintf(&body, "After repairing the reported precondition, retry this same inspection: `%s`. Stop if the fixed identity cannot be restored.\n", watchdogInspectionCommand(root, result))
 		for _, violation := range result.Ledger.Violations {
 			fmt.Fprintf(&body, "- %s\n", violation)
 		}
@@ -29,7 +30,10 @@ func PresentWatchdogInspection(root string, result workflow.ReviewInspection) Wa
 		return output
 	}
 	q := skilldist.ShellQuote
-	fmt.Fprintf(&body, "# Watchdog Inspection Continuation\n\nWork Item #%s, Submission #%s, review number %d. The original reviewed head remains `%s`. This is a read-only continuation of the same Claim; it neither selects work nor publishes a verdict. Preserve Result Documents in %s.\n\n", result.Item, result.Submission, result.ReviewNumber, result.ReviewedHead, q(result.ResultDirectory))
+	fmt.Fprintf(&body, "# Watchdog Inspection Continuation\n\nWork Item #%s, Submission #%s, remote %s, review number %d. The original reviewed head remains `%s`. This is a read-only continuation of the same Claim; it neither selects work nor publishes a verdict. Preserve Result Documents in %s.\n\n", result.Item, result.Submission, q(result.Remote), result.ReviewNumber, result.ReviewedHead, q(result.ResultDirectory))
+	if result.SuppliedBaseline != "" || result.SuppliedCompletion != "" {
+		fmt.Fprintf(&body, "The fixed inspection used the supplied artifact endpoint overrides in `%s`.\n\n", watchdogInspectionCommand(root, result))
+	}
 	fmt.Fprintf(&body, "Artifact Baseline: `%s`\nArtifact Completion: `%s`\nLedger phase: %s. No endpoint violations were found.\n\n", result.Ledger.Baseline, result.Ledger.Completion, result.Ledger.Phase)
 	fmt.Fprintf(&body, "Read the complete historical contract at these exact endpoints:\n\n")
 	for _, file := range result.Ledger.Files {
@@ -46,4 +50,19 @@ func PresentWatchdogInspection(root string, result workflow.ReviewInspection) Wa
 	}
 	output.Instructions = body.String()
 	return output
+}
+
+func watchdogInspectionCommand(root string, result workflow.ReviewInspection) string {
+	q := skilldist.ShellQuote
+	command := fmt.Sprintf("skl watchdog inspect --repo %s --remote %s --item %s --submission %s --base %s --submission-body-sha256 %s --review-number %d --reviewed-head %s --result-directory %s", q(root), q(result.Remote), result.Item, result.Submission, q(result.SubmissionBase), q(result.BodySHA256), result.ReviewNumber, q(result.ReviewedHead), q(result.ResultDirectory))
+	if result.PreviousHead != "" {
+		command += " --previous-reviewed-head " + q(result.PreviousHead)
+	}
+	if result.SuppliedBaseline != "" {
+		command += " --artifact-baseline " + q(result.SuppliedBaseline)
+	}
+	if result.SuppliedCompletion != "" {
+		command += " --artifact-completion " + q(result.SuppliedCompletion)
+	}
+	return command
 }

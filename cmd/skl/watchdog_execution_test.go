@@ -139,7 +139,7 @@ func TestWatchdogInspectRefusesChangedSubmissionBody(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "Status: fix_required") || !strings.Contains(output.String(), "Submission") {
+	if !strings.Contains(output.String(), "Status: fix_required") || !strings.Contains(output.String(), "Submission") || !strings.Contains(output.String(), "--submission-body-sha256 '"+digest+"'") || !strings.Contains(output.String(), facts.ResultDirectory) {
 		t.Fatalf("changed attachment was accepted: %s", &output)
 	}
 }
@@ -171,7 +171,7 @@ func TestWatchdogInspectRefusesHeadAndRoundDrift(t *testing.T) {
 			if err := app.Run(args); err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(output.String(), "Status: fix_required") || strings.Contains(output.String(), "git -C") {
+			if !strings.Contains(output.String(), "Status: fix_required") || !strings.Contains(output.String(), facts.ResultDirectory) || !strings.Contains(output.String(), "--reviewed-head '"+head+"'") || strings.Contains(output.String(), "git -C") {
 				t.Fatalf("drift substituted a new review: %s", &output)
 			}
 		})
@@ -283,11 +283,20 @@ func TestWatchdogMarkdownRefusalPreservesClaimAndReviewDocuments(t *testing.T) {
 	if err := app.Run([]string{"skl", "watchdog", "submit", "--repo", worktree, "--item", "7", "--review-number", "1", "--reviewed-head", head, "--verdict", "rework", "--summary", summary}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "Status: fix_required") || !strings.Contains(output.String(), "main") || !backend.work[0].Claimed {
+	if !strings.Contains(output.String(), "Status: fix_required") || !strings.Contains(output.String(), "main") || !strings.Contains(output.String(), "--reviewed-head '"+head+"'") || !strings.Contains(output.String(), summary) || !backend.work[0].Claimed {
 		t.Fatalf("repairable refusal was not precise: %s; claim=%v", &output, backend.work[0].Claimed)
 	}
 	if data, err := os.ReadFile(summary); err != nil || string(data) != "W1 BLOCK\n" {
 		t.Fatalf("review document was lost: %q, %v", data, err)
+	}
+	var typed bytes.Buffer
+	app = newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &typed, &typed)
+	if err := app.Run([]string{"skl", "watchdog", "submit", "--repo", worktree, "--item", "7", "--review-number", "1", "--reviewed-head", head, "--verdict", "rework", "--summary", summary, "--format", "json"}); err != nil {
+		t.Fatal(err)
+	}
+	var refusal setup.ImplementationOutput
+	if err := json.Unmarshal(typed.Bytes(), &refusal); err != nil || refusal.Status != "fix_required" || !strings.Contains(output.String(), refusal.Reason) || !backend.work[0].Claimed {
+		t.Fatalf("submit transports disagreed or changed the Claim: %v, %#v", err, refusal)
 	}
 }
 
@@ -433,6 +442,44 @@ func TestWatchdogResumePreservesLocalProgressAndEndpointOverrides(t *testing.T) 
 	}
 }
 
+func TestWatchdogResumeMarkdownAndJSONCarrySameExecution(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "widget")
+	completeAndRetireSlice(t, root, "widget")
+	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	backend := &implementationMemory{work: []workflow.ImplementationItem{{
+		ID: "7", Branch: "widget", State: workflow.AwaitingReview, Claimed: true,
+		Submission: &workflow.Submission{ID: "11", Head: head, Base: "main"},
+	}}, remoteHeads: map[string]string{"widget": head}}
+	render := func(format string) string {
+		t.Helper()
+		var output bytes.Buffer
+		app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+		args := []string{"skl", "watchdog", "resume", "--repo", root, "--item", "7"}
+		if format == "json" {
+			args = append(args, "--format", "json")
+		}
+		if err := app.Run(args); err != nil {
+			t.Fatal(err)
+		}
+		body := output.String()
+		if format == "json" {
+			var decoded setup.ImplementationOutput
+			if err := json.Unmarshal(output.Bytes(), &decoded); err != nil || decoded.Packet == nil {
+				t.Fatalf("resume JSON: %v, %#v", err, decoded)
+			}
+			body = decoded.Packet.Instructions
+			t.Cleanup(func() { os.RemoveAll(decoded.Packet.Facts.Watchdog.ResultDirectory) })
+		} else if result := regexp.MustCompile(`/[^'\s]+/skl-watchdog-[0-9]+`).FindString(body); result != "" {
+			t.Cleanup(func() { os.RemoveAll(result) })
+		}
+		return regexp.MustCompile(`/[^'\s]+/skl-watchdog-[0-9]+`).ReplaceAllString(body, "<result>")
+	}
+	if markdown, typed := render("markdown"), render("json"); markdown != typed || !backend.work[0].Claimed {
+		t.Fatal("resume transports changed execution or Claim state")
+	}
+}
+
 func TestWatchdogExecutionShowsOpaqueEvidenceOnceWithProvenance(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
@@ -451,6 +498,20 @@ func TestWatchdogExecutionShowsOpaqueEvidenceOnceWithProvenance(t *testing.T) {
 		if strings.Count(got, text) != 1 {
 			t.Errorf("evidence %q appears %d times", text, strings.Count(got, text))
 		}
+	}
+}
+
+func TestWatchdogExecutionPreservesRawSelectedReviewSummary(t *testing.T) {
+	f := newReviewFixture(t)
+	summary := storedReviewSummary(1, "rework", "W1 BLOCK\nfull original summary", f.head, "2025-01-01T00:00:01Z")
+	f.forge.summaries = []map[string]any{summary}
+	started := f.start(t, f.root)
+	if started.Packet == nil {
+		t.Fatalf("selected review did not render: %#v", started)
+	}
+	raw := summary["body"].(string)
+	if strings.Count(started.Packet.Instructions, raw) != 1 {
+		t.Fatalf("raw selected review summary was changed or repeated: %.1200s", started.Packet.Instructions)
 	}
 }
 
@@ -513,6 +574,16 @@ func TestWatchdogNextExplainsNoWorkAndIdleTimeout(t *testing.T) {
 			got := output.String()
 			if !strings.Contains(got, "Status: "+test.status) || !strings.Contains(got, "Stop this one-item invocation") || strings.Contains(got, "# Review Start") {
 				t.Fatalf("empty queue invented a review or omitted the stop: %s", got)
+			}
+			var typed bytes.Buffer
+			app = newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &typed, &typed)
+			jsonArgs := append(append([]string(nil), args...), "--format", "json")
+			if err := app.Run(jsonArgs); err != nil {
+				t.Fatal(err)
+			}
+			var decoded setup.ImplementationOutput
+			if err := json.Unmarshal(typed.Bytes(), &decoded); err != nil || decoded.Status != test.status || decoded.Packet != nil || decoded.Item != nil {
+				t.Fatalf("empty queue transports disagreed: %v, %#v", err, decoded)
 			}
 		})
 	}
@@ -641,6 +712,15 @@ func TestWatchdogInspectResolvesHistoricalReadsForFixedReview(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("inspection missing %q: %.600s", want, got)
 		}
+	}
+	var typed bytes.Buffer
+	app = newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &typed, &typed)
+	if err := app.Run([]string{"skl", "watchdog", "inspect", "--repo", facts.Worktree, "--item", "7", "--submission", "11", "--base", "main", "--submission-body-sha256", fmt.Sprintf("%x", sha256.Sum256(nil)), "--review-number", "1", "--reviewed-head", head, "--result-directory", facts.ResultDirectory, "--format", "json"}); err != nil {
+		t.Fatal(err)
+	}
+	var inspected setup.WatchdogInspectionOutput
+	if err := json.Unmarshal(typed.Bytes(), &inspected); err != nil || inspected.Status != "inspected" || inspected.Instructions != got || inspected.Comparison == "" {
+		t.Fatalf("inspection transports disagreed: %v, %#v", err, inspected)
 	}
 }
 

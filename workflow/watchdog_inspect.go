@@ -11,24 +11,28 @@ import (
 // ReviewInspection is a read-only continuation of one fixed Watchdog invocation.
 // Startup cannot establish these facts without the selected project's objects.
 type ReviewInspection struct {
-	Status          string        `json:"status"`
-	Reason          string        `json:"reason,omitempty"`
-	Item            WorkItemID    `json:"work_item"`
-	Submission      SubmissionID  `json:"submission"`
-	Remote          string        `json:"remote"`
-	Branch          string        `json:"branch"`
-	ReviewedHead    string        `json:"reviewed_head"`
-	Head            string        `json:"head"`
-	ReviewNumber    uint64        `json:"review_number"`
-	PreviousHead    string        `json:"previous_reviewed_head,omitempty"`
-	ResultDirectory string        `json:"result_directory"`
-	Ledger          LedgerHistory `json:"ledger"`
-	Comparison      string        `json:"comparison,omitempty"`
-	FallbackReason  string        `json:"fallback_reason,omitempty"`
+	Status             string        `json:"status"`
+	Reason             string        `json:"reason,omitempty"`
+	Item               WorkItemID    `json:"work_item"`
+	Submission         SubmissionID  `json:"submission"`
+	Remote             string        `json:"remote"`
+	SubmissionBase     string        `json:"submission_base"`
+	BodySHA256         string        `json:"submission_body_sha256"`
+	Branch             string        `json:"branch"`
+	ReviewedHead       string        `json:"reviewed_head"`
+	Head               string        `json:"head"`
+	ReviewNumber       uint64        `json:"review_number"`
+	PreviousHead       string        `json:"previous_reviewed_head,omitempty"`
+	ResultDirectory    string        `json:"result_directory"`
+	SuppliedBaseline   string        `json:"supplied_artifact_baseline,omitempty"`
+	SuppliedCompletion string        `json:"supplied_artifact_completion,omitempty"`
+	Ledger             LedgerHistory `json:"ledger"`
+	Comparison         string        `json:"comparison,omitempty"`
+	FallbackReason     string        `json:"fallback_reason,omitempty"`
 }
 
 func InspectWatchdog(ctx context.Context, root, remote string, id WorkItemID, submission SubmissionID, base, bodySHA256, reviewed string, number uint64, previous, resultDirectory string, endpoints ArtifactEndpoints, backend ImplementationBackend) (ReviewInspection, error) {
-	result := ReviewInspection{Status: "fix_required", Item: id, Submission: submission, Remote: remote, ReviewedHead: reviewed, Head: reviewed, ReviewNumber: number, PreviousHead: previous, ResultDirectory: resultDirectory}
+	result := ReviewInspection{Status: "fix_required", Item: id, Submission: submission, Remote: remote, SubmissionBase: base, BodySHA256: bodySHA256, ReviewedHead: reviewed, Head: reviewed, ReviewNumber: number, PreviousHead: previous, ResultDirectory: resultDirectory, SuppliedBaseline: endpoints.Baseline, SuppliedCompletion: endpoints.Completion}
 	if id == "" || submission == "" || base == "" || len(bodySHA256) != 64 || reviewed == "" || number == 0 || resultDirectory == "" {
 		result.Reason = "inspect requires the fixed --item, --submission, --base, --submission-body-sha256, --reviewed-head, --review-number, and --result-directory from this invocation"
 		return result, nil

@@ -31,8 +31,6 @@ type WatchdogFacts struct {
 	Repository                 string           `json:"repository,omitempty"`
 	EvidenceStreams            []EvidenceStream `json:"evidence_streams,omitempty"`
 	EvidenceInstructions       string           `json:"evidence_instructions,omitempty"`
-	WorkItemReference          string           `json:"-"`
-	SubmissionReference        string           `json:"-"`
 	Remote                     string           `json:"remote"`
 	Worktree                   string           `json:"worktree"`
 	FetchCommand               string           `json:"fetch_command"`
@@ -98,6 +96,7 @@ const (
 
 type ReviewComment struct {
 	Source          string `json:"source,omitempty"`
+	RawBody         string `json:"-"`
 	Line            int    `json:"line,omitempty"`
 	Side            string `json:"side,omitempty"`
 	Body            string `json:"body"`
