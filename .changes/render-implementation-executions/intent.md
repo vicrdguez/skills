@@ -72,17 +72,17 @@ by this slice.
 
 ## Definition of Done
 
-- [ ] DOD1: Startup and handoff commands default to applicable Markdown, with no separate facts assembly or exact-JSON worker relay; explicit JSON preserves the same operation, outcome, and effects. (B1, B15, B16)
-- [ ] DOD2: Explicit procedure inputs distinguish initial, resumed/draft, and finding-driven work; every established reference is bound without exceeding post-#40 metadata-only startup or inferring artifact progress from lifecycle labels. (B2, B3)
-- [ ] DOD3: After preparation, read-only inspection supplies narrow progress-specific continuations or repairs, preserves invocation identity, avoids duplicate Completion or ledger recreation, and refreshes integrity when required. (B4, B5)
-- [ ] DOD4: Complete bundled output is specialized once per included definition while preserving current task judgment, TDD, verification order, Audit severity/dispositions, scope, frozen ledger, human pause, and human-only integration/merge. (B6)
-- [ ] DOD5: Established execution capabilities select only supported Audit recipes; unknown capability retains a runtime choice, and invalid format/capability inputs fail before avoidable effects. (B7, B14)
-- [ ] DOD6: Already-fetched evidence is complete, labeled, provenance-preserving data; pending evidence has concrete complete retrieval instructions, and no-PR, empty, and failed evidence remain distinct. (B8, B9)
-- [ ] DOD7: Shared deferred resources receive literal settled inputs, explain genuinely later values, retain owner names and visibility, and are disclosed only at the appropriate step. (B10)
-- [ ] DOD8: Empty/waiting, repair, operational-failure, refused, and interrupted outcomes accurately state status and Claim certainty with applicable recovery; rendering preserves engine error semantics and #39 verified handoff/release-last behavior. (B11, B12, B13, B17)
-- [ ] DOD9: Installed Implement stubs run lane `next` directly and consume its full instructions; generic Implement retrieval refuses read-only while reasoning skills and Implement resources remain usable. (B18, B19)
-- [ ] DOD10: Installation disables existing owned legacy Implementation Pi loops, preserves user-owned files and single-item Markdown-reporting runners, and leaves any still-used shared queue helper intact. (B20, B21)
-- [ ] DOD11: B1-B21 have scenario-aligned checks at the approved seams, representative fixtures cover complete executions and continuations, existing relevant regressions pass, and usage/upgrade docs explain rebuilding and refreshing owned installations.
+- [x] DOD1: Startup and handoff commands default to applicable Markdown, with no separate facts assembly or exact-JSON worker relay; explicit JSON preserves the same operation, outcome, and effects. (B1, B15, B16)
+- [x] DOD2: Explicit procedure inputs distinguish initial, resumed/draft, and finding-driven work; every established reference is bound without exceeding post-#40 metadata-only startup or inferring artifact progress from lifecycle labels. (B2, B3)
+- [x] DOD3: After preparation, read-only inspection supplies narrow progress-specific continuations or repairs, preserves invocation identity, avoids duplicate Completion or ledger recreation, and refreshes integrity when required. (B4, B5)
+- [x] DOD4: Complete bundled output is specialized once per included definition while preserving current task judgment, TDD, verification order, Audit severity/dispositions, scope, frozen ledger, human pause, and human-only integration/merge. (B6)
+- [x] DOD5: Established execution capabilities select only supported Audit recipes; unknown capability retains a runtime choice, and invalid format/capability inputs fail before avoidable effects. (B7, B14)
+- [x] DOD6: Already-fetched evidence is complete, labeled, provenance-preserving data; pending evidence has concrete complete retrieval instructions, and no-PR, empty, and failed evidence remain distinct. (B8, B9)
+- [x] DOD7: Shared deferred resources receive literal settled inputs, explain genuinely later values, retain owner names and visibility, and are disclosed only at the appropriate step. (B10)
+- [x] DOD8: Empty/waiting, repair, operational-failure, refused, and interrupted outcomes accurately state status and Claim certainty with applicable recovery; rendering preserves engine error semantics and #39 verified handoff/release-last behavior. (B11, B12, B13, B17)
+- [x] DOD9: Installed Implement stubs run lane `next` directly and consume its full instructions; generic Implement retrieval refuses read-only while reasoning skills and Implement resources remain usable. (B18, B19)
+- [x] DOD10: Installation disables existing owned legacy Implementation Pi loops, preserves user-owned files and single-item Markdown-reporting runners, and leaves any still-used shared queue helper intact. (B20, B21)
+- [x] DOD11: B1-B21 have scenario-aligned checks at the approved seams, representative fixtures cover complete executions and continuations, existing relevant regressions pass, and usage/upgrade docs explain rebuilding and refreshing owned installations.
 
 ## Manual verification
 
