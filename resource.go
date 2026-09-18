@@ -80,8 +80,9 @@ func (i resourceInput) wanted() string {
 // the typed destination they populate. Every call builds fresh flags, so no
 // value survives into the next invocation.
 type resourceSpec struct {
-	data   any
-	inputs []resourceInput
+	data     any
+	inputs   []resourceInput
+	validate func(name, resource string) error
 }
 
 func resourceSpecFor(resource string) resourceSpec {
@@ -104,6 +105,11 @@ func resourceSpecFor(resource string) resourceSpec {
 			{flag: &cli.StringFlag{Name: "result_directory", Required: true, Usage: resultDirectoryUsage, Destination: &data.ResultDirectory}},
 			{flag: &cli.IntFlag{Name: "round", Required: true, Usage: "Review round number for this Submission.", Destination: &data.Round}},
 			{flag: &cli.StringFlag{Name: "reviewed_head", Required: true, Usage: "Original full SHA of the reviewed head.", Destination: &data.ReviewedHead}},
+		}, validate: func(_, resource string) error {
+			if data.Round < 1 {
+				return fmt.Errorf("invalid input %q for resource %q: want a positive review round", "round", resource)
+			}
+			return nil
 		}}
 	}
 	return resourceSpec{}
@@ -163,6 +169,9 @@ func (s resourceSpec) parse(name, resource string, assignments []string) error {
 		if value := set.Lookup(input.name()).Value.String(); !slices.Contains(input.choices, value) {
 			return fmt.Errorf("invalid input %q for resource %q: supported choices are %s", input.name(), resource, strings.Join(input.choices, ", "))
 		}
+	}
+	if s.validate != nil {
+		return s.validate(name, resource)
 	}
 	return nil
 }

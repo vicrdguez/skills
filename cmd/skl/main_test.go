@@ -1834,6 +1834,105 @@ func TestRenderWatchdogReviewInstructions(t *testing.T) {
 	}
 }
 
+func TestRejectInvalidResourceInputs(t *testing.T) {
+	directory := t.TempDir()
+	head := strings.Repeat("a", 40)
+	cases := []struct {
+		name     string
+		owner    string
+		resource string
+		inputs   []string
+		describe bool
+		wants    []string
+	}{
+		{
+			name: "input without separator", owner: "implement", resource: "reference/submission.md",
+			inputs: []string{"result_directory"},
+			wants:  []string{"result_directory", "name=value"},
+		},
+		{
+			name: "undeclared input", owner: "implement", resource: "reference/submission.md",
+			inputs: []string{"result_directory=" + directory, "procedure=initial", "findings=1"},
+			wants:  []string{"findings", "--describe-inputs"},
+		},
+		{
+			name: "duplicate input", owner: "watchdog", resource: "reference/review.md",
+			inputs: []string{"result_directory=" + directory, "round=1", "round=1", "reviewed_head=" + head},
+			wants:  []string{"round", "duplicate"},
+		},
+		{
+			name: "missing required input", owner: "implement", resource: "reference/decision.md",
+			inputs: []string{"result_directory=" + directory},
+			wants:  []string{"preserve", "required"},
+		},
+		{
+			name: "invalid boolean", owner: "implement", resource: "reference/decision.md",
+			inputs: []string{"result_directory=" + directory, "preserve=maybe"},
+			wants:  []string{"preserve", "boolean"},
+		},
+		{
+			name: "invalid integer", owner: "watchdog", resource: "reference/review.md",
+			inputs: []string{"result_directory=" + directory, "round=two", "reviewed_head=" + head},
+			wants:  []string{"round", "integer"},
+		},
+		{
+			name: "unsupported choice", owner: "implement", resource: "reference/submission.md",
+			inputs: []string{"result_directory=" + directory, "procedure=later"},
+			wants:  []string{"procedure", "initial", "rework"},
+		},
+		{
+			name: "zero round", owner: "watchdog", resource: "reference/review.md",
+			inputs: []string{"result_directory=" + directory, "round=0", "reviewed_head=" + head},
+			wants:  []string{"round", "positive"},
+		},
+		{
+			name: "input without resource", owner: "implement",
+			inputs: []string{"result_directory=" + directory},
+			wants:  []string{"--input", "--resource"},
+		},
+		{
+			name: "describe without resource", owner: "implement", describe: true,
+			wants: []string{"--describe-inputs", "--resource"},
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			var output bytes.Buffer
+			app := newApp(func(github.RepositoryID) (setup.Backend, error) {
+				t.Fatal("invalid resource input reached the Workflow Backend")
+				return nil, nil
+			}, bytes.NewReader(nil), &output, &output)
+			command := []string{"skl", "skill"}
+			if testCase.resource != "" {
+				command = append(command, "--resource", testCase.resource)
+			}
+			if testCase.describe {
+				command = append(command, "--describe-inputs")
+			}
+			for _, input := range testCase.inputs {
+				command = append(command, "--input", input)
+			}
+			command = append(command, testCase.owner)
+			err := app.Run(command)
+			if err == nil {
+				t.Fatalf("%v returned no error:\n%s", command, output.String())
+			}
+			for _, want := range testCase.wants {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("%v error %q does not identify %q", command, err, want)
+				}
+			}
+			if output.Len() != 0 {
+				t.Errorf("%v returned procedural content: %q", command, output.String())
+			}
+			entries, err := os.ReadDir(directory)
+			if err != nil || len(entries) != 0 {
+				t.Errorf("invalid input changed the Result Document directory: %v, %v", entries, err)
+			}
+		})
+	}
+}
+
 func TestRetrieveOneNamedResource(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, t.TempDir())
