@@ -44,7 +44,12 @@ func selectionReworkRun(t *testing.T, root string, forge *candidateForge, change
 		backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
 		return backend, nil
 	}, bytes.NewReader(nil), &output, &output)
-	err := app.Run(append(append([]string{"skl"}, args...), "--repo", root))
+	command := append([]string{"skl"}, args...)
+	if args[0] == "implement" {
+		// The Implement default transport is the Execution Skill Markdown.
+		command = append(command, "--format", "json")
+	}
+	err := app.Run(append(command, "--repo", root))
 	if err != nil {
 		return setup.ImplementationOutput{}, err
 	}

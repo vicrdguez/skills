@@ -1206,7 +1206,7 @@ func TestInstalledImplementActivationLoadsDefinitionsOnce(t *testing.T) {
 				output.Reset()
 				args := strings.Fields(command)
 				if args[1] == "implement" {
-					args = append(args, "--repo", root)
+					args = append(args, "--format", "json", "--repo", root)
 				}
 				if err := app.Run(args); err != nil {
 					t.Fatal(err)

@@ -132,7 +132,7 @@ func TestW5PacketUsesSubmissionIdentityNotFeedback(t *testing.T) {
 			if tc.feedback && (len(facts.Comments) != 1 || facts.Comments[0].Body != "human context, not a lifecycle signal" || facts.Comments[0].Author != "maintainer" || facts.Comments[0].Association != "OWNER") {
 				t.Fatalf("source feedback lost: %#v", facts.Comments)
 			}
-			for _, guidance := range []string{"Finding-driven Rework", "Keep the ledger retired"} {
+			for _, guidance := range []string{"finding-driven Rework", "This obligation holds even when the supplied feedback is empty or still pending"} {
 				if strings.Contains(got.Packet.Instructions, guidance) != tc.rework {
 					t.Errorf("%q guidance present = %v, want %v", guidance, !tc.rework, tc.rework)
 				}
