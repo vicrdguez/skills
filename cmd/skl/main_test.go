@@ -756,6 +756,25 @@ func TestInstallPreservesOpenCodeSkillsAndConfiguration(t *testing.T) {
 	}
 }
 
+// assertFaithfulRendering fails when a rendered definition contains text its
+// authored source does not, or orders it differently. Authored templates may
+// select one conditional branch, but they never rewrite, truncate, or inject
+// prose.
+func assertFaithfulRendering(t *testing.T, rendered, source string) {
+	t.Helper()
+	remaining := strings.Split(regexp.MustCompile(`\{\{[^}]*\}\}`).ReplaceAllString(source, ""), "\n")
+	for _, line := range strings.Split(rendered, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		index := slices.Index(remaining, line)
+		if index < 0 {
+			t.Fatalf("rendered definition changed or injected %q", line)
+		}
+		remaining = remaining[index+1:]
+	}
+}
+
 func TestRetrieveRenderedSkillInstructions(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, t.TempDir())
@@ -764,9 +783,15 @@ func TestRetrieveRenderedSkillInstructions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	want := "Protocol: skl.instructions/v1\nSkill: tdd\nIncluded skills: none\nFacts: {}\nResources: reference/mocking.md, reference/tests.md\n\n" + readRepositoryFile(t, "skills/dev/tdd/SKILL.md")
-	if got := stdout.String(); got != want {
-		t.Fatalf("rendered packet differs from canonical definition:\n%s", got)
+	header := "Protocol: skl.instructions/v1\nSkill: tdd\nIncluded skills: none\nFacts: {}\nResources: reference/mocking.md, reference/tests.md\n\n"
+	if got := stdout.String(); !strings.HasPrefix(got, header) {
+		t.Fatalf("rendered packet has an unexpected manifest:\n%s", got)
+	}
+	instructions := strings.TrimPrefix(stdout.String(), header)
+	assertFaithfulRendering(t, instructions, readRepositoryFile(t, "skills/dev/tdd/SKILL.md"))
+	// A standalone retrieval keeps the independent-mode seam agreement.
+	if !strings.Contains(instructions, "confirm them with the user") || strings.Contains(instructions, "at the human pause") {
+		t.Fatalf("standalone retrieval lost its own mode:\n%s", instructions)
 	}
 }
 
@@ -1593,9 +1618,8 @@ func TestCleanupPreservesUnacceptedLocalHead(t *testing.T) {
 }
 
 func TestRetrieveEquivalentTypedInstructions(t *testing.T) {
-	wantInstructions := readRepositoryFile(t, "skills/dev/tdd/SKILL.md")
 	wantResources := []string{"reference/mocking.md", "reference/tests.md"}
-	wantMarkdown := "Protocol: skl.instructions/v1\nSkill: tdd\nIncluded skills: none\nFacts: {}\nResources: reference/mocking.md, reference/tests.md\n\n" + wantInstructions
+	wantHeader := "Protocol: skl.instructions/v1\nSkill: tdd\nIncluded skills: none\nFacts: {}\nResources: reference/mocking.md, reference/tests.md\n\n"
 	var markdown bytes.Buffer
 	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &markdown, &markdown, t.TempDir())
 	if err := app.Run([]string{"skl", "skill", "tdd"}); err != nil {
@@ -1611,9 +1635,10 @@ func TestRetrieveEquivalentTypedInstructions(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &packet); err != nil {
 		t.Fatalf("stdout is not a JSON packet: %v\n%s", err, stdout.String())
 	}
-	if packet.Protocol != "skl.instructions/v1" || packet.Skill != "tdd" || packet.Facts != (skilldist.InvocationFacts{}) || len(packet.IncludedSkills) != 0 || !slices.Equal(packet.Resources, wantResources) || packet.Instructions != wantInstructions || markdown.String() != wantMarkdown {
+	if packet.Protocol != "skl.instructions/v1" || packet.Skill != "tdd" || packet.Facts != (skilldist.InvocationFacts{}) || len(packet.IncludedSkills) != 0 || !slices.Equal(packet.Resources, wantResources) || packet.Instructions == "" || markdown.String() != wantHeader+packet.Instructions {
 		t.Fatalf("JSON and Markdown packets differ: %#v", packet)
 	}
+	assertFaithfulRendering(t, packet.Instructions, readRepositoryFile(t, "skills/dev/tdd/SKILL.md"))
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q", stderr.String())
 	}
@@ -1644,8 +1669,10 @@ func TestRetrieveAuditWithoutPonytail(t *testing.T) {
 				}
 				instructions = strings.TrimPrefix(instructions, header)
 			}
-			if instructions != readRepositoryFile(t, "skills/dev/audit/SKILL.md") {
-				t.Error("retrieved Audit differs from its authoritative definition")
+			assertFaithfulRendering(t, instructions, readRepositoryFile(t, "skills/dev/audit/SKILL.md"))
+			// A standalone Audit keeps its own caller-driven discovery.
+			if !strings.Contains(instructions, "If no PR comparison or fixed point can be resolved, ask for one") || strings.Contains(instructions, "This bundled Audit reviews one claimed change") {
+				t.Error("standalone Audit lost its own mode")
 			}
 			for _, forbidden := range []string{"ponytail", "750", "net-lines", "## Simplicity"} {
 				if strings.Contains(strings.ToLower(instructions), strings.ToLower(forbidden)) {

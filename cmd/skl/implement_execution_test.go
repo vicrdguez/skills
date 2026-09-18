@@ -552,3 +552,65 @@ func TestB5InspectionViolationsAndStaleIntegrityCannotImplyReadiness(t *testing.
 		t.Fatalf("repair released the Claim or restarted selection: %#v", backend.work)
 	}
 }
+
+// TestB6TheCompleteBundlePreservesTheCurrentImplementationContract materializes
+// the B6 scenario against the complete rendered Execution Skill.
+func TestB6TheCompleteBundlePreservesTheCurrentImplementationContract(t *testing.T) {
+	root := proposalRepository(t)
+	baseline := prepareSlice(t, root, "widget")
+	backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}}
+	got := implementCLI(t, root, backend, "next", "--artifact-baseline", strings.Repeat("d", 40))
+	if got.Packet == nil {
+		t.Fatalf("start = %#v", got)
+	}
+	instructions := got.Packet.Instructions
+	facts := got.Packet.Facts.Implementation
+	for _, included := range []string{"tdd", "audit", "design", "domain"} {
+		if count := strings.Count(instructions, "\n\n## Included Skill: "+included+"\n\n"); count != 1 {
+			t.Errorf("bundled %s definition occurs %d times", included, count)
+		}
+	}
+	// The accepted change supplies the fixed point and the artifact pointers, so
+	// the bundle replaces independent-mode discovery with the resolved ones or
+	// with the exact command that establishes them.
+	for _, resolved := range []string{
+		"merge-base with `main` and the parent of this change's first commit",
+		"run `" + facts.InspectCommand + "` to resolve the Artifact Baseline and Completion",
+		"`--artifact-baseline " + facts.SuppliedArtifactBaseline + "`",
+		"The artifacts are the accepted `.changes/widget/` files of this Work Item",
+	} {
+		if !strings.Contains(instructions, resolved) {
+			t.Errorf("bundle lacks the resolved reference %q", resolved)
+		}
+	}
+	for _, superseded := range []string{
+		"If no PR comparison or fixed point can be resolved, ask for one",
+		"If nothing is found, ask the user where the artifacts are",
+		"Before writing any test, write down the seams under test and confirm them with the user",
+		"`skl implement inspect --remote <name> --item <number>` when invoked independently",
+	} {
+		if strings.Contains(instructions, superseded) {
+			t.Errorf("bundle retains the resolved alternative %q", superseded)
+		}
+	}
+	// The construction loop, the review obligations, and the judgment branches stay.
+	for _, required := range []string{
+		"Red before green", "One slice at a time", "One Gherkin `Scenario Outline` with its `Examples` table is one cycle", "pinned in the accepted artifacts",
+		"two axes", "exactly once per invocation", "endpoint inspection", "complete final implementation",
+		"`HARD`", "`JUDGEMENT`", "Do **not** merge or rerank findings", "disposition",
+		"integration with `main`, conflict resolution, and merge belong to the human Merge Authority",
+		"## When only a human can decide", "The scope is already decided",
+		"does not require a new design exercise", "outside the accepted change",
+	} {
+		if !strings.Contains(instructions, required) {
+			t.Errorf("bundle dropped the retained obligation %q", required)
+		}
+	}
+	// ADR 0005's redesign and blanket target synchronization are out of scope.
+	for _, outOfScope := range []string{"target-snapshot", "Target Snapshot", "Synchronization Rework", "git merge ", "git rebase", "contract conformance", "instead of prescribing test order"} {
+		if strings.Contains(instructions, outOfScope) {
+			t.Errorf("bundle introduced out-of-scope behavior %q", outOfScope)
+		}
+	}
+	_ = baseline
+}

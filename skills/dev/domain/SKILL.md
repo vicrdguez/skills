@@ -6,7 +6,9 @@ description: Actively build and sharpen a project's domain model. Use when the u
 Actively build and sharpen the project's domain model as you design. This is the *active discipline* — challenging terms, inventing edge-case scenarios, and writing the glossary and decisions down **the moment they crystallise**. (Merely reading CONTEXT.md for vocabulary is not this skill — that's a one-line habit any skill can do. This skill is for when you're changing the model, not just consuming it.)
 
 
-## File structure
+{{if .Implementation}}Apply this discipline inside the accepted change. Update the glossary or record an ADR only when the change itself resolves a term or makes a decision that is hard to reverse, surprising without context, and the result of a real trade-off. The accepted change does not require glossary or ADR production outside the accepted change, and it never justifies a documentation edit beyond it.
+
+{{end}}## File structure
 
 Most repos have a single context:
 

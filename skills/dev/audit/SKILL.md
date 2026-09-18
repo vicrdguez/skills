@@ -24,14 +24,20 @@ Use the supplied Work Item and Submission facts for originating context. This sk
 
 ### 1. Pin the fixed point
 
-The goal is to review the work done for the single claimed unit of work. Which point that is depends on the round:
+{{if .Implementation}}This bundled Audit reviews one claimed change. Pin the fixed point to the merge-base with `main` and the parent of this change's first commit; never that first commit itself, because `git diff <it>...HEAD` would omit everything it introduced. Implement's finding-driven Rework reviews the current PR comparison and the supplied findings instead of inventing a previous-review cache. First-pass Audit may precede the final completion ticks and the ledger retirement, and it reports those endpoints as pending rather than inferring them. An explicit fixed point the caller supplies replaces the default above.
+{{else}}The goal is to review the work done for the single claimed unit of work. Which point that is depends on the round:
 
 - **First workflow review of a change** — the merge-base with `main`, or the parent of the implementor's first commit. Never that first commit itself: `git diff <it>...HEAD` would omit everything it introduced. An independent Audit still uses any fixed point its caller explicitly supplies.
 - **Repeat review after a bounce** — the `Reviewed head` recorded in the previous reviewer's summary, so the round reads only what changed since.
+{{end}}
 
-Artifact integrity uses its own, unmoving Artifact Baseline and, when available, Artifact Completion from the engine's endpoint inspection. It never advances with review rounds. Refresh fixed Git facts with the packet's `inspect_command`, or `skl implement inspect --remote <name> --item <number>` when invoked independently; preserve any caller-supplied `--artifact-baseline <full-sha>` and `--artifact-completion <full-sha>`. The engine validates endpoint identity and snapshots, while you read and judge the historical contract.
+{{if .Implementation}}Artifact integrity uses its own, unmoving Artifact Baseline and Artifact Completion from the engine's endpoint inspection. They never advance with review rounds.{{if .Implementation.ArtifactBaseline}} The resolved endpoints are Artifact Baseline `{{.Implementation.ArtifactBaseline}}`{{if .Implementation.ArtifactCompletion}} and Artifact Completion `{{.Implementation.ArtifactCompletion}}`{{end}}.{{else}} They are not resolved in this invocation yet: run `{{.Implementation.InspectCommand}}` to resolve the Artifact Baseline and Completion from the fetched history, and never invent an endpoint or take one from the working tree.{{end}}{{if .Implementation.SuppliedArtifactBaseline}} The caller supplied `--artifact-baseline {{.Implementation.SuppliedArtifactBaseline}}`{{if .Implementation.SuppliedArtifactCompletion}} and `--artifact-completion {{.Implementation.SuppliedArtifactCompletion}}`{{end}}; preserve those exact full SHAs on every inspection, resume, submit, and Needs Human command.{{end}} The engine validates endpoint identity and snapshots, while you read and judge the historical contract.
+{{else}}Artifact integrity uses its own, unmoving Artifact Baseline and, when available, Artifact Completion from the engine's endpoint inspection. It never advances with review rounds. Refresh fixed Git facts with the packet's `inspect_command`, or `skl implement inspect --remote <name> --item <number>` when invoked independently; preserve any caller-supplied `--artifact-baseline <full-sha>` and `--artifact-completion <full-sha>`. The engine validates endpoint identity and snapshots, while you read and judge the historical contract.
+{{end}}
 
-If the user provides a fixed point — a commit SHA, branch name, tag, `main`, `HEAD~5`, etc. — use that instead. If no PR comparison or fixed point can be resolved, ask for one.
+{{if .Implementation}}An explicit fixed point the caller supplies — a commit SHA, branch name, tag, `main`, `HEAD~5`, etc. — replaces the default above; the default never has to be asked for.
+{{else}}If the user provides a fixed point — a commit SHA, branch name, tag, `main`, `HEAD~5`, etc. — use that instead. If no PR comparison or fixed point can be resolved, ask for one.
+{{end}}
 
 Capture the diff command once: `git diff <fixed-point>...HEAD` (three-dot, so the comparison is against the merge-base). Also note the list of commits via `git log <fixed-point>..HEAD --oneline`.
 
@@ -39,12 +45,14 @@ Before going further, confirm the fixed point resolves (`git rev-parse <fixed-po
 
 ### 2. Identify the artifacts source
 
-Look for the originating artifacts, in this order:
+{{if .Implementation}}The artifacts are the accepted `.changes/{{.Implementation.Branch}}/` files of this Work Item. Read them from the resolved Artifact Baseline and Completion snapshots with `git show <snapshot>:.changes/{{.Implementation.Branch}}/<file>`. After retirement, read them from those historical snapshots and never recreate the ledger.
+{{else}}Look for the originating artifacts, in this order:
 
 1. The supplied Work Item's exact Artifact Baseline and Completion; read with `git show <snapshot>:.changes/<slug>/<file>`.
 2. A path the user passed as an argument.
 3. Artifacts in `.changes/<slug>` for the in-flight unit of work matching the branch name or feature; after retirement, read them from the historical Artifact Baseline and Completion without recreating them
 4. If nothing is found, ask the user where the artifacts are. If they say there isn't one, the **Artifacts** sub-agent will skip and report "no Artifacts available".
+{{end}}
 
 ### 3. Identify the standards sources
 
