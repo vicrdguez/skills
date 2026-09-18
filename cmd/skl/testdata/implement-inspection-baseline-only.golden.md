@@ -1,6 +1,6 @@
 ---
 name: implement
-description: Implement a single claimed change following TDD, driven by the artifacts in `.changes/<slug>` for that change.
+description: Implement a single claimed change following TDD, driven by its accepted Implementation Ledger.
 disable-model-invocation: true
 ---
 

@@ -865,9 +865,8 @@ func TestRetrieveRetiredLedgerInstructions(t *testing.T) {
 			"The change now awaits the **human's merge**. The watchdog does not merge.",
 		},
 		"implement": {
-			"remove the entire `.changes/<slug>/` ledger in a separate subsequent commit before review",
+			"then remove `.changes/widget/` in a later commit",
 			"Never bless the changes — that is the watchdog's job.",
-			"rework must not recreate or revise it",
 		},
 	} {
 		t.Run(skill, func(t *testing.T) {

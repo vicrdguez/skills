@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -196,10 +197,12 @@ func TestB2ProcedureSelectionIgnoresIncidentalEvidence(t *testing.T) {
 			name: "initial work",
 			item: workflow.ImplementationItem{ID: "7", Branch: "rework", State: workflow.Ready,
 				Feedback: []skilldist.ReviewComment{{Body: "looks like a rework finding", Author: "reviewer"}}},
-			action:     []string{"next"},
-			want:       skilldist.InitialSubmission,
-			wantText:   []string{"read the accepted artifacts at their Artifact Baseline before changing code"},
-			absentText: nil,
+			action:   []string{"next"},
+			want:     skilldist.InitialSubmission,
+			wantText: []string{"read the accepted artifacts at their Artifact Baseline before changing code"},
+			absentText: []string{
+				"preserve the existing Submission", "keep `.changes/rework/` retired",
+			},
 		},
 		{
 			name:   "resumed implementation",
@@ -210,6 +213,7 @@ func TestB2ProcedureSelectionIgnoresIncidentalEvidence(t *testing.T) {
 				"inspect the branch, the preserved files, the applicable artifacts, and the visible feedback",
 				"do not restart completed work",
 			},
+			absentText: []string{"preserve the existing Submission", "keep `.changes/widget/` retired"},
 		},
 		{
 			name: "resumed draft progress",
@@ -219,25 +223,30 @@ func TestB2ProcedureSelectionIgnoresIncidentalEvidence(t *testing.T) {
 			action: []string{"resume", "--item", "7"},
 			want:   skilldist.ResumedSubmission,
 			wantText: []string{
-				"an attached draft Submission is preserved rather than replaced",
+				"Preserve the attached draft Submission #11 rather than replacing it",
 			},
+			absentText: []string{"keep `.changes/widget/` retired"},
 		},
 		{
 			name: "finding-driven rework with fetched empty comments",
 			item: workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Rework, Claimed: true,
 				Submission: &workflow.Submission{ID: "11", Base: "main"}},
-			action:     []string{"resume", "--item", "7"},
-			want:       skilldist.FindingDrivenRework,
-			wantText:   []string{"Map every finding to its resolution", "even when the supplied feedback is empty or still pending"},
-			absentText: []string{"This invocation starts the accepted change:", "This invocation resumes existing work:"},
+			action:   []string{"resume", "--item", "7"},
+			want:     skilldist.FindingDrivenRework,
+			wantText: []string{"Map every finding to its resolution", "Do not recreate or revise the Implementation Ledger", "Do not invoke Audit again"},
+			absentText: []string{
+				"This invocation starts the accepted change:", "This invocation resumes existing work:",
+				"change only existing non-manual", "commit `[completion] widget`", "run the bundled Audit exactly once",
+			},
 		},
 		{
 			name: "finding-driven rework whose feedback is not fetched yet",
 			item: workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Rework, Claimed: true,
 				Submission: &workflow.Submission{ID: "11", Base: "main"}},
-			action:   []string{"resume", "--item", "7"},
-			want:     skilldist.FindingDrivenRework,
-			wantText: []string{"Map every finding to its resolution", "even when the supplied feedback is empty or still pending"},
+			action:     []string{"resume", "--item", "7"},
+			want:       skilldist.FindingDrivenRework,
+			wantText:   []string{"Map every finding to its resolution", "the supplied feedback is empty or still pending", "Do not invoke Audit again"},
+			absentText: []string{"change only existing non-manual", "commit `[completion] widget`", "run the bundled Audit exactly once"},
 		},
 	}
 	for _, testCase := range cases {
@@ -268,9 +277,17 @@ func TestB2ProcedureSelectionIgnoresIncidentalEvidence(t *testing.T) {
 					t.Errorf("Execution Skill lacks %q", text)
 				}
 			}
-			for _, text := range testCase.absentText {
+			for _, text := range append(testCase.absentText,
+				"If this packet carries Implementation facts",
+				"skl implement resume --item <number>",
+				"--remote <name>",
+				".changes/<slug>",
+				"[completion] <slug>",
+				"--decision <absolute-file>",
+				"## Rework",
+			) {
 				if strings.Contains(rendered, text) {
-					t.Errorf("Execution Skill asserts an unobserved phase with %q", text)
+					t.Errorf("Execution Skill retains a superseded instruction %q", text)
 				}
 			}
 		})
@@ -1098,14 +1115,40 @@ func TestB11EmptyAndWaitingOutcomesDoNotInventAnExecution(t *testing.T) {
 	})
 }
 
+// contradictoryClaimReadback records the Claim but returns a contradictory
+// observation, so the CLI cannot prove whether acquisition succeeded.
+type contradictoryClaimReadback struct {
+	implementationMemory
+}
+
+func (b *contradictoryClaimReadback) ClaimSelected(ctx context.Context, candidate workflow.QueueCandidate, item workflow.ImplementationItem) (workflow.ImplementationItem, error) {
+	observed, err := b.implementationMemory.ClaimSelected(ctx, candidate, item)
+	if err != nil {
+		return observed, err
+	}
+	if observed.Source != nil {
+		source := *observed.Source
+		source.Claimed = false
+		observed.Source = &source
+	}
+	observed.ID = "8"
+	return workflow.ReconcileImplementation(observed), nil
+}
+
 // TestB12RepairOutcomesPreserveObservedClaimCertainty materializes the B12 outline.
 func TestB12RepairOutcomesPreserveObservedClaimCertainty(t *testing.T) {
-	refusal := func(t *testing.T, backend *implementationMemory, args ...string) string {
+	refusal := func(t *testing.T, backend setup.Backend, args ...string) string {
 		t.Helper()
 		root := proposalRepository(t)
 		prepareSlice(t, root, "widget")
-		backend.work = []workflow.ImplementationItem{backend.work[0]}
-		return runImplementationTransport(t, root, backend, append(args, "--repo", root)...)
+		var markdown bytes.Buffer
+		app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &markdown, &markdown)
+		command := append([]string{"skl", "implement"}, args...)
+		command = append(command, "--repo", root)
+		if err := app.Run(command); err != nil {
+			t.Fatal(err)
+		}
+		return markdown.String()
 	}
 	for _, testCase := range []struct {
 		name     string
@@ -1134,15 +1177,6 @@ func TestB12RepairOutcomesPreserveObservedClaimCertainty(t *testing.T) {
 				"repair the Work Item projections before resuming",
 			},
 		},
-		{
-			name:    "contradictory readback leaves acquisition uncertain",
-			backend: &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}},
-			args:    []string{"resume", "--item", "7"},
-			wantText: []string{
-				"Status: fix_required",
-				"explicit Work Item is not an unambiguous implementation Claim",
-			},
-		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			markdown := refusal(t, testCase.backend, testCase.args...)
@@ -1162,6 +1196,41 @@ func TestB12RepairOutcomesPreserveObservedClaimCertainty(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("contradictory readback leaves acquisition uncertain", func(t *testing.T) {
+		markdownBackend := &contradictoryClaimReadback{implementationMemory: implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}}}
+		root := proposalRepository(t)
+		prepareSlice(t, root, "widget")
+		var markdown bytes.Buffer
+		app := newApp(func(github.RepositoryID) (setup.Backend, error) { return markdownBackend, nil }, bytes.NewReader(nil), &markdown, &markdown)
+		if err := app.Run([]string{"skl", "implement", "next", "--repo", root}); err != nil {
+			t.Fatal(err)
+		}
+		for _, required := range []string{"Status: fix_required", "does not establish whether Claim acquisition succeeded", "Inspect Work Item #7", "resume --item 7", "do not run `skl implement next`"} {
+			if !strings.Contains(markdown.String(), required) {
+				t.Errorf("uncertain readback lacks %q:\n%s", required, markdown.String())
+			}
+		}
+		if strings.Contains(markdown.String(), "No Claim is recorded") || strings.Contains(markdown.String(), "Retry `skl implement next`") {
+			t.Fatalf("uncertain readback asserted non-acquisition or replacement selection:\n%s", markdown.String())
+		}
+		if !markdownBackend.work[0].Claimed {
+			t.Fatalf("fixture did not preserve the acquired Claim: %#v", markdownBackend.work[0])
+		}
+
+		jsonBackend := &contradictoryClaimReadback{implementationMemory: implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}}}
+		jsonRoot := proposalRepository(t)
+		prepareSlice(t, jsonRoot, "widget")
+		var encoded bytes.Buffer
+		app = newApp(func(github.RepositoryID) (setup.Backend, error) { return jsonBackend, nil }, bytes.NewReader(nil), &encoded, &encoded)
+		if err := app.Run([]string{"skl", "implement", "next", "--repo", jsonRoot, "--format", "json"}); err != nil {
+			t.Fatal(err)
+		}
+		structured := implementationJSON(t, encoded.String())
+		if structured.Guidance == nil || structured.Guidance.Claim != "unknown" || !strings.Contains(structured.Guidance.Recovery, "resume --item 7") {
+			t.Fatalf("JSON uncertain readback guidance = %#v", structured.Guidance)
+		}
+	})
 }
 
 // fatalQueue fails every queue observation, standing in for a backend that
@@ -1179,6 +1248,12 @@ func (b *fatalQueue) ImplementationItems(context.Context) ([]workflow.Implementa
 	return nil, errors.New("backend observation unavailable")
 }
 
+type rejectingImplementationOutput struct{}
+
+func (rejectingImplementationOutput) Write([]byte) (int, error) {
+	return 0, errors.New("output unavailable")
+}
+
 // TestB13OperationalFailuresRetainErrorAndRecoverySemantics materializes B13.
 func TestB13OperationalFailuresRetainErrorAndRecoverySemantics(t *testing.T) {
 	run := func(t *testing.T, root string, backend setup.Backend, args ...string) (string, error) {
@@ -1187,7 +1262,8 @@ func TestB13OperationalFailuresRetainErrorAndRecoverySemantics(t *testing.T) {
 		app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
 		command := append([]string{"skl", "implement"}, args...)
 		command = append(command, "--repo", root)
-		return output.String(), app.Run(command)
+		err := app.Run(command)
+		return output.String(), err
 	}
 	for _, testCase := range []struct {
 		name    string
@@ -1250,6 +1326,25 @@ func TestB13OperationalFailuresRetainErrorAndRecoverySemantics(t *testing.T) {
 			if strings.Contains(stdout, substituted) {
 				t.Errorf("uncertain acquisition was substituted with %q", substituted)
 			}
+		}
+	})
+	t.Run("output delivery fails after acquisition", func(t *testing.T) {
+		root := proposalRepository(t)
+		prepareSlice(t, root, "widget")
+		backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}}
+		writer := rejectingImplementationOutput{}
+		app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), writer, writer)
+		err := app.Run([]string{"skl", "implement", "next", "--repo", root})
+		if err == nil {
+			t.Fatal("output delivery failure was reported as success")
+		}
+		for _, required := range []string{"output delivery failed", "Work Item #7", "explicitly resume", "rather than running next blindly"} {
+			if !strings.Contains(err.Error(), required) {
+				t.Errorf("delivery failure lacks %q: %v", required, err)
+			}
+		}
+		if !backend.work[0].Claimed {
+			t.Fatalf("delivery failure released the acquired Claim: %#v", backend.work[0])
 		}
 	})
 }
@@ -1321,35 +1416,51 @@ func TestB15SubmissionOutcomesReflectOneVerifiedHandoff(t *testing.T) {
 		backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}, remoteHeads: map[string]string{}}
 		start := implementCLI(t, root, backend, "next")
 		body := filepath.Join(start.Packet.Facts.Implementation.ResultDirectory, "submission.md")
-		if err := os.WriteFile(body, []byte("one verified handoff\n"), 0600); err != nil {
-			t.Fatal(err)
+		completeAndRetireSlice(t, root, "widget")
+		backend.remoteHeads["widget"] = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+		return root, backend, body
+	}
+	reworkHandoff := func(t *testing.T) (string, *implementationMemory, string) {
+		root := proposalRepository(t)
+		prepareSlice(t, root, "widget")
+		previousHead := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+		backend := &implementationMemory{work: []workflow.ImplementationItem{{
+			ID: "7", Branch: "widget", State: workflow.Rework, Claimed: true,
+			Submission: &workflow.Submission{ID: "42", Base: "main", Head: previousHead, Body: "previous review\n", BodyUpdatedAt: "2026-01-01T00:00:01Z", ClaimAcquiredAt: "2026-01-01T00:00:02Z"},
+		}}, remoteHeads: map[string]string{}}
+		start := implementCLI(t, root, backend, "resume", "--item", "7")
+		if start.Packet == nil || start.Packet.Facts.Implementation.Procedure != skilldist.FindingDrivenRework {
+			t.Fatalf("fixture did not establish finding-driven Rework: %#v", start)
 		}
+		body := filepath.Join(start.Packet.Facts.Implementation.ResultDirectory, "submission.md")
 		completeAndRetireSlice(t, root, "widget")
 		backend.remoteHeads["widget"] = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 		return root, backend, body
 	}
 	for _, testCase := range []struct {
-		name string
-		body string
+		name         string
+		body         string
+		fixture      func(*testing.T) (string, *implementationMemory, string)
+		wantPRNumber int
 	}{
-		{"first implementation creates its one Submission", "one verified handoff\n"},
-		{"finding-driven Rework updates its existing Submission", "rework dispositions\n"},
+		{"first implementation creates its one Submission", "one verified handoff\n", firstHandoff, 11},
+		{"finding-driven Rework updates its existing Submission", "rework dispositions\n", reworkHandoff, 42},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			markdownRoot, markdownBackend, body := firstHandoff(t)
+			markdownRoot, markdownBackend, body := testCase.fixture(t)
 			if err := os.WriteFile(body, []byte(testCase.body), 0600); err != nil {
 				t.Fatal(err)
 			}
 			markdown := runImplementationTransport(t, markdownRoot, markdownBackend, "submit", "--item", "7", "--body", body)
 
-			jsonRoot, jsonBackend, body := firstHandoff(t)
+			jsonRoot, jsonBackend, body := testCase.fixture(t)
 			if err := os.WriteFile(body, []byte(testCase.body), 0600); err != nil {
 				t.Fatal(err)
 			}
 			encoded := runImplementationTransport(t, jsonRoot, jsonBackend, "submit", "--item", "7", "--body", body, "--format", "json")
 			structured := implementationJSON(t, encoded)
 
-			if structured.Status != "awaiting_review" || structured.Item == nil || structured.Item.Submission == nil || structured.Item.Claimed {
+			if structured.Status != "awaiting_review" || structured.Item == nil || structured.Item.Submission == nil || structured.Item.Submission.Number != testCase.wantPRNumber || structured.Item.Claimed {
 				t.Fatalf("handoff outcome = %#v", structured)
 			}
 			var envelope map[string]any
@@ -1363,6 +1474,7 @@ func TestB15SubmissionOutcomesReflectOneVerifiedHandoff(t *testing.T) {
 			for _, required := range []string{
 				"Status: awaiting_review",
 				"Work Item #7 was published and verified after the handoff check.",
+				fmt.Sprintf("Submission #%d holds the reviewed head.", testCase.wantPRNumber),
 				"The Claim was released by the verified handoff.",
 				"independent Watchdog review",
 				"not a reason to resubmit or roll back published work",
@@ -1373,8 +1485,8 @@ func TestB15SubmissionOutcomesReflectOneVerifiedHandoff(t *testing.T) {
 			}
 			for _, backend := range []*implementationMemory{markdownBackend, jsonBackend} {
 				submission := backend.work[0].Submission
-				if submission == nil || !strings.HasPrefix(submission.Body, testCase.body) || !strings.HasSuffix(submission.Body, "\n\nCloses #7\n") || backend.work[0].Claimed {
-					t.Fatalf("handoff effects differ: %#v", submission)
+				if submission == nil || submission.ID != workflow.SubmissionID(strconv.Itoa(testCase.wantPRNumber)) || !strings.HasPrefix(submission.Body, testCase.body) || !strings.HasSuffix(submission.Body, "\n\nCloses #7\n") || backend.work[0].Claimed {
+					t.Fatalf("handoff effects differ or replaced the Submission: %#v", submission)
 				}
 			}
 			if _, err := os.Stat(filepath.Dir(body)); !os.IsNotExist(err) {

@@ -21,6 +21,10 @@ func implementationGuidance(output ImplementationOutput) *ImplementationGuidance
 	case "fix_required":
 		guidance := &ImplementationGuidance{Explanation: identity + " was refused, and this outcome made no successful transition."}
 		switch {
+		case output.ClaimAcquisitionUncertain:
+			guidance.Claim = "unknown"
+			guidance.Explanation += " The contradictory read-back does not establish whether Claim acquisition succeeded."
+			guidance.Recovery = fmt.Sprintf("Inspect Work Item #%d and explicitly run `skl implement resume --item %d` for that same identity; do not run `skl implement next` or assume the Claim was released.", output.Item.Number, output.Item.Number)
 		case output.Item == nil:
 			guidance.Claim = "unknown"
 			guidance.Recovery = "Inspect the Work Item before retrying; do not run `skl implement next` blindly or assume any reservation was released."
@@ -87,6 +91,8 @@ func ImplementationMarkdown(output ImplementationOutput) string {
 	case "fix_required":
 		line("%s was refused, and this outcome made no successful transition.", identity)
 		switch {
+		case output.ClaimAcquisitionUncertain:
+			line("The contradictory read-back does not establish whether Claim acquisition succeeded. Inspect Work Item #%d and explicitly run `skl implement resume --item %d` for that same identity; do not run `skl implement next` or assume the Claim was released.", output.Item.Number, output.Item.Number)
 		case output.Item == nil:
 			line("This outcome does not establish whether the Work Item holds a Claim. Inspect it before retrying; do not run `skl implement next` blindly and do not assume any reservation was released.")
 		case claimed:

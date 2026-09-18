@@ -107,12 +107,13 @@ func RefuseNonMainBase(id SubmissionID, base string) error {
 }
 
 type ImplementationOutcome struct {
-	Ledger *LedgerHistory             `json:"ledger,omitempty"`
-	Head   string                     `json:"head,omitempty"`
-	Facts  *skilldist.InvocationFacts `json:"-"`
-	Status string                     `json:"status"`
-	Reason string                     `json:"reason,omitempty"`
-	Item   *ImplementationItem        `json:"item,omitempty"`
+	Ledger                    *LedgerHistory             `json:"ledger,omitempty"`
+	Head                      string                     `json:"head,omitempty"`
+	Facts                     *skilldist.InvocationFacts `json:"-"`
+	Status                    string                     `json:"status"`
+	Reason                    string                     `json:"reason,omitempty"`
+	Item                      *ImplementationItem        `json:"item,omitempty"`
+	ClaimAcquisitionUncertain bool                       `json:"claim_acquisition_uncertain,omitempty"`
 }
 
 func loadImplementation(ctx context.Context, backend ImplementationBackend) ([]ImplementationItem, error) {
