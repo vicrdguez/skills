@@ -97,6 +97,61 @@ func TestTestingPolicyPointersAndDesignGuidanceAgree(t *testing.T) {
 	}
 }
 
+func TestAuditAndWatchdogShareContractAcceptanceCriteria(t *testing.T) {
+	criteria, err := RenderResource("audit", "reference/acceptance.md", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"behavioral conformance",
+		"architectural conformance",
+		"local implementation quality",
+		"obligation, the plausible violation, and why existing evidence does not distinguish it",
+		"equally valid implementation",
+		"preference alone",
+		"required behavioral and failure-mode protection",
+	} {
+		if !strings.Contains(string(criteria), want) {
+			t.Errorf("acceptance criteria are missing %q", want)
+		}
+	}
+
+	audit, err := BuildPacket("audit", InvocationFacts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(audit.Resources, []string{"reference/acceptance.md", "reference/smells.md"}) {
+		t.Fatalf("audit resources = %v", audit.Resources)
+	}
+	for _, want := range []string{"grouped many-to-many evidence", "removed or weakened assertions", "architectural obligations"} {
+		if !strings.Contains(audit.Instructions, want) {
+			t.Errorf("Audit is missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"Every `behavior.md` scenario has materialized as a test", "new test for every scenario", "per-test justification ledger"} {
+		if strings.Contains(audit.Instructions, forbidden) {
+			t.Errorf("Audit retains %q", forbidden)
+		}
+	}
+
+	watchdog, err := BuildPacket("watchdog", InvocationFacts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const command = "skl skill --resource reference/acceptance.md audit"
+	if strings.Count(watchdog.Instructions, command) != 1 {
+		t.Fatalf("Watchdog acceptance command count = %d", strings.Count(watchdog.Instructions, command))
+	}
+	if strings.Contains(watchdog.Instructions, "## Included Skill: audit") {
+		t.Fatal("Watchdog included the complete Audit definition")
+	}
+	for _, want := range []string{"every accepted obligation", "additional executable challenges", "specific evidence gap"} {
+		if !strings.Contains(watchdog.Instructions, want) {
+			t.Errorf("Watchdog is missing %q", want)
+		}
+	}
+}
+
 func TestPacketsUseIntegrationReferences(t *testing.T) {
 	packet, err := BuildPacket("implement", InvocationFacts{Implementation: &ImplementationFacts{WorkItemReference: "ticket-7"}})
 	if err != nil {
