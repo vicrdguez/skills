@@ -14,6 +14,7 @@ type LedgerHistory struct {
 	Completion                 string
 	Deletion                   string
 	Phase                      string
+	Files                      []string
 	Violations                 []string
 	endpointIdentityViolations []string
 	acceptedBaselineViolations []string
@@ -68,6 +69,10 @@ func InspectLedger(root, ref, slug string, explicit ArtifactEndpoints, policy Le
 	if err != nil {
 		return endpointViolation(result, err, true)
 	}
+	for name := range baseline {
+		result.Files = append(result.Files, name)
+	}
+	slices.Sort(result.Files)
 	result.acceptedBaselineViolations = append(result.acceptedBaselineViolations, requiredArtifacts(baseline, result.Baseline, slug)...)
 	for name, contents := range baseline {
 		result.acceptedBaselineViolations = append(result.acceptedBaselineViolations, ledgerBoxes(contents, false, result.Baseline+":"+name)...)

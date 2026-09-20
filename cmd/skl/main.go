@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -46,19 +47,47 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "format", Value: "markdown"},
 			&cli.StringFlag{Name: "resource"},
+			newInputFlag(),
+			&cli.BoolFlag{Name: "describe-inputs", Usage: "Describe the named resource's accepted inputs without rendering it"},
 		},
 		Action: func(command *cli.Context) error {
 			if command.NArg() != 1 {
 				return fmt.Errorf("skill name is required")
 			}
 			name := command.Args().First()
-			if command.String("resource") != "" {
-				resource, err := skilldist.Resource(name, command.String("resource"))
+			resource := command.String("resource")
+			describe := command.Bool("describe-inputs")
+			inputs := inputValues(command)
+			if resource == "" && describe {
+				return fmt.Errorf("--describe-inputs requires --resource <owner-relative-name>")
+			}
+			if resource == "" && len(inputs) > 0 {
+				return fmt.Errorf("--input requires --resource <owner-relative-name>")
+			}
+			if resource == "" && name == "implement" {
+				// The Implement Execution Skill is delivered by its own lane: a
+				// read-only retrieval would name no Work Item, open no Workflow
+				// Backend, and acquire no Claim.
+				return fmt.Errorf("the implement Skill Definition is not retrievable read-only; run `skl implement next` for one Work Item's complete Execution Skill, or `skl implement resume --item <number>` to continue a Claim. Its named resources stay retrievable with `skl skill --resource <name> implement`")
+			}
+			if resource != "" {
+				if describe {
+					description, err := skilldist.DescribeResourceInputs(name, resource)
+					if err != nil {
+						return err
+					}
+					_, err = fmt.Fprint(stdout, description)
+					return err
+				}
+				contents, err := skilldist.RenderResource(name, resource, inputs)
 				if err != nil {
 					return err
 				}
-				_, err = stdout.Write(resource)
+				_, err = stdout.Write(contents)
 				return err
+			}
+			if name == "watchdog" {
+				return fmt.Errorf("the Watchdog Execution Skill requires selected work; run `skl watchdog next` for one Work Item or `skl watchdog resume --item <number>` for an interrupted Claim. Named resources remain available with --resource")
 			}
 			packet, err := skilldist.BuildPacket(name, skilldist.InvocationFacts{})
 			if err != nil {
@@ -201,6 +230,44 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 	}}
 	app.Commands = append(app.Commands, statusCommand(newBackend, stdout))
 	return &stageApp{app}
+}
+
+// inputFlag collects repeated --input occurrences verbatim. The resource
+// parser, not the CLI, splits each occurrence at its first "=", so commas,
+// quotes and surrounding padding reach the renderer intact.
+type inputFlag struct {
+	cli.GenericFlag
+}
+
+func newInputFlag() *inputFlag {
+	return &inputFlag{GenericFlag: cli.GenericFlag{
+		Name:  "input",
+		Usage: "Repeatable `name=value` input for the named resource; split at the first '='",
+	}}
+}
+
+// Apply binds a fresh collector to the flag set built for this run, so repeated
+// invocations never share input values.
+func (f *inputFlag) Apply(set *flag.FlagSet) error {
+	f.Value = &rawInputs{}
+	return f.GenericFlag.Apply(set)
+}
+
+type rawInputs []string
+
+func (r *rawInputs) Set(value string) error {
+	*r = append(*r, value)
+	return nil
+}
+
+func (r *rawInputs) String() string { return "" }
+
+func inputValues(command *cli.Context) []string {
+	values, _ := command.Generic("input").(*rawInputs)
+	if values == nil {
+		return nil
+	}
+	return *values
 }
 
 func proposalRequest(command *cli.Context) (workflow.PublishRequest, error) {
