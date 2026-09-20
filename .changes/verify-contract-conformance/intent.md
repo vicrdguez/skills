@@ -25,12 +25,12 @@ Deliver the contract-grounded testing, implementation, and review policy accepte
 
 ## Definition of Done
 
-- [ ] Standalone and included testing guidance, public resources, manifests, and supported harness discovery consistently use the testing skill, with a safe owned-stub upgrade and preservation of user-owned content.
-- [ ] Applicable complete Execution Skills and continuations permit contract-preserving construction and verification choices without global red-green, scenario/test cardinality, or Audit-only refactoring mandates, while honoring explicit frozen obligations.
-- [ ] Testing guidance requires independent expectations and meaningful regression sensitivity, admits faithful controlled alternatives with disclosed limits, and directs material unresolved uncertainty to the human.
-- [ ] Implement and Audit assess changed tests for preserved behavioral and failure-mode protection without per-test ledgers, unique-bug quotas, or mandatory replacement suites.
-- [ ] Audit and Watchdog use consistent criteria that distinguish contractual violations and specific evidence gaps from acceptable preferences and concrete nonblocking debt.
-- [ ] Deferred Submission guidance accounts for all rules, scenarios, and architectural obligations through grouped concrete evidence, results, and material limitations while preserving existing handoff obligations.
+- [x] Standalone and included testing guidance, public resources, manifests, and supported harness discovery consistently use the testing skill, with a safe owned-stub upgrade and preservation of user-owned content.
+- [x] Applicable complete Execution Skills and continuations permit contract-preserving construction and verification choices without global red-green, scenario/test cardinality, or Audit-only refactoring mandates, while honoring explicit frozen obligations.
+- [x] Testing guidance requires independent expectations and meaningful regression sensitivity, admits faithful controlled alternatives with disclosed limits, and directs material unresolved uncertainty to the human.
+- [x] Implement and Audit assess changed tests for preserved behavioral and failure-mode protection without per-test ledgers, unique-bug quotas, or mandatory replacement suites.
+- [x] Audit and Watchdog use consistent criteria that distinguish contractual violations and specific evidence gaps from acceptable preferences and concrete nonblocking debt.
+- [x] Deferred Submission guidance accounts for all rules, scenarios, and architectural obligations through grouped concrete evidence, results, and material limitations while preserving existing handoff obligations.
 
 ## Manual verification
 
