@@ -930,7 +930,18 @@ func TestDelegateClaimedWorkCapabilityGuidance(t *testing.T) {
 			if testCase.capability != "" {
 				args = append(args, "--capability", testCase.capability)
 			}
-			execution := implementCLI(t, root, backend, args...).Packet.Instructions
+			started := implementCLI(t, root, backend, args...)
+			facts := started.Packet.Facts.Implementation
+			execution := started.Packet.Instructions
+			capabilityFlag := " --capability " + skilldist.ShellQuote(testCase.capability)
+			for _, command := range []string{facts.ResumeCommand, facts.InspectCommand} {
+				if testCase.capability != "" && !strings.Contains(command, capabilityFlag) {
+					t.Errorf("known capability was lost from continuation command %q", command)
+				}
+				if testCase.capability == "" && strings.Contains(command, " --capability ") {
+					t.Errorf("unknown capability invented a continuation flag in %q", command)
+				}
+			}
 			for _, required := range append(testCase.want,
 				"Do not require delegation, a separate test writer, a fixed helper count, or a worktree per helper",
 				"authoritative contract references or contents",
