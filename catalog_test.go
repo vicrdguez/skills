@@ -152,6 +152,43 @@ func TestAuditAndWatchdogShareContractAcceptanceCriteria(t *testing.T) {
 	}
 }
 
+func TestSubmissionVerificationAccountsForTheCompleteContract(t *testing.T) {
+	for _, procedure := range []string{"initial", "rework"} {
+		t.Run(procedure, func(t *testing.T) {
+			resource, err := RenderResource("implement", "reference/submission.md", []string{
+				"result_directory=/tmp/result",
+				"procedure=" + procedure,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			body := string(resource)
+			for _, want := range []string{
+				"## Summary",
+				"## Verification",
+				"every rule, scenario, and architectural obligation",
+				"grouped many-to-many",
+				"concrete tests, commands, or appropriate inspection evidence",
+				"results and material limitations",
+				"Prose assurance alone is insufficient",
+				"listing an evidence gap does not make it acceptable",
+				"## Audit ledger",
+				"never parses, judges, or cross-checks the prose",
+			} {
+				if !strings.Contains(body, want) {
+					t.Errorf("%s submission guidance is missing %q", procedure, want)
+				}
+			}
+			if strings.Contains(body, "Map every behavioral scenario to its test") {
+				t.Errorf("%s submission guidance retains one-to-one evidence mapping", procedure)
+			}
+			if procedure == "rework" && !strings.Contains(body, "Map every existing finding by its stable ID") {
+				t.Error("Rework finding-resolution mapping was lost")
+			}
+		})
+	}
+}
+
 func TestPacketsUseIntegrationReferences(t *testing.T) {
 	packet, err := BuildPacket("implement", InvocationFacts{Implementation: &ImplementationFacts{WorkItemReference: "ticket-7"}})
 	if err != nil {
