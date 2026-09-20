@@ -86,6 +86,9 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 				_, err = stdout.Write(contents)
 				return err
 			}
+			if name == "watchdog" {
+				return fmt.Errorf("the Watchdog Execution Skill requires selected work; run `skl watchdog next` for one Work Item or `skl watchdog resume --item <number>` for an interrupted Claim. Named resources remain available with --resource")
+			}
 			packet, err := skilldist.BuildPacket(name, skilldist.InvocationFacts{})
 			if err != nil {
 				return err

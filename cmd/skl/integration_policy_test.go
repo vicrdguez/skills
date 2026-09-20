@@ -372,6 +372,9 @@ func TestStaleSynchronizationReworkUsesOrdinaryCLIFlow(t *testing.T) {
 		}, bytes.NewReader(nil), &output, &output)
 		command := structuredStageCommand(args...)
 		command = append(command, "--repo", root)
+		if len(args) > 0 && args[0] == "watchdog" {
+			command = append(command, "--format", "json")
+		}
 		if err := app.Run(command); err != nil {
 			t.Fatalf("%v: %v\n%s", command, err, &output)
 		}
@@ -547,6 +550,9 @@ func TestWatchdogPassRetryAndStatusIgnoreMergeabilityThroughGitHub(t *testing.T)
 				}, bytes.NewReader(nil), &output, &output)
 				command := structuredStageCommand(args...)
 				command = append(command, "--repo", root)
+				if len(args) > 0 && args[0] == "watchdog" {
+					command = append(command, "--format", "json")
+				}
 				err := app.Run(command)
 				return slices.Clone(output.Bytes()), err
 			}
@@ -685,6 +691,9 @@ func TestNonMainSubmissionRefusesPublicHandoffsThroughGitHub(t *testing.T) {
 				args = append(args, "--format", "json")
 			}
 			args = append(args, "--repo", root)
+			if operation == "watchdog submit" {
+				args = append(args, "--format", "json")
+			}
 			if err := app.Run(args); err != nil {
 				t.Fatal(err)
 			}
@@ -975,6 +984,9 @@ func TestSubmitRefusesLateRetargetThroughGitHub(t *testing.T) {
 		}, bytes.NewReader(nil), &output, &output)
 		command := structuredStageCommand(args...)
 		command = append(command, "--repo", root)
+		if len(args) > 0 && args[0] == "watchdog" {
+			command = append(command, "--format", "json")
+		}
 		err := app.Run(command)
 		return slices.Clone(output.Bytes()), err
 	}
@@ -1234,6 +1246,9 @@ func TestSubmitRefusesRecoveredNonMainSubmissionThroughGitHub(t *testing.T) {
 		}, bytes.NewReader(nil), &output, &output)
 		command := structuredStageCommand(args...)
 		command = append(command, "--repo", root)
+		if len(args) > 0 && args[0] == "watchdog" {
+			command = append(command, "--format", "json")
+		}
 		err := app.Run(command)
 		return slices.Clone(output.Bytes()), err
 	}
@@ -1429,7 +1444,7 @@ func TestWatchdogRefusesInvalidReviewedEvidenceThroughGitHub(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				command := []string{"skl", "watchdog", "submit", "--item", "7", "--review-number", "1", "--reviewed-head", supplied, "--verdict", "pass", "--summary", summary, "--body", body}
+				command := []string{"skl", "watchdog", "submit", "--format", "json", "--item", "7", "--review-number", "1", "--reviewed-head", supplied, "--verdict", "pass", "--summary", summary, "--body", body}
 				if tc.divergentHead {
 					command = append(command, "--head", head)
 				}

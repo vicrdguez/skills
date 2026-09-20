@@ -102,7 +102,7 @@ Existing in-flight work stays on its former CLI unless an operator explicitly ha
 
 ### Wait for claimable work
 
-Both `skl implement next` and `skl watchdog next` check once and return `work_available` with a claimed item and packet, or `no_work`, by default. Add bounded waiting when another lane or a human merge may make work eligible:
+Both `skl implement next` and `skl watchdog next` check once and return one claimed item or `no_work` by default. Watchdog presents a complete Markdown Execution Skill; `--format json` gives equivalent typed transport. Add bounded waiting when another lane or a human merge may make work eligible:
 
 ```sh
 skl implement next --wait --repo <path> --remote upstream
@@ -112,7 +112,7 @@ skl implement next --wait 2m --poll=5s
 
 Bare `--wait` means up to 15 minutes; `--wait=2m` and `--wait 2m` override that idle window. `--poll` defaults to 30 seconds. Durations must be positive Go durations with units; invalid values fail before Backend effects. A valid `--poll` without `--wait` is accepted but does not enable waiting.
 
-Selection runs immediately, then waits between completed empty observations for the smaller of the poll interval and remaining idle window. Each invocation starts a new window, including Backend operation time. It emits only one final outcome: a Claim and Execution Skill, an existing refusal, or successful `idle_timeout`; add `--format json` for the typed packet. The timeout means only local queue inactivity, not global completion; it creates no Claim, private Result Document directory, or persistent run record. Waiting does not launch an Agent Worker or change eligibility, ordering, Dependencies, or handoffs.
+Selection runs immediately, then waits between completed empty observations for the smaller of the poll interval and remaining idle window. Each invocation starts a new window, including Backend operation time. It emits only one final outcome: a Claim and complete Execution Skill, an existing refusal, or successful `idle_timeout`; add `--format json` for equivalent typed transport. The timeout means only local queue inactivity, not global completion; it creates no Claim, private Result Document directory, or persistent run record. Waiting does not launch an Agent Worker or change eligibility, ordering, Dependencies, or handoffs.
 
 The idle deadline prevents new polls but does not cancel an in-flight Claim: a late successful Claim, refusal, or operational error is returned as-is; a late empty observation becomes `idle_timeout`. Operational errors and refusals stop waiting without added retries. SIGINT/SIGTERM or caller cancellation interrupts waiting with a nonzero error, not `no_work` or `idle_timeout`, unless the in-flight selection successfully returns its Claim and packet. No Claim is automatically released or retried. If selection was interrupted and a Claim may have been acquired, inspect the Work Item and explicitly resume it rather than blindly running `next` again.
 
@@ -123,7 +123,7 @@ go install ./cmd/skl
 skl install
 ```
 
-`skl install` refreshes its owned Skill Stubs in Pi, Codex, Claude Code, and OpenCode, plus Pi-only queue prompts, runners, and their continuation check, without touching unrelated user files. OpenCode receives independent common stubs at `~/.config/opencode/skills/<name>/SKILL.md`, not links to another harness or the authoring tree. This replaces the former Pi package and Claude plugin distribution. Run `skl skill <name>` for rendered instructions, `skl skill --format json <name>` for the typed packet, or `skl skill --resource <path> [--input name=value ...] <name>` for one named resource; `--describe-inputs` lists that resource's accepted inputs without rendering it. Flags precede the skill name. Plain `skl skill implement` refuses read-only in both formats with `skl implement next` and `skl implement resume` guidance: the Implement Execution Skill belongs to its lane, and a read-only retrieval would name no Work Item, open no Workflow Backend, and acquire no Claim. Independent reasoning skills and every `--resource ... implement` retrieval stay available.
+`skl install` refreshes its owned Skill Stubs in Pi, Codex, Claude Code, and OpenCode, plus Pi-only prompts, runners, and the retained queue helper, without touching unrelated user files. OpenCode receives independent common stubs at `~/.config/opencode/skills/<name>/SKILL.md`, not links to another harness or the authoring tree. This replaces the former Pi package and Claude plugin distribution. Direct Implement and Watchdog stubs run `skl implement next` and `skl watchdog next` respectively. Plain `skl skill implement` and `skl skill watchdog` refuse read-only retrieval because no Work Item would be selected or claimed; their named resources remain retrievable. Independent reasoning skills use `skl skill <name>` or `skl skill --format json <name>`, and named resources use `skl skill --resource <path> [--input name=value ...] <name>`; `--describe-inputs` lists accepted inputs. Flags precede the skill name.
 
 For a one-time OpenCode cutover, first install the new binary and run `skl install` as above, keeping any existing discovery workaround until the native stubs are available. Then manually remove only obsolete Pi skill-directory or raw-source entries from OpenCode's `skills.paths`; retain unrelated settings and intentionally configured other skills. Do not delete another harness's skills or replace the override with Claude or Codex paths. The installer does not edit discovery settings. Quit and restart OpenCode, then confirm the workflow skills load from `~/.config/opencode/skills/` as thin CLI stubs without claiming work.
 
@@ -143,17 +143,23 @@ skl skill --resource reference/submission.md --describe-inputs implement
 skl skill --resource reference/submission.md --input result_directory=/tmp/skl-result --input procedure=initial implement
 ```
 
-A workflow packet binds every value its invocation already established — the private Result Document directory, the submission procedure, the review round, and the original reviewed head — and leaves the worker only genuinely later values, such as whether implementation work needs preservation at the Needs Human step. Converted resource bodies stay deferred until that step: a packet neither prerenders them nor advertises a bare retrieval that no longer satisfies their required inputs.
+A workflow invocation binds every value it already established — the private Result Document directory, the submission procedure, the selected PR, review round, and original reviewed head — and leaves the worker only genuinely later values, such as whether implementation work needs preservation at the Needs Human step. Converted resource bodies stay deferred until that step.
 
 Retrieve a parent definition with `skl skill <name>` only when it is not already supplied; `SKILL.md` is not a resource name. Raw source-tree registrations bypass this distribution arrangement. OpenCode can consume the installed Claude-compatible stubs rather than registering the authoring tree.
 
 ### Review and human completion
 
-In a fresh session, run `skl watchdog next`, or resume the fixed Claim with `skl watchdog resume --item <number>`. Selection reads only open `review` Submissions without `wip`, ordered by Submission age. The packet carries the reviewed head, the opaque Audit-bearing PR body, prior findings, raw human comments, and concrete fetch/worktree/inspect/submit commands; the worker prepares the worktree, resolves the Artifact Baseline and Completion with the packet's inspection command, then reads the endpoint files from Git. Watchdog runs the Full Gate and independently checks only the exact endpoint paths, modes, bytes, ticks, ancestry, and ledger absence; it neither audits intermediate artifact history nor reruns Audit.
+In a fresh session, run `skl watchdog next`, or resume the selected Claim with `skl watchdog resume --item <number>`. Both return complete Markdown instructions by default; add `--format json` for equivalent typed transport. Selection reads only open `review` Submissions without `wip`, ordered by Submission age. The Execution Skill binds the selected Work Item, PR, branch, remote, reviewed head, review number, private Result Documents, complete supplied evidence, and concrete preparation and handoff commands. The worker prepares the worktree and runs its `skl watchdog inspect` command. That narrow continuation resolves the exact Artifact Baseline and Completion and a usable full or incremental comparison, then supplies historical-file read commands. Invalid evidence produces a repair instead of a substituted review identity. Watchdog runs the Full Gate and independently checks the exact endpoint paths, modes, bytes, ticks, ancestry, and ledger absence; it does not rerun Audit.
 
-Startup never inspects the Review Checkpoint's prior revision: when a retained checkpoint exists the packet supplies the completed count and previous revision, and the worker compares that revision to the reviewed head only after preparation confirms it is an ancestor, otherwise it reviews the full PR comparison. Workers never locate, parse, or edit the `.watchdog` checkpoint.
+Startup uses selected metadata even when local project objects exist. A retained Review Checkpoint supplies the completed count and previous revision without claiming a verified comparison; inspection uses an available ancestral prior revision, including the unchanged head, or gives a full PR comparison with a fallback reason. A lost checkpoint does not erase supplied finding IDs or human dispositions. Workers do not locate, parse, or edit the `.watchdog` checkpoint.
 
-Write the summary and optional anchored findings in the packet's private temporary directory. Submit its concrete command with `--verdict pass`, `--verdict rework`, or `--verdict needs-human`. A pass also takes `--body <absolute-submission.md>` containing the complete final PR body and unchecked Manual Verification checklist. Retrieve the transport instructions with the resource command the packet's invocation supplies, or discover the accepted inputs with `skl skill --resource reference/review.md --describe-inputs watchdog`. If passing Notes need Debt Marker comments, the worker commits and pushes them, runs the formatter/parser and `git diff --check`, and supplies `--head <final-sha>` without replacing `--reviewed-head`.
+Write the summary and optional anchored findings in the invocation's private directory. Before assigning dispositions, retrieve the bound `reference/review.md` resource command in the Execution Skill; it supplies the selected PR, review number, original head, and result path. Submit the fixed command with `--verdict pass`, `--verdict rework`, or `--verdict needs-human`. A pass also takes `--body <absolute-submission.md>` containing the complete final PR body and unchecked Manual Verification checklist. If passing Notes need Debt Marker comments, the worker commits and pushes them, runs the formatter/parser and `git diff --check`, and supplies `--head <final-sha>` without replacing `--reviewed-head`. `submit` reports only a verified engine outcome; a repair retains Result Documents and the Claim, while a cleanup-only warning after completion does not call for republication.
+
+The generated resource command has this shape, with values from the selected review:
+
+```sh
+skl skill --resource reference/review.md --input result_directory=/tmp/skl-result --input pr=11 --input round=2 --input reviewed_head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa watchdog
+```
 
 `ready_for_merge` projects `done` without closing the source issue. Only a human merges; GitHub then closes the issue through the PR's `Closes #N` footer. `skl status` observes Merged, releases Dependencies, closes Coordination Items whose children are all Merged, and safely reconciles partial projections. Contradictions are reported as Needs Human without overwriting them. An unmerged closed Submission is Superseded, preserving its branch reference for later Explore.
 
@@ -161,21 +167,16 @@ A valid pass reaches `ready_for_merge` whether mergeability is mergeable, confli
 
 The removed `--target-snapshot` contract has no compatibility mode. An in-flight worker using the former contract must finish with its old binary or stop for a controlled cutover and retrieve fresh instructions.
 
-## Pi subagent loops
+## Pi entrypoints
 
-The installed Pi adapters use [pi-subagents](https://github.com/nicobailon/pi-subagents). Install that extension separately with `pi install npm:pi-subagents`; Node runs the installed structured-outcome continuation check that the active `/watchdog-loop` still uses, so the shared `queue-next.mjs` helper stays installed. Implement is deliberately single-item now; Watchdog execution specialization is a separate sibling change, and ADR 0005 remains accepted but not implemented here.
+The installed Pi adapters use [pi-subagents](https://github.com/nicobailon/pi-subagents). Install that extension separately with `pi install npm:pi-subagents` when launching the one-item runners.
 
-- `/implement-loop` is disabled. `skl install` replaces any loop carrying its `skl.pi/v1` ownership marker with a prompt that launches no worker, claims no Work Item, and points at one-item use; a loop without that marker is user-owned and preserved. Rebuild and refresh with `go install ./cmd/skl` then `skl install` — editing Markdown alone leaves an owned loop live.
-- One item at a time: run `skl implement next` (or `skl implement resume --item <number>`) and follow the returned Execution Skill. The `implement-runner` agent stays available for that single-item Pi use and reports the verified outcome or unresolved failure in normal Markdown prose — never the engine's exact JSON, never a queue drain, and never a replacement worker after an empty, uncertain, or incomplete result.
-- `/watchdog-loop [max-items]` launches one fresh `watchdog-runner` using `skl watchdog next`. A verified `ready_for_merge` or `rework` handoff starts the next worker.
+Both installed, marker-owned queue prompts are disabled and stop before starting a runner or claiming work. `skl install` replaces older owned copies while preserving user-owned prompts.
 
-Review findings carry stable per-PR IDs (`W1`, `W2`, …) so a round can be compared with the last one. The first watchdog review is complete; later rounds verify the open findings and read only what changed since the previous `Reviewed head`, and a second failing review pauses at `needs-human` rather than bouncing again. A verified `needs-human` is a complete handoff — the loop moves on, and nothing reclaims that item until a person does.
+- `/implement-loop` is disabled. Run `skl implement next` or `skl implement resume --item <number>` and follow the returned Execution Skill. The one-item `implement-runner` remains available and reports the verified outcome or unresolved failure in normal Markdown.
+- `/watchdog-loop` is disabled. Start Watchdog directly in a fresh session with `skl watchdog next` or `skl watchdog resume --item <number>`, or launch the one-item `watchdog-runner` in a fresh context. It reports the verified outcome or unresolved failure in normal Markdown.
 
-The scheduler and every worker have separate contexts. Run the remaining Watchdog scheduler in its own Pi session so review history never mixes with implementation:
-
-```sh
-pi --name watchdog-loop --model openai-codex/gpt-5.6-luna --thinking medium
-```
+Review findings retain stable per-PR IDs (`W1`, `W2`, …). The first review covers the complete change; later reviews verify active findings and use the inspected incremental comparison when valid. A second failing review routes to `needs_human`. Only a person requeues that item.
 
 The worker defaults are:
 
@@ -184,18 +185,8 @@ The worker defaults are:
 | `implement-runner` | `openai-codex/gpt-5.6-sol` | medium | `openai-codex/gpt-5.6-terra:high` |
 | `watchdog-runner` | `openai-codex/gpt-5.6-sol` | high | `openai-codex/gpt-5.6-terra:high` |
 
-For a critical watchdog run, override only that loop invocation:
+A one-item Pi invocation can choose a model explicitly:
 
 ```text
-/watchdog-loop 10 model=openai-codex/gpt-5.6-sol:xhigh
+/run watchdog-runner[model=openai-codex/gpt-5.6-sol:xhigh] "Follow the Watchdog Execution Skill for one Work Item and report the verified result."
 ```
-
-The loop passes this as the `model` override on every fresh `watchdog-runner` launch; it does not change the saved default. The direct pi-subagents equivalent for one item is:
-
-```text
-/run watchdog-runner[model=openai-codex/gpt-5.6-sol:xhigh] "Load and follow the watchdog skill exactly. Process one eligible work item and exit."
-```
-
-Use `xhigh` for security, authorization, billing, destructive migrations, irreversible data operations, public API compatibility, or the watchdog's opt-in independent test reimplementation. Keep `high` for normal reviews: extra reasoning can otherwise increase latency and speculative edge-case findings.
-
-Both loops consume unchanged CLI JSON and stop on `no_work`, their item limit, incomplete Claims, ambiguous results, or adapter errors. A normal watchdog rejection that reaches verified `rework` is complete, so the loop continues. Queue draining remains Pi-only; Codex and Claude Code use the same one-item semantic commands.

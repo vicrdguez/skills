@@ -8,6 +8,7 @@ import (
 	"path"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"text/template"
 )
@@ -27,30 +28,33 @@ const (
 )
 
 type WatchdogFacts struct {
-	WorkItemReference          string          `json:"-"`
-	SubmissionReference        string          `json:"-"`
-	Remote                     string          `json:"remote"`
-	Worktree                   string          `json:"worktree"`
-	FetchCommand               string          `json:"fetch_command"`
-	WorktreeCommand            string          `json:"worktree_command"`
-	InspectCommand             string          `json:"inspect_command"`
-	ResultDirectory            string          `json:"result_directory"`
-	SubmitCommand              string          `json:"submit_command"`
-	ResumeCommand              string          `json:"resume_command"`
-	ReviewCount                uint64          `json:"review_count"`
-	ReviewNumber               uint64          `json:"review_number"`
-	ReviewScope                ReviewScope     `json:"review_scope"`
-	PreviousReviewedHead       string          `json:"previous_reviewed_head,omitempty"`
-	WorkItem                   int             `json:"work_item"`
-	Submission                 int             `json:"submission"`
-	Branch                     string          `json:"branch"`
-	ReviewedHead               string          `json:"reviewed_head"`
-	ArtifactBaseline           string          `json:"artifact_baseline"`
-	ArtifactCompletion         string          `json:"artifact_completion"`
-	SuppliedArtifactBaseline   string          `json:"supplied_artifact_baseline,omitempty"`
-	SuppliedArtifactCompletion string          `json:"supplied_artifact_completion,omitempty"`
-	AuditBody                  string          `json:"audit_body"`
-	Comments                   []ReviewComment `json:"comments,omitempty"`
+	Repository                 string           `json:"repository,omitempty"`
+	EvidenceStreams            []EvidenceStream `json:"evidence_streams,omitempty"`
+	EvidenceInstructions       string           `json:"evidence_instructions,omitempty"`
+	Remote                     string           `json:"remote"`
+	Worktree                   string           `json:"worktree"`
+	FetchCommand               string           `json:"fetch_command"`
+	WorktreeCommand            string           `json:"worktree_command"`
+	InspectCommand             string           `json:"inspect_command"`
+	ResultDirectory            string           `json:"result_directory"`
+	SubmitCommand              string           `json:"submit_command"`
+	ResumeCommand              string           `json:"resume_command"`
+	ReviewCount                uint64           `json:"review_count"`
+	ReviewNumber               uint64           `json:"review_number"`
+	ReviewScope                ReviewScope      `json:"review_scope"`
+	PreviousReviewedHead       string           `json:"previous_reviewed_head,omitempty"`
+	WorkItem                   int              `json:"work_item"`
+	Submission                 int              `json:"submission"`
+	Branch                     string           `json:"branch"`
+	ReviewedHead               string           `json:"reviewed_head"`
+	SubmissionBase             string           `json:"submission_base"`
+	SubmissionBodySHA256       string           `json:"submission_body_sha256"`
+	ArtifactBaseline           string           `json:"artifact_baseline"`
+	ArtifactCompletion         string           `json:"artifact_completion"`
+	SuppliedArtifactBaseline   string           `json:"supplied_artifact_baseline,omitempty"`
+	SuppliedArtifactCompletion string           `json:"supplied_artifact_completion,omitempty"`
+	AuditBody                  string           `json:"audit_body"`
+	Comments                   []ReviewComment  `json:"comments,omitempty"`
 }
 
 type ImplementationFacts struct {
@@ -155,6 +159,7 @@ func PullCommentsEvidenceSource(repository string, number int) EvidenceSource {
 }
 
 type ReviewComment struct {
+	RawBody         string `json:"-"`
 	Line            int    `json:"line,omitempty"`
 	Side            string `json:"side,omitempty"`
 	Body            string `json:"body"`
@@ -190,8 +195,10 @@ type ReviewComment struct {
 // `fetched empty` (observed, zero bodies), `pending` (Command set), and
 // `retrieval failure` (an error rather than a rendered state) are different.
 type EvidenceStream struct {
-	Source  EvidenceSource `json:"source"`
-	Bodies  int            `json:"bodies"`
+	Path    string         `json:"path,omitempty"`
+	State   string         `json:"state,omitempty"`
+	Source  EvidenceSource `json:"source,omitempty"`
+	Bodies  int            `json:"bodies,omitempty"`
 	Command string         `json:"command,omitempty"`
 }
 
@@ -265,14 +272,6 @@ func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
 		}
 		instructions += "\n\n## Included Skill: " + bundled + "\n\n" + rendered
 	}
-	if f := facts.Watchdog; f != nil {
-		instructions += fmt.Sprintf("\n\n## Review Start\n\nWork Item: %s\nSubmission: %s\nWorktree: %s\nReviewed head: %s\nCompleted reviews: %d\nReview number: %d\nScope: %s; the comparison rule below applies after Git preparation\nPrepare: `%s` then `%s`; safely reuse a clean existing worktree instead of recreating it\nInspect: `%s` resolves the Artifact Baseline and Completion from the fetched history\nResume: `%s`\n\nRun the Inspect command after preparing the worktree, read the endpoint files from Git at the resolved Baseline and Completion, then use the opaque Submission body, prior findings, and human comments. Review the invocation's current head; rerun the Full Gate, active-finding verification, artifact checks, and whole-change critical-class scan. The engine has not run Audit or project checks.\n\nWrite `summary.md`, optional anchored findings, and on pass `submission.md` in %s. Run `%s --verdict <pass|rework|needs-human>`. Pass also requires `--body <result>/submission.md`; optional inline inputs use `--findings <result>/findings.json`. After permitted Debt Marker comments, commit and push, run the Post-Marker Check, and supply `--head <final-sha>` while retaining the original `--reviewed-head`.\n", f.WorkItemReference, f.SubmissionReference, f.Worktree, f.ReviewedHead, f.ReviewCount, f.ReviewNumber, f.ReviewScope, f.FetchCommand, f.WorktreeCommand, f.InspectCommand, f.ResumeCommand, f.ResultDirectory, f.SubmitCommand)
-		if f.PreviousReviewedHead != "" {
-			instructions += "\nAfter preparation, compare `" + f.PreviousReviewedHead + "..." + f.ReviewedHead + "` when that prior revision is available and an ancestor of the reviewed head; otherwise review the full PR comparison.\n"
-		} else {
-			instructions += "\nReview the full PR comparison; no usable retained reviewed revision is required or fetched.\n"
-		}
-	}
 	resources, err := resourceNames(definition)
 	if err != nil {
 		return Packet{}, err
@@ -288,7 +287,25 @@ func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
 }
 
 // templateFuncs is the deliberately small helper set authored templates share.
-var templateFuncs = template.FuncMap{"quote": ShellQuote, "fence": markdownFence}
+var templateFuncs = template.FuncMap{
+	"quote":    ShellQuote,
+	"fence":    markdownFence,
+	"evidence": evidenceBlock,
+	"anchor":   anchorValue,
+}
+
+func anchorValue(line *int) string {
+	if line == nil {
+		return "null"
+	}
+	return strconv.Itoa(*line)
+}
+
+// evidenceBlock chooses a fence that cannot be closed by opaque Markdown data.
+func evidenceBlock(body string) string {
+	fence := markdownFence(body)
+	return fence + "\n" + body + "\n" + fence
+}
 
 // ShellQuote renders value as one POSIX shell word without changing any of its
 // characters.

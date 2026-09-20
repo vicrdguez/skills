@@ -45,6 +45,9 @@ func selectionReworkRun(t *testing.T, root string, forge *candidateForge, change
 		return backend, nil
 	}, bytes.NewReader(nil), &output, &output)
 	command := structuredStageCommand(args...)
+	if len(args) > 0 && args[0] == "watchdog" {
+		command = append(command, "--format", "json")
+	}
 	err := app.Run(append(command, "--repo", root))
 	if err != nil {
 		return setup.ImplementationOutput{}, err

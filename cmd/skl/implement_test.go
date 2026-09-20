@@ -1370,9 +1370,16 @@ func TestImplementBundlesInstructionsWithoutTargetPin(t *testing.T) {
 	} {
 		output.Reset()
 		rendered := got.Packet.Instructions
-		if skill != "implement" {
-			err := app.Run([]string{"skl", "skill", skill})
+		if skill == "watchdog" {
+			packet, err := skilldist.BuildPacket("watchdog", skilldist.InvocationFacts{
+				Watchdog: &skilldist.WatchdogFacts{WorkItem: 7, Submission: 11},
+			})
 			if err != nil {
+				t.Fatal(err)
+			}
+			rendered = packet.Instructions
+		} else if skill != "implement" {
+			if err := app.Run([]string{"skl", "skill", skill}); err != nil {
 				t.Fatal(err)
 			}
 			rendered = output.String()

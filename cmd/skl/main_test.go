@@ -419,7 +419,6 @@ func TestDocumentedResourceCommands(t *testing.T) {
 	}{
 		{file: "README.md", want: []string{"reference/submission.md", "reference/decision.md", "reference/review.md", "reference/DEEPENING.md"}},
 		{file: "skills/dev/implement/SKILL.md", skill: "implement", want: []string{"reference/submission.md", "reference/decision.md"}},
-		{file: "skills/dev/watchdog/SKILL.md", skill: "watchdog", want: []string{"reference/review.md"}},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.file, func(t *testing.T) {
@@ -515,8 +514,8 @@ func TestInstallSupportedSkillStubs(t *testing.T) {
 				t.Fatalf("%s %s stub changed source frontmatter:\n%s", harness, name, stub)
 			}
 			command := "skl skill " + name
-			if name == "implement" {
-				command = "skl implement next"
+			if name == "implement" || name == "watchdog" {
+				command = "skl " + name + " next"
 			}
 			if !strings.Contains(stub, command) || !strings.Contains(stub, "skl.stub/v1") {
 				t.Fatalf("%s %s stub does not delegate to skl:\n%s", harness, name, stub)
@@ -614,10 +613,13 @@ func TestEmbeddedResourceDelegationSmoke(t *testing.T) {
 			stub := readFile(t, filepath.Join(directory, "SKILL.md"))
 			_, body, found := strings.Cut(strings.TrimPrefix(stub, "---\n"), "\n---\n")
 			command := "skl skill " + skill
-			if skill == "implement" {
-				command = "skl implement next"
+			if skill == "implement" || skill == "watchdog" {
+				command = "skl " + skill + " next"
 			}
 			want := "\n<!-- skl-owned: skl.stub/v1 -->\n\nRun `" + command + "`. Skip activation for every skill named in `included_skills`; its definition is already in the packet.\n"
+			if skill == "watchdog" {
+				want = strings.TrimSuffix(want, "\n") + " Start Watchdog in a fresh session, process one Work Item, and report the verified result in normal Markdown.\n"
+			}
 			if !found || body != want {
 				t.Fatalf("%s is not a thin CLI-delegating stub: %s", directory, stub)
 			}
@@ -871,15 +873,17 @@ func TestRetrieveRetiredLedgerInstructions(t *testing.T) {
 	} {
 		t.Run(skill, func(t *testing.T) {
 			var got string
-			if skill == "implement" {
+			switch skill {
+			case "implement":
 				got = implementBundle(t).Instructions
-			} else {
-				var output bytes.Buffer
-				app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, t.TempDir())
-				if err := app.Run([]string{"skl", "skill", skill}); err != nil {
+			case "watchdog":
+				packet, err := skilldist.BuildPacket("watchdog", skilldist.InvocationFacts{
+					Watchdog: &skilldist.WatchdogFacts{WorkItem: 7, Submission: 11},
+				})
+				if err != nil {
 					t.Fatal(err)
 				}
-				got, _, _ = strings.Cut(output.String(), "\n\n## Included Skill:")
+				got = packet.Instructions
 			}
 			for _, want := range required {
 				if !strings.Contains(got, want) {
@@ -1849,6 +1853,7 @@ func TestRenderWatchdogReviewInstructions(t *testing.T) {
 			// the authorization and precedence guidance must already be available.
 			instructions := renderResource(t, "watchdog", "reference/review.md",
 				"result_directory="+directory,
+				"pr=11",
 				fmt.Sprintf("round=%d", testCase.round),
 				"reviewed_head="+testCase.head)
 			for _, want := range append(slices.Clone(obligations),
@@ -1905,7 +1910,7 @@ func TestRejectInvalidResourceInputs(t *testing.T) {
 		},
 		{
 			name: "duplicate input", owner: "watchdog", resource: "reference/review.md",
-			inputs: []string{"result_directory=" + directory, "round=1", "round=1", "reviewed_head=" + head},
+			inputs: []string{"result_directory=" + directory, "pr=11", "round=1", "round=1", "reviewed_head=" + head},
 			wants:  []string{"round", "duplicate"},
 		},
 		{
@@ -1920,7 +1925,7 @@ func TestRejectInvalidResourceInputs(t *testing.T) {
 		},
 		{
 			name: "invalid integer", owner: "watchdog", resource: "reference/review.md",
-			inputs: []string{"result_directory=" + directory, "round=two", "reviewed_head=" + head},
+			inputs: []string{"result_directory=" + directory, "pr=11", "round=two", "reviewed_head=" + head},
 			wants:  []string{"round", "integer"},
 		},
 		{
@@ -1930,8 +1935,18 @@ func TestRejectInvalidResourceInputs(t *testing.T) {
 		},
 		{
 			name: "zero round", owner: "watchdog", resource: "reference/review.md",
-			inputs: []string{"result_directory=" + directory, "round=0", "reviewed_head=" + head},
+			inputs: []string{"result_directory=" + directory, "pr=11", "round=0", "reviewed_head=" + head},
 			wants:  []string{"round", "positive"},
+		},
+		{
+			name: "missing PR", owner: "watchdog", resource: "reference/review.md",
+			inputs: []string{"result_directory=" + directory, "round=1", "reviewed_head=" + head},
+			wants:  []string{"pr", "required"},
+		},
+		{
+			name: "zero PR", owner: "watchdog", resource: "reference/review.md",
+			inputs: []string{"result_directory=" + directory, "pr=0", "round=1", "reviewed_head=" + head},
+			wants:  []string{"pr", "positive"},
 		},
 		{
 			name: "empty result directory", owner: "implement", resource: "reference/decision.md",
@@ -1945,7 +1960,7 @@ func TestRejectInvalidResourceInputs(t *testing.T) {
 		},
 		{
 			name: "malformed reviewed head", owner: "watchdog", resource: "reference/review.md",
-			inputs: []string{"result_directory=" + directory, "round=1", "reviewed_head=" + head[:12] + "nonsense"},
+			inputs: []string{"result_directory=" + directory, "pr=11", "round=1", "reviewed_head=" + head[:12] + "nonsense"},
 			wants:  []string{"reviewed_head", "40-character"},
 		},
 		{
@@ -2420,9 +2435,10 @@ func TestDescribeNamedResourceInputs(t *testing.T) {
 		},
 		{
 			owner: "watchdog", resource: "reference/review.md",
-			inputs: []string{"result_directory=/tmp/result", "round=2", "reviewed_head=" + strings.Repeat("a", 40)},
+			inputs: []string{"result_directory=/tmp/result", "pr=11", "round=2", "reviewed_head=" + strings.Repeat("a", 40)},
 			described: []string{
 				"result_directory (string, required): Absolute path of the private Result Document directory this invocation created.",
+				"pr (integer, required): Selected Submission PR number.",
 				"round (integer, required): Review round number for this Submission.",
 				"reviewed_head (string, required): Original full SHA of the reviewed head.",
 			},

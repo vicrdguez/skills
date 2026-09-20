@@ -2,7 +2,7 @@
 
 Write opaque Markdown in this invocation's private directory: `{{.ResultDirectory}}/summary.md` always, `{{.ResultDirectory}}/submission.md` on a pass, and optional `{{.ResultDirectory}}/findings.json` for structured anchors.
 
-This is review round {{.Round}} of this Submission. The original reviewed head is `{{.ReviewedHead}}`; it remains the original reviewed head even after you commit permitted Debt Marker comments, which are reported separately through `--head`.
+This is review round {{.Round}} of PR #{{.PR}}. The original reviewed head is `{{.ReviewedHead}}`; it remains the original reviewed head even after you commit permitted Debt Marker comments, which are reported separately through `--head`.
 
 ## summary.md
 
