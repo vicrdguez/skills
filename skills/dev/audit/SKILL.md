@@ -6,14 +6,14 @@ description: Review the changes since a fixed point (commit, branch, tag or merg
 Two-axis review of the diff between `HEAD` and a fixed point the user supplies:
 
 - **Standards** — does the code conform to this repo's documented coding standards? This includes any documented standard in the repo but also make use of project/repo specific skills to aid here. E.g. the repo has a specific skill to review a module or a layer present in the project
-- **Artifacts** — does the code faithfully implement the originating intent, behaviors, plan and tasks?
+{{if and .Implementation (eq .Implementation.Procedure "rework")}}- **Artifacts** — do the supplied Watchdog findings remain resolved, and did the Rework delta regress the frozen Contract, introduce unnecessary behavior, or leave inadequate regression coverage at accepted seams? This focused axis does not reopen unrelated unchanged code or whole-change omissions.{{else}}- **Artifacts** — does the code faithfully implement the originating intent, behaviors, plan and tasks?
   1. The Workflow Engine's endpoint inspection reports identical paths, regular non-executable blobs, and exact bytes except permitted lowercase completion ticks, with Manual Verification unchecked; normal submission also requires completed automated boxes and later ledger retirement
   2. Every `intent.md` item in "Definition of Done" is demonstrably met
   3. Every `behavior.md` scenario has materialized as a test (or for prose changes, encoded)
   4. The full suite is green
   5. Read `plan.md` against the diff. If the implementation diverged, note it.
 
-Item 1 is what stops the contract moving to meet the code. The rest are judged against the **complete final implementation**, even when the diff under review is only the latest increment.
+Item 1 is what stops the contract moving to meet the code. The rest are judged against the **complete final implementation**, even when the diff under review is only the latest increment.{{end}}
 
 Both axes run as **parallel sub-agents** when the harness supports them, so they don't pollute each other's context, then this skill aggregates their findings. The sequential fallback below preserves both axes when it does not.
 
@@ -37,7 +37,8 @@ Use the supplied Work Item and Submission facts for originating context. This sk
 {{else}}Artifact integrity uses its own, unmoving Artifact Baseline and, when available, Artifact Completion from the engine's endpoint inspection. It never advances with review rounds. Refresh fixed Git facts with the packet's `inspect_command`, or `skl implement inspect --remote <name> --item <number>` when invoked independently; preserve any caller-supplied `--artifact-baseline <full-sha>` and `--artifact-completion <full-sha>`. The engine validates endpoint identity and snapshots, while you read and judge the historical contract.
 {{end}}
 
-{{if .Implementation}}An explicit fixed point the caller supplies — a commit SHA, branch name, tag, `main`, `HEAD~5`, etc. — replaces the default above; the default never has to be asked for.
+{{if and .Implementation (eq .Implementation.Procedure "rework")}}The supplied review evidence is authoritative for this fixed point; no caller-provided comparison may replace it.
+{{else if .Implementation}}An explicit fixed point the caller supplies — a commit SHA, branch name, tag, `main`, `HEAD~5`, etc. — replaces the default above; the default never has to be asked for.
 {{else}}If the user provides a fixed point — a commit SHA, branch name, tag, `main`, `HEAD~5`, etc. — use that instead. If no PR comparison or fixed point can be resolved, ask for one.
 {{end}}
 

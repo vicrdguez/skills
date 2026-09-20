@@ -294,31 +294,36 @@ func TestB2ProcedureSelectionIgnoresIncidentalEvidence(t *testing.T) {
 	}
 }
 
-// TestAuditReworkFixesAuditsTheApplicableReviewedCommit materializes the
-// finding-driven Rework fixed-point scenario at the public Implement seam.
-func TestAuditReworkFixesAuditsTheApplicableReviewedCommit(t *testing.T) {
+func renderAuditReworkFixes(t *testing.T) string {
+	t.Helper()
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
-	reviewed := strings.Repeat("a", 40)
 	backend := &implementationMemory{work: []workflow.ImplementationItem{{
 		ID: "7", Branch: "widget", State: workflow.Rework, Claimed: true,
 		Submission: &workflow.Submission{ID: "11", Base: "main", Comments: []skilldist.ReviewComment{{
-			Source: skilldist.PullReviewsEvidenceSource("acme/widgets", 11), Body: "W1 BLOCK: fix transport", Commit: reviewed, Verdict: "rework", ReviewNumber: 1,
+			Source: skilldist.PullReviewsEvidenceSource("acme/widgets", 11), Body: "W1 BLOCK: fix transport", Commit: strings.Repeat("a", 40), Verdict: "rework", ReviewNumber: 1,
 		}}},
 	}}}
-
 	got := implementCLI(t, root, backend, "resume", "--item", "7")
 	if got.Packet == nil || got.Packet.Facts.Implementation.Procedure != skilldist.FindingDrivenRework {
 		t.Fatalf("fixture did not render finding-driven Rework: %#v", got)
 	}
+	return got.Packet.Instructions
+}
+
+// TestAuditReworkFixesAuditsTheApplicableReviewedCommit materializes the
+// finding-driven Rework fixed-point scenario at the public Implement seam.
+func TestAuditReworkFixesAuditsTheApplicableReviewedCommit(t *testing.T) {
+	rendered := renderAuditReworkFixes(t)
 	for _, required := range []string{
 		"Invoke the bundled Audit exactly once",
 		"latest applicable supplied review whose verdict caused the current Rework",
 		"review's `Commit` as the fixed point",
 		"`<reviewed-commit>...HEAD`",
 		"Stop rather than guess when the applicable reviewed commit is missing or ambiguous",
+		"no caller-provided comparison may replace it",
 	} {
-		if !strings.Contains(got.Packet.Instructions, required) {
+		if !strings.Contains(rendered, required) {
 			t.Errorf("Rework execution lacks %q", required)
 		}
 	}
@@ -327,14 +332,7 @@ func TestAuditReworkFixesAuditsTheApplicableReviewedCommit(t *testing.T) {
 // TestAuditReworkFixesScopesBothAxesToDeltaConsequences materializes the
 // focused Standards and Contracts review scenario.
 func TestAuditReworkFixesScopesBothAxesToDeltaConsequences(t *testing.T) {
-	root := proposalRepository(t)
-	prepareSlice(t, root, "widget")
-	backend := &implementationMemory{work: []workflow.ImplementationItem{{
-		ID: "7", Branch: "widget", State: workflow.Rework, Claimed: true,
-		Submission: &workflow.Submission{ID: "11", Base: "main", Comments: []skilldist.ReviewComment{{Body: "W1 BLOCK", Commit: strings.Repeat("a", 40), Verdict: "rework"}}},
-	}}}
-
-	rendered := implementCLI(t, root, backend, "resume", "--item", "7").Packet.Instructions
+	rendered := renderAuditReworkFixes(t)
 	for _, required := range []string{
 		"Standards findings to violations or smells caused by the Rework delta",
 		"resolution of the supplied Watchdog findings",
@@ -343,6 +341,7 @@ func TestAuditReworkFixesScopesBothAxesToDeltaConsequences(t *testing.T) {
 		"regression coverage at the accepted seams",
 		"neither axis reopens findings against unrelated unchanged code or whole-change omissions",
 		"evidence and resolution targets, never new frozen Contract Items",
+		"This focused axis does not reopen unrelated unchanged code or whole-change omissions",
 	} {
 		if !strings.Contains(rendered, required) {
 			t.Errorf("focused Rework Audit lacks %q", required)
@@ -353,14 +352,7 @@ func TestAuditReworkFixesScopesBothAxesToDeltaConsequences(t *testing.T) {
 // TestAuditReworkFixesKeepsChecksAtResponsibleStages materializes the
 // Rework Full Gate and Implement inspection ownership scenario.
 func TestAuditReworkFixesKeepsChecksAtResponsibleStages(t *testing.T) {
-	root := proposalRepository(t)
-	prepareSlice(t, root, "widget")
-	backend := &implementationMemory{work: []workflow.ImplementationItem{{
-		ID: "7", Branch: "widget", State: workflow.Rework, Claimed: true,
-		Submission: &workflow.Submission{ID: "11", Base: "main", Comments: []skilldist.ReviewComment{{Body: "W1 BLOCK", Commit: strings.Repeat("a", 40), Verdict: "rework"}}},
-	}}}
-
-	rendered := implementCLI(t, root, backend, "resume", "--item", "7").Packet.Instructions
+	rendered := renderAuditReworkFixes(t)
 	for _, required := range []string{
 		"Rework Audit owns one Full Gate run",
 		"Audit does not repeat artifact endpoint or retirement inspection",
@@ -376,14 +368,7 @@ func TestAuditReworkFixesKeepsChecksAtResponsibleStages(t *testing.T) {
 // TestAuditReworkFixesDisposesFindingsWithoutAuditLoop materializes the
 // post-Audit disposition and verification scenario.
 func TestAuditReworkFixesDisposesFindingsWithoutAuditLoop(t *testing.T) {
-	root := proposalRepository(t)
-	prepareSlice(t, root, "widget")
-	backend := &implementationMemory{work: []workflow.ImplementationItem{{
-		ID: "7", Branch: "widget", State: workflow.Rework, Claimed: true,
-		Submission: &workflow.Submission{ID: "11", Base: "main", Comments: []skilldist.ReviewComment{{Body: "W1 BLOCK", Commit: strings.Repeat("a", 40), Verdict: "rework"}}},
-	}}}
-
-	rendered := implementCLI(t, root, backend, "resume", "--item", "7").Packet.Instructions
+	rendered := renderAuditReworkFixes(t)
 	for _, required := range []string{
 		"Apply every Audit `HARD` finding",
 		"For each `JUDGEMENT`, fix it, decline it with a reason, or carry it as debt",
