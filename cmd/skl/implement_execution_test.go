@@ -373,6 +373,29 @@ func TestAuditReworkFixesKeepsChecksAtResponsibleStages(t *testing.T) {
 	}
 }
 
+// TestAuditReworkFixesDisposesFindingsWithoutAuditLoop materializes the
+// post-Audit disposition and verification scenario.
+func TestAuditReworkFixesDisposesFindingsWithoutAuditLoop(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "widget")
+	backend := &implementationMemory{work: []workflow.ImplementationItem{{
+		ID: "7", Branch: "widget", State: workflow.Rework, Claimed: true,
+		Submission: &workflow.Submission{ID: "11", Base: "main", Comments: []skilldist.ReviewComment{{Body: "W1 BLOCK", Commit: strings.Repeat("a", 40), Verdict: "rework"}}},
+	}}}
+
+	rendered := implementCLI(t, root, backend, "resume", "--item", "7").Packet.Instructions
+	for _, required := range []string{
+		"Apply every Audit `HARD` finding",
+		"For each `JUDGEMENT`, fix it, decline it with a reason, or carry it as debt",
+		"If a disposition changes code, run its affected checks and a final Full Gate before handoff",
+		"Do not invoke Audit again in this execution",
+	} {
+		if !strings.Contains(rendered, required) {
+			t.Errorf("Rework Audit disposition guidance lacks %q", required)
+		}
+	}
+}
+
 // TestB3MetadataOnlyStartupBindsEveryAlreadyEstablishedReference materializes
 // the B3 outline. Startup may only use metadata the invocation already
 // established, so every bound command must be literal and usable as printed.
