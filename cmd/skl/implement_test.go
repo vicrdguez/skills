@@ -1163,13 +1163,13 @@ func TestImplementResumesInterruptedClaim(t *testing.T) {
 	}
 }
 
-func TestImplementStartAndResumePreserveProgressWithoutTargetPin(t *testing.T) {
+func TestImplementStartAndResumePreserveProgressWithoutEngineTargetPin(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
 	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}}
 	first := implementCLI(t, root, b, "next")
-	if first.Packet == nil || strings.Contains(first.Packet.Markdown(), "target_snapshot") || strings.Contains(first.Packet.Markdown(), "git merge ") {
-		t.Fatalf("resume requested a target: %#v", first)
+	if first.Packet == nil || strings.Contains(first.Packet.Markdown(), "target_snapshot") || !strings.Contains(first.Packet.Markdown(), "merge --no-edit <observed-target-sha>") {
+		t.Fatalf("start lost late integration or added engine target state: %#v", first)
 	}
 	if err := os.WriteFile(filepath.Join(root, "progress.txt"), []byte("preserved\n"), 0600); err != nil {
 		t.Fatal(err)
@@ -1178,8 +1178,8 @@ func TestImplementStartAndResumePreserveProgressWithoutTargetPin(t *testing.T) {
 	runGit(t, root, "commit", "--allow-empty", "-m", "implementation")
 	b.remoteHeads["main"] = strings.Repeat("f", 40)
 	second := implementCLI(t, root, b, "resume", "--item", "7")
-	if second.Packet == nil || strings.Contains(second.Packet.Markdown(), "target_snapshot") || strings.Contains(second.Packet.Markdown(), "git merge ") || readFile(t, filepath.Join(root, "progress.txt")) != "preserved\n" {
-		t.Fatalf("resume changed progress or requested a target: %#v", second)
+	if second.Packet == nil || strings.Contains(second.Packet.Markdown(), "target_snapshot") || strings.Contains(second.Packet.Markdown(), strings.Repeat("f", 40)) || !strings.Contains(second.Packet.Markdown(), "merge --no-edit <observed-target-sha>") || readFile(t, filepath.Join(root, "progress.txt")) != "preserved\n" {
+		t.Fatalf("resume changed progress, pinned a target, or lost late integration: %#v", second)
 	}
 }
 
@@ -1318,7 +1318,7 @@ func TestImplementUsesSelectedGitHubRemoteThroughout(t *testing.T) {
 	}
 }
 
-func TestImplementBundlesInstructionsWithoutTargetPin(t *testing.T) {
+func TestImplementBundlesInstructionsWithoutEngineTargetPin(t *testing.T) {
 	root := proposalRepository(t)
 	baseline := prepareSlice(t, root, "widget")
 	backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}}
@@ -1329,8 +1329,8 @@ func TestImplementBundlesInstructionsWithoutTargetPin(t *testing.T) {
 	if got.Packet.Skill != "implement" || !reflect.DeepEqual(got.Packet.IncludedSkills, []string{"testing", "audit", "design", "domain"}) {
 		t.Fatalf("manifest = %#v", got.Packet)
 	}
-	if strings.Contains(got.Packet.Markdown(), "git merge ") || strings.Contains(got.Packet.Facts.Implementation.ResumeCommand, "target-snapshot") {
-		t.Fatalf("packet retained target integration: %s", got.Packet.Markdown())
+	if !strings.Contains(got.Packet.Markdown(), "merge --no-edit <observed-target-sha>") || strings.Contains(got.Packet.Facts.Implementation.ResumeCommand, "target-snapshot") {
+		t.Fatalf("packet lost ordinary-Git late integration or added an engine target pin: %s", got.Packet.Markdown())
 	}
 	definition, _, found := strings.Cut(got.Packet.Instructions, "\n\n## Included Skill: testing\n\n")
 	if !found {
@@ -1361,8 +1361,8 @@ func TestImplementBundlesInstructionsWithoutTargetPin(t *testing.T) {
 	}
 	for skill, required := range map[string][]string{
 		"implement": {
-			"Submission targets `main`", "merge-base with `main`", "Artifact Baseline",
-			"integration with `main`, conflict resolution, and merge belong to the human Merge Authority after review",
+			"Submission targets `main`", "recorded integrated `main` SHA", "Artifact Baseline",
+			"worker-owned late merge", "human Merge Authority's later integration and final merge",
 			"Apply its findings yourself.",
 		},
 		"watchdog": {"Workflow Submissions target `main`", "mergeability is mergeable, conflicting, or unknown", "Artifact Baseline"},
@@ -1390,8 +1390,8 @@ func TestImplementBundlesInstructionsWithoutTargetPin(t *testing.T) {
 				missing = text
 			}
 		}
-		if strings.Contains(rendered, "--target-snapshot") || strings.Contains(rendered, "resolve merge conflicts with `main`") || missing != "" {
-			t.Fatalf("%s guidance retained integration obligation or lacks %q:\n%s", skill, missing, rendered)
+		if strings.Contains(rendered, "--target-snapshot") || missing != "" {
+			t.Fatalf("%s guidance added engine target state or lacks %q:\n%s", skill, missing, rendered)
 		}
 	}
 }
@@ -1411,8 +1411,8 @@ func TestImplementStartsFindingDrivenRework(t *testing.T) {
 	if facts.Submission != 11 || !reflect.DeepEqual(facts.Comments, comments) {
 		t.Fatalf("facts = %#v", facts)
 	}
-	if !strings.Contains(got.Packet.Markdown(), "current PR comparison") || strings.Contains(got.Packet.Markdown(), "git merge ") || strings.Contains(got.Packet.Markdown(), head+"...HEAD") {
-		t.Fatal("rework packet synchronizes target or requires a previous review cache")
+	if !strings.Contains(got.Packet.Markdown(), "current PR comparison") || !strings.Contains(got.Packet.Markdown(), "merge --no-edit <observed-target-sha>") || strings.Contains(got.Packet.Markdown(), head+"...HEAD") {
+		t.Fatal("rework packet lost late integration or requires an unavailable previous review cache")
 	}
 }
 

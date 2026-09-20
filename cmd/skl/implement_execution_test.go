@@ -294,6 +294,86 @@ func TestB2ProcedureSelectionIgnoresIncidentalEvidence(t *testing.T) {
 	}
 }
 
+// TestIntegrateBeforeAuditDeliversBoundLateIntegration materializes the
+// first, resumed, and finding-driven Rework procedures at the public rendering
+// seam. The worker observes one selected-target snapshot immediately before
+// Audit while final merge authority remains human-owned.
+func TestIntegrateBeforeAuditDeliversBoundLateIntegration(t *testing.T) {
+	for _, testCase := range []struct {
+		name string
+		item workflow.ImplementationItem
+		args []string
+	}{
+		{"initial", workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Ready}, []string{"next"}},
+		{"resumed", workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Ready, Claimed: true}, []string{"resume", "--item", "7"}},
+		{"rework", workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Rework, Claimed: true, Submission: &workflow.Submission{ID: "11", Base: "main"}}, []string{"resume", "--item", "7"}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			root := proposalRepository(t)
+			prepareSlice(t, root, "widget")
+			backend := &implementationMemory{work: []workflow.ImplementationItem{testCase.item}}
+			rendered := implementCLI(t, root, backend, testCase.args...).Packet.Instructions
+			for _, required := range []string{
+				"Late pre-Audit target integration",
+				"fetch 'origin' main",
+				"rev-parse FETCH_HEAD",
+				"merge --no-edit <observed-target-sha>",
+				"Preparation-time target state does not satisfy this step",
+				"Resolve every conflict before normal Audit",
+				"round's integration cutoff",
+				"Later target movement alone does not require another merge",
+				"unrelated code inherited unchanged from the integrated target",
+				"Full Gate covering the final functional state",
+				"human Merge Authority's later integration and final merge",
+			} {
+				if !strings.Contains(rendered, required) {
+					t.Errorf("%s execution lacks %q", testCase.name, required)
+				}
+			}
+			if testCase.name == "resumed" && !strings.Contains(rendered, "resuming alone does not require another target observation or merge") {
+				t.Error("resumed execution repeats integration solely because work resumed")
+			}
+		})
+	}
+}
+
+// TestIntegrateBeforeAuditContinuesThroughInspection verifies that a narrow
+// inspection continuation does not mistake preparation for late integration.
+func TestIntegrateBeforeAuditContinuesThroughInspection(t *testing.T) {
+	worktree, _, backend := inspectionFixture(t, "baseline-only")
+	got := implementCLI(t, worktree, backend, "inspect", "--item", "7")
+	for _, required := range []string{
+		"Inspection does not observe or integrate the current target",
+		"fetch `main` from the selected remote `origin`",
+		"rev-parse FETCH_HEAD",
+		"merge that exact observed SHA",
+		"resuming or later target movement alone does not require another merge",
+		"without claiming successful integration or a completed Audit",
+	} {
+		if !strings.Contains(got.Packet.Instructions, required) {
+			t.Errorf("inspection continuation lacks %q", required)
+		}
+	}
+}
+
+// TestIntegrateBeforeAuditDefersIntegratedSHAEvidence verifies that the actual
+// observed SHA remains opaque Result Document prose rather than renderer input.
+func TestIntegrateBeforeAuditDefersIntegratedSHAEvidence(t *testing.T) {
+	rendered := renderResource(t, "implement", "reference/submission.md",
+		"result_directory="+t.TempDir(), "procedure=initial")
+	for _, required := range []string{
+		"full target SHA actually observed and merged",
+		"not a rendering input or engine metadata field",
+		"does not replace the review baseline, Artifact Baseline, Artifact Completion, or a Watchdog invocation's fixed reviewed head",
+		"Full Gate that covered that later state",
+		"integration-effects review and final-state checks",
+	} {
+		if !strings.Contains(rendered, required) {
+			t.Errorf("Submission resource lacks %q", required)
+		}
+	}
+}
+
 func renderAuditReworkFixes(t *testing.T) string {
 	t.Helper()
 	root := proposalRepository(t)
@@ -802,7 +882,7 @@ func TestB6TheCompleteBundlePreservesTheCurrentImplementationContract(t *testing
 	// the bundle replaces independent-mode discovery with the resolved ones or
 	// with the exact command that establishes them.
 	for _, resolved := range []string{
-		"merge-base with `main` and the parent of this change's first commit",
+		"merge-base with the recorded integrated `main` SHA and the parent of this change's first commit",
 		"run `" + facts.InspectCommand + "` to resolve the Artifact Baseline and Completion",
 		"`--artifact-baseline " + facts.SuppliedArtifactBaseline + "`",
 		"The artifacts are the accepted `.changes/widget/` files of this Work Item",
@@ -827,7 +907,8 @@ func TestB6TheCompleteBundlePreservesTheCurrentImplementationContract(t *testing
 		"Every rule, scenario, and architectural obligation", "shared contract criteria", "do not impose preferred test organization or implementation",
 		"two axes", "exactly once per invocation", "endpoint inspection", "complete final implementation",
 		"`HARD`", "`JUDGEMENT`", "Do **not** merge or rerank findings", "disposition",
-		"integration with `main`, conflict resolution, and merge belong to the human Merge Authority",
+		"worker-owned late merge of one observed `origin/main` snapshot",
+		"human Merge Authority's later integration and final merge",
 		"## When only a human can decide", "The scope is already decided",
 		"does not require a new design exercise", "outside the accepted change",
 	} {
@@ -835,8 +916,9 @@ func TestB6TheCompleteBundlePreservesTheCurrentImplementationContract(t *testing
 			t.Errorf("bundle dropped the retained obligation %q", required)
 		}
 	}
-	// The redesign does not restore target synchronization or legacy queue mechanics.
-	for _, outOfScope := range []string{"target-snapshot", "Target Snapshot", "Synchronization Rework", "git merge ", "git rebase"} {
+	// The redesign keeps startup metadata-only and adds no engine-owned target
+	// snapshot or synchronization mode; ordinary Git performs the late merge.
+	for _, outOfScope := range []string{"target-snapshot", "Target Snapshot", "Synchronization Rework", "git rebase"} {
 		if strings.Contains(instructions, outOfScope) {
 			t.Errorf("bundle introduced out-of-scope behavior %q", outOfScope)
 		}

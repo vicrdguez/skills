@@ -58,6 +58,8 @@ The selected PR body and Audit ledger were supplied above, including when empty.
 
 Artifact integrity always uses the same exact Artifact Baseline and Completion, whichever round this is. Compare the packet's `previous_reviewed_head...reviewed_head` only after preparation confirms that revision is available and an ancestor; otherwise review the full PR comparison.
 
+Read the implementor's Verification evidence for the integrated target SHA: the selected remote and full target SHA actually merged before Audit. Treat that SHA as an agent-authored evidence reference, not an engine field, review baseline, artifact endpoint, or replacement for this invocation's fixed reviewed head. Confirm it is reachable from the reviewed head, and review the merge and any conflict-resolution effects alongside the implementation. Do not call unrelated target additions scope creep or reopen settled preferences merely because integration made them visible; concrete regressions and material risks remain reviewable. Do not fetch or require a newer target snapshot: the recorded integration is the round's cutoff, and later target movement alone does not invalidate evidence for the unchanged reviewed head or restart review.
+
 ## Apply the shared acceptance criteria
 
 Before judging conformance or assigning findings, retrieve `skl skill --resource reference/acceptance.md audit`. Apply that Audit-owned criteria resource to the complete frozen contract; retrieving it is not another Audit execution. Keep Watchdog's fresh-context, fixed-head, finding-identity, and bounded repeat-review responsibilities below.
@@ -79,7 +81,7 @@ If the change is high-stakes or considered critical you can do an **Independent 
 The first review of a PR is complete: read all of it, batch every finding, publish them together. A repeat review is not a second complete review — restarting an unconstrained search is how a PR gets four rounds of new blockers and never converges. Instead:
 
 1. Rerun the gate yourself and verify every still-active finding against the final state.
-2. Read only the packet's incremental comparison for regressions the rework introduced and for false claims in the updated ledger.
+2. Read only the packet's incremental comparison for regressions the rework introduced, integration or conflict-resolution effects added in that round, and false claims in the updated ledger. Exclude unrelated code inherited unchanged from the integrated target.
 3. Scan the resulting whole only for the critical class — security, privacy, authorization, data loss, compatibility, accessibility, an unusable path.
 
 Assign a new ID only for a defect the rework introduced or a critical discovery of that last kind. A pre-existing, noncritical thing you merely noticed this round is a `NOTE`, not another bounce. A finding that was `NOTE` last round cannot become `BLOCK` this round without new material evidence or a human's `BLOCK`.
@@ -133,7 +135,7 @@ When verification passes **and** no `BLOCK` or `HUMAN` finding is still active, 
 - Read the historical `intent.md` with `git show <artifact-baseline>:.changes/<slug>/intent.md`. Copy its `Manual verification` section into the PR body verbatim, with every checkbox unchecked, as the human's checklist. You tick nothing in it: by definition those are the checks no agent can run.
 - Keep the retired Implementation Ledger absent; do not restore or archive it.
 
-Write the complete final PR body to the packet's `submission.md`, and submit the packet's semantic command with `--verdict pass --body <absolute-submission.md>`. Workflow Submissions target `main`. A valid pass reports `ready_for_merge` whether mergeability is mergeable, conflicting, or unknown; record conflicts as informational session context. A successful verdict may include a cleanup-only warning for retained local files; do not repeat the verdict. Ready for Merge leaves integration and conflict resolution to the Merge Authority and leaves the source issue open until GitHub observes the merge. The change now awaits the **human's merge**. The watchdog does not merge.
+Write the complete final PR body to the packet's `submission.md`, and submit the packet's semantic command with `--verdict pass --body <absolute-submission.md>`. Workflow Submissions target `main`. A valid pass reports `ready_for_merge` whether mergeability is mergeable, conflicting, or unknown; record conflicts as informational session context. A successful verdict may include a cleanup-only warning for retained local files; do not repeat the verdict. The worker's recorded pre-Audit target SHA remains the historical review cutoff. Ready for Merge leaves any later integration with target movement, resulting conflict resolution, and final merge of the reviewed Submission to the Merge Authority; approval of the fixed reviewed head does not certify a later conflict-resolution result. The source issue stays open until GitHub observes the merge. The change now awaits the **human's merge**. The watchdog does not merge.
 
 
 ## Pause → hand the decision to a human
