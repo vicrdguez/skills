@@ -59,7 +59,16 @@ func InspectWatchdog(ctx context.Context, root, remote string, id WorkItemID, su
 	if err != nil {
 		return result, err
 	}
-	if checkpoint.Count == ^uint64(0) || checkpoint.Count+1 != number || checkpoint.Head != previous {
+	checkpointChanged := checkpoint.Count == ^uint64(0) || checkpoint.Count+1 != number
+	if checkpoint.Count == 0 {
+		// A zero-count checkpoint still records the fixed reviewed head. It is
+		// not a previous completed review, so startup intentionally leaves
+		// PreviousReviewedHead empty and the first inspection is full.
+		checkpointChanged = checkpointChanged || checkpoint.Head != "" && checkpoint.Head != reviewed
+	} else {
+		checkpointChanged = checkpointChanged || checkpoint.Head != previous
+	}
+	if checkpointChanged {
 		result.Reason = "completed-review checkpoint changed from this invocation's round or previous reference; preserve the original Result Documents and stop"
 		return result, nil
 	}

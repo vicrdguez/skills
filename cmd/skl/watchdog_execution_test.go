@@ -89,6 +89,42 @@ func TestWatchdogInspectReadsOnlySelectedWorkItem(t *testing.T) {
 	}
 }
 
+func TestWatchdogInspectAcceptsUnchangedZeroCountCheckpoint(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "widget")
+	completeAndRetireSlice(t, root, "widget")
+	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	worktree := filepath.Join(root, ".worktrees", "widget")
+	runGit(t, root, "switch", "main")
+	runGit(t, root, "worktree", "add", worktree, "widget")
+	gitDir := strings.TrimSpace(runGitOutput(t, worktree, "rev-parse", "--absolute-git-dir"))
+	if err := os.WriteFile(filepath.Join(gitDir, ".watchdog"), []byte("0:"+head+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	backend := &implementationMemory{work: []workflow.ImplementationItem{{
+		ID: "7", Branch: "widget", State: workflow.AwaitingReview,
+		Submission: &workflow.Submission{ID: "11", Head: head, Base: "main"},
+	}}, remoteHeads: map[string]string{"widget": head}}
+	started := watchdogCLI(t, root, backend, "next")
+	facts := started.Packet.Facts.Watchdog
+	if facts.ReviewCount != 0 || facts.ReviewNumber != 1 || facts.PreviousReviewedHead != "" {
+		t.Fatalf("zero-count checkpoint changed startup facts: %#v", facts)
+	}
+	var output bytes.Buffer
+	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+	args := []string{"skl", "watchdog", "inspect", "--repo", facts.Worktree, "--item", "7", "--submission", "11", "--base", "main", "--submission-body-sha256", facts.SubmissionBodySHA256, "--review-number", "1", "--reviewed-head", head, "--result-directory", facts.ResultDirectory}
+	if err := app.Run(args); err != nil {
+		t.Fatal(err)
+	}
+	got := output.String()
+	if !strings.Contains(got, "# Watchdog Inspection Continuation") || !strings.Contains(got, "first full PR comparison") || strings.Contains(got, "Status: fix_required") {
+		t.Fatalf("unchanged zero-count checkpoint did not inspect successfully: %s", got)
+	}
+	if data, err := os.ReadFile(filepath.Join(gitDir, ".watchdog")); err != nil || string(data) != "0:"+head+"\n" {
+		t.Fatalf("inspection changed the zero-count checkpoint: %q, %v", data, err)
+	}
+}
+
 func TestWatchdogClaimReadbackFailureRequiresIdentityInspection(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
