@@ -324,6 +324,32 @@ func TestAuditReworkFixesAuditsTheApplicableReviewedCommit(t *testing.T) {
 	}
 }
 
+// TestAuditReworkFixesScopesBothAxesToDeltaConsequences materializes the
+// focused Standards and Contracts review scenario.
+func TestAuditReworkFixesScopesBothAxesToDeltaConsequences(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "widget")
+	backend := &implementationMemory{work: []workflow.ImplementationItem{{
+		ID: "7", Branch: "widget", State: workflow.Rework, Claimed: true,
+		Submission: &workflow.Submission{ID: "11", Base: "main", Comments: []skilldist.ReviewComment{{Body: "W1 BLOCK", Commit: strings.Repeat("a", 40), Verdict: "rework"}}},
+	}}}
+
+	rendered := implementCLI(t, root, backend, "resume", "--item", "7").Packet.Instructions
+	for _, required := range []string{
+		"Standards findings to violations or smells caused by the Rework delta",
+		"resolution of the supplied Watchdog findings",
+		"Contract regressions caused by the Rework delta",
+		"unnecessary behavior introduced by the fixes",
+		"regression coverage at the accepted seams",
+		"neither axis reopens findings against unrelated unchanged code or whole-change omissions",
+		"evidence and resolution targets, never new frozen Contract Items",
+	} {
+		if !strings.Contains(rendered, required) {
+			t.Errorf("focused Rework Audit lacks %q", required)
+		}
+	}
+}
+
 // TestB3MetadataOnlyStartupBindsEveryAlreadyEstablishedReference materializes
 // the B3 outline. Startup may only use metadata the invocation already
 // established, so every bound command must be literal and usable as printed.
