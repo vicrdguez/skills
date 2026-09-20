@@ -294,6 +294,36 @@ func TestB2ProcedureSelectionIgnoresIncidentalEvidence(t *testing.T) {
 	}
 }
 
+// TestAuditReworkFixesAuditsTheApplicableReviewedCommit materializes the
+// finding-driven Rework fixed-point scenario at the public Implement seam.
+func TestAuditReworkFixesAuditsTheApplicableReviewedCommit(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "widget")
+	reviewed := strings.Repeat("a", 40)
+	backend := &implementationMemory{work: []workflow.ImplementationItem{{
+		ID: "7", Branch: "widget", State: workflow.Rework, Claimed: true,
+		Submission: &workflow.Submission{ID: "11", Base: "main", Comments: []skilldist.ReviewComment{{
+			Source: skilldist.PullReviewsEvidenceSource("acme/widgets", 11), Body: "W1 BLOCK: fix transport", Commit: reviewed, Verdict: "rework", ReviewNumber: 1,
+		}}},
+	}}}
+
+	got := implementCLI(t, root, backend, "resume", "--item", "7")
+	if got.Packet == nil || got.Packet.Facts.Implementation.Procedure != skilldist.FindingDrivenRework {
+		t.Fatalf("fixture did not render finding-driven Rework: %#v", got)
+	}
+	for _, required := range []string{
+		"Invoke the bundled Audit exactly once",
+		"latest applicable supplied review whose verdict caused the current Rework",
+		"review's `Commit` as the fixed point",
+		"`<reviewed-commit>...HEAD`",
+		"Stop rather than guess when the applicable reviewed commit is missing or ambiguous",
+	} {
+		if !strings.Contains(got.Packet.Instructions, required) {
+			t.Errorf("Rework execution lacks %q", required)
+		}
+	}
+}
+
 // TestB3MetadataOnlyStartupBindsEveryAlreadyEstablishedReference materializes
 // the B3 outline. Startup may only use metadata the invocation already
 // established, so every bound command must be literal and usable as printed.
