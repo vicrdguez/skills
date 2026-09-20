@@ -230,15 +230,15 @@ var definitionPaths = map[string]string{
 	"implement":          "skills/dev/implement/SKILL.md",
 	"propose":            "skills/dev/propose/SKILL.md",
 	"shape":              "skills/thinking/shape/SKILL.md",
-	"tdd":                "skills/dev/tdd/SKILL.md",
+	"testing":            "skills/dev/testing/SKILL.md",
 	"watchdog":           "skills/dev/watchdog/SKILL.md",
 	"writing-for-agents": "skills/misc/writing-for-agents/SKILL.md",
 }
 
 var dependencies = map[string][]string{
 	"explore":   {"domain"},
-	"propose":   {"design", "tdd"},
-	"implement": {"tdd", "audit", "design", "domain"},
+	"propose":   {"design", "testing"},
+	"implement": {"testing", "audit", "design", "domain"},
 }
 
 func SkillNames() []string {

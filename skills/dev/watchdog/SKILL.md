@@ -58,14 +58,18 @@ The selected PR body and Audit ledger were supplied above, including when empty.
 
 Artifact integrity always uses the same exact Artifact Baseline and Completion, whichever round this is. Compare the packet's `previous_reviewed_head...reviewed_head` only after preparation confirms that revision is available and an ancestor; otherwise review the full PR comparison.
 
+## Apply the shared acceptance criteria
+
+Before judging conformance or assigning findings, retrieve `skl skill --resource reference/acceptance.md audit`. Apply that Audit-owned criteria resource to the complete frozen contract; retrieving it is not another Audit execution. Keep Watchdog's fresh-context, fixed-head, finding-identity, and bounded repeat-review responsibilities below.
+
 ## Review guilty-until-proven — claims, tests, contract
 
 Assume the implementation is **wrong until it proves otherwise**. A passing suite is necessary, not
 sufficient — weak tests pass too.
 
 - **Verify the ledger, adversarially**. Every `fixed` claim: is it true at this head? Every `declined`: is the reasoning defensible, and was the finding actually a `JUDGEMENT`? A declined `HARD` is a `BLOCK`, that call was never the implementor's to make.
-- **Judge test *strength*, not presence.** For each materialized test, ask: *would this test fail if the behavior broke?* Mentally (or actually) break the behavior and check the test catches it. A test that asserts nothing meaningful — tautological, over-mocked so it exercises the mock, asserting a constant — is a **finding**, even though it is green.
-- **Prove the frozen requirements**. Every `intent.md` "Definition of Done" item is demonstrably met, every `behavior.md` scenario is materialized as a test that actually covers it.
+- **Challenge claimed evidence**. Apply the shared criteria to the submitted checks and use additional executable challenges only for concrete risk or uncertainty.
+- **Trace the frozen contract**. Check every `intent.md` "Definition of Done" item, rule, scenario, and accepted architecture commitment against the grouped evidence the implementor supplied.
 - **Scan the whole for the critical class only**. Security, privacy, authorization, data loss, compatibility, accessibility, an unusable path.
 
 If the change is high-stakes or considered critical you can do an **Independent test re-implementation**, writing the tests yourself from `behavior.md` and diffing intent. However, is an **opt-in escalation** that should be requested by the user explicitly, not the default. The standing default is this adversarial test-strength read.
@@ -105,6 +109,7 @@ A finding can block for:
 - an explicit mandatory project or language rule — `MUST`, `ALWAYS`, `NEVER` or equivalent — violated in changed code and absent from the ledger;
 - a mandatory finding from a project-specific quality skill;
 - material frozen behavior with no credible evidence behind it;
+- a specific evidence gap that names the obligation, plausible violation, and why current evidence cannot distinguish it;
 - a test that cannot prove the behavior it claims;
 - a false claim in the implementor's ledger, or a `HARD` finding they declined.
 

@@ -793,7 +793,7 @@ func TestB6TheCompleteBundlePreservesTheCurrentImplementationContract(t *testing
 	}
 	instructions := got.Packet.Instructions
 	facts := got.Packet.Facts.Implementation
-	for _, included := range []string{"tdd", "audit", "design", "domain"} {
+	for _, included := range []string{"testing", "audit", "design", "domain"} {
 		if count := strings.Count(instructions, "\n\n## Included Skill: "+included+"\n\n"); count != 1 {
 			t.Errorf("bundled %s definition occurs %d times", included, count)
 		}
@@ -821,9 +821,10 @@ func TestB6TheCompleteBundlePreservesTheCurrentImplementationContract(t *testing
 			t.Errorf("bundle retains the resolved alternative %q", superseded)
 		}
 	}
-	// The construction loop, the review obligations, and the judgment branches stay.
+	// Contract-grounded construction, review obligations, and judgment branches stay.
 	for _, required := range []string{
-		"Red before green", "One slice at a time", "One Gherkin `Scenario Outline` with its `Examples` table is one cycle", "pinned in the accepted artifacts",
+		"construction order", "suitable existing verification boundaries", "independent expectation", "before or after the fix", "required behavioral and failure-mode protection",
+		"Every rule, scenario, and architectural obligation", "shared contract criteria", "do not impose preferred test organization or implementation",
 		"two axes", "exactly once per invocation", "endpoint inspection", "complete final implementation",
 		"`HARD`", "`JUDGEMENT`", "Do **not** merge or rerank findings", "disposition",
 		"integration with `main`, conflict resolution, and merge belong to the human Merge Authority",
@@ -834,8 +835,8 @@ func TestB6TheCompleteBundlePreservesTheCurrentImplementationContract(t *testing
 			t.Errorf("bundle dropped the retained obligation %q", required)
 		}
 	}
-	// ADR 0005's redesign and blanket target synchronization are out of scope.
-	for _, outOfScope := range []string{"target-snapshot", "Target Snapshot", "Synchronization Rework", "git merge ", "git rebase", "contract conformance", "instead of prescribing test order"} {
+	// The redesign does not restore target synchronization or legacy queue mechanics.
+	for _, outOfScope := range []string{"target-snapshot", "Target Snapshot", "Synchronization Rework", "git merge ", "git rebase"} {
 		if strings.Contains(instructions, outOfScope) {
 			t.Errorf("bundle introduced out-of-scope behavior %q", outOfScope)
 		}
@@ -1216,7 +1217,7 @@ func TestB10DeferredResourcesBindSettledFactsWithoutPrematureDecisions(t *testin
 			}
 		}
 		output.Reset()
-		if err := app.Run([]string{"skl", "skill", "--resource", "reference/tests.md", "tdd"}); err != nil {
+		if err := app.Run([]string{"skl", "skill", "--resource", "reference/tests.md", "testing"}); err != nil {
 			t.Fatalf("context-free resource required invented invocation inputs: %v\n%s", err, &output)
 		}
 		if _, err := skilldist.DescribeResourceInputs("implement", "reference/submission.md"); err != nil {
@@ -1978,7 +1979,7 @@ func TestB19GenericImplementRetrievalRefusesWithoutWorkflowEffects(t *testing.T)
 		return nil, nil
 	}, bytes.NewReader(nil), &output, &output)
 	for _, retrieval := range [][]string{
-		{"skl", "skill", "tdd"},
+		{"skl", "skill", "testing"},
 		{"skl", "skill", "--format", "json", "design"},
 		{"skl", "skill", "--resource", "reference/submission.md", "--input", "result_directory=" + t.TempDir(), "--input", "procedure=initial", "implement"},
 		{"skl", "skill", "--resource", "reference/decision.md", "--describe-inputs", "implement"},

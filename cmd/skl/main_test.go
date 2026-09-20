@@ -500,7 +500,7 @@ func TestInstallSupportedSkillStubs(t *testing.T) {
 		"implement":          "skills/dev/implement/SKILL.md",
 		"propose":            "skills/dev/propose/SKILL.md",
 		"shape":              "skills/thinking/shape/SKILL.md",
-		"tdd":                "skills/dev/tdd/SKILL.md",
+		"testing":            "skills/dev/testing/SKILL.md",
 		"watchdog":           "skills/dev/watchdog/SKILL.md",
 		"writing-for-agents": "skills/misc/writing-for-agents/SKILL.md",
 	}
@@ -604,7 +604,7 @@ func TestEmbeddedResourceDelegationSmoke(t *testing.T) {
 		}
 	}
 	for _, harness := range []string{".pi/agent/skills", ".codex/skills", ".claude/skills"} {
-		for _, skill := range []string{"audit", "brainstorm", "design", "domain", "explore", "implement", "propose", "shape", "tdd", "watchdog", "writing-for-agents"} {
+		for _, skill := range []string{"audit", "brainstorm", "design", "domain", "explore", "implement", "propose", "shape", "testing", "watchdog", "writing-for-agents"} {
 			directory := filepath.Join(home, harness, skill)
 			entries, err := os.ReadDir(directory)
 			if err != nil || len(entries) != 1 || entries[0].Name() != "SKILL.md" {
@@ -630,9 +630,10 @@ func TestEmbeddedResourceDelegationSmoke(t *testing.T) {
 	}{
 		{"domain", "", "Use the format from `skl skill --resource reference/CONTEXT-FORMAT.md domain`.", "skl skill --resource reference/CONTEXT-FORMAT.md domain", "# CONTEXT.md Format"},
 		{"domain", "", "If any of the three is missing, skip the ADR. Use the format from `skl skill --resource reference/ADR-FORMAT.md domain`.", "skl skill --resource reference/ADR-FORMAT.md domain", "# ADR Format"},
-		{"tdd", "", "See `skl skill --resource reference/tests.md tdd` for examples", "skl skill --resource reference/tests.md tdd", "# Good and Bad Tests"},
-		{"tdd", "", "`skl skill --resource reference/mocking.md tdd` for mocking guidelines.", "skl skill --resource reference/mocking.md tdd", "Mock at **system boundaries** only:"},
+		{"testing", "", "See `skl skill --resource reference/tests.md testing` for examples", "skl skill --resource reference/tests.md testing", "# Behavioral and Regression Tests"},
+		{"testing", "", "`skl skill --resource reference/mocking.md testing` for boundary substitutes", "skl skill --resource reference/mocking.md testing", "# Boundary Substitutes and Controlled Reproductions"},
 		{"audit", "", "the Standards axis always carries the **smell baseline** from `skl skill --resource reference/smells.md audit`", "skl skill --resource reference/smells.md audit", "# Smell Baseline"},
+		{"audit", "", "Retrieve the shared contract criteria with `skl skill --resource reference/acceptance.md audit`", "skl skill --resource reference/acceptance.md audit", "# Contract Acceptance and Finding Criteria"},
 		{"audit", "", "The list of standards-source files you found in step 3, plus `skl skill --resource reference/smells.md audit`. Instruct the sub-agent to read those files and the command's output.", "skl skill --resource reference/smells.md audit", "**The repo overrides.** A documented repo standard always wins"},
 		{"design", "", "see `skl skill --resource reference/DEEPENING.md design`: dependency categories", "skl skill --resource reference/DEEPENING.md design", "### 2. Local-substitutable"},
 		{"design", "", "see `skl skill --resource reference/DESIGN-IT-TWICE.md design`: spin up parallel sub-agents", "skl skill --resource reference/DESIGN-IT-TWICE.md design", "Each must produce a **radically different** interface"},
@@ -645,7 +646,7 @@ func TestEmbeddedResourceDelegationSmoke(t *testing.T) {
 		{"propose", "", "Follow the template from `skl skill --resource reference/intent.md propose`", "skl skill --resource reference/intent.md propose", "## Definition of Done"},
 		{"propose", "", "Follow the template from `skl skill --resource reference/behavior.md propose`", "skl skill --resource reference/behavior.md propose", "## Feature: Order cancellation"},
 		{"propose", "", "Follow the template from `skl skill --resource reference/plan.md propose`", "skl skill --resource reference/plan.md propose", "### Module shapes & seams"},
-		{"propose", "", "`tasks.md`: Follow the template from `skl skill --resource reference/tasks.md propose`", "skl skill --resource reference/tasks.md propose", "Write it when there's more than a couple of scenarios or any non-behavioral chores."},
+		{"propose", "", "`tasks.md`: Follow the template from `skl skill --resource reference/tasks.md propose`", "skl skill --resource reference/tasks.md propose", "Write it when sequencing, dependencies, or non-behavioral chores benefit from explicit tracking."},
 		{"writing-for-agents", "", "When the document you're writing is a skill, read `skl skill --resource SKILL-MECHANICS.md writing-for-agents` for frontmatter, invocation choice, and router skills.", "skl skill --resource SKILL-MECHANICS.md writing-for-agents", "## Invocation"},
 		{"writing-for-agents", "", "**By invocation**, skill-specific: see `skl skill --resource SKILL-MECHANICS.md writing-for-agents`.", "skl skill --resource SKILL-MECHANICS.md writing-for-agents", "## Router skills"},
 		{"writing-for-agents", "SKILL-MECHANICS.md", "the Writing for Agents definition (retrieve with `skl skill writing-for-agents` if not already supplied)", "skl skill writing-for-agents", "## Context pointers"},
@@ -659,7 +660,7 @@ func TestEmbeddedResourceDelegationSmoke(t *testing.T) {
 				}
 			} else {
 				skills := []string{tc.skill}
-				if slices.Contains([]string{"tdd", "audit", "design", "domain"}, tc.skill) {
+				if slices.Contains([]string{"testing", "audit", "design", "domain"}, tc.skill) {
 					skills = append(skills, "implement")
 				}
 				for _, skill := range skills {
@@ -677,7 +678,7 @@ func TestEmbeddedResourceDelegationSmoke(t *testing.T) {
 							if err := json.Unmarshal([]byte(got), &packet); err != nil {
 								t.Fatal(err)
 							}
-							if skill == "implement" && !slices.Equal(packet.IncludedSkills, []string{"tdd", "audit", "design", "domain"}) {
+							if skill == "implement" && !slices.Equal(packet.IncludedSkills, []string{"testing", "audit", "design", "domain"}) {
 								t.Fatalf("included skills = %v", packet.IncludedSkills)
 							}
 							got = packet.Instructions
@@ -716,9 +717,9 @@ func TestInstallRefreshesOnlyOwnedStubs(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			tdd := filepath.Join(root, harness, "tdd/SKILL.md")
-			wantTDD := readFile(t, tdd)
-			if err := os.WriteFile(tdd, []byte("---\nname: tdd\n---\n\n<!-- skl-owned: skl.stub/v1 -->\nstale"), 0o644); err != nil {
+			testing := filepath.Join(root, harness, "testing/SKILL.md")
+			wantTesting := readFile(t, testing)
+			if err := os.WriteFile(testing, []byte("---\nname: testing\n---\n\n<!-- skl-owned: skl.stub/v1 -->\nstale"), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			audit := filepath.Join(root, harness, "audit/SKILL.md")
@@ -729,7 +730,7 @@ func TestInstallRefreshesOnlyOwnedStubs(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if got := readFile(t, tdd); got != wantTDD {
+			if got := readFile(t, testing); got != wantTesting {
 				t.Fatalf("owned stub was not refreshed:\n%s", got)
 			}
 			if got := readFile(t, audit); got != "---\nname: audit\n---\n\n<!-- skl-owned: skl.stub/v2 -->\nmy unrelated skill" {
@@ -738,7 +739,7 @@ func TestInstallRefreshesOnlyOwnedStubs(t *testing.T) {
 			if err := app.Run([]string{"skl", "install"}); err != nil {
 				t.Fatal(err)
 			}
-			if got := readFile(t, tdd); got != wantTDD {
+			if got := readFile(t, testing); got != wantTesting {
 				t.Fatalf("repeat installation changed current stub:\n%s", got)
 			}
 			if harness == ".config/opencode/skills" {
@@ -749,6 +750,76 @@ func TestInstallRefreshesOnlyOwnedStubs(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestInstallUpgradesOwnedTDDStubsWithoutTouchingUserContent(t *testing.T) {
+	for _, harness := range []string{".pi/agent/skills", ".codex/skills", ".claude/skills", ".config/opencode/skills"} {
+		t.Run(harness, func(t *testing.T) {
+			root := t.TempDir()
+			legacyDirectory := filepath.Join(root, harness, "tdd")
+			if err := os.MkdirAll(legacyDirectory, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			legacy := filepath.Join(legacyDirectory, "SKILL.md")
+			if err := os.WriteFile(legacy, []byte("---\nname: tdd\n---\n\n<!-- skl-owned: skl.stub/v1 -->\nstale\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			extra := filepath.Join(legacyDirectory, "notes.md")
+			if err := os.WriteFile(extra, []byte("keep legacy notes\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			userOwned := filepath.Join(root, harness, "my-tdd", "SKILL.md")
+			if err := os.MkdirAll(filepath.Dir(userOwned), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(userOwned, []byte("my unrelated test skill\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			var output bytes.Buffer
+			app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, root)
+			for range 2 {
+				if err := app.Run([]string{"skl", "install"}); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+					t.Fatalf("owned legacy tdd stub still exists: %v", err)
+				}
+				if got := readFile(t, extra); got != "keep legacy notes\n" {
+					t.Fatalf("legacy sibling changed: %q", got)
+				}
+				if got := readFile(t, userOwned); got != "my unrelated test skill\n" {
+					t.Fatalf("user-owned skill changed: %q", got)
+				}
+				testing := readFile(t, filepath.Join(root, harness, "testing", "SKILL.md"))
+				if !strings.Contains(testing, "skl skill testing") || !strings.Contains(testing, "skl.stub/v1") {
+					t.Fatalf("testing stub is not current and owned:\n%s", testing)
+				}
+			}
+		})
+	}
+
+	t.Run("user-owned tdd", func(t *testing.T) {
+		root := t.TempDir()
+		legacy := filepath.Join(root, ".codex/skills/tdd/SKILL.md")
+		if err := os.MkdirAll(filepath.Dir(legacy), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		const userSkill = "---\nname: tdd\n---\nmy own tdd skill\n"
+		if err := os.WriteFile(legacy, []byte(userSkill), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var output bytes.Buffer
+		app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, root)
+		for range 2 {
+			if err := app.Run([]string{"skl", "install"}); err != nil {
+				t.Fatal(err)
+			}
+			if got := readFile(t, legacy); got != userSkill {
+				t.Fatalf("user-owned tdd changed: %q", got)
+			}
+		}
+	})
 }
 
 func TestInstallPreservesOpenCodeSkillsAndConfiguration(t *testing.T) {
@@ -790,21 +861,63 @@ func TestInstallPreservesOpenCodeSkillsAndConfiguration(t *testing.T) {
 	}
 }
 
+func TestTestingIsTheCanonicalContractGroundedPolicy(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) {
+		t.Fatal("reasoning-skill retrieval opened a Workflow Backend")
+		return nil, nil
+	}, bytes.NewReader(nil), &stdout, &stderr, t.TempDir())
+
+	if err := app.Run([]string{"skl", "skill", "testing"}); err != nil {
+		t.Fatal(err)
+	}
+	got := stdout.String()
+	for _, want := range []string{
+		"Skill: testing",
+		"Resources: reference/mocking.md, reference/tests.md",
+		"observable behavior",
+		"independent expectation",
+		"before or after the fix",
+		"faithful isolated reproduction",
+		"material limitations",
+		"Required behavioral and failure-mode protection matters more than test inventory",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("testing policy is missing %q:\n%s", want, got)
+		}
+	}
+	for _, forbidden := range []string{
+		"Red before green",
+		"One scenario → one test",
+		"Refactoring is not part of the loop",
+	} {
+		if strings.Contains(got, forbidden) {
+			t.Errorf("testing policy still mandates %q:\n%s", forbidden, got)
+		}
+	}
+
+	stdout.Reset()
+	if err := app.Run([]string{"skl", "skill", "tdd"}); err == nil || !strings.Contains(err.Error(), "unknown skill") {
+		t.Fatalf("retired tdd retrieval error = %v, output = %q", err, stdout.String())
+	}
+}
+
 func TestRetrieveRenderedSkillInstructions(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, t.TempDir())
 
-	if err := app.Run([]string{"skl", "skill", "tdd"}); err != nil {
+	if err := app.Run([]string{"skl", "skill", "testing"}); err != nil {
 		t.Fatal(err)
 	}
 
-	header := "Protocol: skl.instructions/v1\nSkill: tdd\nIncluded skills: none\nFacts: {}\nResources: reference/mocking.md, reference/tests.md\n\n"
-	if got, want := stdout.String(), readRepositoryFile(t, "cmd/skl/testdata/tdd-standalone.golden.md"); got != want {
-		t.Fatalf("rendered TDD packet differs from the independently reviewed golden:\n%s", got)
+	header := "Protocol: skl.instructions/v1\nSkill: testing\nIncluded skills: none\nFacts: {}\nResources: reference/mocking.md, reference/tests.md\n\n"
+	if got, want := stdout.String(), readRepositoryFile(t, "cmd/skl/testdata/testing-standalone.golden.md"); got != want {
+		t.Fatalf("rendered Testing packet differs from the independently reviewed golden:\n%s", got)
 	}
 	instructions := strings.TrimPrefix(stdout.String(), header)
-	// A standalone retrieval keeps the independent-mode seam agreement.
-	if !strings.Contains(instructions, "confirm them with the user") || strings.Contains(instructions, "at the human pause") {
+	// A standalone retrieval keeps its independent decision path rather than
+	// referring to an Implement-only human-decision command.
+	if !strings.Contains(instructions, "Clarify a consequential unresolved behavioral or architectural choice with the user") || strings.Contains(instructions, "execution's human-decision path") {
 		t.Fatalf("standalone retrieval lost its own mode:\n%s", instructions)
 	}
 }
@@ -1639,27 +1752,27 @@ func TestCleanupPreservesUnacceptedLocalHead(t *testing.T) {
 
 func TestRetrieveEquivalentTypedInstructions(t *testing.T) {
 	wantResources := []string{"reference/mocking.md", "reference/tests.md"}
-	wantHeader := "Protocol: skl.instructions/v1\nSkill: tdd\nIncluded skills: none\nFacts: {}\nResources: reference/mocking.md, reference/tests.md\n\n"
+	wantHeader := "Protocol: skl.instructions/v1\nSkill: testing\nIncluded skills: none\nFacts: {}\nResources: reference/mocking.md, reference/tests.md\n\n"
 	var markdown bytes.Buffer
 	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &markdown, &markdown, t.TempDir())
-	if err := app.Run([]string{"skl", "skill", "tdd"}); err != nil {
+	if err := app.Run([]string{"skl", "skill", "testing"}); err != nil {
 		t.Fatal(err)
 	}
 
 	var stdout, stderr bytes.Buffer
 	app = newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, t.TempDir())
-	if err := app.Run([]string{"skl", "skill", "--format", "json", "tdd"}); err != nil {
+	if err := app.Run([]string{"skl", "skill", "--format", "json", "testing"}); err != nil {
 		t.Fatal(err)
 	}
 	var packet skilldist.Packet
 	if err := json.Unmarshal(stdout.Bytes(), &packet); err != nil {
 		t.Fatalf("stdout is not a JSON packet: %v\n%s", err, stdout.String())
 	}
-	if packet.Protocol != "skl.instructions/v1" || packet.Skill != "tdd" || packet.Facts != (skilldist.InvocationFacts{}) || len(packet.IncludedSkills) != 0 || !slices.Equal(packet.Resources, wantResources) || packet.Instructions == "" || markdown.String() != wantHeader+packet.Instructions {
+	if packet.Protocol != "skl.instructions/v1" || packet.Skill != "testing" || packet.Facts != (skilldist.InvocationFacts{}) || len(packet.IncludedSkills) != 0 || !slices.Equal(packet.Resources, wantResources) || packet.Instructions == "" || markdown.String() != wantHeader+packet.Instructions {
 		t.Fatalf("JSON and Markdown packets differ: %#v", packet)
 	}
-	if want := strings.TrimPrefix(readRepositoryFile(t, "cmd/skl/testdata/tdd-standalone.golden.md"), wantHeader); packet.Instructions != want {
-		t.Fatalf("JSON TDD instructions differ from the independently reviewed golden:\n%s", packet.Instructions)
+	if want := strings.TrimPrefix(readRepositoryFile(t, "cmd/skl/testdata/testing-standalone.golden.md"), wantHeader); packet.Instructions != want {
+		t.Fatalf("JSON Testing instructions differ from the independently reviewed golden:\n%s", packet.Instructions)
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q", stderr.String())
@@ -1680,18 +1793,18 @@ func TestRetrieveAuditWithoutPonytail(t *testing.T) {
 				if err := json.Unmarshal(output.Bytes(), &packet); err != nil {
 					t.Fatal(err)
 				}
-				if len(packet.IncludedSkills) != 0 || !slices.Equal(packet.Resources, []string{"reference/smells.md"}) {
+				if len(packet.IncludedSkills) != 0 || !slices.Equal(packet.Resources, []string{"reference/acceptance.md", "reference/smells.md"}) {
 					t.Fatalf("unexpected Audit dependencies: %#v", packet)
 				}
 				instructions = packet.Instructions
 			} else {
-				header := "Protocol: skl.instructions/v1\nSkill: audit\nIncluded skills: none\nFacts: {}\nResources: reference/smells.md\n\n"
+				header := "Protocol: skl.instructions/v1\nSkill: audit\nIncluded skills: none\nFacts: {}\nResources: reference/acceptance.md, reference/smells.md\n\n"
 				if !strings.HasPrefix(instructions, header) {
 					t.Fatalf("unexpected Audit manifest: %s", instructions)
 				}
 				instructions = strings.TrimPrefix(instructions, header)
 			}
-			header := "Protocol: skl.instructions/v1\nSkill: audit\nIncluded skills: none\nFacts: {}\nResources: reference/smells.md\n\n"
+			header := "Protocol: skl.instructions/v1\nSkill: audit\nIncluded skills: none\nFacts: {}\nResources: reference/acceptance.md, reference/smells.md\n\n"
 			if want := strings.TrimPrefix(readRepositoryFile(t, "cmd/skl/testdata/audit-standalone.golden.md"), header); instructions != want {
 				t.Fatalf("rendered Audit instructions differ from the independently reviewed golden:\n%s", instructions)
 			}
@@ -2276,6 +2389,7 @@ func TestContextFreeResourcesRetainOwnershipAndDefaults(t *testing.T) {
 		owner, resource string
 		markers         []string
 	}{
+		{"audit", "reference/acceptance.md", []string{"# Contract Acceptance and Finding Criteria", "specific evidence gap"}},
 		{"audit", "reference/smells.md", []string{"# Smell Baseline", "Feature Envy"}},
 		{"design", "reference/DEEPENING.md", []string{"# Deepening", "Adapters"}},
 		{"design", "reference/DESIGN-IT-TWICE.md", []string{"design constraint", "sub-agent"}},
@@ -2285,8 +2399,8 @@ func TestContextFreeResourcesRetainOwnershipAndDefaults(t *testing.T) {
 		{"propose", "reference/behavior.md", []string{"Gherkin", "Scenario"}},
 		{"propose", "reference/plan.md", []string{"Module shapes", "## Approach"}},
 		{"propose", "reference/tasks.md", []string{"Behavioral", "## Docs"}},
-		{"tdd", "reference/mocking.md", []string{"# When to Mock", "mock"}},
-		{"tdd", "reference/tests.md", []string{"# Good and Bad Tests", "Integration-style"}},
+		{"testing", "reference/mocking.md", []string{"# Boundary Substitutes and Controlled Reproductions", "faithful"}},
+		{"testing", "reference/tests.md", []string{"# Behavioral and Regression Tests", "independent expectation"}},
 		{"writing-for-agents", "SKILL-MECHANICS.md", []string{"# Skill mechanics", "## Invocation"}},
 	}
 	for _, testCase := range cases {
@@ -2300,7 +2414,7 @@ func TestContextFreeResourcesRetainOwnershipAndDefaults(t *testing.T) {
 			if strings.Contains(resource, "{{") {
 				t.Errorf("context-free %s leaked an unrendered template action:\n%s", testCase.resource, resource)
 			}
-			for _, other := range []string{"implement", "watchdog", "tdd"} {
+			for _, other := range []string{"audit", "implement", "testing", "watchdog"} {
 				if other == testCase.owner {
 					continue
 				}
@@ -2317,29 +2431,29 @@ func TestContextFreeResourcesRetainOwnershipAndDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, owned := range []string{"reference/smells.md audit", "reference/tests.md tdd", "reference/DEEPENING.md design", "reference/CONTEXT-FORMAT.md domain"} {
+	for _, owned := range []string{"reference/acceptance.md audit", "reference/smells.md audit", "reference/tests.md testing", "reference/DEEPENING.md design", "reference/CONTEXT-FORMAT.md domain"} {
 		if !strings.Contains(packet.Instructions, owned) {
 			t.Errorf("bundled definition lost its owning reference %q", owned)
 		}
 	}
-	for _, stolen := range []string{"reference/smells.md implement", "reference/tests.md implement", "reference/smells.md, ", "reference/tests.md, "} {
+	for _, stolen := range []string{"reference/acceptance.md implement", "reference/smells.md implement", "reference/tests.md implement", "reference/acceptance.md, ", "reference/smells.md, ", "reference/tests.md, "} {
 		if strings.Contains(packet.Instructions+strings.Join(packet.Resources, ", "), stolen) {
 			t.Errorf("bundled instructions took over %q", stolen)
 		}
 	}
 
 	var markdown, jsonPacket bytes.Buffer
-	if err := newApp(nil, bytes.NewReader(nil), &markdown, &markdown).Run([]string{"skl", "skill", "tdd"}); err != nil {
+	if err := newApp(nil, bytes.NewReader(nil), &markdown, &markdown).Run([]string{"skl", "skill", "testing"}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(markdown.String(), "Protocol: skl.instructions/v1\nSkill: tdd\nIncluded skills: none\nFacts: {}\nResources: reference/mocking.md, reference/tests.md\n\n") {
+	if !strings.HasPrefix(markdown.String(), "Protocol: skl.instructions/v1\nSkill: testing\nIncluded skills: none\nFacts: {}\nResources: reference/mocking.md, reference/tests.md\n\n") {
 		t.Errorf("default Markdown rendering changed:\n%s", markdown.String())
 	}
-	if err := newApp(nil, bytes.NewReader(nil), &jsonPacket, &jsonPacket).Run([]string{"skl", "skill", "--format", "json", "tdd"}); err != nil {
+	if err := newApp(nil, bytes.NewReader(nil), &jsonPacket, &jsonPacket).Run([]string{"skl", "skill", "--format", "json", "testing"}); err != nil {
 		t.Fatal(err)
 	}
 	var decoded skilldist.Packet
-	if err := json.Unmarshal(jsonPacket.Bytes(), &decoded); err != nil || decoded.Skill != "tdd" {
+	if err := json.Unmarshal(jsonPacket.Bytes(), &decoded); err != nil || decoded.Skill != "testing" {
 		t.Fatalf("typed packet default changed: %v, %v", err, jsonPacket.String())
 	}
 }
@@ -2391,11 +2505,11 @@ func TestRetrieveOneNamedResource(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, t.TempDir())
 
-	if err := app.Run([]string{"skl", "skill", "--resource", "reference/tests.md", "tdd"}); err != nil {
+	if err := app.Run([]string{"skl", "skill", "--resource", "reference/tests.md", "testing"}); err != nil {
 		t.Fatal(err)
 	}
 
-	if got, want := stdout.String(), readRepositoryFile(t, "skills/dev/tdd/reference/tests.md"); got != want {
+	if got, want := stdout.String(), readRepositoryFile(t, "skills/dev/testing/reference/tests.md"); got != want {
 		t.Fatalf("stdout did not contain only the requested resource:\n%s", got)
 	}
 	stdout.Reset()
@@ -2445,9 +2559,9 @@ func TestDescribeNamedResourceInputs(t *testing.T) {
 			procedural: "# Review Result Documents",
 		},
 		{
-			owner: "tdd", resource: "reference/tests.md",
+			owner: "testing", resource: "reference/tests.md",
 			described:  []string{"reference/tests.md accepts no inputs."},
-			procedural: "# Good and Bad Tests",
+			procedural: "# Behavioral and Regression Tests",
 		},
 	}
 	for _, testCase := range cases {
@@ -2498,7 +2612,7 @@ func TestDescribeNamedResourceInputs(t *testing.T) {
 func TestBundleGuaranteedSupportingSkills(t *testing.T) {
 	packet := implementBundle(t)
 	root := t.TempDir()
-	want := []string{"tdd", "audit", "design", "domain"}
+	want := []string{"testing", "audit", "design", "domain"}
 	if !slices.Equal(packet.IncludedSkills, want) {
 		t.Fatalf("included_skills = %v, want %v", packet.IncludedSkills, want)
 	}
@@ -2511,7 +2625,7 @@ func TestBundleGuaranteedSupportingSkills(t *testing.T) {
 	for _, marker := range []struct{ name, text string }{
 		{"implement", "## The scope is already decided"},
 		{"implement", "## When only a human can decide"},
-		{"tdd", "## What a good test is"},
+		{"testing", "## Verify observable behavior"},
 		{"audit", "### 6. Aggregate"},
 		{"design", "## Deep vs shallow"},
 		{"domain", "### Offer ADRs sparingly"},
@@ -2529,10 +2643,10 @@ func TestBundleGuaranteedSupportingSkills(t *testing.T) {
 	// execution: it keeps the shared obligations and replaces the
 	// independent-mode alternatives the invocation already resolved.
 	specialized := map[string][]string{
-		"tdd":    {"pinned in the accepted artifacts"},
-		"audit":  {"merge-base with `main` and the parent of this change's first commit"},
-		"design": {"does not require a new design exercise"},
-		"domain": {"outside the accepted change"},
+		"testing": {"After preparation, read the accepted"},
+		"audit":   {"merge-base with `main` and the parent of this change's first commit"},
+		"design":  {"does not require a new design exercise"},
+		"domain":  {"outside the accepted change"},
 	}
 	for _, included := range want {
 		section := bundledSection(t, packet.Instructions, included)
@@ -2550,11 +2664,11 @@ func TestBundleGuaranteedSupportingSkills(t *testing.T) {
 	// The authored definition stays retrievable on its own for an independent
 	// caller, which keeps the standalone branch instead.
 	var standalone bytes.Buffer
-	if err := newApp(nil, bytes.NewReader(nil), &standalone, &standalone).Run([]string{"skl", "skill", "tdd"}); err != nil {
+	if err := newApp(nil, bytes.NewReader(nil), &standalone, &standalone).Run([]string{"skl", "skill", "testing"}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(standalone.String(), "confirm them with the user") || strings.Contains(standalone.String(), "at the human pause") {
-		t.Errorf("standalone TDD lost its own mode:\n%s", standalone.String())
+	if !strings.Contains(standalone.String(), "Clarify a consequential unresolved behavioral or architectural choice with the user") || strings.Contains(standalone.String(), "execution's human-decision path") {
+		t.Errorf("standalone Testing lost its own mode:\n%s", standalone.String())
 	}
 
 	var installOutput bytes.Buffer
@@ -2581,7 +2695,7 @@ func bundledSection(t *testing.T, instructions, name string) string {
 
 func TestIgnoreConsumerRepositoryOverrides(t *testing.T) {
 	repository := t.TempDir()
-	override := filepath.Join(repository, "skills/dev/tdd/SKILL.md")
+	override := filepath.Join(repository, "skills/dev/testing/SKILL.md")
 	if err := os.MkdirAll(filepath.Dir(override), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -2599,10 +2713,10 @@ func TestIgnoreConsumerRepositoryOverrides(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, t.TempDir())
-	if err := app.Run([]string{"skl", "skill", "tdd"}); err != nil {
+	if err := app.Run([]string{"skl", "skill", "testing"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := stdout.String(); !strings.Contains(got, "# Test-Driven Development") || strings.Contains(got, "consumer override") {
+	if got := stdout.String(); !strings.Contains(got, "# Contract-Grounded Testing") || strings.Contains(got, "consumer override") {
 		t.Fatalf("consumer repository overrode embedded definition:\n%s", got)
 	}
 }
