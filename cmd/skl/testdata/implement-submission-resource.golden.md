@@ -9,7 +9,9 @@ Describe the implemented change and its scope.
 
 ## Verification
 
-Map every behavioral scenario to its test, and record the focused checks you ran and the Full Gate results.
+Account for every rule, scenario, and architectural obligation using grouped many-to-many references to concrete tests, commands, or appropriate inspection evidence. One evidence item may support several obligations, and one obligation may require several observations; separate rows are not required.
+
+Record results and material limitations, including the focused checks, Full Gate, and artifact inspection. Prose assurance alone is insufficient for ordinary executable behavior, and listing an evidence gap does not make it acceptable.
 
 ## Audit ledger --<fixed-point>...<audited-head>
 

@@ -577,7 +577,7 @@ func TestWatchdogPacketCarriesHistoricalContractAndSemanticHandoff(t *testing.T)
 	if want := readRepositoryFile(t, "cmd/skl/testdata/watchdog-start.golden.md"); normalized != want {
 		t.Fatalf("packet golden mismatch:\n%s", normalized)
 	}
-	for _, required := range []string{"Do not re-run `audit`", "formatter or parser", "git diff --check", "push", "--head", "W<n>", "test *strength*"} {
+	for _, required := range []string{"Do not re-run `audit`", "formatter or parser", "git diff --check", "push", "--head", "W<n>", "Challenge claimed evidence"} {
 		if !strings.Contains(got.Packet.Instructions, required) {
 			t.Errorf("missing preserved instruction %q", required)
 		}

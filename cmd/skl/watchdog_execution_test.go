@@ -34,7 +34,7 @@ func TestWatchdogNextDeliversCompleteFirstReviewInMarkdown(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := output.String()
-	for _, want := range []string{"name: watchdog", "Work Item #7", "Submission is #11", head, "Full Gate", "Artifact Baseline", "Audit ledger", "critical", "skl watchdog submit", "skl skill --resource reference/review.md", "Post-Marker Check", "Manual verification", "--head <actual-pushed-final-SHA>", "human"} {
+	for _, want := range []string{"name: watchdog", "Work Item #7", "Submission is #11", head, "Full Gate", "Artifact Baseline", "Audit ledger", "critical", "skl watchdog submit", "skl skill --resource reference/acceptance.md audit", "skl skill --resource reference/review.md", "complete frozen contract", "additional executable challenges", "Post-Marker Check", "Manual verification", "--head <actual-pushed-final-SHA>", "human"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("execution missing %q", want)
 		}
