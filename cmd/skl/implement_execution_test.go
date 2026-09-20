@@ -433,6 +433,21 @@ func TestAuditReworkFixesContinuesTheCumulativeLedger(t *testing.T) {
 	}
 }
 
+// TestAuditReworkFixesAddsNoSyntheticCleanFinding materializes the clean
+// focused-Audit ledger scenario.
+func TestAuditReworkFixesAddsNoSyntheticCleanFinding(t *testing.T) {
+	rendered := renderResource(t, "implement", "reference/submission.md",
+		"result_directory="+t.TempDir(), "procedure=rework")
+	for _, required := range []string{
+		"When the focused Audit is clean, add no synthetic Audit Finding",
+		"still advance the cumulative ledger to the newly audited head",
+	} {
+		if !strings.Contains(rendered, required) {
+			t.Errorf("clean Rework Audit guidance lacks %q", required)
+		}
+	}
+}
+
 // TestB3MetadataOnlyStartupBindsEveryAlreadyEstablishedReference materializes
 // the B3 outline. Startup may only use metadata the invocation already
 // established, so every bound command must be literal and usable as printed.
