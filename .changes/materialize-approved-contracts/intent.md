@@ -28,10 +28,10 @@ and one bounded fresh-context Propose fidelity review, as accepted in
 
 ## Definition of Done
 
-- [ ] Delivered Explore and Propose instructions distinguish final semantic approval, bounded fidelity correction, and decisions requiring human resolution.
-- [ ] Retrieved artifact templates preserve scoped rules, binding discriminating scenarios, agreed architecture, delegated choices, and existing ledger integrity without scenario/test/task cardinality requirements.
-- [ ] Context-free public retrieval, resource visibility, once-only inclusion, and Markdown/explicit JSON equivalence remain covered by focused checks and existing foundation checks.
-- [ ] Inspection of actual rendered guidance accounts for `behavior.md` and `plan.md`; normal project checks pass, with evidence and limitations recorded without claims of model-behavior validation.
+- [x] Delivered Explore and Propose instructions distinguish final semantic approval, bounded fidelity correction, and decisions requiring human resolution.
+- [x] Retrieved artifact templates preserve scoped rules, binding discriminating scenarios, agreed architecture, delegated choices, and existing ledger integrity without scenario/test/task cardinality requirements.
+- [x] Context-free public retrieval, resource visibility, once-only inclusion, and Markdown/explicit JSON equivalence remain covered by focused checks and existing foundation checks.
+- [x] Inspection of actual rendered guidance accounts for `behavior.md` and `plan.md`; normal project checks pass, with evidence and limitations recorded without claims of model-behavior validation.
 
 ## Manual verification
 
