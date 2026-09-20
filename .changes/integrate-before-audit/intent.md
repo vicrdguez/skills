@@ -22,11 +22,11 @@ Require the implementor to merge one current-target snapshot immediately before 
 
 ## Definition of Done
 
-- [ ] First implementation and finding-driven Rework direct worker-owned observation and integration at the late pre-Audit step, with conflicts resolved before normal review.
-- [ ] Deferred Submission guidance records the actual integrated SHA in Verification while preserving distinct review and artifact references and opaque Result Documents.
-- [ ] Audit and Watchdog account for integration effects without reopening accepted preferences or labeling unrelated upstream additions as scope creep; evidence covers the final functional state.
-- [ ] Target movement alone does not restart the round, and observation, merge, or consequential conflict failures preserve progress without false completion claims or changed human merge authority.
-- [ ] Focused verification at the public seams in `plan.md` demonstrates coherent instruction and resource delivery while retaining the prerequisite foundation's fixed-head, recovery, and lifecycle behavior.
+- [x] First implementation and finding-driven Rework direct worker-owned observation and integration at the late pre-Audit step, with conflicts resolved before normal review.
+- [x] Deferred Submission guidance records the actual integrated SHA in Verification while preserving distinct review and artifact references and opaque Result Documents.
+- [x] Audit and Watchdog account for integration effects without reopening accepted preferences or labeling unrelated upstream additions as scope creep; evidence covers the final functional state.
+- [x] Target movement alone does not restart the round, and observation, merge, or consequential conflict failures preserve progress without false completion claims or changed human merge authority.
+- [x] Focused verification at the public seams in `plan.md` demonstrates coherent instruction and resource delivery while retaining the prerequisite foundation's fixed-head, recovery, and lifecycle behavior.
 
 ## Manual verification
 
