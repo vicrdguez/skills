@@ -248,30 +248,143 @@ func (b *implementationMemory) ImplementationItems(context.Context) ([]workflow.
 	return items, nil
 }
 
-func (b *implementationMemory) ClaimImplementation(_ context.Context, item workflow.ImplementationItem) error {
-	for i := range b.work {
-		if b.work[i].ID == item.ID {
-			b.work[i] = implementationFixture(b.work[i])
-			wasClaimed := b.work[i].Claimed
-			if item.Submission != nil {
-				b.work[i].Submission = item.Submission
+func (b *implementationMemory) QueuePage(_ context.Context, queue workflow.QueueKind, _ string) (workflow.QueuePage, error) {
+	items, err := b.ImplementationItems(context.Background())
+	if err != nil {
+		return workflow.QueuePage{}, err
+	}
+	page := workflow.QueuePage{}
+	for _, item := range items {
+		var candidate workflow.QueueCandidate
+		switch {
+		case queue == workflow.ReadyQueue && item.State == workflow.Ready:
+			candidate = workflow.QueueCandidate{ID: item.ID, Number: item.Order, CreatedAt: item.CreatedAt, Claimed: item.Claimed, Problem: item.Problem}
+		case queue == workflow.ReworkQueue && item.State == workflow.Rework && item.Submission != nil:
+			number, err := strconv.Atoi(string(item.Submission.ID))
+			if err != nil {
+				number = item.Order
 			}
-			claim := b.work[i].Source
-			if item.State == workflow.Rework || item.State == workflow.AwaitingReview {
-				claim = b.work[i].Submission.Lifecycle
+			candidate = workflow.QueueCandidate{ID: item.ID, SubmissionID: item.Submission.ID, Number: number, CreatedAt: item.Submission.CreatedAt, Claimed: item.Claimed, Problem: item.Problem}
+		case queue == workflow.ReviewQueue && item.State == workflow.AwaitingReview && item.Submission != nil:
+			number, err := strconv.Atoi(string(item.Submission.ID))
+			if err != nil {
+				number = item.Order
 			}
-			claim.Claimed = true
-			if !wasClaimed {
-				if b.work[i].Submission != nil && (item.State == workflow.Rework || item.State == workflow.AwaitingReview) {
-					b.work[i].Submission.ClaimAcquiredAt = b.reviewTime()
-				} else {
-					b.work[i].SourceClaimAcquiredAt = b.reviewTime()
-				}
+			candidate = workflow.QueueCandidate{ID: item.ID, SubmissionID: item.Submission.ID, Number: number, CreatedAt: item.Submission.CreatedAt, Claimed: item.Claimed, Problem: item.Problem}
+		default:
+			continue
+		}
+		page.Candidates = append(page.Candidates, candidate)
+	}
+	return page, nil
+}
+
+func (b *implementationMemory) SelectedImplementation(_ context.Context, candidate workflow.QueueCandidate) (workflow.ImplementationItem, error) {
+	items, err := b.ImplementationItems(context.Background())
+	if err != nil {
+		return workflow.ImplementationItem{}, err
+	}
+	for _, item := range items {
+		if candidate.SubmissionID != "" {
+			if item.Submission != nil && item.Submission.ID == candidate.SubmissionID {
+				return item, nil
 			}
-			b.work[i] = workflow.ReconcileImplementation(b.work[i])
+			continue
+		}
+		if item.ID == candidate.ID {
+			return item, nil
 		}
 	}
-	return nil
+	return workflow.ImplementationItem{}, workflow.Refuse("selected Work Item is unavailable; repair its attachment")
+}
+
+func (b *implementationMemory) ResumedImplementation(_ context.Context, id workflow.WorkItemID, branch string) (workflow.ImplementationItem, error) {
+	items, err := b.ImplementationItems(context.Background())
+	if err != nil {
+		return workflow.ImplementationItem{}, err
+	}
+	matches := 0
+	var found workflow.ImplementationItem
+	for _, item := range items {
+		if id != "" {
+			if item.ID != id {
+				continue
+			}
+		} else if branch == "" || item.Branch != branch || !item.Claimed {
+			continue
+		}
+		matches++
+		found = item
+	}
+	if matches == 0 {
+		return workflow.ImplementationItem{}, workflow.Refuse("explicit Work Item is unavailable; repair its attachment before resuming")
+	}
+	if matches > 1 {
+		return workflow.ImplementationItem{}, workflow.Refuse("worktree identity is ambiguous; resume with --item after repairing attachments")
+	}
+	return found, nil
+}
+
+func (b *implementationMemory) ImplementationDependencies(_ context.Context, id workflow.WorkItemID) ([]workflow.BlockerObservation, error) {
+	items, err := b.ImplementationItems(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	merged := make(map[workflow.WorkItemID]bool)
+	var target workflow.ImplementationItem
+	for _, item := range items {
+		merged[item.ID] = item.State == workflow.Merged
+		if item.ID == id {
+			target = item
+		}
+	}
+	var observations []workflow.BlockerObservation
+	for _, blocker := range target.Blockers {
+		observations = append(observations, workflow.BlockerObservation{ID: blocker, Merged: merged[blocker]})
+	}
+	return observations, nil
+}
+
+func (b *implementationMemory) ClaimSelected(_ context.Context, candidate workflow.QueueCandidate, item workflow.ImplementationItem) (workflow.ImplementationItem, error) {
+	for i := range b.work {
+		current := implementationFixture(b.work[i])
+		if candidate.SubmissionID != "" {
+			if current.Submission == nil || current.Submission.ID != candidate.SubmissionID {
+				continue
+			}
+		} else if current.ID != candidate.ID {
+			continue
+		}
+		reconciled := workflow.ReconcileImplementation(current)
+		if reconciled.Problem != "" {
+			return workflow.ImplementationItem{}, workflow.Refuse("selected Work Item has contradictory projections; inspect it before retrying")
+		}
+		if reconciled.Claimed {
+			return workflow.ImplementationItem{}, workflow.Refuse("selected Work Item already carries a Claim; resume with --item if it is yours")
+		}
+		b.work[i] = current
+		if reconciled.State == workflow.Rework || reconciled.State == workflow.AwaitingReview {
+			b.work[i].Submission.Lifecycle.Claimed = true
+			b.work[i].Submission.ClaimAcquiredAt = b.reviewTime()
+		} else {
+			b.work[i].Source.Claimed = true
+			b.work[i].SourceClaimAcquiredAt = b.reviewTime()
+		}
+		b.work[i] = workflow.ReconcileImplementation(b.work[i])
+		result := item
+		result.Claimed = b.work[i].Claimed
+		if result.Source != nil && b.work[i].Source != nil {
+			result.Source.Claimed = b.work[i].Source.Claimed
+			result.SourceClaimAcquiredAt = b.work[i].SourceClaimAcquiredAt
+		}
+		if result.Submission != nil && b.work[i].Submission != nil {
+			result.Submission.Claimed = b.work[i].Submission.Claimed
+			result.Submission.ClaimAcquiredAt = b.work[i].Submission.ClaimAcquiredAt
+			result.Submission.Lifecycle = b.work[i].Submission.Lifecycle
+		}
+		return workflow.ReconcileImplementation(result), nil
+	}
+	return workflow.ImplementationItem{}, workflow.Refuse("selected Work Item disappeared before Claim; inspect its stable identity")
 }
 
 func implementCLI(t *testing.T, root string, backend *implementationMemory, args ...string) setup.ImplementationOutput {
@@ -291,7 +404,7 @@ func implementCLI(t *testing.T, root string, backend *implementationMemory, args
 		return backend, nil
 	}, bytes.NewReader(nil), &output, &output)
 	command := append([]string{"skl", "implement"}, args...)
-	command = append(command, "--repo", root)
+	command = append(command, "--format", "json", "--repo", root)
 	if err := app.Run(command); err != nil {
 		t.Fatalf("%v: %v\n%s", command, err, &output)
 	}
@@ -431,8 +544,11 @@ func TestB3RefuseMissingOrAmbiguousRequiredMarkers(t *testing.T) {
 				backend.work[0].Submission = &workflow.Submission{ID: "11", Head: head}
 			}
 			start := implementCLI(t, root, backend, "next")
-			if start.Status != "fix_required" || backend.work[0].Claimed {
-				t.Fatalf("startup chose invalid evidence: %#v, work=%#v", start, backend.work)
+			if start.Status != "work_available" || !backend.work[0].Claimed || start.Packet == nil || start.Packet.Facts.Implementation.InspectCommand == "" {
+				t.Fatalf("startup did not defer artifact inspection: %#v, work=%#v", start, backend.work)
+			}
+			if inspected := implementCLI(t, root, backend, "inspect", "--item", "7"); inspected.Status != "inspected" || len(inspected.Ledger.Violations) == 0 {
+				t.Fatalf("deferred inspection accepted invalid evidence: %#v", inspected)
 			}
 		})
 	}
@@ -818,7 +934,7 @@ func TestB8InspectAndStartBaselineOnlyImplementation(t *testing.T) {
 				args = []string{"resume", "--item", "7"}
 			}
 			started := implementCLI(t, root, backend, args...)
-			if started.Status != "work_available" || started.Packet == nil || started.Packet.Facts.Implementation.ArtifactBaseline != baseline || started.Packet.Facts.Implementation.ArtifactCompletion != "" {
+			if started.Status != "work_available" || started.Packet == nil || started.Packet.Facts.Implementation.InspectCommand == "" || started.Packet.Facts.Implementation.FetchCommand == "" || started.Packet.Facts.Implementation.WorktreeCommand == "" {
 				t.Fatalf("startup = %#v", started)
 			}
 			if !strings.Contains(started.Packet.Instructions, "Audit") || strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD")) != head {
@@ -934,7 +1050,7 @@ func TestImplementClaimsOldestEligibleWork(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			item.Submission = &workflow.Submission{ID: workflow.SubmissionID(strconv.Itoa(number + 100)), Head: head, Base: "main"}
+			item.Submission = &workflow.Submission{ID: workflow.SubmissionID(strconv.Itoa(number + 100)), Head: head, Base: "main", CreatedAt: item.CreatedAt}
 		}
 	}
 	for _, want := range []int{4, 5, 3, 2} {
@@ -1090,7 +1206,7 @@ func TestInstalledImplementActivationLoadsDefinitionsOnce(t *testing.T) {
 				output.Reset()
 				args := strings.Fields(command)
 				if args[1] == "implement" {
-					args = append(args, "--repo", root)
+					args = append(args, "--format", "json", "--repo", root)
 				}
 				if err := app.Run(args); err != nil {
 					t.Fatal(err)
@@ -1111,10 +1227,15 @@ func TestInstalledImplementActivationLoadsDefinitionsOnce(t *testing.T) {
 				instructions += outcome.Packet.Instructions
 				break
 			}
-			for _, name := range []string{"implement", "tdd", "audit", "design", "domain"} {
-				definition := readRepositoryFile(t, "skills/dev/"+name+"/SKILL.md")
-				if count := strings.Count(instructions, definition); count != 1 {
-					t.Errorf("activation loaded %s %d times", name, count)
+			for _, marker := range []struct{ name, text string }{
+				{"implement", "## The scope is already decided"},
+				{"testing", "\n\n## Included Skill: testing\n\n"},
+				{"audit", "\n\n## Included Skill: audit\n\n"},
+				{"design", "\n\n## Included Skill: design\n\n"},
+				{"domain", "\n\n## Included Skill: domain\n\n"},
+			} {
+				if count := strings.Count(instructions, marker.text); count != 1 {
+					t.Errorf("activation loaded %s %d times", marker.name, count)
 				}
 			}
 			if !b.work[0].Claimed {
@@ -1202,24 +1323,29 @@ func TestImplementBundlesInstructionsWithoutTargetPin(t *testing.T) {
 	baseline := prepareSlice(t, root, "widget")
 	backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}}
 	got := implementCLI(t, root, backend, "next")
-	if got.Packet == nil || got.Packet.Facts.Implementation.ArtifactBaseline != baseline {
+	if got.Packet == nil || got.Packet.Facts.Implementation.InspectCommand == "" || got.Packet.Facts.Implementation.FetchCommand == "" || got.Packet.Facts.Implementation.WorktreeCommand == "" {
 		t.Fatalf("packet = %#v", got)
 	}
-	if got.Packet.Skill != "implement" || !reflect.DeepEqual(got.Packet.IncludedSkills, []string{"tdd", "audit", "design", "domain"}) {
+	if got.Packet.Skill != "implement" || !reflect.DeepEqual(got.Packet.IncludedSkills, []string{"testing", "audit", "design", "domain"}) {
 		t.Fatalf("manifest = %#v", got.Packet)
 	}
 	if strings.Contains(got.Packet.Markdown(), "git merge ") || strings.Contains(got.Packet.Facts.Implementation.ResumeCommand, "target-snapshot") {
 		t.Fatalf("packet retained target integration: %s", got.Packet.Markdown())
 	}
-	_, markdown, found := strings.Cut(got.Packet.Markdown(), "\n\n## Work Start\n")
+	definition, _, found := strings.Cut(got.Packet.Instructions, "\n\n## Included Skill: testing\n\n")
 	if !found {
-		t.Fatal("packet lacks Work Start instructions")
+		t.Fatal("packet lacks the specialized Implement definition")
 	}
 	facts := got.Packet.Facts.Implementation
 	golden := readRepositoryFile(t, "cmd/skl/testdata/implement-start.golden.md")
-	normalized := strings.NewReplacer(facts.Worktree, "<worktree>", facts.ResultDirectory, "<result>", baseline, "<baseline>").Replace("## Work Start\n" + markdown)
+	normalized := normalizeRepresentativeExecution(got.Packet.Instructions, facts)
 	if normalized != golden {
-		t.Fatalf("Work Start Markdown differs from golden:\n%s", normalized)
+		t.Fatalf("complete specialized Implement execution differs from golden:\n%s", normalized)
+	}
+	for _, unresolved := range []string{"{{if", "{{else", "{{end", "{{.Implementation"} {
+		if strings.Contains(definition, unresolved) {
+			t.Fatalf("specialized definition left %q unrendered", unresolved)
+		}
 	}
 	if strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD")) != baseline {
 		t.Fatal("Work Start changed Git")
@@ -1243,15 +1369,29 @@ func TestImplementBundlesInstructionsWithoutTargetPin(t *testing.T) {
 		"audit":    {"merge-base with `main`", "explicitly supplies", "Artifact Baseline"},
 	} {
 		output.Reset()
-		err := app.Run([]string{"skl", "skill", skill})
+		rendered := got.Packet.Instructions
+		if skill == "watchdog" {
+			packet, err := skilldist.BuildPacket("watchdog", skilldist.InvocationFacts{
+				Watchdog: &skilldist.WatchdogFacts{WorkItem: 7, Submission: 11},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rendered = packet.Instructions
+		} else if skill != "implement" {
+			if err := app.Run([]string{"skl", "skill", skill}); err != nil {
+				t.Fatal(err)
+			}
+			rendered = output.String()
+		}
 		missing := ""
 		for _, text := range required {
-			if !strings.Contains(output.String(), text) {
+			if !strings.Contains(rendered, text) {
 				missing = text
 			}
 		}
-		if err != nil || strings.Contains(output.String(), "--target-snapshot") || strings.Contains(output.String(), "resolve merge conflicts with `main`") || missing != "" {
-			t.Fatalf("%s guidance retained integration obligation or lacks %q: %v\n%s", skill, missing, err, &output)
+		if strings.Contains(rendered, "--target-snapshot") || strings.Contains(rendered, "resolve merge conflicts with `main`") || missing != "" {
+			t.Fatalf("%s guidance retained integration obligation or lacks %q:\n%s", skill, missing, rendered)
 		}
 	}
 }
@@ -1515,8 +1655,8 @@ func TestB12ValidateExplicitMarkerlessEndpointSHAsWithoutAdoptionState(t *testin
 		{"markerless review misses Completion", func(t *testing.T) (setup.ImplementationOutput, *implementationMemory) {
 			f := markerless(t, false, true)
 			b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Submission: &workflow.Submission{ID: "11", Head: f.head}}}}
-			return watchdogCLI(t, f.root, b, "next", "--artifact-baseline", f.baseline), b
-		}, "fix_required"},
+			return implementCLI(t, f.root, b, "inspect", "--item", "7", "--artifact-baseline", f.baseline), b
+		}, "completion"},
 		{"invalid explicit identities", func(t *testing.T) (setup.ImplementationOutput, *implementationMemory) {
 			f := markerless(t, false, true)
 			invalid := []string{"widget", f.baseline[:12], strings.TrimSpace(runGitOutput(t, f.root, "rev-parse", f.baseline+"^{tree}")), strings.Repeat("f", 40)}
@@ -1574,8 +1714,8 @@ func TestB12ValidateExplicitMarkerlessEndpointSHAsWithoutAdoptionState(t *testin
 		{"markerless evidence without inputs", func(t *testing.T) (setup.ImplementationOutput, *implementationMemory) {
 			f := markerless(t, false, true)
 			b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}}
-			return implementCLI(t, f.root, b, "next"), b
-		}, "missing"},
+			return implementCLI(t, f.root, b, "inspect", "--item", "7"), b
+		}, "missing [baseline]"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			got, backend := test.run(t)
@@ -1764,7 +1904,7 @@ func TestImplementRequiresLifecycleObservations(t *testing.T) {
 			ID: "7", Branch: "widget", State: workflow.Ready, Claimed: true, Source: source,
 			Submission: &workflow.Submission{ID: "11", State: workflow.Rework},
 		}}}}
-		got, err := workflow.InspectImplementation(context.Background(), root, "7", workflow.ArtifactEndpoints{}, b)
+		got, err := workflow.InspectImplementation(context.Background(), root, "origin", "7", workflow.ArtifactEndpoints{}, b)
 		if err != nil || got.Item == nil || !strings.Contains(got.Item.Problem, "missing lifecycle observations") {
 			t.Fatalf("incomplete observation accepted: %#v, %v; item=%#v", got, err, got.Item)
 		}
@@ -1885,6 +2025,10 @@ func TestImplementationReviewProjectionBackendParity(t *testing.T) {
 			writes := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				path := strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets")
+				if path == "/graphql" && r.Method == http.MethodPost {
+					fmt.Fprint(w, `{"data":{"repository":{"issue":{"closedByPullRequestsReferences":{"nodes":[{"number":11,"repository":{"nameWithOwner":"acme/widgets"}}]}}}}}`)
+					return
+				}
 				if r.Method != http.MethodGet {
 					writes++
 				}
@@ -1896,6 +2040,8 @@ func TestImplementationReviewProjectionBackendParity(t *testing.T) {
 					return ls
 				}
 				switch {
+				case path == "/pulls/11" && r.Method == http.MethodGet:
+					json.NewEncoder(w).Encode(map[string]any{"number": 11, "body": "Closes #7", "head": map[string]any{"repo": map[string]string{"full_name": "acme/widgets"}}})
 				case path == "/issues/11" && r.Method == http.MethodGet:
 					json.NewEncoder(w).Encode(map[string]any{"number": 11, "state": "open", "labels": labelList(labels)})
 				case path == "/issues/7" && r.Method == http.MethodGet:
@@ -1996,7 +2142,7 @@ func TestImplementInspectionUsesCurrentLifecycleWithoutResumeCursor(t *testing.T
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
 	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", Source: &workflow.LifecycleObservation{Open: true, States: []workflow.State{workflow.Ready}}}}}
-	got, err := workflow.InspectImplementation(context.Background(), root, "7", workflow.ArtifactEndpoints{}, b)
+	got, err := workflow.InspectImplementation(context.Background(), root, "origin", "7", workflow.ArtifactEndpoints{}, b)
 	if err != nil || got.Item.State != workflow.Ready {
 		t.Fatalf("inspection changed current lifecycle evidence: %#v, %v", got, err)
 	}

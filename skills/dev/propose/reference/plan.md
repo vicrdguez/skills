@@ -1,57 +1,61 @@
-# {change title} Plan
+# {Change title} Plan
 
 <!--
-The purpose is to keep the implementer from making important architectural decisions at code time Reference ADRs rather than restating them.
+Create plan.md when the approved design pins architecture. Preserve those accepted
+decisions for a fresh implementer without inventing new ones. Reference existing
+ADRs instead of restating them, and label sketches that explain a decision as
+illustrative so they do not become accidental obligations.
 
-Write this file knowing that a different agent with a completely fresh context will implement it. Making
-sure that no context resolution is lost that could drive the implementer to drift from the plan is _crucial_. 
+Frozen at the `[baseline] <slice-slug>` commit. A material architectural change
+requires human resolution and a new Proposal, not an edit at Artifact Completion.
+Delete this comment in the real file.
+-->
 
-When you include code-snippets anywhere on this document, **trim to the decision-rich parts** - a working demo is not needed, just the important bits
-
-Frozen at the `[baseline] <slice-slug>` commit: a decision that turns out wrong is corrected by a new proposal, never by editing this file at `[completion] <slice-slug>`.
+## Authority and assumptions
+<!--
+Name the approved recap, relevant ADRs, landed prerequisites, and boundary
+assumptions on which this plan depends.
 -->
 
 ## Approach
 <!--
-The implementation strategy and how all the pieces fit together. 
-
-Add detail and clarity as needed, use code snippets as examples if it encodes the approach precisely and directly than prose.
+Explain how the pinned responsibilities fit together. Keep private paths, helper
+choices, and other delegated implementation details open unless they were
+explicitly agreed.
 -->
 
-## Implementation decisions
+## Responsibility ownership
+<!-- State which module owns each contractual responsibility. -->
+
+| Owner | Contractual responsibility |
+| --- | --- |
+| {module or authored guidance} | {behavior and decisions it owns} |
+
+## Architectural commitments
 <!--
-A list of the pinned implementation decisions made in the session. These are the decisions the implementer MUST NOT relitigate.
-
-Including (but not limited to):
-
-- Technical clarifications from the developer
-- Architectural decisions
-- API contracts
-- Specific interactions
+Record only deliberately agreed interfaces, ordering constraints, error modes,
+and other decisions the implementer must preserve.
 -->
 
 ### Module shapes & seams
-
 <!--
-The deep-module / seam decisions made in the sessions. This should include:
-- Sketches of the seams at which this change will be tested
-- The modules that will be built/modified
-- The interfaces of those modules that will be modified.
-- If there is another *existing Module* that can act as a reference implementation, reference it.
-
-Modules are scale-agnostic: capture PUBLIC modules and (if needed) its critical INTERNAL modules. 
+Name modified modules, their observable interfaces, dependencies and boundary
+assumptions, and the seams at which accepted outcomes can be verified. Label any
+helper or code sketch **Illustrative** unless its exact shape was approved.
 -->
 
-#### [{NEW/MODIFIED}] {Module} 
+#### [NEW/MODIFIED] {Module}
+- **Interface:** {what callers must know}
+- **Responsibilities:** {behavior hidden behind the interface}
+- **Dependencies and assumptions:** {relevant facts}
+- **Verification seam:** {observable interface and promised consequences}
+
+## Verification strategy
 <!--
-For each module state the interface, its dependencies (with its categories) and the invariants that it must uphold. Internal correctness is the whole point so if there is more information that significantly helps during implementation, pin it.
-
-Use snippets that show the interface functions/methods in scope.
-
-Finally, include the Test strategy for the module.
+Map rules, scenarios, and architectural obligations to suitable existing checks or
+inspection evidence. Evidence may be grouped many-to-many; scenarios do not
+prescribe one test each. Record material limitations.
 -->
 
 ## Sequence
-<!--
-Numbered, Ordered high-level steps, if order matters. Be concise but precise.
--->
+<!-- Include only ordering needed for implementation, dependencies, or coordination. -->

@@ -24,15 +24,22 @@ func TestGitHubWatchdogClaimsSubmissionAndReadsReviewFacts(t *testing.T) {
 		for _, label := range labels {
 			ls = append(ls, map[string]string{"name": label})
 		}
-		pull := map[string]any{"number": 11, "state": "open", "created_at": "2026-01-01", "labels": ls, "head": map[string]any{"ref": "widget", "sha": "fixed", "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": "main"}}
+		pull := map[string]any{"number": 11, "state": "open", "created_at": "2026-01-01", "labels": ls, "body": "review me\n\nCloses #7\n", "head": map[string]any{"ref": "widget", "sha": "fixed", "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": "main"}}
 		var result any = []any{}
 		switch path {
+		case "/graphql":
+			fmt.Fprint(w, `{"data":{"repository":{"issue":{"closedByPullRequestsReferences":{"nodes":[{"number":11,"repository":{"nameWithOwner":"acme/widgets"}}]}}}}}`)
+			return
 		case "/issues":
-			result = []any{map[string]any{"number": 7, "title": "widget", "state": "open"}}
+			result = []any{map[string]any{"number": 7, "title": "widget", "state": "open", "body": "Branch: `widget`\n"}}
 		case "/pulls":
 			result = []any{pull}
+		case "/pulls/11":
+			result = pull
 		case "/issues/11":
 			result = pull
+		case "/issues/7":
+			result = map[string]any{"number": 7, "state": "open", "body": "Branch: `widget`\n"}
 		case "/issues/7/comments":
 			if r.Method == "POST" {
 				var p map[string]any
@@ -81,10 +88,12 @@ func TestGitHubWatchdogClaimsSubmissionAndReadsReviewFacts(t *testing.T) {
 	if item.ID != "7" || item.Order != 7 || item.Submission.ID != "11" || item.Submission.CreatedAt != "2026-01-01" || len(item.Submission.Comments) != 3 {
 		t.Fatalf("review facts: %#v", item.Submission)
 	}
-	for range 2 {
-		if err := b.ClaimImplementation(ctx, item); err != nil {
-			t.Fatal(err)
-		}
+	candidate := workflow.QueueCandidate{SubmissionID: "11", Number: 11}
+	if _, err := b.ClaimSelected(ctx, candidate, item); err == nil || !strings.Contains(err.Error(), "Claim response was uncertain") {
+		t.Fatalf("uncertain acquisition lacked explicit recovery: %v", err)
+	}
+	if _, err := b.ClaimSelected(ctx, candidate, item); err == nil || !strings.Contains(err.Error(), "already carries") {
+		t.Fatalf("second Claim accepted: %v", err)
 	}
 	items, err = b.ImplementationItems(ctx)
 	if err != nil || !items[0].Claimed || !slices.Contains(labels, "review") || posts != 0 {
@@ -98,6 +107,12 @@ func TestGitHubWatchdogPublishesOpaqueAnchorsOnceAfterLostResponse(t *testing.T)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var stream *[]map[string]any
 		switch r.URL.Path {
+		case "/graphql":
+			fmt.Fprint(w, `{"data":{"repository":{"issue":{"closedByPullRequestsReferences":{"nodes":[{"number":11,"repository":{"nameWithOwner":"acme/widgets"}}]}}}}}`)
+			return
+		case "/repos/acme/widgets/pulls/11":
+			fmt.Fprint(w, `{"number":11,"state":"open","body":"Closes #7","head":{"ref":"widget","sha":"fixed","repo":{"full_name":"acme/widgets"}}}`)
+			return
 		case "/repos/acme/widgets/issues/11/comments":
 			stream = &summaries
 		case "/repos/acme/widgets/pulls/11/comments":
@@ -137,7 +152,7 @@ func TestGitHubWatchdogObservesMergeabilityWithoutCountingTimelineBounces(t *tes
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
 			case "/repos/acme/widgets/pulls/11":
-				fmt.Fprintf(w, `{"number":11,"state":"open","merged":%t,"mergeable":false,"head":{"sha":"fixed"},"base":{"ref":"main"}}`, merged)
+				fmt.Fprintf(w, `{"number":11,"state":"open","merged":%t,"mergeable":false,"head":{"sha":"fixed","ref":"widget","repo":{"full_name":"acme/widgets"}},"base":{"ref":"main"}}`, merged)
 			case "/repos/acme/widgets/issues/11/timeline":
 				if r.URL.Query().Get("page") == "1" {
 					events := []map[string]any{}
@@ -159,7 +174,7 @@ func TestGitHubWatchdogObservesMergeabilityWithoutCountingTimelineBounces(t *tes
 		b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
 		got, err := b.ReviewSubmission(context.Background(), "11")
 		server.Close()
-		if err != nil || got.ID != "11" || got.Mergeability != "conflicting" || got.Merged != merged || got.Head != "fixed" {
+		if err != nil || got.ID != "11" || got.Branch != "widget" || got.Mergeability != "conflicting" || got.Merged != merged || got.Head != "fixed" || got.Lifecycle == nil || !got.Lifecycle.Open || got.Lifecycle.Merged != merged {
 			t.Fatalf("observation: %#v %v", got, err)
 		}
 	}
@@ -174,6 +189,14 @@ func TestGitHubWatchdogCompletesReviewWithoutClosingSource(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				path := strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets")
 				switch {
+				case path == "/graphql":
+					fmt.Fprint(w, `{"data":{"repository":{"issue":{"closedByPullRequestsReferences":{"nodes":[{"number":11,"repository":{"nameWithOwner":"acme/widgets"}}]}}}}}`)
+				case path == "/pulls/11" && r.Method == "GET":
+					ls := []map[string]string{}
+					for _, label := range labels {
+						ls = append(ls, map[string]string{"name": label})
+					}
+					json.NewEncoder(w).Encode(map[string]any{"number": 11, "state": "open", "body": "Closes #7", "labels": ls, "head": map[string]any{"ref": "widget", "sha": "fixed", "repo": map[string]string{"full_name": "acme/widgets"}}})
 				case path == "/issues/7" && r.Method == "GET":
 					ls := []map[string]string{}
 					if sourcePaused {
@@ -240,9 +263,12 @@ func TestGitHubWatchdogLeavesStaleSyncUntilImplementationHandoff(t *testing.T) {
 		for _, v := range labels {
 			ls = append(ls, map[string]string{"name": v})
 		}
-		pull := map[string]any{"number": 11, "state": "open", "labels": ls, "head": map[string]any{"sha": "fixed", "ref": "widget", "repo": map[string]string{"full_name": "acme/widgets"}}}
+		pull := map[string]any{"number": 11, "state": "open", "body": "original\n\nCloses #7\n", "labels": ls, "head": map[string]any{"sha": "fixed", "ref": "widget", "repo": map[string]string{"full_name": "acme/widgets"}}}
 		var result any = []any{}
 		switch {
+		case path == "/graphql":
+			fmt.Fprint(w, `{"data":{"repository":{"issue":{"closedByPullRequestsReferences":{"nodes":[{"number":11,"repository":{"nameWithOwner":"acme/widgets"}}]}}}}}`)
+			return
 		case path == "/issues":
 			result = []any{map[string]any{"number": 7, "title": "widget", "state": "open"}}
 		case path == "/pulls":
@@ -289,10 +315,12 @@ func TestGitHubWatchdogHumanRequeueUsesProjectionNotProse(t *testing.T) {
 	for _, label := range []string{"needs-human", "review", "rework", "done"} {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
+			case "/graphql":
+				fmt.Fprint(w, `{"data":{"repository":{"issue":{"closedByPullRequestsReferences":{"nodes":[{"number":11,"repository":{"nameWithOwner":"acme/widgets"}}]}}}}}`)
 			case "/repos/acme/widgets/issues":
 				fmt.Fprint(w, `[{"number":7,"title":"widget","state":"open","labels":[{"name":"needs-human"}]}]`)
 			case "/repos/acme/widgets/pulls":
-				fmt.Fprintf(w, `[{"number":11,"state":"open","labels":[{"name":%q}],"head":{"sha":"fixed","ref":"widget","repo":{"full_name":"acme/widgets"}}}]`, label)
+				fmt.Fprintf(w, `[{"number":11,"state":"open","body":"original\n\nCloses #7\n","labels":[{"name":%q}],"head":{"sha":"fixed","ref":"widget","repo":{"full_name":"acme/widgets"}}}]`, label)
 			case "/repos/acme/widgets/issues/7/comments":
 				fmt.Fprint(w, `[{"body":"Please pass! [opaque","author_association":"OWNER"}]`)
 			default:
@@ -368,11 +396,13 @@ func TestGitHubStatusReadsChildrenAndReconcilesLostClosure(t *testing.T) {
 func TestGitHubStatusAdoptsOnlyForwardReviewProjections(t *testing.T) {
 	for _, latest := range []string{"rework", "review", "done", "partial"} {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			pull := `{"number":11,"state":"open","labels":[{"name":"review"},{"name":"rework"},{"name":"wip"}],"head":{"sha":"fixed","ref":"widget","repo":{"full_name":"acme/widgets"}}}`
+			pull := `{"number":11,"state":"open","body":"review\n\nCloses #7\n","labels":[{"name":"review"},{"name":"rework"},{"name":"wip"}],"head":{"sha":"fixed","ref":"widget","repo":{"full_name":"acme/widgets"}}}`
 			if latest == "partial" {
 				pull = strings.Replace(pull, `{"name":"review"},`, "", 1)
 			}
 			switch r.URL.Path {
+			case "/graphql":
+				fmt.Fprint(w, `{"data":{"repository":{"issue":{"closedByPullRequestsReferences":{"nodes":[{"number":11,"repository":{"nameWithOwner":"acme/widgets"}}]}}}}}`)
 			case "/repos/acme/widgets/issues":
 				fmt.Fprint(w, `[{"number":7,"title":"widget","state":"open"}]`)
 			case "/repos/acme/widgets/pulls":
@@ -405,46 +435,39 @@ func TestGitHubStatusAdoptsOnlyForwardReviewProjections(t *testing.T) {
 	}
 }
 
-func TestGitHubReviewRecoveryPreservesProblems(t *testing.T) {
-	for _, problem := range []string{"multiple source issues own the conventional branch"} {
-		t.Run(problem, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				pull := `{"number":11,"state":"open","labels":[{"name":"done"},{"name":"wip"}],"head":{"sha":"fixed","ref":"widget","repo":{"full_name":"acme/widgets"}}}`
-				switch r.URL.Path {
-				case "/repos/acme/widgets/issues":
-					issues := []map[string]any{{"number": 7, "title": "widget", "state": "open"}}
-					if strings.HasPrefix(problem, "multiple") {
-						issues = append(issues, map[string]any{"number": 8, "title": "widget", "state": "open"})
-					}
-					json.NewEncoder(w).Encode(issues)
-				case "/repos/acme/widgets/pulls":
-					fmt.Fprint(w, "["+pull+"]")
-				case "/repos/acme/widgets/pulls/11":
-					fmt.Fprint(w, pull)
-				case "/repos/acme/widgets/issues/7/comments":
-					comments := []map[string]string{}
-					if strings.HasPrefix(problem, "conflicting") {
-						for _, snapshot := range []string{"first", "second"} {
-							comments = append(comments, map[string]string{"body": "<!-- skl.implement/v1\n{\"target_snapshot\":\"" + snapshot + "\"}\n-->", "author_association": "OWNER"})
-						}
-					}
-					json.NewEncoder(w).Encode(comments)
-				default:
-					fmt.Fprint(w, `[]`)
-				}
-			}))
-			defer server.Close()
-			b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
-			items, err := b.ImplementationItems(context.Background())
-			if err != nil || len(items) == 0 {
-				t.Fatalf("items: %#v %v", items, err)
+func TestGitHubOwnershipIgnoresDisplayTitles(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pull := `{"number":11,"state":"open","body":"review\n\nCloses #7\n","labels":[{"name":"done"},{"name":"wip"}],"head":{"sha":"fixed","ref":"renamed","repo":{"full_name":"acme/widgets"}}}`
+		switch r.URL.Path {
+		case "/graphql":
+			var query struct{ Variables struct{ Number int } }
+			json.NewDecoder(r.Body).Decode(&query)
+			if query.Variables.Number == 7 {
+				fmt.Fprint(w, `{"data":{"repository":{"issue":{"closedByPullRequestsReferences":{"nodes":[{"number":11,"repository":{"nameWithOwner":"acme/widgets"}}]}}}}}`)
+			} else {
+				fmt.Fprint(w, `{"data":{"repository":{"issue":{"closedByPullRequestsReferences":{"nodes":[]}}}}}`)
 			}
-			for _, item := range items {
-				if item.Problem != problem {
-					t.Fatalf("recovery erased unrelated problem: %#v", item)
-				}
-			}
-		})
+		case "/repos/acme/widgets/issues":
+			json.NewEncoder(w).Encode([]map[string]any{
+				{"number": 7, "title": "renamed", "state": "open"},
+				{"number": 8, "title": "renamed", "state": "open"},
+			})
+		case "/repos/acme/widgets/pulls":
+			fmt.Fprint(w, "["+pull+"]")
+		case "/repos/acme/widgets/pulls/11":
+			fmt.Fprint(w, pull)
+		default:
+			fmt.Fprint(w, `[]`)
+		}
+	}))
+	defer server.Close()
+	b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
+	items, err := b.ImplementationItems(context.Background())
+	if err != nil || len(items) != 1 {
+		t.Fatalf("items: %#v %v", items, err)
+	}
+	if items[0].ID != "7" || items[0].Problem != "" || items[0].Branch != "renamed" || items[0].Submission == nil || items[0].Submission.ID != "11" {
+		t.Fatalf("ownership followed a display title: %#v", items[0])
 	}
 }
 
@@ -452,13 +475,15 @@ func TestGitHubReviewRecoveryLateSynchronization(t *testing.T) {
 	for _, history := range [][]string{{"done", "sync", "rework"}, {"rework", "sync", "done"}, {"done", "rework", "sync"}, {"done", "rework"}, {"review", "done", "sync", "rework"}, {"done", "review", "wip", "sync", "rework"}, {"review", "wip", "done", "rework", "sync"}, {"review", "wip", "done", "needs-human", "sync", "rework"}} {
 		t.Run(strings.Join(history, "-"), func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				pull := `{"number":11,"state":"open","labels":[{"name":"done"},{"name":"sync"},{"name":"rework"}],"head":{"sha":"fixed","ref":"widget","repo":{"full_name":"acme/widgets"}}}`
+				pull := `{"number":11,"state":"open","body":"review\n\nCloses #7\n","labels":[{"name":"done"},{"name":"sync"},{"name":"rework"}],"head":{"sha":"fixed","ref":"widget","repo":{"full_name":"acme/widgets"}}}`
 				for _, label := range []string{"review", "wip", "needs-human"} {
 					if slices.Contains(history, label) {
 						pull = strings.Replace(pull, `"labels":[`, `"labels":[{"name":"`+label+`"},`, 1)
 					}
 				}
 				switch r.URL.Path {
+				case "/graphql":
+					fmt.Fprint(w, `{"data":{"repository":{"issue":{"closedByPullRequestsReferences":{"nodes":[{"number":11,"repository":{"nameWithOwner":"acme/widgets"}}]}}}}}`)
 				case "/repos/acme/widgets/issues":
 					fmt.Fprint(w, `[{"number":7,"title":"widget","state":"open"}]`)
 				case "/repos/acme/widgets/pulls":
@@ -507,9 +532,12 @@ func TestGitHubReviewRecoveryConflictingPartialPass(t *testing.T) {
 				for _, label := range labels {
 					ls = append(ls, map[string]string{"name": label})
 				}
-				pull := map[string]any{"number": 11, "state": "open", "mergeable": false, "labels": ls, "head": map[string]any{"sha": "fixed", "ref": "widget", "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": "main"}}
+				pull := map[string]any{"number": 11, "state": "open", "mergeable": false, "body": "review\n\nCloses #7\n", "labels": ls, "head": map[string]any{"sha": "fixed", "ref": "widget", "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": "main"}}
 				var result any = []any{}
 				switch {
+				case path == "/graphql":
+					fmt.Fprint(w, `{"data":{"repository":{"issue":{"closedByPullRequestsReferences":{"nodes":[{"number":11,"repository":{"nameWithOwner":"acme/widgets"}}]}}}}}`)
+					return
 				case path == "/issues":
 					result = []any{map[string]any{"number": 7, "title": "widget", "state": "open"}}
 				case path == "/pulls":
@@ -605,13 +633,16 @@ func TestGitHubReviewRecoverySourceDeletionFailsUnapplied(t *testing.T) {
 		for _, label := range labels {
 			ls = append(ls, map[string]string{"name": label})
 		}
-		pull := map[string]any{"number": 11, "state": "open", "labels": ls, "head": map[string]any{"sha": "fixed", "ref": "widget", "repo": map[string]string{"full_name": "acme/widgets"}}}
+		pull := map[string]any{"number": 11, "state": "open", "body": "original\n\nCloses #7\n", "labels": ls, "head": map[string]any{"sha": "fixed", "ref": "widget", "repo": map[string]string{"full_name": "acme/widgets"}}}
 		source := map[string]any{"number": 7, "title": "widget", "state": "open"}
 		if sourcePaused {
 			source["labels"] = []map[string]string{{"name": "needs-human"}}
 		}
 		var result any = []any{}
 		switch {
+		case path == "/graphql":
+			fmt.Fprint(w, `{"data":{"repository":{"issue":{"closedByPullRequestsReferences":{"nodes":[{"number":11,"repository":{"nameWithOwner":"acme/widgets"}}]}}}}}`)
+			return
 		case path == "/issues":
 			result = []any{source}
 		case path == "/pulls":
@@ -677,6 +708,8 @@ func TestGitHubStatusRecognizesMergedAndSupersededReferences(t *testing.T) {
 	for _, mergedAt := range []string{"", "2026-09-08T12:00:00Z"} {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
+			case "/graphql":
+				fmt.Fprint(w, `{"data":{"repository":{"issue":{"closedByPullRequestsReferences":{"nodes":[{"number":11,"repository":{"nameWithOwner":"acme/widgets"}}]}}}}}`)
 			case "/repos/acme/widgets/issues":
 				fmt.Fprint(w, `[{"number":7,"title":"widget","state":"closed"}]`)
 			case "/repos/acme/widgets/pulls":

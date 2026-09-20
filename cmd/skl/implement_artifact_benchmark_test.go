@@ -73,7 +73,7 @@ func BenchmarkArtifactEndpointInspection(b *testing.B) {
 			backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "ship-widget", State: workflow.AwaitingReview}}}
 			var output bytes.Buffer
 			app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
-			command := []string{"skl", "implement", "inspect", "--item", "7", "--repo", fixture.root}
+			command := []string{"skl", "implement", "inspect", "--format", "json", "--item", "7", "--repo", fixture.root}
 
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
@@ -99,7 +99,7 @@ func inspectArtifactFixture(t testing.TB, fixture artifactInspectionFixture, tra
 	backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "ship-widget", State: workflow.AwaitingReview}}}
 	var output bytes.Buffer
 	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
-	if err := app.Run([]string{"skl", "implement", "inspect", "--item", "7", "--repo", fixture.root}); err != nil {
+	if err := app.Run([]string{"skl", "implement", "inspect", "--format", "json", "--item", "7", "--repo", fixture.root}); err != nil {
 		t.Fatalf("inspect: %v\n%s", err, &output)
 	}
 	var result setup.ImplementationOutput

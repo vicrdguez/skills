@@ -37,6 +37,7 @@ func watchdogCLI(t *testing.T, root string, backend *implementationMemory, args 
 	var output bytes.Buffer
 	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
 	command := append([]string{"skl", "watchdog"}, args...)
+	command = append(command, "--format", "json")
 	command = append(command, "--repo", root)
 	if err := app.Run(command); err != nil {
 		t.Fatalf("%v: %v\n%s", command, err, &output)
@@ -59,8 +60,8 @@ func TestB11ValidateWatchdogAgainstTheSameArtifactEndpoints(t *testing.T) {
 		{"unchanged endpoints after Rework", "rework", "next", "work_available"},
 		{"Debt Marker descendant", "debt", "submit", "ready_for_merge"},
 		{"final head reintroduces ledger", "reintroduced", "submit", "fix_required"},
-		{"invalid Completion", "invalid", "next", "fix_required"},
-		{"ambiguous Completion", "ambiguous", "next", "fix_required"},
+		{"invalid Completion", "invalid", "submit", "fix_required"},
+		{"ambiguous Completion", "ambiguous", "submit", "fix_required"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			root := proposalRepository(t)
@@ -125,8 +126,8 @@ func TestB11ValidateWatchdogAgainstTheSameArtifactEndpoints(t *testing.T) {
 			}
 			if test.want == "work_available" {
 				facts := got.Packet.Facts.Watchdog
-				if facts.BaselineFiles[".changes/widget/intent.md"] == "" || facts.CompletionFiles[".changes/widget/intent.md"] == "" || !strings.Contains(got.Packet.Instructions, "endpoint") {
-					t.Fatalf("historical contract or independent guidance missing: %#v", facts)
+				if facts.InspectCommand == "" || facts.FetchCommand == "" || facts.WorktreeCommand == "" || facts.ReviewedHead != final || facts.ReviewCount != 0 || facts.ReviewNumber != 1 || !strings.Contains(got.Packet.Instructions, "Inspect") {
+					t.Fatalf("startup preparation or independent guidance missing: %#v", facts)
 				}
 			}
 			if test.want == "fix_required" && backend.work[0].Claimed != claimed {
@@ -426,7 +427,9 @@ func (b *implementationMemory) ReviewSubmission(_ context.Context, id workflow.S
 			if b.work[i].Claimed && submission.ClaimAcquiredAt == "" {
 				submission.ClaimAcquiredAt = b.reviewTime()
 			}
-			return *submission, nil
+			observed := *submission
+			observed.Branch = b.work[i].Branch
+			return observed, nil
 		}
 	}
 	return workflow.Submission{}, fmt.Errorf("missing Submission")
@@ -494,7 +497,7 @@ func TestWatchdogClaimsOldestSubmissionAndPinsPacket(t *testing.T) {
 		t.Fatalf("claim: %#v", got)
 	}
 	f := got.Packet.Facts.Watchdog
-	if f.ReviewedHead != b.work[1].Submission.Head || f.ArtifactBaseline == "" || f.ArtifactCompletion == "" || f.AuditBody != "opaque audit" || !reflect.DeepEqual(f.Comments, b.work[1].Submission.Comments) {
+	if f.ReviewedHead != b.work[1].Submission.Head || f.InspectCommand == "" || f.FetchCommand == "" || f.WorktreeCommand == "" || f.AuditBody != "opaque audit" || !reflect.DeepEqual(f.Comments, b.work[1].Submission.Comments) {
 		t.Fatalf("facts: %#v", f)
 	}
 	if got.Packet.Skill != "watchdog" || len(got.Packet.IncludedSkills) != 0 {
@@ -559,21 +562,22 @@ func TestWatchdogPacketCarriesHistoricalContractAndSemanticHandoff(t *testing.T)
 	baseline := prepareSlice(t, root, "widget")
 	completeAndRetireSlice(t, root, "widget")
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
-	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Submission: &workflow.Submission{ID: "11", Head: head, Body: "opaque audit", Comments: []skilldist.ReviewComment{{Body: "W1 prior", Commit: baseline}}}}}}
+	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.AwaitingReview, Submission: &workflow.Submission{ID: "11", Head: head, Base: "main", Body: "opaque audit", Comments: []skilldist.ReviewComment{{Body: "W1 prior", Commit: baseline}}}}}}
 	got := watchdogCLI(t, root, b, "next")
 	f := got.Packet.Facts.Watchdog
-	if f.BaselineFiles[".changes/widget/intent.md"] == "" || f.CompletionFiles[".changes/widget/intent.md"] == "" || f.ReviewCount != 0 || f.ReviewNumber != 1 || !strings.Contains(f.SubmitCommand, "--review-number 1 --reviewed-head "+head) {
+	if f.InspectCommand == "" || f.FetchCommand == "" || f.WorktreeCommand == "" || f.ReviewCount != 0 || f.ReviewNumber != 1 || !strings.Contains(f.SubmitCommand, "--review-number 1 --reviewed-head "+head) {
 		t.Fatalf("concrete facts: %#v", f)
 	}
 	_, body, ok := strings.Cut(got.Packet.Instructions, "\n\n## Review Start\n")
 	if !ok {
 		t.Fatal("missing concrete review instructions")
 	}
-	normalized := strings.NewReplacer(f.Worktree, "<worktree>", f.ResultDirectory, "<result>", head, "<head>", baseline, "<baseline>", f.ArtifactCompletion, "<completion>").Replace("## Review Start\n" + body)
+	header, _, _ := strings.Cut("## Review Start\n"+body, "\n\n## Supplied Submission body and Audit ledger")
+	normalized := strings.NewReplacer(f.Worktree, "<worktree>", f.ResultDirectory, "<result>", head, "<head>", filepath.Dir(filepath.Dir(f.Worktree)), "<main>", baseline, "<baseline>").Replace(header + "\n")
 	if want := readRepositoryFile(t, "cmd/skl/testdata/watchdog-start.golden.md"); normalized != want {
 		t.Fatalf("packet golden mismatch:\n%s", normalized)
 	}
-	for _, required := range []string{"Do not re-run `audit`", "formatter or parser", "git diff --check", "push", "--head", "W<n>", "test *strength*"} {
+	for _, required := range []string{"Do not re-run `audit`", "formatter or parser", "git diff --check", "push", "--head", "W<n>", "Challenge claimed evidence"} {
 		if !strings.Contains(got.Packet.Instructions, required) {
 			t.Errorf("missing preserved instruction %q", required)
 		}
