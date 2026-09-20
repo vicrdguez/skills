@@ -36,6 +36,7 @@ Read the historical accepted artifacts from the resolved endpoints rather than f
 
 - `git -C {{quote .Worktree}} show {{quote (printf "%s:.changes/%s/tasks.md" .ArtifactCompletion .Branch)}}`
 {{end}}
+{{template "delegation" .}}
 {{end}}
 Refresh integrity with `{{.InspectCommand}}` before editing, before Audit, and before handoff, wherever the current procedure needs current evidence.
 {{end}}

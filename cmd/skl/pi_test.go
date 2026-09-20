@@ -42,6 +42,34 @@ func TestInstallPiQueueAdaptersWithoutDuplicatingSkills(t *testing.T) {
 	if got := readFile(t, path); got != "user-owned queue" {
 		t.Fatal("overwrote user's adapter")
 	}
+
+	runner := filepath.Join(home, ".pi/agent/agents/implement-runner.md")
+	if err := os.WriteFile(runner, []byte("user-owned implement runner\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.Run([]string{"skl", "install"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, runner); got != "user-owned implement runner\n" {
+		t.Fatal("overwrote user's implement runner")
+	}
+
+	upgradeHome := t.TempDir()
+	legacyRunner := filepath.Join(upgradeHome, ".pi/agent/agents/implement-runner.md")
+	if err := os.MkdirAll(filepath.Dir(legacyRunner), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacyRunner, []byte("<!-- skl-owned: skl.pi/v1 -->\nUse `subagent` only for audit.\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	upgradeApp := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, upgradeHome)
+	if err := upgradeApp.Run([]string{"skl", "install"}); err != nil {
+		t.Fatal(err)
+	}
+	upgraded := readFile(t, legacyRunner)
+	if !strings.Contains(upgraded, "optional `subagent` use for bounded, non-conflicting implementation or testing assignments") || strings.Contains(upgraded, "Use `subagent` only for audit") {
+		t.Fatalf("owned implement runner was not upgraded: %s", upgraded)
+	}
 }
 
 func TestInstallDisablesOwnedWatchdogLoopButPreservesOneItemRunner(t *testing.T) {

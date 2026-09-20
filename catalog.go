@@ -99,8 +99,9 @@ const (
 )
 
 // ExecutionCapability is the adapter capability an invocation established. It
-// selects only the Audit review recipe; a harness name alone establishes
-// nothing, and an unknown capability keeps a runtime choice.
+// selects supported helper recipes for optional implementation/testing delegation
+// and mandatory Audit dispatch; a harness name alone establishes nothing, and an
+// unknown capability keeps a bounded runtime choice.
 type ExecutionCapability string
 
 const (

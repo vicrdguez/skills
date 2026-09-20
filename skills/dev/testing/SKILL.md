@@ -17,7 +17,13 @@ An unspecified detail is delegated only when the available choices preserve thos
 {{else}}Identify the promised behavior, architecture commitments, and mandatory standards before judging evidence. Clarify a consequential unresolved behavioral or architectural choice with the user; do not turn silence into a requirement or an assumption.
 {{end}}
 
-## Verify observable behavior
+{{if .Implementation}}## Delegated testing during Implement
+
+When the invocation establishes a supported helper mechanism, the owner may delegate a bounded testing assignment; delegation is optional, and unavailable support—or unknown support that the Implement guidance's bounded check does not establish—means the owner performs it serially. Give a fresh helper the accepted behavioral and architectural obligations, required observations, working location, standards, and non-conflicting write responsibility. State preferred test organization only as a preference, not an acceptance criterion.
+
+The helper returns its contribution, evidence, and limitations to the same owner without selecting work, acquiring a Claim, changing Workflow State, or publishing the Submission. The owner inspects and integrates the contribution and verifies the final functional state. A helper's isolated passing check is evidence, not a substitute for affected integrated checks, the Full Gate, Audit, or independent Watchdog Review.
+
+{{end}}## Verify observable behavior
 
 Test through an interface that exposes the promised consequence without reaching through it into incidental implementation details. A suitable existing verification boundary is valid when it can observe the obligation and distinguish a plausible violation; do not add another test layer or redesign the architecture merely to create a preferred seam.
 
