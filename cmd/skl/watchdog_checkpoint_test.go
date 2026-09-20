@@ -1747,7 +1747,7 @@ func (f *reviewFixture) runJSON(caller string, args ...string) ([]byte, error) {
 		backend.BindRepository(repository)
 		return backend, nil
 	}, bytes.NewReader(nil), &output, &output)
-	command := append([]string{"skl"}, args...)
+	command := structuredStageCommand(args...)
 	command = append(command, "--repo", caller)
 	if len(args) > 0 && args[0] == "watchdog" {
 		command = append(command, "--format", "json")
@@ -2800,7 +2800,7 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 		}
 		resumed := f.run(t, f.root, "implement", "resume", "--item", "7")
 		for _, instructions := range []string{got.Packet.Instructions, resumed.Packet.Instructions} {
-			required := []string{"ordinary PR comparison", "user provides a fixed point", "Two-axis review", "Standards", "Artifacts", "full suite", "documented gate", "Artifact integrity", "complete final implementation"}
+			required := []string{"ordinary PR comparison", "merge-base with `main` and the parent of this change's first commit", "Two-axis review", "Standards", "Artifacts", "full suite", "documented gate", "Artifact integrity", "complete final implementation"}
 			missing := slices.DeleteFunc(required, func(text string) bool { return strings.Contains(instructions, text) })
 			if strings.Contains(instructions, "previous-reviewed-head") || strings.Contains(instructions, "cache repair") || strings.Contains(instructions, "required previous-review") || !strings.Contains(instructions, "## Included Skill: audit") || len(missing) != 0 {
 				t.Fatalf("implementation/Audit fallback missing %v: %q", missing, instructions)

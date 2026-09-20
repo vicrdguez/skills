@@ -293,10 +293,13 @@ func (b *GitHubBackend) selectedReady(ctx context.Context, id workflow.WorkItemI
 	if len(owners) != 0 {
 		problem = "another active Submission already owns the Work Item; inspect its attachment instead of reassigning it"
 	}
-	comments, err := b.implementationComments(ctx, b.repository, fmt.Sprintf("/issues/%d/comments", issue.Number))
+	stream := fmt.Sprintf("/issues/%d/comments", issue.Number)
+	comments, err := b.implementationComments(ctx, b.repository, stream)
 	if err != nil {
 		return workflow.ImplementationItem{}, err
 	}
+	repository := b.repository.Owner + "/" + b.repository.Name
+	item.EvidenceSources = append(item.EvidenceSources, skilldist.RepositoryEvidenceSource(repository, stream))
 	for _, comment := range comments {
 		if strings.HasPrefix(comment.Body, "<!-- skl.implement/v1\n") {
 			continue
@@ -334,6 +337,7 @@ func (b *GitHubBackend) submissionItem(ctx context.Context, pull githubPull) (wo
 		Source: implementationLifecycle(issue),
 		Submission: &workflow.Submission{
 			ID: workflow.SubmissionID(strconv.Itoa(pull.Number)), Head: pull.Head.SHA, Base: pull.Base.Ref, Draft: pull.Draft, Body: pull.Body,
+			Author: pull.User.Login, Association: pull.AuthorAssociation,
 			CreatedAt: pull.CreatedAt, Lifecycle: implementationLifecycle(pull.githubIssue),
 		},
 	}
@@ -364,12 +368,24 @@ func (b *GitHubBackend) submissionItem(ctx context.Context, pull githubPull) (wo
 		item.Feedback = append(item.Feedback, comment)
 		item.Submission.Comments = append(item.Submission.Comments, comment)
 	}
-	for _, stream := range []string{streams.discussion, streams.inline} {
-		comments, err := b.implementationComments(ctx, b.repository, stream)
+	repository := b.repository.Owner + "/" + b.repository.Name
+	item.Submission.EvidenceSources = []skilldist.EvidenceSource{
+		skilldist.PullEvidenceSource(repository, pull.Number),
+		skilldist.IssueCommentsEvidenceSource(repository, owner),
+	}
+	for _, stream := range []struct {
+		path   string
+		source skilldist.EvidenceSource
+	}{
+		{streams.discussion, skilldist.PullDiscussionEvidenceSource(repository, pull.Number)},
+		{streams.inline, skilldist.PullCommentsEvidenceSource(repository, pull.Number)},
+	} {
+		comments, err := b.implementationComments(ctx, b.repository, stream.path)
 		if err != nil {
 			return workflow.ImplementationItem{}, "", err
 		}
-		recordEvidence(stream, len(comments))
+		item.Submission.EvidenceSources = append(item.Submission.EvidenceSources, stream.source)
+		recordEvidence(stream.path, len(comments))
 		item.Submission.Comments = append(item.Submission.Comments, comments...)
 		item.Submission.EvidenceComments = append(item.Submission.EvidenceComments, comments...)
 	}
@@ -377,6 +393,10 @@ func (b *GitHubBackend) submissionItem(ctx context.Context, pull githubPull) (wo
 	if err != nil {
 		return workflow.ImplementationItem{}, "", err
 	}
+	item.Submission.EvidenceSources = append(
+		item.Submission.EvidenceSources,
+		skilldist.PullReviewsEvidenceSource(repository, pull.Number),
+	)
 	recordEvidence(streams.summaries, len(reviews))
 	item.Submission.Comments = append(item.Submission.Comments, reviews...)
 	for _, review := range reviews {
@@ -773,7 +793,17 @@ func (b *GitHubBackend) implementationReviews(ctx context.Context, number int) (
 					finalHead = metadata.FinalHead
 				}
 			}
-			comment := skilldist.ReviewComment{Source: b.repositoryPath(b.repository) + fmt.Sprintf("/pulls/%d/reviews", number), Body: body, Author: review.User.Login, Association: review.Association, Commit: review.Commit, FinalHead: finalHead, CreatedAt: review.SubmittedAt, Verdict: verdict, ReviewNumber: reviewNumber}
+			comment := skilldist.ReviewComment{
+				Source:       skilldist.PullReviewsEvidenceSource(b.repository.Owner+"/"+b.repository.Name, number),
+				Body:         body,
+				Author:       review.User.Login,
+				Association:  review.Association,
+				Commit:       review.Commit,
+				FinalHead:    finalHead,
+				CreatedAt:    review.SubmittedAt,
+				Verdict:      verdict,
+				ReviewNumber: reviewNumber,
+			}
 			if body != review.Body {
 				comment.RawBody = review.Body
 			}

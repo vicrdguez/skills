@@ -77,7 +77,8 @@ func waitingCLI(t *testing.T, ctx context.Context, root, lane string, b *waiting
 		b.repository = repository
 		return b, nil
 	}, nil, &out, &stderr)
-	args := append([]string{"skl", lane, "next", "--repo", root, "--remote", "upstream"}, options...)
+	args := append([]string{lane, "next", "--repo", root, "--remote", "upstream"}, options...)
+	args = structuredStageCommand(args...)
 	if lane == "watchdog" {
 		args = append(args, "--format", "json")
 	}

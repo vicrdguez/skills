@@ -144,10 +144,21 @@ func claimSelected(ctx context.Context, backend SelectionBackend, candidate Queu
 		return ImplementationItem{}, ImplementationOutcome{}, err
 	}
 	if observed.Problem != "" || !observed.Claimed || observed.ID != item.ID || observed.State != item.State || observed.Branch != item.Branch {
-		return observed, implementationRefusal(observed, "Claim read-back contradicts the selected Work Item; inspect it and explicitly resume"), nil
+		outcome := uncertainClaimRefusal(item, "Claim read-back contradicts the selected Work Item; inspect it and explicitly resume")
+		return observed, outcome, nil
 	}
 	if item.Submission != nil && (observed.Submission == nil || observed.Submission.ID != item.Submission.ID || observed.Submission.Head != item.Submission.Head) {
-		return observed, implementationRefusal(observed, "Claim read-back contradicts the selected Submission; inspect it and explicitly resume"), nil
+		outcome := uncertainClaimRefusal(item, "Claim read-back contradicts the selected Submission; inspect it and explicitly resume")
+		return observed, outcome, nil
 	}
 	return observed, ImplementationOutcome{}, nil
+}
+
+// uncertainClaimRefusal preserves the acquisition target even when read-back
+// returns a different identity. The observation proves neither acquisition nor
+// release, so recovery must inspect and resume the originally selected item.
+func uncertainClaimRefusal(selected ImplementationItem, reason string) ImplementationOutcome {
+	outcome := implementationRefusal(selected, reason)
+	outcome.ClaimAcquisitionUncertain = true
+	return outcome
 }

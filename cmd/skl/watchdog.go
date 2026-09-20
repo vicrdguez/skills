@@ -88,7 +88,7 @@ func watchdogCommands(newBackend backendFactory, stdout io.Writer) []*cli.Comman
 			if outcome.Facts != nil && outcome.Facts.Watchdog != nil {
 				outcome.Facts.Watchdog.Repository = repository.Repository.Owner + "/" + repository.Repository.Name
 			}
-			output, err := setup.PresentImplementation(outcome)
+			output, err := setup.PresentImplementation(outcome, setup.InvocationContext{Repository: repository.Repository})
 			if err != nil {
 				return err
 			}

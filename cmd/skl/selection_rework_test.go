@@ -44,11 +44,11 @@ func selectionReworkRun(t *testing.T, root string, forge *candidateForge, change
 		backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
 		return backend, nil
 	}, bytes.NewReader(nil), &output, &output)
-	command := append(append([]string{"skl"}, args...), "--repo", root)
+	command := structuredStageCommand(args...)
 	if len(args) > 0 && args[0] == "watchdog" {
 		command = append(command, "--format", "json")
 	}
-	err := app.Run(command)
+	err := app.Run(append(command, "--repo", root))
 	if err != nil {
 		return setup.ImplementationOutput{}, err
 	}
