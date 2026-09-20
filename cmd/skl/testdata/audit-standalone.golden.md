@@ -2,7 +2,7 @@ Protocol: skl.instructions/v1
 Skill: audit
 Included skills: none
 Facts: {}
-Resources: reference/smells.md
+Resources: reference/acceptance.md, reference/smells.md
 
 ---
 name: audit
@@ -15,11 +15,11 @@ Two-axis review of the diff between `HEAD` and a fixed point the user supplies:
 - **Artifacts** — does the code faithfully implement the originating intent, behaviors, plan and tasks?
   1. The Workflow Engine's endpoint inspection reports identical paths, regular non-executable blobs, and exact bytes except permitted lowercase completion ticks, with Manual Verification unchecked; normal submission also requires completed automated boxes and later ledger retirement
   2. Every `intent.md` item in "Definition of Done" is demonstrably met
-  3. Every `behavior.md` scenario has materialized as a test (or for prose changes, encoded)
+  3. Every rule, scenario, and architectural obligation is accounted for with credible grouped many-to-many evidence, and the changed test set preserves required behavioral and failure-mode protection
   4. The full suite is green
   5. Read `plan.md` against the diff. If the implementation diverged, note it.
 
-Item 1 is what stops the contract moving to meet the code. The rest are judged against the **complete final implementation**, even when the diff under review is only the latest increment.
+Item 1 is what stops the contract moving to meet the code. The rest are judged against the **complete final implementation**, even when the diff under review is only the latest increment. Reuse, strengthening, consolidation, or removal of tests is acceptable when protection remains; scrutinize removed or weakened assertions for lost coverage without demanding per-test bookkeeping.
 
 Both axes run as **parallel sub-agents** when the harness supports them, so they don't pollute each other's context, then this skill aggregates their findings. The sequential fallback below preserves both axes when it does not.
 
@@ -56,11 +56,13 @@ Look for the originating artifacts, in this order:
 4. If nothing is found, ask the user where the artifacts are. If they say there isn't one, the **Artifacts** sub-agent will skip and report "no Artifacts available".
 
 
-### 3. Identify the standards sources
+### 3. Identify the standards and acceptance sources
 
 Anything in the repo that documents how code should be written, such as `CODING_STANDARDS.md` or `CONTRIBUTING.md`.
 
 On top of whatever the repo documents, the Standards axis always carries the **smell baseline** from `skl skill --resource reference/smells.md audit` — a fixed set of Fowler code smells (_Refactoring_, ch.3) that applies even when a repo documents nothing, plus the two rules that bind it.
+
+Retrieve the shared contract criteria with `skl skill --resource reference/acceptance.md audit`. Give those criteria to both reviewers. They distinguish behavioral conformance, architectural conformance, and local implementation quality; sharing them with Watchdog does not execute Audit again.
 
 ### 4. Run the deterministic checks once
 
@@ -83,6 +85,7 @@ Dispatch both axes as parallel sub-agents, each in a fresh context carrying its 
 
 - The full diff command and commit list.
 - The list of standards-source files you found in step 3, plus `skl skill --resource reference/smells.md audit`. Instruct the sub-agent to read those files and the command's output.
+- The shared criteria from `skl skill --resource reference/acceptance.md audit`.
 - The gate results from step 4.
 - The precedence between sources, so the sub-agent knows what outranks what: frozen artifacts, then required tooling and CI, then the project's `AGENTS.md`, standards docs and quality skills, then language and framework correctness, security and accessibility rules, then the generic smell baseline. An explicit project or language `MUST`, `ALWAYS`, `NEVER` or equivalent can be a hard violation; a generic smell stays a judgement call unless a local rule or a concrete behavior or maintenance impact elevates it.
 - The brief: "Report — per file/hunk where relevant — (a) every place the diff violates a documented standard: cite the standard (file + the rule); and (b) any baseline smell you spot: name it and quote the hunk. Tag each finding as `HARD` or `JUDGEMENT` as its first token; documented-standard breaches can be `HARD`, but baseline smells are always `JUDGEMENT`, and a documented repo standard overrides the baseline. Skip anything tooling enforces. Report each finding as its own bullet, anchored to `file:line`. Under 500 words. Compress findings rather than omit any."
@@ -91,8 +94,9 @@ Dispatch both axes as parallel sub-agents, each in a fresh context carrying its 
 
 - The diff command and commit list.
 - The paths or fetched contents of the Artifacts at the exact Baseline and, when available, Completion or provisional head.
+- The shared criteria from `skl skill --resource reference/acceptance.md audit`.
 - The gate and artifact-integrity results from step 4.
-- The brief: "Report: (a) requirements, intent and behaviors the artifacts asked for that are missing or partial; (b) behaviour in the diff that wasn't asked for (scope creep); (c) requirements that look implemented but where the implementation looks wrong; (d) the gate result you were given, if it is not green — do not rerun it; (e) read `plan.md` against the diff and note any divergence; (f) any endpoint violation the integrity result reports, without adding intermediate-history or deletion-inference rules. Judge (a) to (c) against the complete final implementation even when the diff is only the latest increment. Quote the spec line for each finding. Tag each finding `HARD` or `JUDGEMENT` as its first token: (a), (b), (c) and (f) are `HARD`; (d) is `HARD` when the gate is red; (e) is `JUDGEMENT` unless the divergence breaks a frozen requirement. Report each finding as its own bullet, anchored to `file:line`. Under 500 words — compress findings rather than omit any."
+- The brief: "Report: (a) requirements, intent, rules, scenarios, or architectural obligations that are missing, partial, or contradicted; (b) behaviour in the diff that wasn't asked for (scope creep); (c) claimed evidence that does not expose the promised consequence or distinguish a plausible violation, including protection lost through removed or weakened assertions; (d) the gate result you were given, if it is not green — do not rerun it; (e) read `plan.md` against the diff and note any divergence; (f) any endpoint violation the integrity result reports, without adding intermediate-history or deletion-inference rules. Accept grouped many-to-many evidence and contract-preserving test reuse or consolidation; do not impose preferred test organization or implementation. Judge (a) to (c) against the complete final implementation even when the diff is only the latest increment. For an evidence gap, identify the obligation, plausible violation, and why existing evidence does not distinguish it. Quote the spec line for each finding. Tag each finding `HARD` or `JUDGEMENT` as its first token under the shared criteria: (a), (b), (c) and (f) are `HARD`; (d) is `HARD` when the gate is red; (e) is `JUDGEMENT` unless the divergence breaks a frozen requirement. Report each finding as its own bullet, anchored to `file:line`. Under 500 words — compress findings rather than omit any."
 
 
 Nothing written after the artifacts were published is a requirement: not review comments, not rework notes. They can be evidence, never a spec line to hold the implementation against.

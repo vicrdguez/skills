@@ -1,6 +1,6 @@
 ---
 name: implement
-description: Implement a single claimed change following TDD, driven by its accepted Implementation Ledger.
+description: Implement a single claimed change against its accepted behavioral and architectural contract.
 disable-model-invocation: true
 ---
 
@@ -47,8 +47,8 @@ A read that fails, returns an error, or whose pagination stops early is a `retri
 Work only in `<worktree>`. Every new or updated Submission targets `main`; integration with `main`, conflict resolution, and merge belong to the human Merge Authority after review. Never rewrite history: the Artifact Baseline, Artifact Completion, and prior Reviewed heads must remain reachable.
 
 1. Run Inspect before editing. Artifact progress is genuinely unknown until that read-only continuation. Follow only the returned progress-specific instructions: continue a provisional ledger, reuse an existing Completion, and keep a retired ledger absent. Never duplicate Completion or recreate retired artifacts.
-2. Read the accepted `.changes/widget/` artifacts at the resolved Artifact Baseline. Materialize every `behavior.md` scenario as an idiomatic test at its pinned seam and follow the bundled TDD red -> green loop. For resumed work, first establish what remains and preserve completed progress.
-3. Run typechecking and focused tests regularly. Once every accepted scenario is green, run Inspect again for current integrity, then invoke the bundled Audit exactly once against the merge-base with `main` and the parent of this change's first commit. Audit runs the Full Gate once before its reviewers. Refactoring belongs in that Audit pass, not in the red -> green cycles.
+2. Read the accepted `.changes/widget/` artifacts at the resolved Artifact Baseline. Deliver the complete accepted behavior and architecture, not merely enough behavior to satisfy the checks written so far. Account for every rule and scenario using suitable existing verification boundaries, grouped or reused tests, and appropriate inspection evidence. Preserve every explicit frozen obligation. For resumed work, first establish what remains and preserve completed progress.
+3. Choose the construction order that best fits the change. Add or strengthen checks where they provide credible protection, and perform in-scope refactoring throughout implementation while preserving required behavior, architecture, and regression coverage. Run typechecking and focused tests regularly. When the complete accepted contract is implemented and focused evidence is green, run Inspect again for current integrity, then invoke the bundled Audit exactly once against the merge-base with `main` and the parent of this change's first commit. Audit runs the Full Gate once before its reviewers and remains the final quality and conformance pass.
 4. Apply its findings yourself. Apply every Audit `HARD` finding. For each `JUDGEMENT`, fix it, decline it with a reason, or carry it as debt; record every disposition under `## Audit ledger` in the Result Document. A declined judgement call with a stated reason is a decision, not an omission. Do not rerun Audit after applying its findings.
 5. Finalize artifacts only as the current inspection continuation permits. If no Completion exists and all automated work is complete, change only existing non-manual `[ ]` boxes to lowercase `[x]`, commit `[completion] widget`, and then remove `.changes/widget/` in a later commit. If Completion already exists, reuse it; if the ledger is retired, keep it absent. Run Inspect once more and require no violations before handoff.
 
@@ -60,7 +60,7 @@ Write the opaque Submission body at `<result>/submission.md`. Retrieve its instr
 
 `skl skill --resource reference/submission.md --input result_directory='<result>' --input procedure=initial implement`
 
-Include the implementation summary, scenario-aligned verification, Full Gate result, artifact inspection, and complete Audit ledger.
+Include the implementation summary, grouped contract-aligned verification, Full Gate result, artifact inspection, material limitations, and complete Audit ledger.
 
 Submit only with:
 
@@ -70,7 +70,7 @@ A `fix_required` result retains this Claim and prose. Repair the reported invari
 
 ## The scope is already decided
 
-Implement the accepted artifacts, honor what they exclude, and treat sibling behavior they never mention as separate work. Read callers of shared code you change and fix regressions this change causes. Do not tidy unrelated code. Absence of a decision in the artifacts delegates the smallest repository-consistent implementation to you.
+Implement the complete accepted behavior and architecture, honor what the artifacts exclude, and treat sibling behavior they never mention as separate work. Use suitable existing verification boundaries, grouped or reused tests, and in-scope refactoring when they preserve the contract and relevant regression protection. Read callers of shared code you change and fix regressions this change causes. Do not tidy unrelated code. An unspecified detail is delegated only when its alternatives preserve accepted behavior, architecture, and mandatory standards; an unambiguously implied case may be implemented and verified without rewriting the frozen scenario list. A consequential unresolved behavioral or architectural choice requires the human-decision path rather than an assumption that silence grants permission.
 
 Respect the applicable Audit dispositions: Apply its findings yourself. A declined judgement call with a stated reason is a decision, not an omission. During Rework, preserve those recorded dispositions and never invoke Audit more than once in the same execution.
 
@@ -86,45 +86,64 @@ Choose this later value at the decision point, setting `preserve` to `true` when
 
 
 
-## Included Skill: tdd
+## Included Skill: testing
 
 ---
-name: tdd
-description: Test-driven development. Use it when the user wants to build features or fix bugs test-first. mentions red-green-refactor, or wants integration tests.
+name: testing
+description: Design, assess, and retain tests that establish observable behavior and detect relevant regressions. Use when adding or changing tests, fixing bugs, choosing verification seams, mocking boundaries, or evaluating test evidence.
 ---
 
-# Test-Driven Development
+# Contract-Grounded Testing
 
-TDD is the red → green loop. This skill is the reference that makes that loop produce tests worth keeping: what a good test is, where tests go, the anti-patterns, and the rules of the loop. Every section applies on every cycle — consult them before and during the loop, not after.
+Testing establishes that delivered behavior and architecture satisfy their accepted contract. Choose the construction order, test organization, and verification boundaries that make that evidence credible; no universal test-first chronology or scenario-to-test cardinality is required.
 
-When exploring the codebase, read `CONTEXT.md` (if it exists) so test names and interface vocabulary match the project's domain language, and respect ADRs in the area you're touching.
+When exploring a codebase, read `CONTEXT.md` (if it exists) so test names and interface vocabulary match the project's domain language, and respect applicable ADRs and repository standards.
 
+## Start from the obligation
 
-## What a good test is
+After preparation, read the accepted `intent.md`, `behavior.md`, and `plan.md` at the resolved Artifact Baseline. Treat explicit behavioral scenarios, architecture commitments, required observations, and mandatory standards as binding. The execution metadata does not interpret that prose for you.
 
-Tests verify behavior through public interfaces, not implementation details. Code can change entirely; tests shouldn't. A good test reads like a specification — "user can checkout with valid cart" tells you exactly what capability exists — and survives refactors because it doesn't care about internal structure.
-
-See `skl skill --resource reference/tests.md tdd` for examples and `skl skill --resource reference/mocking.md tdd` for mocking guidelines.
-
-## Seams — where tests go
-
-A **seam** is the public boundary you test at: the interface where you observe behavior without reaching inside (full vocabulary in `design`). Tests live at seams, never against internals.
-
-**Test only at the pinned seams.** This execution's seams are pinned in the accepted artifacts, `plan.md` and `behavior.md`, which are the pre-agreement: no test is written at an unconfirmed seam, and you never ask again for a seam the accepted artifacts already name. A scenario that genuinely needs a seam the artifacts do not name is a contradiction to raise at the human pause, not a new question here. You can't test everything — the pinned seams are where testing effort lands.
+An unspecified detail is delegated only when the available choices preserve those obligations and standards. You may implement and test an unambiguously implied case without rewriting the frozen scenario list. If a consequential behavioral or architectural choice remains unresolved, use the execution's human-decision path rather than infer permission from silence.
 
 
-## Anti-patterns
+## Verify observable behavior
 
-- **Implementation-coupled** — mocks internal collaborators, tests private methods, or verifies through a side channel (querying the database instead of using the interface). The tell: the test breaks when you refactor but behavior hasn't changed.
-- **Tautological** — the assertion recomputes the expected value the way the code does (`expect(add(a, b)).toBe(a + b)`, a snapshot derived by hand the same way, a constant asserted equal to itself), so it passes by construction and can never disagree with the code. Expected values must come from an independent source of truth — a known-good literal, a worked example, the spec.
-- **Horizontal slicing** — writing all tests first, then all implementation. Bulk tests verify _imagined_ behavior: you test the _shape_ of things rather than user-facing behavior, the tests go insensitive to real changes, and you commit to test structure before understanding the implementation. Work in **vertical slices** instead — one test → one implementation → repeat, each test a **tracer bullet** that responds to what the last cycle taught you.
+Test through an interface that exposes the promised consequence without reaching through it into incidental implementation details. A suitable existing verification boundary is valid when it can observe the obligation and distinguish a plausible violation; do not add another test layer or redesign the architecture merely to create a preferred seam.
 
-## Rules of the loop
+A substantial internal module may have its own interface and tests. The question is whether the seam represents behavior callers rely on, not whether it is the topmost interface.
 
-- **Red before green.** Write the failing test first, then only enough code to pass it. Don't anticipate future tests or add speculative features.
-- **One slice at a time.** One seam, one test, one minimal implementation per cycle. One Gherkin `Scenario Outline` with its `Examples` table is one cycle materialized as one `table-driven test`, not one cycle per row.
-- **Refactoring is not part of the loop.** It belongs to the review stage after the whole implementation is done (see the `audit` skill), not the red → green implementation cycle.
-- **Commit**: Once done with the slice, create one logical commit for it with a tight message and mentioning the ticket it was made for. Per-slice commits are cheap and reworkable (they live on the change branch not on `main`) and make the eventual PR readable
+A strong check:
+
+- observes an accepted behavior or failure mode;
+- would fail for a plausible implementation that violates it;
+- keeps unrelated setup, imports, and infrastructure from masquerading as behavioral evidence;
+- remains stable when implementation details change without changing behavior.
+
+See `skl skill --resource reference/tests.md testing` for examples and test-set assessment, and `skl skill --resource reference/mocking.md testing` for boundary substitutes and controlled alternatives.
+
+## Ground expected outcomes independently
+
+Every expected result needs an independent expectation grounded in an accepted rule, a trusted example or reference, or a justified property. Do not derive the expected value by repeating the production algorithm, copying the template under test, or asserting only that execution occurred.
+
+When exact examples are unavailable, state the property and why it follows from the contract. Material uncertainty about the promised result is a decision gap, not a reason to weaken the assertion.
+
+## Establish regression sensitivity
+
+For a bug fix, provide evidence that the regression check detects the reported wrong behavior and passes with the fix. The check may be authored before or after the fix; early reproduction is encouraged because it sharpens diagnosis, but writing order is not an acceptance criterion.
+
+A failure caused only by unrelated setup, import, compilation, or execution errors does not establish sensitivity to the regression.
+
+If the original failure cannot be reproduced reliably or safely, a faithful isolated reproduction, captured-trace replay, or controlled fault injection may establish protection when it preserves the relevant trigger and observable failure. Record the material limitations of that evidence. If material uncertainty remains without credible protection, seek a human decision rather than claim verification or silently carry the gap as debt.
+
+## Assess the changed test set together
+
+Required behavioral and failure-mode protection matters more than test inventory. Reuse existing checks, strengthen assertions, combine overlapping cases, or remove redundant checks only while required behavioral and failure-mode protection remains covered and the resulting set still distinguishes the required behavior from relevant violations.
+
+Scrutinize removed or weakened assertions. Keep distinct regression protection, but do not require a new test for every scenario, a per-test justification ledger, a unique-bug quota, a universal mutation score, or a duplicate suite. Unrelated repository-wide test pruning is outside the current change unless explicitly accepted.
+
+## Report evidence honestly
+
+Connect the obligations to concrete tests, commands, or appropriate inspection evidence, including results and material limitations. Many obligations may share evidence and one obligation may need several checks. Prose assurance alone is insufficient for ordinary executable behavior, and merely listing a gap does not make it acceptable.
 
 
 ## Included Skill: audit
@@ -140,11 +159,11 @@ Two-axis review of the diff between `HEAD` and a fixed point the user supplies:
 - **Artifacts** — does the code faithfully implement the originating intent, behaviors, plan and tasks?
   1. The Workflow Engine's endpoint inspection reports identical paths, regular non-executable blobs, and exact bytes except permitted lowercase completion ticks, with Manual Verification unchecked; normal submission also requires completed automated boxes and later ledger retirement
   2. Every `intent.md` item in "Definition of Done" is demonstrably met
-  3. Every `behavior.md` scenario has materialized as a test (or for prose changes, encoded)
+  3. Every rule, scenario, and architectural obligation is accounted for with credible grouped many-to-many evidence, and the changed test set preserves required behavioral and failure-mode protection
   4. The full suite is green
   5. Read `plan.md` against the diff. If the implementation diverged, note it.
 
-Item 1 is what stops the contract moving to meet the code. The rest are judged against the **complete final implementation**, even when the diff under review is only the latest increment.
+Item 1 is what stops the contract moving to meet the code. The rest are judged against the **complete final implementation**, even when the diff under review is only the latest increment. Reuse, strengthening, consolidation, or removal of tests is acceptable when protection remains; scrutinize removed or weakened assertions for lost coverage without demanding per-test bookkeeping.
 
 Both axes run as **parallel sub-agents** when the harness supports them, so they don't pollute each other's context, then this skill aggregates their findings. The sequential fallback below preserves both axes when it does not.
 
@@ -173,11 +192,13 @@ Before going further, confirm the fixed point resolves (`git rev-parse <fixed-po
 The artifacts are the accepted `.changes/widget/` files of this Work Item. Read them from the resolved Artifact Baseline and Completion snapshots with `git show <snapshot>:.changes/widget/<file>`. After retirement, read them from those historical snapshots and never recreate the ledger.
 
 
-### 3. Identify the standards sources
+### 3. Identify the standards and acceptance sources
 
 Anything in the repo that documents how code should be written, such as `CODING_STANDARDS.md` or `CONTRIBUTING.md`.
 
 On top of whatever the repo documents, the Standards axis always carries the **smell baseline** from `skl skill --resource reference/smells.md audit` — a fixed set of Fowler code smells (_Refactoring_, ch.3) that applies even when a repo documents nothing, plus the two rules that bind it.
+
+Retrieve the shared contract criteria with `skl skill --resource reference/acceptance.md audit`. Give those criteria to both reviewers. They distinguish behavioral conformance, architectural conformance, and local implementation quality; sharing them with Watchdog does not execute Audit again.
 
 ### 4. Run the deterministic checks once
 
@@ -200,6 +221,7 @@ The recipe changes how the two axes are dispatched, never what they check: both 
 
 - The full diff command and commit list.
 - The list of standards-source files you found in step 3, plus `skl skill --resource reference/smells.md audit`. Instruct the sub-agent to read those files and the command's output.
+- The shared criteria from `skl skill --resource reference/acceptance.md audit`.
 - The gate results from step 4.
 - The precedence between sources, so the sub-agent knows what outranks what: frozen artifacts, then required tooling and CI, then the project's `AGENTS.md`, standards docs and quality skills, then language and framework correctness, security and accessibility rules, then the generic smell baseline. An explicit project or language `MUST`, `ALWAYS`, `NEVER` or equivalent can be a hard violation; a generic smell stays a judgement call unless a local rule or a concrete behavior or maintenance impact elevates it.
 - The brief: "Report — per file/hunk where relevant — (a) every place the diff violates a documented standard: cite the standard (file + the rule); and (b) any baseline smell you spot: name it and quote the hunk. Tag each finding as `HARD` or `JUDGEMENT` as its first token; documented-standard breaches can be `HARD`, but baseline smells are always `JUDGEMENT`, and a documented repo standard overrides the baseline. Skip anything tooling enforces. Report each finding as its own bullet, anchored to `file:line`. Under 500 words. Compress findings rather than omit any."
@@ -208,8 +230,9 @@ The recipe changes how the two axes are dispatched, never what they check: both 
 
 - The diff command and commit list.
 - The paths or fetched contents of the Artifacts at the exact Baseline and, when available, Completion or provisional head.
+- The shared criteria from `skl skill --resource reference/acceptance.md audit`.
 - The gate and artifact-integrity results from step 4.
-- The brief: "Report: (a) requirements, intent and behaviors the artifacts asked for that are missing or partial; (b) behaviour in the diff that wasn't asked for (scope creep); (c) requirements that look implemented but where the implementation looks wrong; (d) the gate result you were given, if it is not green — do not rerun it; (e) read `plan.md` against the diff and note any divergence; (f) any endpoint violation the integrity result reports, without adding intermediate-history or deletion-inference rules. Judge (a) to (c) against the complete final implementation even when the diff is only the latest increment. Quote the spec line for each finding. Tag each finding `HARD` or `JUDGEMENT` as its first token: (a), (b), (c) and (f) are `HARD`; (d) is `HARD` when the gate is red; (e) is `JUDGEMENT` unless the divergence breaks a frozen requirement. Report each finding as its own bullet, anchored to `file:line`. Under 500 words — compress findings rather than omit any."
+- The brief: "Report: (a) requirements, intent, rules, scenarios, or architectural obligations that are missing, partial, or contradicted; (b) behaviour in the diff that wasn't asked for (scope creep); (c) claimed evidence that does not expose the promised consequence or distinguish a plausible violation, including protection lost through removed or weakened assertions; (d) the gate result you were given, if it is not green — do not rerun it; (e) read `plan.md` against the diff and note any divergence; (f) any endpoint violation the integrity result reports, without adding intermediate-history or deletion-inference rules. Accept grouped many-to-many evidence and contract-preserving test reuse or consolidation; do not impose preferred test organization or implementation. Judge (a) to (c) against the complete final implementation even when the diff is only the latest increment. For an evidence gap, identify the obligation, plausible violation, and why existing evidence does not distinguish it. Quote the spec line for each finding. Tag each finding `HARD` or `JUDGEMENT` as its first token under the shared criteria: (a), (b), (c) and (f) are `HARD`; (d) is `HARD` when the gate is red; (e) is `JUDGEMENT` unless the divergence breaks a frozen requirement. Report each finding as its own bullet, anchored to `file:line`. Under 500 words — compress findings rather than omit any."
 
 
 Nothing written after the artifacts were published is a requirement: not review comments, not rework notes. They can be evidence, never a spec line to hold the implementation against.

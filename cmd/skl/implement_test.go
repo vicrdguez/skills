@@ -1229,7 +1229,7 @@ func TestInstalledImplementActivationLoadsDefinitionsOnce(t *testing.T) {
 			}
 			for _, marker := range []struct{ name, text string }{
 				{"implement", "## The scope is already decided"},
-				{"tdd", "\n\n## Included Skill: tdd\n\n"},
+				{"testing", "\n\n## Included Skill: testing\n\n"},
 				{"audit", "\n\n## Included Skill: audit\n\n"},
 				{"design", "\n\n## Included Skill: design\n\n"},
 				{"domain", "\n\n## Included Skill: domain\n\n"},
@@ -1326,13 +1326,13 @@ func TestImplementBundlesInstructionsWithoutTargetPin(t *testing.T) {
 	if got.Packet == nil || got.Packet.Facts.Implementation.InspectCommand == "" || got.Packet.Facts.Implementation.FetchCommand == "" || got.Packet.Facts.Implementation.WorktreeCommand == "" {
 		t.Fatalf("packet = %#v", got)
 	}
-	if got.Packet.Skill != "implement" || !reflect.DeepEqual(got.Packet.IncludedSkills, []string{"tdd", "audit", "design", "domain"}) {
+	if got.Packet.Skill != "implement" || !reflect.DeepEqual(got.Packet.IncludedSkills, []string{"testing", "audit", "design", "domain"}) {
 		t.Fatalf("manifest = %#v", got.Packet)
 	}
 	if strings.Contains(got.Packet.Markdown(), "git merge ") || strings.Contains(got.Packet.Facts.Implementation.ResumeCommand, "target-snapshot") {
 		t.Fatalf("packet retained target integration: %s", got.Packet.Markdown())
 	}
-	definition, _, found := strings.Cut(got.Packet.Instructions, "\n\n## Included Skill: tdd\n\n")
+	definition, _, found := strings.Cut(got.Packet.Instructions, "\n\n## Included Skill: testing\n\n")
 	if !found {
 		t.Fatal("packet lacks the specialized Implement definition")
 	}

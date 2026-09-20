@@ -25,7 +25,7 @@ Expected values come from an accepted rule, a trusted worked example or referenc
 
 ```go
 // Independent worked example: the expected total is a known contract example.
-if got := CalculateTotal([]Item{{Price: 10}, {Price: 5}}); got != 15 {
+if got := CalculateTotal([]Item{PricedItem(10), PricedItem(5)}); got != 15 {
     t.Fatalf("total = %d, want 15", got)
 }
 ```
