@@ -17,8 +17,10 @@ acceptance: {"level":"none","reason":"The implement skill owns its handoff contr
 
 <!-- skl-owned: skl.pi/v1 -->
 
-Run `skl implement next` and follow the returned packet exactly. Its manifest bundles the required definitions once; do not reactivate their stubs.
+Run `skl implement next` and follow the returned Execution Skill exactly. Its manifest bundles the required definitions once; do not reactivate their stubs.
 
-Process at most one Work Item and return the final structured CLI JSON unchanged. `no_work` ends the invocation. An error or incomplete claimed handoff ends it without claiming successful completion. The scheduler continues only after a verified semantic handoff.
+Process at most one Work Item, and use the transport the invocation returned rather than relaying it. When the invocation ends, report the verified outcome in normal Markdown prose: the Work Item, the status the engine established, the Submission or preserved work, whether the Claim was released, and any unresolved failure with what is still needed. Never reproduce the engine's exact JSON, and never report success the engine did not verify.
 
-The parent owns the outer queue loop. Do not continue to another item, reuse prior worker context, or broaden the skill's contract. Use `subagent` only for the parallel review required by `audit`, and launch those reviewers in fresh contexts.
+`no_work` or an empty wait ends the invocation. An error, a refusal, or an incomplete claimed handoff ends it without claiming successful completion. Do not drain the queue, and do not launch a replacement worker after an empty, uncertain, or incomplete result.
+
+The parent owns any outer loop. Do not continue to another item or reuse prior worker context. Use `subagent` only for the parallel review `audit` requires, and launch those reviewers in fresh contexts.

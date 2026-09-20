@@ -27,25 +27,30 @@ type waitingMemory struct {
 	claim         func(context.Context) error
 }
 
-func (b *waitingMemory) ImplementationItems(ctx context.Context) ([]workflow.ImplementationItem, error) {
-	b.reads++
-	if b.observe != nil {
-		if err := b.observe(ctx); err != nil {
-			return nil, err
+func (b *waitingMemory) QueuePage(ctx context.Context, queue workflow.QueueKind, cursor string) (workflow.QueuePage, error) {
+	// Count one observation per selection attempt: the implement lane also
+	// consults the Ready queue, but that is one attempt, not another poll.
+	if queue == workflow.ReworkQueue || queue == workflow.ReviewQueue {
+		b.reads++
+		if b.observe != nil {
+			if err := b.observe(ctx); err != nil {
+				return workflow.QueuePage{}, err
+			}
 		}
 	}
-	return b.implementationMemory.ImplementationItems(ctx)
+	return b.implementationMemory.QueuePage(ctx, queue, cursor)
 }
 
-func (b *waitingMemory) ClaimImplementation(ctx context.Context, item workflow.ImplementationItem) error {
+func (b *waitingMemory) ClaimSelected(ctx context.Context, candidate workflow.QueueCandidate, item workflow.ImplementationItem) (workflow.ImplementationItem, error) {
 	b.claims++
-	if err := b.implementationMemory.ClaimImplementation(ctx, item); err != nil {
-		return err
+	claimed, err := b.implementationMemory.ClaimSelected(ctx, candidate, item)
+	if err != nil {
+		return claimed, err
 	}
 	if b.claim != nil {
-		return b.claim(ctx)
+		return claimed, b.claim(ctx)
 	}
-	return nil
+	return claimed, nil
 }
 
 func waitFixture(t *testing.T, lane string) (string, *waitingMemory) {
@@ -72,7 +77,11 @@ func waitingCLI(t *testing.T, ctx context.Context, root, lane string, b *waiting
 		b.repository = repository
 		return b, nil
 	}, nil, &out, &stderr)
-	args := append([]string{"skl", lane, "next", "--repo", root, "--remote", "upstream"}, options...)
+	args := append([]string{lane, "next", "--repo", root, "--remote", "upstream"}, options...)
+	args = structuredStageCommand(args...)
+	if lane == "watchdog" {
+		args = append(args, "--format", "json")
+	}
 	err := app.RunContext(ctx, args)
 	var got setup.ImplementationOutput
 	if err != nil && out.Len() != 0 {
@@ -118,7 +127,7 @@ func TestNextWaitNewlyAvailable(t *testing.T) {
 						elapsed = 32 * time.Second
 					}
 					got, err := waitingCLI(t, t.Context(), root, lane, b, strings.Fields(options)...)
-					if err != nil || got.Status != "work_available" || got.Packet == nil || !got.Item.Claimed || b.claims != 1 || b.reads != 3 || time.Since(start) != elapsed || b.repository.Owner != "acme" {
+					if err != nil || got.Status != "work_available" || got.Packet == nil || !got.Item.Claimed || b.claims != 1 || b.reads != 2 || time.Since(start) != elapsed || b.repository.Owner != "acme" {
 						t.Fatalf("got %#v, err %v, reads %d claims %d elapsed %s repo %#v", got, err, b.reads, b.claims, time.Since(start), b.repository)
 					}
 				})
@@ -204,7 +213,7 @@ func TestNextWaitAvailableImmediately(t *testing.T) {
 				synctest.Test(t, func(t *testing.T) {
 					start := time.Now()
 					got, err := waitingCLI(t, t.Context(), root, lane, b, strings.Fields(option)...)
-					if err != nil || got.Status != "work_available" || got.Packet == nil || got.Item.Number != 7 || !got.Item.Claimed || b.reads != 2 || b.claims != 1 || time.Since(start) != 0 || b.repository.Owner != "acme" {
+					if err != nil || got.Status != "work_available" || got.Packet == nil || got.Item.Number != 7 || !got.Item.Claimed || b.reads != 1 || b.claims != 1 || time.Since(start) != 0 || b.repository.Owner != "acme" {
 						t.Fatalf("claim = %#v err %v reads %d claims %d elapsed %s", got, err, b.reads, b.claims, time.Since(start))
 					}
 					remote := ""
@@ -220,7 +229,7 @@ func TestNextWaitAvailableImmediately(t *testing.T) {
 						return
 					}
 					got, err = waitingCLI(t, t.Context(), root, lane, b, strings.Fields(option)...)
-					if err != nil || got.Status != "no_work" || got.Packet != nil || got.Item != nil || b.reads != 3 || b.claims != 1 || time.Since(start) != 0 {
+					if err != nil || got.Status != "no_work" || got.Packet != nil || got.Item != nil || b.reads != 2 || b.claims != 1 || time.Since(start) != 0 {
 						t.Fatalf("empty immediate = %#v err %v", got, err)
 					}
 				})
@@ -278,11 +287,7 @@ func TestNextWaitCancellation(t *testing.T) {
 							t.Fatalf("continued after sleep cancellation: reads %d claims %d elapsed %s", b.reads, b.claims, time.Since(start))
 						}
 					case "uncertain claim":
-						wantReads := 2
-						if lane == "watchdog" {
-							wantReads = 1
-						}
-						if b.reads != wantReads || b.claims != 1 || !b.work[0].Claimed || time.Since(start) != 0 || !strings.Contains(err.Error(), "inspect") || !strings.Contains(err.Error(), "resume") {
+						if b.reads != 1 || b.claims != 1 || !b.work[0].Claimed || time.Since(start) != 0 || !strings.Contains(err.Error(), "inspect") || !strings.Contains(err.Error(), "resume") {
 							t.Fatalf("uncertain claim retried or lost: %v reads %d claims %d work %#v", err, b.reads, b.claims, b.work)
 						}
 					}
@@ -327,7 +332,7 @@ func TestNextWaitLateObservation(t *testing.T) {
 					wantReads, wantClaims := 2, 0
 					switch result {
 					case "claim":
-						wantReads, wantClaims = 3, 1
+						wantReads, wantClaims = 2, 1
 						if err != nil || got.Status != "work_available" || got.Packet == nil || !got.Item.Claimed {
 							t.Fatalf("late claim lost: %#v %v", got, err)
 						}
@@ -399,13 +404,7 @@ func TestNextWaitArtifactEndpoints(t *testing.T) {
 						if err != nil || time.Since(start) != 30*time.Second {
 							t.Fatalf("waiting selection: %#v %v elapsed %s", got, err, time.Since(start))
 						}
-						if !valid {
-							if got.Status != "fix_required" || !strings.Contains(got.Reason, "missing ledger directory") || got.Packet != nil || b.reads != 2 || b.claims != 0 {
-								t.Fatalf("endpoint refusal retried or claimed: %#v reads %d claims %d", got, b.reads, b.claims)
-							}
-							return
-						}
-						if got.Status != "work_available" || got.Packet == nil || b.reads != 3 || b.claims != 1 {
+						if got.Status != "work_available" || got.Packet == nil || b.reads != 2 || b.claims != 1 {
 							t.Fatalf("endpoint selection failed: %#v reads %d claims %d", got, b.reads, b.claims)
 						}
 						var commands []string
@@ -449,11 +448,7 @@ func TestNextWaitStopsOnFailure(t *testing.T) {
 							substitute.Submission = &workflow.Submission{ID: "12", Head: strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD")), CreatedAt: "2026"}
 						}
 						work = append(work, substitute)
-						if lane == "implement" {
-							work[0].Problem = "invalid workflow evidence"
-						} else {
-							work[0].Submission.Head = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "widget^"))
-						}
+						work[0].Problem = "invalid workflow evidence"
 					}
 					synctest.Test(t, func(t *testing.T) {
 						start := time.Now()
@@ -465,13 +460,16 @@ func TestNextWaitStopsOnFailure(t *testing.T) {
 								}
 								b.work = work
 							}
-							if b.reads == observation+1 && failure == "ambiguous readback" {
-								return problem
-							}
 							return nil
 						}
+						if failure == "ambiguous readback" {
+							b.claim = func(context.Context) error { return problem }
+						}
 						if failure == "contradictory readback" {
-							b.claim = func(context.Context) error { b.work[0].Problem = "changed during Claim"; return nil }
+							b.claim = func(context.Context) error {
+								b.work[0].Problem = "changed during Claim"
+								return workflow.Refuse("changed during Claim; inspect and explicitly resume")
+							}
 						}
 						got, err := waitingCLI(t, t.Context(), root, lane, b, "--wait")
 						if failure == "invalid evidence" || failure == "contradictory readback" {
@@ -481,14 +479,14 @@ func TestNextWaitStopsOnFailure(t *testing.T) {
 						} else if !errors.Is(err, problem) || got.Status != "" {
 							t.Fatalf("lost operational error: %#v %v", got, err)
 						}
-						wantClaims := 0
+						wantReads, wantClaims := observation, 0
 						if strings.Contains(failure, "readback") {
-							wantClaims = 1
+							wantReads, wantClaims = observation, 1
 							if !b.work[0].Claimed {
 								t.Fatal("uncertain Claim released")
 							}
 						}
-						if b.reads != observation+wantClaims || b.claims != wantClaims || time.Since(start) != time.Duration(observation-1)*30*time.Second {
+						if b.reads != wantReads || b.claims != wantClaims || time.Since(start) != time.Duration(observation-1)*30*time.Second {
 							t.Fatalf("failure retried: reads %d claims %d elapsed %s", b.reads, b.claims, time.Since(start))
 						}
 					})
@@ -568,7 +566,7 @@ func TestNextWaitCanonicalEligibility(t *testing.T) {
 						return nil
 					}
 					got, err := waitingCLI(t, t.Context(), root, lane, b, "--wait")
-					if err != nil || got.Item == nil || got.Item.Number != want || !got.Item.Claimed || b.reads != firstRead+2 || b.claims != claims+1 || time.Since(start) != 30*time.Second {
+					if err != nil || got.Item == nil || got.Item.Number != want || !got.Item.Claimed || b.reads != firstRead+1 || b.claims != claims+1 || time.Since(start) != 30*time.Second {
 						t.Fatalf("ordering: %#v %v reads %d claims %d", got, err, b.reads, b.claims)
 					}
 				}
@@ -586,7 +584,7 @@ func TestNextWaitCanonicalEligibility(t *testing.T) {
 						return nil
 					}
 					got, err = waitingCLI(t, t.Context(), root, lane, b, "--wait")
-					if err != nil || got.Item == nil || got.Item.Number != 1 || b.reads != firstRead+2 || b.claims != 3 {
+					if err != nil || got.Item == nil || got.Item.Number != 1 || b.reads != firstRead+1 || b.claims != 3 {
 						t.Fatalf("merged blocker did not release dependent: %#v %v", got, err)
 					}
 				}

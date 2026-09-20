@@ -20,9 +20,11 @@ See `skl skill --resource reference/tests.md tdd` for examples and `skl skill --
 
 A **seam** is the public boundary you test at: the interface where you observe behavior without reaching inside (full vocabulary in `design`). Tests live at seams, never against internals.
 
-**Test only at pre-agreed seams.** Before writing any test, write down the seams under test and confirm them with the user — unless they are already pinned in the change artifacts (`plan.md` / `behavior.md`), which count as the pre-agreement. No test is written at an unconfirmed seam. You can't test everything — agreeing the seams up front is how testing effort lands on the critical paths and complex logic instead of every edge case.
+{{if .Implementation}}**Test only at the pinned seams.** This execution's seams are pinned in the accepted artifacts, `plan.md` and `behavior.md`, which are the pre-agreement: no test is written at an unconfirmed seam, and you never ask again for a seam the accepted artifacts already name. A scenario that genuinely needs a seam the artifacts do not name is a contradiction to raise at the human pause, not a new question here. You can't test everything — the pinned seams are where testing effort lands.
+{{else}}**Test only at pre-agreed seams.** Before writing any test, write down the seams under test and confirm them with the user — unless they are already pinned in the change artifacts (`plan.md` / `behavior.md`), which count as the pre-agreement. No test is written at an unconfirmed seam. You can't test everything — agreeing the seams up front is how testing effort lands on the critical paths and complex logic instead of every edge case.
 
 Ask: "What's the public interface, and which seams should we test?"
+{{end}}
 
 ## Anti-patterns
 
@@ -33,6 +35,6 @@ Ask: "What's the public interface, and which seams should we test?"
 ## Rules of the loop
 
 - **Red before green.** Write the failing test first, then only enough code to pass it. Don't anticipate future tests or add speculative features.
-- **One slice at a time.** One seam, one test, one minimal implementation per cycle.
+- **One slice at a time.** One seam, one test, one minimal implementation per cycle. One Gherkin `Scenario Outline` with its `Examples` table is one cycle materialized as one `table-driven test`, not one cycle per row.
 - **Refactoring is not part of the loop.** It belongs to the review stage after the whole implementation is done (see the `audit` skill), not the red → green implementation cycle.
 - **Commit**: Once done with the slice, create one logical commit for it with a tight message and mentioning the ticket it was made for. Per-slice commits are cheap and reworkable (they live on the change branch not on `main`) and make the eventual PR readable

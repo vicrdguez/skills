@@ -1,67 +1,87 @@
 ---
 name: implement
-description: Implement a single claimed change following TDD, driven by the artifacts in `.changes/<slug>` for that change.
+description: Implement a single claimed change following TDD, driven by its accepted Implementation Ledger.
 disable-model-invocation: true
 ---
 
-Implement a single change proposal, materializing each Gherkin scenario in `behavior.md` into an idiomatic test and following a red -> green loop using the `tdd` skill at the seams pinned in the change artifacts.
+{{if and .Implementation .Implementation.Inspection}}{{template "inspection" .Implementation}}{{else if .Implementation}}Implement Work Item {{.Implementation.WorkItemReference}} in `{{.Implementation.Worktree}}`. This Execution Skill already represents the engine's completed Work Start operation; do not select or claim another Work Item.
 
-If this packet carries Implementation facts, continue with that Work Item. Otherwise run `skl implement next` and follow its concrete packet. `no_work` ends the invocation. Resume interrupted work with `skl implement resume --item <number>` or from its conventional worktree with `skl implement resume`; ordinary selection skips Claims. On resume, inspect the selected branch, preserved files, applicable artifacts, and visible feedback to determine what remains; do not expect a persisted execution cursor. Keep the packet's retry commands. If the invocation supplied `--artifact-baseline <full-sha>` or `--artifact-completion <full-sha>`, preserve those exact flags and full SHAs on every generated or manually run resume, inspect, submit, and Needs Human command for this Work Item; never add override flags for endpoints resolved from markers.
+## Applicable procedure
 
-Work only in the packet's conventional worktree, creating it from the pushed branch with ordinary Git if needed. Preserve existing branch progress. Every new or updated Submission targets `main`; integration with `main`, conflict resolution, and merge belong to the human Merge Authority after review. Never rebase or force-push: rewriting history orphans the Artifact Baseline and previous _Reviewed head_, and silently widens later three-dot diffs.
+{{if eq .Implementation.Procedure "rework"}}This invocation follows finding-driven Rework: preserve the existing Submission{{if .Implementation.Submission}} #{{.Implementation.Submission}}{{end}}, keep `.changes/{{.Implementation.Branch}}/` retired, and resolve the supplied Watchdog findings against the current PR comparison. Do not recreate or revise the Implementation Ledger or create another Artifact Completion. Map every finding to its resolution commit and supporting evidence in the Result Document, and update the `## Audit ledger` in the Submission body to the current head. Resolve every `BLOCK`; materialize code-local `NOTE` findings as `DEBT(#{{.Implementation.Submission}}/W<n>)` comments. This obligation holds even when the supplied feedback is empty or still pending: retrieve every required stream before concluding there are no findings.
+{{else if eq .Implementation.Procedure "resumed"}}This invocation resumes existing work: inspect the branch, the preserved files, the applicable artifacts, and the visible feedback; do not restart completed work. Continue the remaining accepted scenarios. Preserve the attached draft Submission{{if .Implementation.Submission}} #{{.Implementation.Submission}}{{end}} rather than replacing it.
+{{else}}This invocation starts the accepted change: read the accepted artifacts at their Artifact Baseline before changing code, then implement every accepted scenario. No implementation progress is presumed; branch names, comments, and a draft attachment do not change this procedure.
+{{end}}
+## Established work
 
-Use the packet's selected `remote` for Git fetch/push and pass `--remote <name>` on every Implement command, including Needs Human and legacy resume. When inference is ambiguous, choose explicitly with `--remote` before claiming.
+Repository: {{.Implementation.Repository}} on the selected remote `{{.Implementation.Remote}}`
+Work Item: {{.Implementation.WorkItemReference}}
+Branch: `{{.Implementation.Branch}}`
+Worktree: `{{.Implementation.Worktree}}`
+Private result location: `{{.Implementation.ResultDirectory}}`, which this invocation already created
 
-Run typechecking and single test files regularly. `audit` runs the full suite as its gate at the end of this stage, so don't run it separately first.
+Prepare: `{{.Implementation.FetchCommand}}` then `{{.Implementation.WorktreeCommand}}`; safely reuse a clean existing worktree instead of recreating it, and preserve dirty files, the index, and existing branch progress. Never reset, stash, rebase, force-push, or merge the target merely to make preparation or presentation convenient.
+Push: `{{.Implementation.PushCommand}}`
+Inspect: `{{.Implementation.InspectCommand}}` resolves the Artifact Baseline, Artifact Completion, and current ledger progress from fetched history.
+Resume: `{{.Implementation.ResumeCommand}}`; this is the only command for continuing the same Claim.
+{{if or .Implementation.SuppliedArtifactBaseline .Implementation.SuppliedArtifactCompletion}}
+Supplied Artifact Baseline `{{.Implementation.SuppliedArtifactBaseline}}` and Artifact Completion `{{.Implementation.SuppliedArtifactCompletion}}` are known pointers, not validated contents or ancestry. Their exact override flags are already present on every applicable command above and below; do not add an override for an endpoint resolved from history. Inspection validates them.
+{{end}}
+The dedicated worktree, selected project commits, and artifact objects may still be unavailable locally. Run Prepare, then Inspect. Do not infer their availability, contents, ancestry, or ledger progress from the branch name, Submission, or lifecycle label.
 
-Once the whole implementation is done and every scenario is green, run the packet's artifact inspection command, preserving any explicit endpoint flags, then run `audit` against the PR base merge-base — not the first commit of the claim, which `...HEAD` would leave out of the diff — unless the caller supplied another explicit fixed point. On a rework round the fixed point moves; **Rework** below pins it. This first-pass Audit is provisional: it may compare the Baseline with the current ledger while automated boxes remain unchecked, and must report Completion and retirement as pending rather than infer either from intermediate commits. Refactoring happens here, deliberately kept out of the red -> green cycles. Apply its findings yourself. Fix the `HARD` and on each `JUDGEMENT`, either fix it, decline it with a stated reason, or carry it as debt. Declining `HARD` is not yours to do. Keep the suite green while doing so. This is the pass where ordinary cleanup and refactoring belongs — smells, readability, maintainability, making the code navigable for the next agent. Whatever survives it, the watchdog sees.
+{{template "evidence" .Implementation}}
 
-Record what the pass decided. Every `audit` finding goes into the PR body under `## Audit ledger`: ID, axis, severity as `audit` assigned it, and `fixed` / `declined` / `debt` with one line of reasoning:
+## Execute the change
 
-```text
-## Audit ledger --<fixed-point>...<head>
-A1  Standards  HARD       fixed    — order total computed in two places; extracted to `OrderTotal` (def456)
-A2  Standards  JUDGEMENT  declined — "Feature Envy" on `Cart.price`: moving it splits the pricing rule across two modules
-A3  Standards  JUDGEMENT  debt     — DEBT(#17/A3) `String` currency; typed when the payments slice lands
-A4  Artifacts  HARD       fixed    — DoD item 3 had no test; added `cancel_shipped_order_test` (abc789)
+Work only in `{{.Implementation.Worktree}}`. Every new or updated Submission targets `main`; integration with `main`, conflict resolution, and merge belong to the human Merge Authority after review. Never rewrite history: the Artifact Baseline{{if .Implementation.ArtifactBaseline}} `{{.Implementation.ArtifactBaseline}}`{{end}}, Artifact Completion{{if .Implementation.ArtifactCompletion}} `{{.Implementation.ArtifactCompletion}}`{{end}}, and prior Reviewed heads must remain reachable.
 
-```
-A declined judgement call with a stated reason is a decision, not an omission. This ledger is what the watchdog verifies and the human approves; without it, the next context re-derives the same calls from scratch and files them as new findings.
+{{if eq .Implementation.Procedure "rework"}}1. Run Inspect before editing. It must confirm the retired ledger and resolved historical endpoints. If it reports a violation or any other progress, repair or stop according to that continuation; never recreate the ledger.
+2. Read the accepted `intent.md`, `behavior.md`, `plan.md`, and completed `tasks.md` from the historical endpoint commands returned by inspection. Treat the supplied Watchdog summary and inline findings as evidence to resolve, not as new frozen requirements.
+3. Fix one active finding at a time. Run the focused test or check that proves each fix, commit it, and preserve each finding identity. Do not re-clean untouched code.
+4. Select the latest applicable supplied review whose verdict caused the current Rework and use that review's `Commit` as the fixed point. Stop rather than guess when the applicable reviewed commit is missing or ambiguous.
+5. Invoke the bundled Audit exactly once over `<reviewed-commit>...HEAD`. Apply every Audit `HARD` finding. For each `JUDGEMENT`, fix it, decline it with a reason, or carry it as debt. If a disposition changes code, run its affected checks and a final Full Gate before handoff. Do not invoke Audit again in this execution.
+6. Run Inspect again after all edits. It must still report the same valid retired ledger and no violations.
+{{else}}1. Run Inspect before editing. Artifact progress is genuinely unknown until that read-only continuation. Follow only the returned progress-specific instructions: continue a provisional ledger, reuse an existing Completion, and keep a retired ledger absent. Never duplicate Completion or recreate retired artifacts.
+2. Read the accepted `.changes/{{.Implementation.Branch}}/` artifacts at the resolved Artifact Baseline. Materialize every `behavior.md` scenario as an idiomatic test at its pinned seam and follow the bundled TDD red -> green loop. For resumed work, first establish what remains and preserve completed progress.
+3. Run typechecking and focused tests regularly. Once every accepted scenario is green, run Inspect again for current integrity, then invoke the bundled Audit exactly once against the merge-base with `main` and the parent of this change's first commit. Audit runs the Full Gate once before its reviewers. Refactoring belongs in that Audit pass, not in the red -> green cycles.
+4. Apply its findings yourself. Apply every Audit `HARD` finding. For each `JUDGEMENT`, fix it, decline it with a reason, or carry it as debt; record every disposition under `## Audit ledger` in the Result Document. A declined judgement call with a stated reason is a decision, not an omission. Do not rerun Audit after applying its findings.
+5. Finalize artifacts only as the current inspection continuation permits. If no Completion exists and all automated work is complete, change only existing non-manual `[ ]` boxes to lowercase `[x]`, commit `[completion] {{.Implementation.Branch}}`, and then remove `.changes/{{.Implementation.Branch}}/` in a later commit. If Completion already exists, reuse it; if the ledger is retired, keep it absent. Run Inspect once more and require no violations before handoff.
+{{end}}
+Push with `{{.Implementation.PushCommand}}`. A push does not authorize review or merge.
 
-Tick off every automated `[ ]` box, except those under `Manual verification`, using lowercase `[x]`. That is the only endpoint content difference the Implementation Ledger allows. While every artifact file still exists, commit Artifact Completion with subject `[completion] <slug>` (optional explanatory text may follow after a space), then remove the entire `.changes/<slug>/` ledger in a separate subsequent commit before review. The removal need not be Completion's immediate child. Keep both resolved endpoint commits reachable; new work uses exact `[baseline] <slug>` and `[completion] <slug>` subject prefixes, while an explicit markerless handoff keeps its supplied full SHAs. Validation compares those endpoints and ledger absence at the review head, not intermediate edits or a deletion commit's parent.
+## Result and handoff
 
-Then push the branch with ordinary Git. Write the PR body, including every Audit disposition, to `submission.md` in the packet's private Result Document directory; retrieve the template with `skl skill --resource reference/submission.md implement`. Run the packet's `skl implement submit` command. A `fix_required` outcome retains the Claim and prose: repair the reported invariant, commit and push as needed, and retry the same handoff. A successful handoff may include a cleanup-only warning for a retained private directory; do not resubmit or roll back published work. Never bless the changes — that is the watchdog's job.
+Write the opaque Submission body at `{{.Implementation.ResultDirectory}}/submission.md`. Retrieve its instructions only when verification and dispositions are settled:
 
-The work is done only when every `behavior.md` scenario has a materialized test, every `intent.md` "Definition of Done" box is demonstrably met, every `audit` finding carries a disposition in the PR ledger, the full suite is green and `skl implement submit` reports `awaiting_review`.
+`skl skill --resource reference/submission.md --input result_directory={{quote .Implementation.ResultDirectory}} --input procedure={{.Implementation.Procedure}} implement`
+
+{{if eq .Implementation.Procedure "rework"}}Include a `Rework: <supplied-reviewed-head>...<current-head>` line and one `W<n> resolved — <commit>; covered by <check>` (or permitted debt) line for every supplied finding. Retain and update the existing Audit ledger rather than replacing the Submission with a new one.
+{{else}}Include the implementation summary, scenario-aligned verification, Full Gate result, artifact inspection, and complete Audit ledger.
+{{end}}
+Submit only with:
+
+`{{.Implementation.SubmitCommand}}`
+
+A `fix_required` result retains this Claim and prose. Repair the reported invariant and retry the same command. Work is complete only when it reports `awaiting_review`; independent Watchdog review follows, and only a human may merge. Never bless the changes — that is the watchdog's job.
 
 ## The scope is already decided
 
-The artifacts say what this change is. Implement that, honor what they exclude, and treat sibling behavior they never mention as somebody else's work.
+Implement the accepted artifacts, honor what they exclude, and treat sibling behavior they never mention as separate work. Read callers of shared code you change and fix regressions this change causes. Do not tidy unrelated code. Absence of a decision in the artifacts delegates the smallest repository-consistent implementation to you.
 
-Read the callers of any shared code you change — a regression **this** change causes is yours to fix. A defect that was already there is not: leave it. Neither is an opportunity to tidy a sibling up while you are in the area, and neither is a question. Absence of a decision in the artifacts is a decision delegated to you, so use the pattern the project already uses and the smallest implementation that works.
-
-## Rework
-
-The latest watchdog summary is the ledger of what was found. Read the packet's summary and inline comments carrying its evidence, and any human disposition posted since. Association and commit facts identify their source; interpreting findings remains your judgment.
-
-Read the retired Implementation Ledger from its historical Artifact Baseline and Completion; rework must not recreate or revise it. Preserve any explicit endpoint flags and full SHAs from the handoff on inspection, resume, resubmission, and Needs Human commands.
-
-Resolve every finding that is still `BLOCK`. Findings left as `NOTE` are debt, not work to skip: materialize the code-local ones as `DEBT(#<pr>/W<n>)` comments, exactly as the watchdog's contract describes. Open no follow-up issues — that stays human or `propose` work.
-
-Review your own rework against the ordinary PR comparison and focus on the supplied findings. Do not re-clean untouched code: it grows the diff, adds regressions, and gives the next review more surface.
-
-Before resubmitting, include a mapping of each finding to its resolution in the Result Document: the commit that did it and the evidence that it holds:
-
-```text
-Rework: abc123...def456
-W1 resolved — def456; covered by <check>
-W2 debt — DEBT(#17/W2) in <path · symbol>
-```
-
-That is a claim, not proof. The next watchdog verifies it independently. Update the `## Audit ledger` in the PR body in the same push: it must describe the current head, not the first one.
+Respect the applicable Audit dispositions: Apply its findings yourself. A declined judgement call with a stated reason is a decision, not an omission. During Rework, preserve those recorded dispositions and never invoke Audit more than once in the same execution.
 
 ## When only a human can decide
 
-Finish everything that is not blocked first. This handoff is for contradictory or impossible artifacts, a mandatory project/language/security/accessibility conflict, an unavoidable change to frozen behavior or interface, a disputed blocker, or the bounce cap; adjacent improvements and implementation preferences do not justify it. Write `decision.md` using `skl skill --resource reference/decision.md implement`, then run `skl implement needs-human --item <number> --reason <reason> --decision <absolute-file>`. Reasons are `contradictory_artifacts`, `mandatory_rule`, `frozen_interface`, `disputed_blocker`, and `bounce_cap`.
+Finish all unblocked work first. Pause only for contradictory or impossible artifacts, a mandatory project/language/security/accessibility conflict, an unavoidable frozen-interface change, a disputed blocker, or the bounce cap. The permitted reasons are `contradictory_artifacts`, `mandatory_rule`, `frozen_interface`, `disputed_blocker`, and `bounce_cap`.
 
-When implementation work exists, push it and also supply `--body <absolute-submission.md>` from the same private directory to preserve one draft Submission. Incomplete artifacts may remain during this pause; preserve any supplied endpoint flags, but do not invent Completion, tick unfinished work, or retire the ledger. The semantic command publishes the decision and preserves the state to resume; never leave the question only in your own session.
+Retrieve the decision template at the decision point with:
+
+`skl skill --resource reference/decision.md --input result_directory={{quote .Implementation.ResultDirectory}} --input preserve=<true|false> implement`
+
+Choose this later value at the decision point, setting `preserve` to `true` when implementation work exists that the draft Submission must preserve and to `false` otherwise. Publish the decision with `{{.Implementation.NeedsHumanCommand}}`; when preserving changes, append `--body` with the established Result Document `{{.Implementation.ResultDirectory}}/submission.md`. A pause never invents Completion, ticks unfinished work, retires a live ledger, approves, or merges.
+{{else}}Implement one accepted change through its conventional worktree. Start only with `skl implement next`, or resume an explicit existing Claim with `skl implement resume --item <number>`. Follow the returned Execution Skill: it binds the selected repository, remote, Work Item, branch, worktree, result location, procedure, evidence, and commands.
+
+Use TDD at the seams pinned in the accepted artifacts. Keep scope to those artifacts, preserve existing work, never rewrite branch history, and leave integration and merge to the human Merge Authority. Run focused checks during implementation and the Full Gate through Audit. A normal implementation runs Audit once, records every disposition, ticks only permitted automated boxes, commits Artifact Completion, and must "remove the entire `.changes/<slug>/` ledger in a separate subsequent commit before review" before it pushes and submits its opaque Result Document. Never bless the changes — that is the watchdog's job.
+
+Finding-driven Rework reads the retired Implementation Ledger from its historical endpoints; rework must not recreate or revise it. It resolves the supplied findings, keeps the retired ledger absent, and runs one focused Audit per Implement execution. Only the engine's `awaiting_review` outcome completes implementation. Use Needs Human solely for a permitted decision automation cannot make; a pause does not approve or merge work.
+{{end}}

@@ -6,7 +6,9 @@ description: Actively build and sharpen a project's domain model. Use when the u
 Actively build and sharpen the project's domain model as you design. This is the *active discipline* — challenging terms, inventing edge-case scenarios, and writing the glossary and decisions down **the moment they crystallise**. (Merely reading CONTEXT.md for vocabulary is not this skill — that's a one-line habit any skill can do. This skill is for when you're changing the model, not just consuming it.)
 
 
-## File structure
+{{if .Implementation}}Apply this discipline inside the accepted change. Update the glossary or record an ADR only when the change itself resolves a term or makes a decision that is hard to reverse, surprising without context, and the result of a real trade-off. The accepted change does not require glossary or ADR production outside the accepted change, and it never justifies a documentation edit beyond it.
+
+{{end}}## File structure
 
 Most repos have a single context:
 
@@ -45,7 +47,7 @@ when the first term is resolved. If no `docs/adr/` exists, create it when the fi
 When the user uses a term that conflicts with the existing language in `CONTEXT.md`, call it out immediately. "Your glossary defines 'cancellation' as X, but you seem to mean Y — which is it?"
 
 ### Sharpen fuzzy language
-When the user uses vague or overloaded terms, propose a precise canonical term. "You're saying 'account' — do you mean the Customer or the User? Those are different things." 
+When the user uses vague or overloaded terms, propose a precise canonical term. "You're saying 'account' — do you mean the Customer or the User? Those are different things."
 
 ### Discuss concrete scenarios
 When domain relationships are being discussed, stress-test them with specific scenarios. Invent scenarios that probe edge cases and force the user to be precise about the boundaries between concepts.

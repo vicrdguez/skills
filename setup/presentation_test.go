@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/workflow"
 )
 
@@ -14,7 +15,7 @@ func TestGitHubLifecyclePresentationKeepsNativeJSON(t *testing.T) {
 			ID: "7", Order: 7, Blockers: []workflow.WorkItemID{"2"},
 			Submission: &workflow.Submission{ID: "11"},
 		},
-	})
+	}, InvocationContext{Repository: github.RepositoryID{Owner: "acme", Name: "widgets"}})
 	if err != nil {
 		t.Fatal(err)
 	}
