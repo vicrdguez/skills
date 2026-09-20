@@ -644,9 +644,9 @@ func TestEmbeddedResourceDelegationSmoke(t *testing.T) {
 		{"design", "reference/DESIGN-IT-TWICE.md", "Include both the Design definition's vocabulary (retrieve with `skl skill design` if not already supplied) and `CONTEXT.md` vocabulary in the brief", "skl skill design", "**Locality**"},
 		{"design", "reference/DESIGN-IT-TWICE.md", "Dependency strategy and adapters (see `skl skill --resource reference/DEEPENING.md design`)", "skl skill --resource reference/DEEPENING.md design", "## Testing strategy: replace, don't layer"},
 		{"propose", "", "Follow the template from `skl skill --resource reference/intent.md propose`", "skl skill --resource reference/intent.md propose", "## Definition of Done"},
-		{"propose", "", "Follow the template from `skl skill --resource reference/behavior.md propose`", "skl skill --resource reference/behavior.md propose", "## Feature: Order cancellation"},
+		{"propose", "", "Follow the template from `skl skill --resource reference/behavior.md propose`", "skl skill --resource reference/behavior.md propose", "## Rule: Cancellation is available only before shipment"},
 		{"propose", "", "Follow the template from `skl skill --resource reference/plan.md propose`", "skl skill --resource reference/plan.md propose", "### Module shapes & seams"},
-		{"propose", "", "`tasks.md`: Follow the template from `skl skill --resource reference/tasks.md propose`", "skl skill --resource reference/tasks.md propose", "Write it when sequencing, dependencies, or non-behavioral chores benefit from explicit tracking."},
+		{"propose", "", "Follow the template from `skl skill --resource reference/tasks.md propose`", "skl skill --resource reference/tasks.md propose", "exists only when useful sequencing"},
 		{"writing-for-agents", "", "When the document you're writing is a skill, read `skl skill --resource SKILL-MECHANICS.md writing-for-agents` for frontmatter, invocation choice, and router skills.", "skl skill --resource SKILL-MECHANICS.md writing-for-agents", "## Invocation"},
 		{"writing-for-agents", "", "**By invocation**, skill-specific: see `skl skill --resource SKILL-MECHANICS.md writing-for-agents`.", "skl skill --resource SKILL-MECHANICS.md writing-for-agents", "## Router skills"},
 		{"writing-for-agents", "SKILL-MECHANICS.md", "the Writing for Agents definition (retrieve with `skl skill writing-for-agents` if not already supplied)", "skl skill writing-for-agents", "## Context pointers"},
@@ -932,10 +932,25 @@ func TestRetrieveConcreteProposeInstructions(t *testing.T) {
 
 	got, _, _ := strings.Cut(output.String(), "\n\n## Included Skill:")
 	for section, requirements := range map[string][]string{
-		"slice judgment":      {"COMPLETE path through every layer", "demoable and verifiable on its own", "single fresh context window", "Iterate until the user approves the breakdown"},
-		"seam judgment":       {"Use the `design` skill", "Always prefer existing seams", "Use the highest seam possible", "Check with the user if the seams match their expectations"},
-		"artifact authorship": {"## Writing the change artifacts", "`intent.md`: Why / What / Scope / Out of scope / Definition of Done", "*Gherkin notation*", "module shapes and seams chosen for implementation", "Discoveries belong in PR findings or in a new proposal", "skl skill --resource reference/tasks.md propose"},
-		"publication":         {"skl propose publish", "skl propose cleanup"},
+		"slice judgment": {"COMPLETE path through every layer", "demoable and verifiable on its own", "single fresh context window", "Iterate until the user approves the breakdown"},
+		"seam judgment": {
+			"Use the `design` skill to materialize the approved seams", "Preserve any deliberately agreed seam",
+			"Where seam choice was delegated, prefer an existing seam", "return it to the human before drafting rather than redesigning the accepted architecture",
+		},
+		"artifact authorship": {
+			"## Writing the change artifacts", "desired result, scope, exclusions, Definition of Done", "scoped named rules", "binding scenarios that discriminate plausible interpretations",
+			"responsibility ownership, boundary assumptions, deliberately agreed interfaces, and verification strategy", "Do not manufacture tasks from scenario or test counts",
+			"Discoveries belong in PR findings or in a new proposal", "skl skill --resource reference/tasks.md propose",
+		},
+		"fidelity review": {
+			"user-confirmed final recap of consequential rules, architectural commitments, and delegated choices",
+			"one bounded review in a fresh context across the complete proposed slice set",
+			"the exact user-confirmed Explore recap", "every referenced decision or ADR", "all proposed slices and their artifact drafts",
+			"omits, weakens, strengthens, contradicts, or invents obligations", "does not redesign the solution",
+			"Correct demonstrable transcription errors", "returns to the human for resolution",
+			"neither routine artifact-by-artifact rereading nor a second semantic approval ceremony",
+		},
+		"publication": {"skl propose publish", "skl propose cleanup"},
 		"independent delivery": {
 			"Prefer separate Work Items for behaviors that deliver safe, useful results independently",
 			"after declared Dependencies are Merged, without requiring later Work Items",
@@ -967,6 +982,107 @@ func TestRetrieveConcreteProposeInstructions(t *testing.T) {
 	}
 	if strings.Contains(got, "docs/github.md") {
 		t.Fatalf("Propose instructions retain copied board protocol:\n%s", got)
+	}
+}
+
+func TestRetrieveApprovedContractGuidance(t *testing.T) {
+	run := func(args ...string) string {
+		t.Helper()
+		var stdout, stderr bytes.Buffer
+		app := newApp(func(github.RepositoryID) (setup.Backend, error) {
+			t.Fatal("public guidance retrieval reached the Workflow Backend")
+			return nil, nil
+		}, bytes.NewReader(nil), &stdout, &stderr)
+		if err := app.Run(args); err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, stderr.String())
+		}
+		if stderr.Len() != 0 {
+			t.Fatalf("%v stderr: %s", args, stderr.String())
+		}
+		return stdout.String()
+	}
+
+	for _, tc := range []struct {
+		name      string
+		included  []string
+		resources []string
+		markers   []string
+	}{
+		{
+			name: "explore", included: []string{"domain"},
+			markers: []string{
+				"one final approval recap", "consequential rules", "architectural commitments and responsibility ownership",
+				"choices deliberately delegated to implementation", "confirmation is the semantic approval for the whole Proposal",
+				"do not require the user to reread or separately reapprove each one",
+			},
+		},
+		{
+			name: "propose", included: []string{"design", "testing"},
+			resources: []string{"reference/behavior.md", "reference/intent.md", "reference/plan.md", "reference/tasks.md"},
+			markers: []string{
+				"one bounded review in a fresh context across the complete proposed slice set", "the exact user-confirmed Explore recap",
+				"every referenced decision or ADR", "omits, weakens, strengthens, contradicts, or invents obligations",
+				"Correct demonstrable transcription errors", "returns to the human for resolution",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			markdown := run("skl", "skill", tc.name)
+			typed := run("skl", "skill", "--format", "json", tc.name)
+			var packet skilldist.Packet
+			if err := json.Unmarshal([]byte(typed), &packet); err != nil {
+				t.Fatalf("typed retrieval is not JSON: %v\n%s", err, typed)
+			}
+			if markdown != packet.Markdown() {
+				t.Fatalf("Markdown and explicit JSON differ for %s", tc.name)
+			}
+			if !slices.Equal(packet.IncludedSkills, tc.included) || !slices.Equal(packet.Resources, tc.resources) {
+				t.Fatalf("%s manifest = included %v resources %v", tc.name, packet.IncludedSkills, packet.Resources)
+			}
+			primary, _, _ := strings.Cut(packet.Instructions, "\n\n## Included Skill:")
+			for _, marker := range tc.markers {
+				if !strings.Contains(primary, marker) {
+					t.Errorf("%s guidance lacks %q", tc.name, marker)
+				}
+			}
+			for _, included := range tc.included {
+				marker := "## Included Skill: " + included
+				if count := strings.Count(packet.Instructions, marker); count != 1 {
+					t.Errorf("%s included marker %q appears %d times", tc.name, marker, count)
+				}
+			}
+		})
+	}
+
+	templates := map[string][]string{
+		"reference/intent.md": {
+			"rather than repeating them here", "Rules and scenarios may map many-to-many", "Human-owned checks",
+		},
+		"reference/behavior.md": {
+			"authoritative, scoped named rules", "governs its class of situations beyond the scenarios", "discriminate plausible interpretations",
+			"one test or task per scenario", "precision aids, not compulsory headings", "unambiguously implied case",
+		},
+		"reference/plan.md": {
+			"when the approved design pins architecture", "Responsibility ownership", "boundary", "Illustrative", "Verification strategy", "grouped many-to-many",
+		},
+		"reference/tasks.md": {
+			"optional coordination ledger", "Scenario count, test count", "coherent implementation outcome", "stable IDs are optional",
+		},
+	}
+	for resource, markers := range templates {
+		t.Run(resource, func(t *testing.T) {
+			rendered := run("skl", "skill", "--resource", resource, "propose")
+			for _, marker := range markers {
+				if !strings.Contains(rendered, marker) {
+					t.Errorf("%s lacks %q", resource, marker)
+				}
+			}
+			for _, forbidden := range []string{"becomes one test", "One behavior per Scenario", "EVERY Gherkin scenario", "Stable ids (B1"} {
+				if strings.Contains(rendered, forbidden) {
+					t.Errorf("%s retains cardinality requirement %q", resource, forbidden)
+				}
+			}
+		})
 	}
 }
 

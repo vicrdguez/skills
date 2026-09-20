@@ -1,23 +1,25 @@
 # Tasks — {change title}
 
 <!--
-This is the coordination ledger for implementation. Write it when sequencing, dependencies, or non-behavioral chores benefit from explicit tracking. Rules:
+This optional coordination ledger exists only when useful sequencing,
+dependencies, or coordination benefit from explicit tracking. Group work by a
+coherent implementation outcome. Scenario count, test count, and construction
+order never require matching tasks, and stable IDs are optional rather than a
+requirement database.
 
-- A behavioral task may coordinate one or more related scenarios; task boundaries follow coherent implementation work rather than test cardinality or construction order.
-- Stable ids (B1, C1, D1…) so an orchestrator can dispatch and track.
-
-Frozen at the `[baseline] <slice-slug>` commit: the `[completion] <slice-slug>` endpoint may only change an existing non-manual `[ ]` to lowercase `[x]`. No task is added during implementation or rework.
+Frozen at the `[baseline] <slice-slug>` commit. Artifact Completion may only tick
+an existing non-manual `[ ]` to lowercase `[x]`; no task is added during
+implementation or Rework. Delete this comment in the real file.
 -->
 
 ## Behavioral contract work
-- [ ] B1  {coherent behavior group}  → behavior.md §1–2
-- [ ] B2  {another behavior group}   → behavior.md §3
+- [ ] {coherent behavior group; reference relevant rules or scenarios when useful}
 
-## Chores  (non-behavioral work: migrations, wiring, config)
-- [ ] C1  {chore}
+## Chores
+- [ ] {non-behavioral migration, wiring, or configuration work}
 
 ## Docs
-- [ ] D1  {documentation task}
+- [ ] {documentation work}
 
 ---
 
@@ -27,9 +29,8 @@ Frozen at the `[baseline] <slice-slug>` commit: the `[completion] <slice-slug>` 
 # Tasks — add-order-cancellation
 
 ## Behavioral contract work
-- [ ] B1  Order cancellation rules and outcomes → behavior.md §1–3
+- [ ] Deliver cancellation eligibility, state change, and refund outcomes.
 
 ## Chores
-- [ ] C1  Migration: add orders.cancelled_at
-- [ ] C2  Wire OrderCancelled → refund handler
+- [ ] Add the cancellation timestamp migration before wiring the refund handler.
 ```

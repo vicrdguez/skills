@@ -1,86 +1,59 @@
 # {Change title} Behavior
 
 <!--
-Specify behavior in Gherkin NOTATION (there are no .feature files and no Cucumber and no runtime).
+Write authoritative, scoped named rules where consequential ambiguity needs a
+decision. A rule governs its class of situations beyond the scenarios beneath it.
+Use binding scenarios only to discriminate plausible interpretations, not to
+inventory every simple case or prescribe one test or task per scenario.
 
-Frozen at the `[baseline] <slice-slug>` commit: a scenario discovered during review is a new proposal, never an edit at `[completion] <slice-slug>`.
+Use Gherkin notation as readable prose; there are no .feature files or Cucumber
+runtime. Given / When / Then / And / But help expose preconditions, actions, and
+observable outcomes. Where relevant, consider state and side effects, prohibited
+or unchanged effects, and failure, cancellation, retry, or partial completion.
+These are precision aids, not compulsory headings.
 
-Use the keywords that make behavior unambiguous and map cleanly onto a test;
-skip the ones that only exist to drive the Cucumber engine.
+Each scenario must be observable through the chosen module interface rather than
+incidental implementation state. An unambiguously implied case needs no extra
+scenario. Resolve any consequential behavior not settled by the approved source
+before publication rather than inventing an obligation.
 
-Allowed keywords:
-  - Feature: a capability or behavior under change
-  - Rule (optional): a business rule / invariant; group its scenarios beneath it
-  - Scenario: one concrete behavior  ->  becomes one test
-  - Given / When / Then: arrange / act / assert
-  - And / But: continue the previous Given/When/Then, readably
-  - Background (optional): shared Given steps for a Feature/Rule  ->  shared test setup
-  - Scenario Outline + Examples:   table-driven cases  ->  one parameterized test data tables (|), doc strings  when a step needs structured data
-
-Skip:
-  *        the anonymous step bullet — it loses the Given/When/Then -> arrange/act/assert mapping
-  @tags    no runtime to filter on; tasks.md already carries traceability
-
-Rules:
-- Each Scenario is observable through a module's interface, not incidental internal state.
-- One behavior per Scenario.
-- Reach for Rule when a change turns on an invariant.
-- Give a critical INTERNAL module its own Feature — those scenarios become tests at that module's seam.
+Frozen at the `[baseline] <slice-slug>` commit. Artifact Completion may only tick
+existing non-manual boxes; review discoveries belong in findings or a new Proposal.
 Delete this comment in the real file.
 -->
 
+## Rule: {scoped, consequential rule}
 
-## Feature: {capability or behavior under change}
+{State the authoritative rule, including its scope and material prohibited effects.}
 
-#### Scenario: {clear, specific name — becomes the test name}
-- Given {the starting state}
-- When {the action taken through a public interface}
-- Then {the observable outcome}
-- And {a further observable outcome}
+### Scenario: {case that distinguishes plausible interpretations}
+- Given {the relevant precondition}
+- When {the action through an observable interface}
+- Then {the contractually observable outcome}
+- And {a further observable or unchanged outcome, when relevant}
 
 ---
 
 ### Example
 
-```
-## Feature: Order cancellation
+```md
+# Order Cancellation Behavior
 
-  ### Background:
-  - Given a customer with a placed order
+## Rule: Cancellation is available only before shipment
 
-  ### Rule: An order can only be cancelled before it ships
+A customer may cancel an unshipped order. Cancellation makes the order cancelled
+and initiates a full refund. Once shipped, an order rejects cancellation and
+remains unchanged.
 
-    #### Scenario: Cancel an unshipped order
-    - When the customer cancels the order
-    - Then the order moves to state "cancelled"
-    - And a full refund is initiated
+### Scenario: Cancel an unshipped order
+- Given a customer has an unshipped order
+- When the customer cancels the order
+- Then the order becomes "cancelled"
+- And a refund for the full payment is initiated
 
-    #### Scenario: Cannot cancel a shipped order
-    - Given the order has shipped
-    - When the customer attempts to cancel the order
-    - Then the cancellation is rejected with reason "already shipped"
-    - But the order remains in state "shipped"
-
-    #### Scenario Outline: Refund equals the order total
-    - When the customer cancels the order totalling <total>
-    - Then a refund of <total> is initiated
-
-    Examples:
-    | total |
-    | 1000  |
-    | 4250  |
-
-```
-
-A critical internal module — tested at its own seam, not via the public API
-
-```
-## Feature: Order state-machine guard
-
-  ### Rule: Only placed -> cancelled is a legal transition
-
-    #### Scenario: Reject a cancel from shipped
-      - Given a state "shipped"
-      - When the guard evaluates a "cancel" transition
-      - Then the transition is rejected as illegal
+### Scenario: Reject cancellation after shipment
+- Given the order has shipped
+- When the customer attempts to cancel the order
+- Then cancellation is rejected with reason "already shipped"
+- But the order remains "shipped" and no refund is initiated
 ```

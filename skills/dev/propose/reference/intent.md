@@ -1,58 +1,54 @@
 # {title}
 
 <!--
-Capture intent so precisely that an implementer needs no further clarification.
-Keep each line tight. Delete this comment in the real file.
+State the desired result compactly. Keep detailed rules and scenarios in
+behavior.md rather than repeating them here. Delete this comment in the real file.
 
-Frozen at the `[baseline] <slice-slug>` commit. The `[completion] <slice-slug>` endpoint may only tick an existing non-manual Done box `[ ]` → lowercase `[x]`.
+Frozen at the `[baseline] <slice-slug>` commit. The `[completion] <slice-slug>`
+endpoint may only tick an existing non-manual Done box `[ ]` → lowercase `[x]`.
 -->
 
 ## Why
-<!--
-The problem and motivation from the user's perspective. 
--->
+<!-- The problem and motivation from the user's perspective. -->
 
 ## What
-<!--
-What this change introduces, the solution. Detailed, but to the point.  Focus on clarity and avoid redundant explanations.
--->
+<!-- The result this change introduces, without restating behavior.md. -->
 
 ## Scope
-<!--
-LONG Bullet list of what this change DOES.
--->
-
+<!-- What this change includes. -->
 
 ## Out of Scope
-<!--
-Bullet list of the what this change deliberately DOES NOT do.
--->
+<!-- What this change deliberately excludes. -->
 
 ## Definition of Done
 <!--
-Observable, testable acceptance criteria. The conditions that determine if this change is complete or not. EVERY Gherkin scenario in `behavior.md` should trace back to a line here.
+Observable completion outcomes. Rules and scenarios may map many-to-many to these
+outcomes; do not create one item per scenario or test.
 
-Use markdown task-bullets: `- [ ]`
+Use Markdown task bullets: `- [ ]`.
 -->
 
 ## Manual verification
 <!--
-What a human must check by hand because no agent can run or observe it: visual checks, third-party dashboards or sandboxes, credentials the agent lacks, production-like data. Frozen like everything else: the reviewer copies it into the PR body, nobody authors it after the fact. "None" is a valid answer.
+Human-owned checks an agent cannot run or observe, such as visual checks,
+third-party dashboards, unavailable credentials, or production-like data. Frozen
+like every other obligation and left unchecked at Artifact Completion. "None" is
+a valid answer.
 
-Use markdown task-bullets `- [ ]`
+Use Markdown task bullets `- [ ]` when checks exist.
 -->
 
-------
+---
 ## Example
 
 ```md
 # Add order cancellation
 
 ## Why
-Customers can't cancel an order after placing it, which drives avoidable support load.
+Customers cannot cancel an order after placing it, which drives avoidable support load.
 
 ## What
-Let a customer cancel an order before it ships; refund the full amount automatically.
+Let a customer cancel an order before shipment and receive a full refund.
 
 ## Scope
 - Customer-initiated cancellation of unshipped orders
@@ -64,10 +60,10 @@ Let a customer cancel an order before it ships; refund the full amount automatic
 - Post-shipment returns
 
 ## Definition of Done
-- [ ] A customer can cancel an order while it is unshipped, and the order becomes "cancelled".
-- [ ] Cancelling an unshipped order initiates a full refund.
-- [ ] Cancelling a shipped order is rejected and leaves the order unchanged.
+- [ ] Eligible cancellation is available and leaves the order cancelled.
+- [ ] Cancellation refunds the complete order payment.
+- [ ] Ineligible cancellation is rejected without changing the order.
 
 ## Manual verification
-- [ ] Cancel an order and confirm the refund shows as initiated in the Stripe test dashboard
+- [ ] Confirm the initiated refund in the Stripe test dashboard.
 ```
