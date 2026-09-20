@@ -87,7 +87,7 @@ So resolve the contradictions now, while you still can — between the artifacts
 
 **Always**:
 - `intent.md`: Why / What / Scope / Out of scope / Definition of Done. Follow the template from `skl skill --resource reference/intent.md propose`
-- `behavior.md`: The exact required behavior(s) to implement, in *Gherkin notation* that map to `intent.md` *Definition of Done* section. Since seams are where we test at, use `tdd` to define good tests and avoid anti-patterns. The final list of behaviours will translate directly to what should be implemented and tested. Follow the template from `skl skill --resource reference/behavior.md propose`
+- `behavior.md`: The exact required behavior(s) to implement, in *Gherkin notation* that map to `intent.md` *Definition of Done* section. Since seams are where verification effort lands, use `testing` and its public guidance (`skl skill --resource reference/tests.md testing`) to define credible behavioral evidence and avoid anti-patterns. The final list of behaviours defines what implementation must satisfy without prescribing test organization or construction order. Follow the template from `skl skill --resource reference/behavior.md propose`
 
 **When warranted**:
 - `plan.md`: The approach, the module shapes and seams chosen for implementation and any pinned decision the implementer MUST NOT make on its own. Follow the template from `skl skill --resource reference/plan.md propose`
