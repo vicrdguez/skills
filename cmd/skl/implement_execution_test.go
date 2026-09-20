@@ -448,6 +448,44 @@ func TestAuditReworkFixesAddsNoSyntheticCleanFinding(t *testing.T) {
 	}
 }
 
+// TestAuditReworkFixesPreservesNonReworkAuditBehavior materializes the
+// regression scenario for initial, resumed, and standalone Audit procedures.
+func TestAuditReworkFixesPreservesNonReworkAuditBehavior(t *testing.T) {
+	for _, procedure := range []struct {
+		name string
+		item workflow.ImplementationItem
+		args []string
+	}{
+		{name: "initial", item: workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Ready}, args: []string{"next"}},
+		{name: "resumed", item: workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Ready, Claimed: true}, args: []string{"resume", "--item", "7"}},
+	} {
+		t.Run(procedure.name, func(t *testing.T) {
+			root := proposalRepository(t)
+			prepareSlice(t, root, "widget")
+			backend := &implementationMemory{work: []workflow.ImplementationItem{procedure.item}}
+			rendered := implementCLI(t, root, backend, procedure.args...).Packet.Instructions
+			for _, retained := range []string{"merge-base with `main` and the parent of this change's first commit", "Artifact integrity", "two axes", "Assign every new Audit Finding an `F<n>` identity"} {
+				if !strings.Contains(rendered, retained) {
+					t.Errorf("%s Audit lost %q", procedure.name, retained)
+				}
+			}
+			if strings.Contains(rendered, "This bundled Audit reviews one finding-driven Rework delta") {
+				t.Errorf("%s Audit contains Rework scope", procedure.name)
+			}
+		})
+	}
+
+	standalone, err := skilldist.BuildPacket("audit", skilldist.InvocationFacts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, retained := range []string{"First workflow review of a change", "Repeat review after a bounce", "Artifact integrity", "two axes", "Assign every new Audit Finding an `F<n>` identity"} {
+		if !strings.Contains(standalone.Instructions, retained) {
+			t.Errorf("standalone Audit lost %q", retained)
+		}
+	}
+}
+
 // TestB3MetadataOnlyStartupBindsEveryAlreadyEstablishedReference materializes
 // the B3 outline. Startup may only use metadata the invocation already
 // established, so every bound command must be literal and usable as printed.
