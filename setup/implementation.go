@@ -686,13 +686,13 @@ func (b *GitHubBackend) implementationComments(ctx context.Context, repository g
 			OriginalCommit    string `json:"original_commit_id"`
 		}
 		if err := b.request(ctx, http.MethodGet, b.repositoryPath(repository)+stream+fmt.Sprintf("?per_page=100&page=%d", page), nil, &batch); err != nil {
-			return nil, err
+			path := strings.TrimPrefix(b.repositoryPath(repository)+stream, "/")
+			return nil, fmt.Errorf("selected feedback stream %s page %d was not read completely: %w; retry the selected request or retrieve every page with `gh api --paginate %s` before judgment", path, page, err, skilldist.ShellQuote(path))
 		}
 		for _, comment := range batch {
 			observed := skilldist.ReviewComment{
-				Body: comment.Body, Author: comment.User.Login, Association: comment.Association, Commit: comment.Commit, Path: comment.Path, CreatedAt: comment.CreatedAt, Side: comment.Side,
+				Source: skilldist.RepositoryEvidenceSource(repository.Owner+"/"+repository.Name, stream), Body: comment.Body, Author: comment.User.Login, Association: comment.Association, Commit: comment.Commit, Path: comment.Path, CreatedAt: comment.CreatedAt, Side: comment.Side,
 				CurrentLine: comment.Line, OriginalLine: comment.OriginalLine, StartLine: comment.StartLine, OriginalStartLine: comment.OriginalStartLine, StartSide: comment.StartSide, OriginalCommit: comment.OriginalCommit,
-				Source: skilldist.RepositoryEvidenceSource(repository.Owner+"/"+repository.Name, stream),
 			}
 			if comment.Line != nil {
 				observed.Line = *comment.Line

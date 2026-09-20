@@ -68,7 +68,9 @@ type Submission struct {
 	// EvidenceSources names the repository-bound streams the last observation
 	// actually read for this Submission. A required stream missing from this
 	// list is pending for the worker, not evidence of an empty review.
-	EvidenceSources []skilldist.EvidenceSource
+	EvidenceSources  []skilldist.EvidenceSource
+	EvidenceComments []skilldist.ReviewComment
+	EvidenceStreams  []skilldist.EvidenceStream
 }
 
 // LifecycleObservation retains overlaps while a multi-record transition is in flight.

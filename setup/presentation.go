@@ -243,16 +243,24 @@ func PresentImplementation(outcome workflow.ImplementationOutcome, invocation In
 		facts.Watchdog = &f
 		skill, directory = "watchdog", f.ResultDirectory
 		f.WorkItem, f.Submission = output.Item.Number, output.Item.Submission.Number
-		f.WorkItemReference, f.SubmissionReference = fmt.Sprintf("#%d", f.WorkItem), fmt.Sprintf("#%d", f.Submission)
 		f.ResumeCommand = fmt.Sprintf("skl watchdog resume --repo %s --remote %s --item %d", quote(f.Worktree), quote(f.Remote), f.WorkItem)
-		f.SubmitCommand = fmt.Sprintf("skl watchdog submit --repo %s --remote %s --item %d --review-number %d --reviewed-head %s --summary %s", quote(f.Worktree), quote(f.Remote), f.WorkItem, f.ReviewNumber, f.ReviewedHead, quote(filepath.Join(directory, "summary.md")))
+		f.SubmitCommand = fmt.Sprintf("skl watchdog submit --repo %s --remote %s --item %d --review-number %d --reviewed-head %s --submission %d --base %s --submission-body-sha256 %s --summary %s", quote(f.Worktree), quote(f.Remote), f.WorkItem, f.ReviewNumber, f.ReviewedHead, f.Submission, quote(f.SubmissionBase), quote(f.SubmissionBodySHA256), quote(filepath.Join(directory, "summary.md")))
 		flags := endpointFlags(f.SuppliedArtifactBaseline, f.SuppliedArtifactCompletion)
 		f.ResumeCommand += flags
 		f.SubmitCommand += flags
 		f.FetchCommand = fmt.Sprintf("git -C %s fetch %s %s", quote(primary(f.Worktree)), quote(f.Remote), quote("+refs/heads/"+f.Branch+":refs/remotes/"+f.Remote+"/"+f.Branch))
 		f.WorktreeCommand = fmt.Sprintf("git -C %s worktree add -b %s %s %s", quote(primary(f.Worktree)), quote(f.Branch), quote(f.Worktree), quote(f.Remote+"/"+f.Branch))
-		f.InspectCommand = fmt.Sprintf("skl implement inspect --repo %s --remote %s --item %d", quote(f.Worktree), quote(f.Remote), f.WorkItem)
+		f.InspectCommand = fmt.Sprintf("skl watchdog inspect --repo %s --remote %s --item %d --submission %d --base %s --submission-body-sha256 %s --review-number %d --reviewed-head %s --result-directory %s", quote(f.Worktree), quote(f.Remote), f.WorkItem, f.Submission, quote(f.SubmissionBase), quote(f.SubmissionBodySHA256), f.ReviewNumber, quote(f.ReviewedHead), quote(f.ResultDirectory))
+		if f.PreviousReviewedHead != "" {
+			f.InspectCommand += " --previous-reviewed-head " + quote(f.PreviousReviewedHead)
+		}
 		f.InspectCommand += flags
+		if f.Repository == "" {
+			if selected, err := ResolveRepository(primary(f.Worktree), f.Remote); err == nil {
+				f.Repository = selected.Repository.Owner + "/" + selected.Repository.Name
+			}
+		}
+		f.EvidenceInstructions = watchdogEvidenceInstructions(f)
 	}
 	packet, err := skilldist.BuildPacket(skill, facts)
 	if err != nil {
