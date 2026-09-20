@@ -31,13 +31,13 @@ Give each finding-driven Rework execution one Audit specialized to the fixes mad
 - Automating attachment of this Work Item to coordination issue #44
 
 ## Definition of Done
-- [ ] A finding-driven Rework execution directs the worker to run exactly one Audit over the delta from the applicable Watchdog-reviewed commit to the current head, and to stop when that commit cannot be selected unambiguously.
-- [ ] Rework Standards and Contracts reviews report only findings caused by or necessary to verify the Rework delta, without reopening unrelated unchanged code or whole-change omissions.
-- [ ] Rework Audit owns one Full Gate run while Implement retains artifact inspection before and after Rework; endpoint inspection is not duplicated inside Audit.
-- [ ] Applying Rework Audit findings does not trigger another Audit in the same execution, and code-changing dispositions require affected checks and a final Full Gate before handoff.
-- [ ] Initial and Rework Audits assign every new Audit Finding an `F<n>` identity, starting at `F1` when necessary and otherwise continuing after the greatest existing `F<n>`, while preserving historical identifiers unchanged.
-- [ ] The cumulative Submission Audit ledger advances its audited head without adding a round-specific ledger section or a synthetic entry for a clean Audit.
-- [ ] Initial and resumed implementation and standalone Audit retain their existing fixed points, review scope, deterministic checks, and two-axis behavior apart from the shared `F<n>` identity rule.
+- [x] A finding-driven Rework execution directs the worker to run exactly one Audit over the delta from the applicable Watchdog-reviewed commit to the current head, and to stop when that commit cannot be selected unambiguously.
+- [x] Rework Standards and Contracts reviews report only findings caused by or necessary to verify the Rework delta, without reopening unrelated unchanged code or whole-change omissions.
+- [x] Rework Audit owns one Full Gate run while Implement retains artifact inspection before and after Rework; endpoint inspection is not duplicated inside Audit.
+- [x] Applying Rework Audit findings does not trigger another Audit in the same execution, and code-changing dispositions require affected checks and a final Full Gate before handoff.
+- [x] Initial and Rework Audits assign every new Audit Finding an `F<n>` identity, starting at `F1` when necessary and otherwise continuing after the greatest existing `F<n>`, while preserving historical identifiers unchanged.
+- [x] The cumulative Submission Audit ledger advances its audited head without adding a round-specific ledger section or a synthetic entry for a clean Audit.
+- [x] Initial and resumed implementation and standalone Audit retain their existing fixed points, review scope, deterministic checks, and two-axis behavior apart from the shared `F<n>` identity rule.
 
 ## Manual verification
 None.
