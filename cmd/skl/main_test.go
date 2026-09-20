@@ -790,6 +790,47 @@ func TestInstallPreservesOpenCodeSkillsAndConfiguration(t *testing.T) {
 	}
 }
 
+func TestTestingIsTheCanonicalContractGroundedPolicy(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) {
+		t.Fatal("reasoning-skill retrieval opened a Workflow Backend")
+		return nil, nil
+	}, bytes.NewReader(nil), &stdout, &stderr, t.TempDir())
+
+	if err := app.Run([]string{"skl", "skill", "testing"}); err != nil {
+		t.Fatal(err)
+	}
+	got := stdout.String()
+	for _, want := range []string{
+		"Skill: testing",
+		"Resources: reference/mocking.md, reference/tests.md",
+		"observable behavior",
+		"independent expectation",
+		"before or after the fix",
+		"faithful isolated reproduction",
+		"material limitations",
+		"required behavioral and failure-mode protection remains",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("testing policy is missing %q:\n%s", want, got)
+		}
+	}
+	for _, forbidden := range []string{
+		"Red before green",
+		"One scenario → one test",
+		"Refactoring is not part of the loop",
+	} {
+		if strings.Contains(got, forbidden) {
+			t.Errorf("testing policy still mandates %q:\n%s", forbidden, got)
+		}
+	}
+
+	stdout.Reset()
+	if err := app.Run([]string{"skl", "skill", "tdd"}); err == nil || !strings.Contains(err.Error(), "unknown skill") {
+		t.Fatalf("retired tdd retrieval error = %v, output = %q", err, stdout.String())
+	}
+}
+
 func TestRetrieveRenderedSkillInstructions(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, t.TempDir())
