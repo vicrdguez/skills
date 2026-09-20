@@ -261,10 +261,12 @@ func TestWatchdogSubmitExplainsVerifiedReadyForHumanMerge(t *testing.T) {
 	completeAndRetireSlice(t, root, "widget")
 	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
 	backend := &implementationMemory{work: []workflow.ImplementationItem{{
-		ID: "7", Branch: "widget", State: workflow.AwaitingReview,
-		Submission: &workflow.Submission{ID: "11", Head: head, Base: "main", Body: "original evidence", Mergeability: "conflicting"},
+		ID: "7", Branch: "widget", State: workflow.AwaitingReview, Claimed: true,
+		Submission: &workflow.Submission{ID: "11", Head: head, Base: "main", Mergeability: "conflicting"},
 	}}, remoteHeads: map[string]string{"widget": head}}
-	facts := watchdogCLI(t, root, backend, "next").Packet.Facts.Watchdog
+	worktree := filepath.Join(root, ".worktrees", "widget")
+	runGit(t, root, "switch", "main")
+	runGit(t, root, "worktree", "add", worktree, "widget")
 	dir := t.TempDir()
 	summary, body := filepath.Join(dir, "summary.md"), filepath.Join(dir, "submission.md")
 	for path, content := range map[string]string{summary: "no findings\n", body: "final PR body\n"} {
@@ -274,56 +276,12 @@ func TestWatchdogSubmitExplainsVerifiedReadyForHumanMerge(t *testing.T) {
 	}
 	var output bytes.Buffer
 	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
-	args := []string{"skl", "watchdog", "submit", "--repo", facts.Worktree, "--item", "7", "--submission", "11", "--base", "main", "--submission-body-sha256", facts.SubmissionBodySHA256, "--review-number", "1", "--reviewed-head", head, "--verdict", "pass", "--summary", summary, "--body", body}
-	if err := app.Run(args); err != nil {
+	if err := app.Run([]string{"skl", "watchdog", "submit", "--repo", worktree, "--item", "7", "--review-number", "1", "--reviewed-head", head, "--verdict", "pass", "--summary", summary, "--body", body}); err != nil {
 		t.Fatal(err)
 	}
 	got := output.String()
 	if !strings.Contains(got, "Status: ready_for_merge") || !strings.Contains(got, "human") || strings.HasPrefix(got, "{") {
 		t.Fatalf("verified outcome was not explained in Markdown: %s", got)
-	}
-}
-
-func TestWatchdogSubmitRecoversFixedAttachmentPassAfterBodyPublication(t *testing.T) {
-	root := proposalRepository(t)
-	prepareSlice(t, root, "widget")
-	completeAndRetireSlice(t, root, "widget")
-	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
-	backend := &implementationMemory{work: []workflow.ImplementationItem{{
-		ID: "7", Branch: "widget", State: workflow.AwaitingReview,
-		Submission: &workflow.Submission{ID: "11", Head: head, Base: "main", Body: "original evidence"},
-	}}, remoteHeads: map[string]string{"widget": head}}
-	facts := watchdogCLI(t, root, backend, "next").Packet.Facts.Watchdog
-	dir := t.TempDir()
-	summary, body := filepath.Join(dir, "summary.md"), filepath.Join(dir, "submission.md")
-	for path, content := range map[string]string{summary: "no findings\n", body: "final PR body\n"} {
-		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	args := []string{"skl", "watchdog", "submit", "--repo", facts.Worktree, "--item", "7", "--submission", "11", "--base", "main", "--submission-body-sha256", facts.SubmissionBodySHA256, "--review-number", "1", "--reviewed-head", head, "--verdict", "pass", "--summary", summary, "--body", body}
-	var output bytes.Buffer
-	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
-	backend.beforeTransition = func() { backend.remoteHeads["widget"] = strings.Repeat("a", 40) }
-	if err := app.Run(args); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(output.String(), "Status: fix_required") || backend.work[0].Submission.Body == "original evidence" || !backend.work[0].Claimed {
-		t.Fatalf("first submission did not retain the partial publication: %s; item=%#v", output.String(), backend.work[0])
-	}
-	gitDir := strings.TrimSpace(runGitOutput(t, facts.Worktree, "rev-parse", "--absolute-git-dir"))
-	checkpoint, err := os.ReadFile(filepath.Join(gitDir, ".watchdog"))
-	if err != nil || string(checkpoint) != "1:"+head+"\n" {
-		t.Fatalf("first submission did not retain its checkpoint: %q, %v", checkpoint, err)
-	}
-	backend.beforeTransition = nil
-	backend.remoteHeads["widget"] = head
-	output.Reset()
-	if err := app.Run(args); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(output.String(), "Status: ready_for_merge") || backend.work[0].Claimed || len(backend.work[0].Submission.Comments) != 1 {
-		t.Fatalf("same-command retry did not recover exactly once: %s; item=%#v; submission=%#v", output.String(), backend.work[0], backend.work[0].Submission)
 	}
 }
 
