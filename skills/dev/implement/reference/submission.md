@@ -17,5 +17,5 @@ For every finding: ID, axis, the severity Audit assigned, and the disposition `f
 {{if eq .Procedure "rework"}}
 ## Rework
 
-Map every existing finding by its stable ID to the resolution commit and the evidence that holds, or to its linked Debt Marker. Keep the Audit ledger current for this head.
+Map every existing finding by its stable ID to the resolution commit and the evidence that holds, or to its linked Debt Marker. Assign each new Audit Finding the next monotonic identity: continue after the greatest existing `F<n>` or begin with `F1` when none exists. Preserve every historical finding identifier unchanged. Advance the existing cumulative Audit ledger to the newly audited head. Do not add a round-specific provenance section.
 {{end}}

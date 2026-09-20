@@ -416,6 +416,23 @@ func TestAuditReworkFixesIdentifiesInitialAuditFindings(t *testing.T) {
 	}
 }
 
+// TestAuditReworkFixesContinuesTheCumulativeLedger materializes the Rework
+// finding identity and audited-head scenario in the deferred Result Document.
+func TestAuditReworkFixesContinuesTheCumulativeLedger(t *testing.T) {
+	rendered := renderResource(t, "implement", "reference/submission.md",
+		"result_directory="+t.TempDir(), "procedure=rework")
+	for _, required := range []string{
+		"continue after the greatest existing `F<n>` or begin with `F1`",
+		"Preserve every historical finding identifier unchanged",
+		"Advance the existing cumulative Audit ledger to the newly audited head",
+		"Do not add a round-specific provenance section",
+	} {
+		if !strings.Contains(rendered, required) {
+			t.Errorf("Rework Result Document guidance lacks %q", required)
+		}
+	}
+}
+
 // TestB3MetadataOnlyStartupBindsEveryAlreadyEstablishedReference materializes
 // the B3 outline. Startup may only use metadata the invocation already
 // established, so every bound command must be literal and usable as printed.
