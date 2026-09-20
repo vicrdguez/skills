@@ -880,7 +880,7 @@ func TestTestingIsTheCanonicalContractGroundedPolicy(t *testing.T) {
 		"before or after the fix",
 		"faithful isolated reproduction",
 		"material limitations",
-		"required behavioral and failure-mode protection remains",
+		"Required behavioral and failure-mode protection matters more than test inventory",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("testing policy is missing %q:\n%s", want, got)
