@@ -294,49 +294,6 @@ func TestB2ProcedureSelectionIgnoresIncidentalEvidence(t *testing.T) {
 	}
 }
 
-// TestIntegrateBeforeAuditDeliversBoundLateIntegration materializes the
-// first, resumed, and finding-driven Rework procedures at the public rendering
-// seam. The worker observes one selected-target snapshot immediately before
-// Audit while final merge authority remains human-owned.
-func TestIntegrateBeforeAuditDeliversBoundLateIntegration(t *testing.T) {
-	for _, testCase := range []struct {
-		name string
-		item workflow.ImplementationItem
-		args []string
-	}{
-		{"initial", workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Ready}, []string{"next"}},
-		{"resumed", workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Ready, Claimed: true}, []string{"resume", "--item", "7"}},
-		{"rework", workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Rework, Claimed: true, Submission: &workflow.Submission{ID: "11", Base: "main"}}, []string{"resume", "--item", "7"}},
-	} {
-		t.Run(testCase.name, func(t *testing.T) {
-			root := proposalRepository(t)
-			prepareSlice(t, root, "widget")
-			backend := &implementationMemory{work: []workflow.ImplementationItem{testCase.item}}
-			rendered := implementCLI(t, root, backend, testCase.args...).Packet.Instructions
-			for _, required := range []string{
-				"Late pre-Audit target integration",
-				"fetch 'origin' main",
-				"rev-parse FETCH_HEAD",
-				"merge --no-edit <observed-target-sha>",
-				"Preparation-time target state does not satisfy this step",
-				"Resolve every conflict before normal Audit",
-				"round's integration cutoff",
-				"Later target movement alone does not require another merge",
-				"unrelated code inherited unchanged from the integrated target",
-				"Full Gate covering the final functional state",
-				"human Merge Authority's later integration and final merge",
-			} {
-				if !strings.Contains(rendered, required) {
-					t.Errorf("%s execution lacks %q", testCase.name, required)
-				}
-			}
-			if testCase.name == "resumed" && !strings.Contains(rendered, "resuming alone does not require another target observation or merge") {
-				t.Error("resumed execution repeats integration solely because work resumed")
-			}
-		})
-	}
-}
-
 // TestIntegrateBeforeAuditContinuesThroughInspection verifies that a narrow
 // inspection continuation does not mistake preparation for late integration.
 func TestIntegrateBeforeAuditContinuesThroughInspection(t *testing.T) {
@@ -366,6 +323,8 @@ func TestIntegrateBeforeAuditDefersIntegratedSHAEvidence(t *testing.T) {
 		"not a rendering input or engine metadata field",
 		"does not replace the review baseline, Artifact Baseline, Artifact Completion, or a Watchdog invocation's fixed reviewed head",
 		"Full Gate that covered that later state",
+		"identify that later SHA as the integrated target snapshot",
+		"replacing the earlier integrated-SHA reference",
 		"integration-effects review and final-state checks",
 	} {
 		if !strings.Contains(rendered, required) {
@@ -437,7 +396,7 @@ func TestAuditReworkFixesKeepsChecksAtResponsibleStages(t *testing.T) {
 		"Rework Audit owns one Full Gate run",
 		"Audit does not repeat artifact endpoint or retirement inspection",
 		"Run Inspect before editing",
-		"Run Inspect again after all edits",
+		"Run Inspect again before handoff",
 	} {
 		if !strings.Contains(rendered, required) {
 			t.Errorf("Rework check ownership lacks %q", required)
@@ -452,7 +411,7 @@ func TestAuditReworkFixesDisposesFindingsWithoutAuditLoop(t *testing.T) {
 	for _, required := range []string{
 		"Apply every Audit `HARD` finding",
 		"For each `JUDGEMENT`, fix it, decline it with a reason, or carry it as debt",
-		"If a disposition changes code, run its affected checks and a final Full Gate before handoff",
+		"If a disposition changes functional code, run its affected checks and a final Full Gate covering the final functional state before handoff",
 		"Do not invoke Audit again in this execution",
 	} {
 		if !strings.Contains(rendered, required) {
@@ -529,7 +488,7 @@ func TestAuditReworkFixesPreservesNonReworkAuditBehavior(t *testing.T) {
 			prepareSlice(t, root, "widget")
 			backend := &implementationMemory{work: []workflow.ImplementationItem{procedure.item}}
 			rendered := implementCLI(t, root, backend, procedure.args...).Packet.Instructions
-			for _, retained := range []string{"merge-base with `main` and the parent of this change's first commit", "Artifact integrity", "two axes", "Assign every new Audit Finding an `F<n>` identity"} {
+			for _, retained := range []string{"merge-base with the recorded integrated `main` SHA and the parent of this change's first commit", "Artifact integrity", "two axes", "Assign every new Audit Finding an `F<n>` identity"} {
 				if !strings.Contains(rendered, retained) {
 					t.Errorf("%s Audit lost %q", procedure.name, retained)
 				}
@@ -583,6 +542,9 @@ func TestB3MetadataOnlyStartupBindsEveryAlreadyEstablishedReference(t *testing.T
 			if facts.Repository != "acme/widgets" || facts.Remote != "upstream" || facts.Worktree != worktree || facts.ResultDirectory == "" {
 				t.Fatalf("established identities = %#v", facts)
 			}
+			lateFetch := "git -C " + quote(worktree) + " fetch " + quote("upstream") + " main"
+			lateResolve := "git -C " + quote(worktree) + " rev-parse FETCH_HEAD"
+			lateMerge := "git -C " + quote(worktree) + " merge --no-edit <observed-target-sha>"
 			for _, bound := range []string{
 				"Repository: acme/widgets on the selected remote `upstream`",
 				"Work Item: #7",
@@ -591,6 +553,9 @@ func TestB3MetadataOnlyStartupBindsEveryAlreadyEstablishedReference(t *testing.T
 				"Private result location: `" + facts.ResultDirectory + "`",
 				"Prepare: `git -C " + quote(root) + " fetch " + quote("upstream") + " " + quote("+refs/heads/slice-seven:refs/remotes/upstream/slice-seven") + "` then `git -C " + quote(root) + " worktree add -b " + quote("slice-seven") + " " + quote(worktree) + " " + quote("upstream/slice-seven") + "`",
 				"Push: `git -C " + quote(worktree) + " push " + quote("upstream") + " " + quote("slice-seven") + "`",
+				lateFetch,
+				lateResolve,
+				lateMerge,
 				"Inspect: `skl implement inspect --repo " + quote(worktree) + " --remote " + quote("upstream") + " --item 7 --artifact-baseline " + baseline + " --artifact-completion " + completion + "`",
 				"Resume: `skl implement resume --item 7 --remote " + quote("upstream") + " --artifact-baseline " + baseline + " --artifact-completion " + completion + "`",
 				"`skl implement submit --repo " + quote(worktree) + " --remote " + quote("upstream") + " --item 7 --body " + quote(filepath.Join(facts.ResultDirectory, "submission.md")) + " --artifact-baseline " + baseline + " --artifact-completion " + completion + "`",
@@ -601,6 +566,10 @@ func TestB3MetadataOnlyStartupBindsEveryAlreadyEstablishedReference(t *testing.T
 				if !strings.Contains(rendered, bound) {
 					t.Errorf("Execution Skill lacks the bound reference:\n%s", bound)
 				}
+			}
+			fetchAt, resolveAt, mergeAt := strings.Index(rendered, lateFetch), strings.Index(rendered, lateResolve), strings.Index(rendered, lateMerge)
+			if fetchAt < 0 || resolveAt <= fetchAt || mergeAt <= resolveAt {
+				t.Errorf("late integration is not bound to upstream/main in fetch-resolve-merge order")
 			}
 			if info, err := os.Stat(facts.ResultDirectory); err != nil || !info.IsDir() {
 				t.Fatalf("private result location is not established: %v", err)

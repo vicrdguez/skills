@@ -69,7 +69,7 @@ Retrieve the shared contract criteria with `skl skill --resource reference/accep
 These two produce facts, not judgements — a diff read or an exit code. Run them here, before spawning anything, and hand the recorded results to both briefs. Two reviewers running them concurrently would contend over the same worktree, and a fact produced inside a reviewer's context is a fact the two axes can end up reporting differently.
 
 1. **The documented gate** — the project's full suite, typecheck and lint, exactly once per invocation. A red gate is worth knowing before spending two reviewer contexts on it.
-2. **Artifact integrity** — record the available endpoint evidence. Compare only the resolved Baseline and Completion, or Baseline and current provisional head before Completion; do not inspect intermediate artifact contents, infer Completion from deletion, or require monotonic intermediate ticks. Report missing integrity evidence explicitly.
+2. **Artifact integrity** — record the engine's endpoint inspection: Baseline, optional Completion, provisional/present/retired phase, and every violation. Compare only the resolved Baseline and Completion, or Baseline and current provisional head before Completion; do not inspect intermediate artifact contents, infer Completion from deletion, or require monotonic intermediate ticks. First-pass Audit may precede final ticks and retirement, so label those facts pending rather than claim review readiness. Normal submission requires completed automated boxes at Completion and ledger absence at the review head; Rework keeps it absent. For an independent Audit without engine facts, compare the supplied endpoint snapshots directly and report missing integrity evidence explicitly.
 
 
 ### 5. Spawn both sub-agents in parallel

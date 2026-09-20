@@ -1168,8 +1168,8 @@ func TestImplementStartAndResumePreserveProgressWithoutEngineTargetPin(t *testin
 	prepareSlice(t, root, "widget")
 	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}}
 	first := implementCLI(t, root, b, "next")
-	if first.Packet == nil || strings.Contains(first.Packet.Markdown(), "target_snapshot") || !strings.Contains(first.Packet.Markdown(), "merge --no-edit <observed-target-sha>") {
-		t.Fatalf("start lost late integration or added engine target state: %#v", first)
+	if first.Packet == nil || strings.Contains(first.Packet.Markdown(), "target_snapshot") {
+		t.Fatalf("start added engine target state: %#v", first)
 	}
 	if err := os.WriteFile(filepath.Join(root, "progress.txt"), []byte("preserved\n"), 0600); err != nil {
 		t.Fatal(err)
@@ -1178,8 +1178,8 @@ func TestImplementStartAndResumePreserveProgressWithoutEngineTargetPin(t *testin
 	runGit(t, root, "commit", "--allow-empty", "-m", "implementation")
 	b.remoteHeads["main"] = strings.Repeat("f", 40)
 	second := implementCLI(t, root, b, "resume", "--item", "7")
-	if second.Packet == nil || strings.Contains(second.Packet.Markdown(), "target_snapshot") || strings.Contains(second.Packet.Markdown(), strings.Repeat("f", 40)) || !strings.Contains(second.Packet.Markdown(), "merge --no-edit <observed-target-sha>") || readFile(t, filepath.Join(root, "progress.txt")) != "preserved\n" {
-		t.Fatalf("resume changed progress, pinned a target, or lost late integration: %#v", second)
+	if second.Packet == nil || strings.Contains(second.Packet.Markdown(), "target_snapshot") || strings.Contains(second.Packet.Markdown(), strings.Repeat("f", 40)) || readFile(t, filepath.Join(root, "progress.txt")) != "preserved\n" {
+		t.Fatalf("resume changed progress or pinned a target: %#v", second)
 	}
 }
 
@@ -1411,8 +1411,8 @@ func TestImplementStartsFindingDrivenRework(t *testing.T) {
 	if facts.Submission != 11 || !reflect.DeepEqual(facts.Comments, comments) {
 		t.Fatalf("facts = %#v", facts)
 	}
-	if !strings.Contains(got.Packet.Markdown(), "current PR comparison") || !strings.Contains(got.Packet.Markdown(), "merge --no-edit <observed-target-sha>") || strings.Contains(got.Packet.Markdown(), head+"...HEAD") {
-		t.Fatal("rework packet lost late integration or requires an unavailable previous review cache")
+	if !strings.Contains(got.Packet.Markdown(), "current PR comparison") || strings.Contains(got.Packet.Markdown(), head+"...HEAD") {
+		t.Fatal("rework packet requires an unavailable previous review cache")
 	}
 }
 
