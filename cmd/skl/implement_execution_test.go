@@ -396,6 +396,26 @@ func TestAuditReworkFixesDisposesFindingsWithoutAuditLoop(t *testing.T) {
 	}
 }
 
+// TestAuditReworkFixesIdentifiesInitialAuditFindings materializes the shared
+// F<n> identity rule for an initial Implement Audit.
+func TestAuditReworkFixesIdentifiesInitialAuditFindings(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "widget")
+	backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}}
+
+	rendered := implementCLI(t, root, backend, "next").Packet.Instructions
+	for _, required := range []string{
+		"Assign every new Audit Finding an `F<n>` identity",
+		"Begin with `F1` when no `F<n>` exists",
+		"continue after the greatest existing `F<n>`",
+		"Preserve historical identifiers in other formats unchanged",
+	} {
+		if !strings.Contains(rendered, required) {
+			t.Errorf("initial Audit identity guidance lacks %q", required)
+		}
+	}
+}
+
 // TestB3MetadataOnlyStartupBindsEveryAlreadyEstablishedReference materializes
 // the B3 outline. Startup may only use metadata the invocation already
 // established, so every bound command must be literal and usable as printed.

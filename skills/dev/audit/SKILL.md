@@ -111,6 +111,8 @@ Dispatch both axes as parallel sub-agents, each in a fresh context carrying its 
 
 Nothing written after the artifacts were published is a requirement: not review comments, not rework notes. They can be evidence, never a spec line to hold the implementation against.
 
+Assign every new Audit Finding an `F<n>` identity. Begin with `F1` when no `F<n>` exists; otherwise continue after the greatest existing `F<n>`. Preserve historical identifiers in other formats unchanged and never renumber earlier findings.
+
 If the Artifacts is missing, skip the Artifacts sub-agent and note this in the final report.
 
 ### 6. Aggregate
