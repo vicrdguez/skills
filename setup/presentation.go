@@ -157,7 +157,7 @@ func PresentImplementation(outcome workflow.ImplementationOutcome) (Implementati
 		skill, directory = "watchdog", f.ResultDirectory
 		f.WorkItem, f.Submission = output.Item.Number, output.Item.Submission.Number
 		f.ResumeCommand = fmt.Sprintf("skl watchdog resume --repo %s --remote %s --item %d", quote(f.Worktree), quote(f.Remote), f.WorkItem)
-		f.SubmitCommand = fmt.Sprintf("skl watchdog submit --repo %s --remote %s --item %d --review-number %d --reviewed-head %s --summary %s", quote(f.Worktree), quote(f.Remote), f.WorkItem, f.ReviewNumber, f.ReviewedHead, quote(filepath.Join(directory, "summary.md")))
+		f.SubmitCommand = fmt.Sprintf("skl watchdog submit --repo %s --remote %s --item %d --review-number %d --reviewed-head %s --submission %d --base %s --submission-body-sha256 %s --summary %s", quote(f.Worktree), quote(f.Remote), f.WorkItem, f.ReviewNumber, f.ReviewedHead, f.Submission, quote(f.SubmissionBase), quote(f.SubmissionBodySHA256), quote(filepath.Join(directory, "summary.md")))
 		flags := endpointFlags(f.SuppliedArtifactBaseline, f.SuppliedArtifactCompletion)
 		f.ResumeCommand += flags
 		f.SubmitCommand += flags

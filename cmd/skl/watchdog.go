@@ -53,7 +53,11 @@ func watchdogCommands(newBackend backendFactory, stdout io.Writer) []*cli.Comman
 				if !ok {
 					return fmt.Errorf("backend does not support review publication")
 				}
-				outcome, err = workflow.SubmitWatchdog(c.Context, repository.Root, repository.Remote, workItemID(c.Int("item")), c.Uint64("review-number"), c.String("reviewed-head"), c.String("head"), c.String("verdict"), c.Path("summary"), c.Path("findings"), c.Path("body"), endpoints, review)
+				var fixedSubmission workflow.SubmissionID
+				if c.IsSet("submission") {
+					fixedSubmission = workflow.SubmissionID(workItemID(c.Int("submission")))
+				}
+				outcome, err = workflow.SubmitWatchdog(c.Context, repository.Root, repository.Remote, workItemID(c.Int("item")), fixedSubmission, c.String("base"), c.String("submission-body-sha256"), c.Uint64("review-number"), c.String("reviewed-head"), c.String("head"), c.String("verdict"), c.Path("summary"), c.Path("findings"), c.Path("body"), endpoints, review)
 			} else {
 				outcome, err = nextWork(c.Context, c.Duration("wait"), c.Duration("poll"), func() (workflow.ImplementationOutcome, error) {
 					return workflow.StartWatchdog(c.Context, repository.Root, repository.Remote, workItemID(c.Int("item")), endpoints, port)
@@ -106,6 +110,15 @@ func watchdogCommands(newBackend backendFactory, stdout io.Writer) []*cli.Comman
 func watchdogSubmitRecovery(c *cli.Context, repository setup.RepositoryContext) string {
 	q := skilldist.ShellQuote
 	command := fmt.Sprintf("skl watchdog submit --repo %s --remote %s --item %d --review-number %d --reviewed-head %s --verdict %s --summary %s", q(repository.Root), q(repository.Remote), c.Int("item"), c.Uint64("review-number"), q(c.String("reviewed-head")), q(c.String("verdict")), q(c.Path("summary")))
+	if c.IsSet("submission") {
+		command += fmt.Sprintf(" --submission %d", c.Int("submission"))
+	}
+	if c.IsSet("base") {
+		command += " --base " + q(c.String("base"))
+	}
+	if c.IsSet("submission-body-sha256") {
+		command += " --submission-body-sha256 " + q(c.String("submission-body-sha256"))
+	}
 	for _, flag := range []string{"findings", "body", "head", "artifact-baseline", "artifact-completion"} {
 		if c.IsSet(flag) {
 			value := c.String(flag)

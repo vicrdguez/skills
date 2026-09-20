@@ -214,6 +214,47 @@ func TestWatchdogInspectRefusesHeadAndRoundDrift(t *testing.T) {
 	}
 }
 
+func TestWatchdogSubmitRefusesReplacementSubmission(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "widget")
+	completeAndRetireSlice(t, root, "widget")
+	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+	backend := &implementationMemory{work: []workflow.ImplementationItem{{
+		ID: "7", Branch: "widget", State: workflow.AwaitingReview,
+		Submission: &workflow.Submission{ID: "11", Head: head, Base: "main", Body: "original evidence"},
+	}}, remoteHeads: map[string]string{"widget": head}}
+	started := watchdogCLI(t, root, backend, "next")
+	facts := started.Packet.Facts.Watchdog
+	if !strings.Contains(facts.SubmitCommand, "--submission 11") || !strings.Contains(facts.SubmitCommand, "--base 'main'") || !strings.Contains(facts.SubmitCommand, "--submission-body-sha256 '") {
+		t.Fatalf("submit command did not bind the original attachment: %s", facts.SubmitCommand)
+	}
+	backend.work[0].Submission.ID = "68"
+	summary := filepath.Join(t.TempDir(), "summary.md")
+	if err := os.WriteFile(summary, []byte("W1 BLOCK\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+	args := []string{"skl", "watchdog", "submit", "--repo", facts.Worktree, "--item", "7", "--submission", "11", "--base", "main", "--submission-body-sha256", facts.SubmissionBodySHA256, "--review-number", "1", "--reviewed-head", head, "--verdict", "rework", "--summary", summary}
+	if err := app.Run(args); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "Status: fix_required") || !strings.Contains(output.String(), "selected Submission") || !backend.work[0].Claimed {
+		t.Fatalf("replacement Submission was not refused: %s; item=%#v", output.String(), backend.work[0])
+	}
+	if len(backend.work[0].Submission.Comments) != 0 {
+		t.Fatalf("replacement refusal published review evidence: %#v", backend.work[0].Submission.Comments)
+	}
+	backend.work[0].Submission.ID = "11"
+	output.Reset()
+	if err := app.Run(args); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "Status: rework") || backend.work[0].Claimed {
+		t.Fatalf("authorized retry with the original Submission failed: %s; item=%#v", output.String(), backend.work[0])
+	}
+}
+
 func TestWatchdogSubmitExplainsVerifiedReadyForHumanMerge(t *testing.T) {
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
