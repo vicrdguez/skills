@@ -751,6 +751,76 @@ func TestInstallRefreshesOnlyOwnedStubs(t *testing.T) {
 	}
 }
 
+func TestInstallUpgradesOwnedTDDStubsWithoutTouchingUserContent(t *testing.T) {
+	for _, harness := range []string{".pi/agent/skills", ".codex/skills", ".claude/skills", ".config/opencode/skills"} {
+		t.Run(harness, func(t *testing.T) {
+			root := t.TempDir()
+			legacyDirectory := filepath.Join(root, harness, "tdd")
+			if err := os.MkdirAll(legacyDirectory, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			legacy := filepath.Join(legacyDirectory, "SKILL.md")
+			if err := os.WriteFile(legacy, []byte("---\nname: tdd\n---\n\n<!-- skl-owned: skl.stub/v1 -->\nstale\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			extra := filepath.Join(legacyDirectory, "notes.md")
+			if err := os.WriteFile(extra, []byte("keep legacy notes\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			userOwned := filepath.Join(root, harness, "my-tdd", "SKILL.md")
+			if err := os.MkdirAll(filepath.Dir(userOwned), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(userOwned, []byte("my unrelated test skill\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			var output bytes.Buffer
+			app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, root)
+			for range 2 {
+				if err := app.Run([]string{"skl", "install"}); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+					t.Fatalf("owned legacy tdd stub still exists: %v", err)
+				}
+				if got := readFile(t, extra); got != "keep legacy notes\n" {
+					t.Fatalf("legacy sibling changed: %q", got)
+				}
+				if got := readFile(t, userOwned); got != "my unrelated test skill\n" {
+					t.Fatalf("user-owned skill changed: %q", got)
+				}
+				testing := readFile(t, filepath.Join(root, harness, "testing", "SKILL.md"))
+				if !strings.Contains(testing, "skl skill testing") || !strings.Contains(testing, "skl.stub/v1") {
+					t.Fatalf("testing stub is not current and owned:\n%s", testing)
+				}
+			}
+		})
+	}
+
+	t.Run("user-owned tdd", func(t *testing.T) {
+		root := t.TempDir()
+		legacy := filepath.Join(root, ".codex/skills/tdd/SKILL.md")
+		if err := os.MkdirAll(filepath.Dir(legacy), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		const userSkill = "---\nname: tdd\n---\nmy own tdd skill\n"
+		if err := os.WriteFile(legacy, []byte(userSkill), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var output bytes.Buffer
+		app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, root)
+		for range 2 {
+			if err := app.Run([]string{"skl", "install"}); err != nil {
+				t.Fatal(err)
+			}
+			if got := readFile(t, legacy); got != userSkill {
+				t.Fatalf("user-owned tdd changed: %q", got)
+			}
+		}
+	})
+}
+
 func TestInstallPreservesOpenCodeSkillsAndConfiguration(t *testing.T) {
 	root := t.TempDir()
 	files := map[string]string{

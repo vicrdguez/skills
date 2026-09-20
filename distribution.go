@@ -36,6 +36,20 @@ func Install(home string) (InstallOutcome, error) {
 	}
 	var outcome InstallOutcome
 	for _, harness := range []string{".pi/agent/skills", ".codex/skills", ".claude/skills", ".config/opencode/skills"} {
+		legacyTDD := filepath.Join(home, harness, "tdd", "SKILL.md")
+		legacyContents, err := os.ReadFile(legacyTDD)
+		switch {
+		case err == nil && bytes.Contains(legacyContents, ownedMarker):
+			if err := os.Remove(legacyTDD); err != nil {
+				return outcome, fmt.Errorf("retire owned tdd stub for %s: %w", harness, err)
+			}
+			outcome.Changed++
+		case err == nil:
+			outcome.Unchanged++
+		case !os.IsNotExist(err):
+			return outcome, fmt.Errorf("inspect legacy tdd stub for %s: %w", harness, err)
+		}
+
 		for _, name := range SkillNames() {
 			frontmatter, err := definitionFrontmatter(name)
 			if err != nil {
