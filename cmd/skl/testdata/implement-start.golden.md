@@ -137,9 +137,7 @@ If the original failure cannot be reproduced reliably or safely, a faithful isol
 
 ## Assess the changed test set together
 
-Required behavioral and failure-mode protection matters more than test inventory. Reuse existing checks, strengthen assertions, combine overlapping cases, or remove redundant checks only while required behavioral and failure-mode protection remains covered and the resulting set still distinguishes the required behavior from relevant violations.
-
-Scrutinize removed or weakened assertions. Keep distinct regression protection, but do not require a new test for every scenario, a per-test justification ledger, a unique-bug quota, a universal mutation score, or a duplicate suite. Unrelated repository-wide test pruning is outside the current change unless explicitly accepted.
+Required behavioral and failure-mode protection matters more than test inventory. Use `skl skill --resource reference/tests.md testing` for the detailed retention, consolidation, and removal guidance; unrelated repository-wide test pruning remains outside the current change unless explicitly accepted.
 
 ## Report evidence honestly
 

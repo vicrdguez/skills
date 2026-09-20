@@ -1,17 +1,17 @@
 # Tasks — {change title}
 
 <!--
-This the coordination ledger for implementation. Write it when there's more than a couple of scenarios or any non-behavioral chores. Rules:
+This is the coordination ledger for implementation. Write it when sequencing, dependencies, or non-behavioral chores benefit from explicit tracking. Rules:
 
-- One behavioral task per Gherkin scenario → each is one red-green TDD cycle.
+- A behavioral task may coordinate one or more related scenarios; task boundaries follow coherent implementation work rather than test cardinality or construction order.
 - Stable ids (B1, C1, D1…) so an orchestrator can dispatch and track.
 
 Frozen at the `[baseline] <slice-slug>` commit: the `[completion] <slice-slug>` endpoint may only change an existing non-manual `[ ]` to lowercase `[x]`. No task is added during implementation or rework.
 -->
 
-## Behavioral  (one per scenario → a red-green cycle)
-- [ ] B1  {Scenario name}            → behavior.md §1
-- [ ] B2  {Scenario name}            → behavior.md §2
+## Behavioral contract work
+- [ ] B1  {coherent behavior group}  → behavior.md §1–2
+- [ ] B2  {another behavior group}   → behavior.md §3
 
 ## Chores  (non-behavioral work: migrations, wiring, config)
 - [ ] C1  {chore}
@@ -26,10 +26,8 @@ Frozen at the `[baseline] <slice-slug>` commit: the `[completion] <slice-slug>` 
 ```md
 # Tasks — add-order-cancellation
 
-## Behavioral
-- [ ] B1  Cancel an unshipped order            → behavior.md §1
-- [ ] B2  Reject cancelling a shipped order     → behavior.md §2
-- [ ] B3  Refund amount matches the order total → behavior.md §3
+## Behavioral contract work
+- [ ] B1  Order cancellation rules and outcomes → behavior.md §1–3
 
 ## Chores
 - [ ] C1  Migration: add orders.cancelled_at

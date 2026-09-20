@@ -95,6 +95,19 @@ func TestTestingPolicyPointersAndDesignGuidanceAgree(t *testing.T) {
 			t.Errorf("Design deepening guidance is missing %q", want)
 		}
 	}
+
+	tasks, err := RenderResource("propose", "reference/tasks.md", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(tasks), "one or more related scenarios") {
+		t.Errorf("Propose tasks do not permit grouped contract work:\n%s", tasks)
+	}
+	for _, forbidden := range []string{"One behavioral task per Gherkin scenario", "one per scenario → a red-green cycle"} {
+		if strings.Contains(string(tasks), forbidden) {
+			t.Errorf("Propose tasks retain %q", forbidden)
+		}
+	}
 }
 
 func TestAuditAndWatchdogShareContractAcceptanceCriteria(t *testing.T) {
@@ -145,7 +158,7 @@ func TestAuditAndWatchdogShareContractAcceptanceCriteria(t *testing.T) {
 	if strings.Contains(watchdog.Instructions, "## Included Skill: audit") {
 		t.Fatal("Watchdog included the complete Audit definition")
 	}
-	for _, want := range []string{"every accepted obligation", "additional executable challenges", "specific evidence gap"} {
+	for _, want := range []string{"complete frozen contract", "additional executable challenges", "not another Audit execution"} {
 		if !strings.Contains(watchdog.Instructions, want) {
 			t.Errorf("Watchdog is missing %q", want)
 		}
