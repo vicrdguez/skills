@@ -350,6 +350,29 @@ func TestAuditReworkFixesScopesBothAxesToDeltaConsequences(t *testing.T) {
 	}
 }
 
+// TestAuditReworkFixesKeepsChecksAtResponsibleStages materializes the
+// Rework Full Gate and Implement inspection ownership scenario.
+func TestAuditReworkFixesKeepsChecksAtResponsibleStages(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "widget")
+	backend := &implementationMemory{work: []workflow.ImplementationItem{{
+		ID: "7", Branch: "widget", State: workflow.Rework, Claimed: true,
+		Submission: &workflow.Submission{ID: "11", Base: "main", Comments: []skilldist.ReviewComment{{Body: "W1 BLOCK", Commit: strings.Repeat("a", 40), Verdict: "rework"}}},
+	}}}
+
+	rendered := implementCLI(t, root, backend, "resume", "--item", "7").Packet.Instructions
+	for _, required := range []string{
+		"Rework Audit owns one Full Gate run",
+		"Audit does not repeat artifact endpoint or retirement inspection",
+		"Run Inspect before editing",
+		"Run Inspect again after all edits",
+	} {
+		if !strings.Contains(rendered, required) {
+			t.Errorf("Rework check ownership lacks %q", required)
+		}
+	}
+}
+
 // TestB3MetadataOnlyStartupBindsEveryAlreadyEstablishedReference materializes
 // the B3 outline. Startup may only use metadata the invocation already
 // established, so every bound command must be literal and usable as printed.
