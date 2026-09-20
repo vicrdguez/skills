@@ -940,7 +940,8 @@ func TestRetrieveConcreteProposeInstructions(t *testing.T) {
 		"artifact authorship": {
 			"## Writing the change artifacts", "desired result, scope, exclusions, Definition of Done", "scoped named rules", "binding scenarios that discriminate plausible interpretations",
 			"responsibility ownership, boundary assumptions, deliberately agreed interfaces, and verification strategy", "Do not manufacture tasks from scenario or test counts",
-			"Discoveries belong in PR findings or in a new proposal", "skl skill --resource reference/tasks.md propose",
+			"readable, uniquely referenceable descriptive headings without requiring IDs", "Discoveries belong in PR findings or in a new proposal",
+			"skl skill --resource reference/tasks.md propose",
 		},
 		"fidelity review": {
 			"user-confirmed final recap of consequential rules, architectural commitments, and delegated choices",
@@ -1060,7 +1061,8 @@ func TestRetrieveApprovedContractGuidance(t *testing.T) {
 		},
 		"reference/behavior.md": {
 			"authoritative, scoped named rules", "governs its class of situations beyond the scenarios", "discriminate plausible interpretations",
-			"one test or task per scenario", "precision aids, not compulsory headings", "unambiguously implied case",
+			"one test or task per scenario", "precision aids, not compulsory headings", "readable, uniquely referenceable descriptive heading",
+			"IDs are not required", "unambiguously implied",
 		},
 		"reference/plan.md": {
 			"when the approved design pins architecture", "Responsibility ownership", "boundary", "Illustrative", "Verification strategy", "grouped many-to-many",

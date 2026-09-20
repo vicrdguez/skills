@@ -12,10 +12,11 @@ observable outcomes. Where relevant, consider state and side effects, prohibited
 or unchanged effects, and failure, cancellation, retry, or partial completion.
 These are precision aids, not compulsory headings.
 
-Each scenario must be observable through the chosen module interface rather than
-incidental implementation state. An unambiguously implied case needs no extra
-scenario. Resolve any consequential behavior not settled by the approved source
-before publication rather than inventing an obligation.
+Each rule and scenario has a readable, uniquely referenceable descriptive heading;
+IDs are not required. Each scenario must be observable through the chosen module
+interface rather than incidental implementation state. An unambiguously implied
+case needs no extra scenario. Resolve any consequential behavior not settled by
+the approved source before publication rather than inventing an obligation.
 
 Frozen at the `[baseline] <slice-slug>` commit. Artifact Completion may only tick
 existing non-manual boxes; review discoveries belong in findings or a new Proposal.
