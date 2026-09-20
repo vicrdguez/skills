@@ -25,11 +25,11 @@ Allow one accountable implementor to delegate non-conflicting testing and implem
 
 ## Definition of Done
 
-- [ ] Complete relevant Execution Skills and continuations distinguish supported, unsupported, and genuinely unknown delegation capability without using harness identity as evidence.
-- [ ] Delivered guidance permits bounded, non-conflicting implementation/testing delegation within one Claim and preserves contractual inputs, owner authority, integration, and final-state verification.
-- [ ] Optional delegation fallback does not weaken mandatory Audit mechanisms, the Full Gate, independent Watchdog Review, artifact integrity, or the human merge boundary.
-- [ ] The installed single-item implement runner permits this delegation without further queue selection or re-enabling disabled loops, and installation preserves user-owned content.
-- [ ] Existing project checks and focused rendering, capability, and installation checks cover the delivered guidance and affected interfaces, with results and limitations recorded without agent-behavior claims.
+- [x] Complete relevant Execution Skills and continuations distinguish supported, unsupported, and genuinely unknown delegation capability without using harness identity as evidence.
+- [x] Delivered guidance permits bounded, non-conflicting implementation/testing delegation within one Claim and preserves contractual inputs, owner authority, integration, and final-state verification.
+- [x] Optional delegation fallback does not weaken mandatory Audit mechanisms, the Full Gate, independent Watchdog Review, artifact integrity, or the human merge boundary.
+- [x] The installed single-item implement runner permits this delegation without further queue selection or re-enabling disabled loops, and installation preserves user-owned content.
+- [x] Existing project checks and focused rendering, capability, and installation checks cover the delivered guidance and affected interfaces, with results and limitations recorded without agent-behavior claims.
 
 ## Manual verification
 
