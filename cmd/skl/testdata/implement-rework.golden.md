@@ -8,7 +8,7 @@ Implement Work Item #7 in `<worktree>`. This Execution Skill already represents 
 
 ## Applicable procedure
 
-This invocation follows finding-driven Rework: preserve the existing Submission #11, keep `.changes/widget/` retired, and resolve the supplied Watchdog findings against the current PR comparison. Do not recreate or revise the Implementation Ledger, create another Artifact Completion, or rerun Audit. Map every finding to its resolution commit and supporting evidence in the Result Document, and update the `## Audit ledger` in the Submission body to the current head. Resolve every `BLOCK`; materialize code-local `NOTE` findings as `DEBT(#11/W<n>)` comments. This obligation holds even when the supplied feedback is empty or still pending: retrieve every required stream before concluding there are no findings.
+This invocation follows finding-driven Rework: preserve the existing Submission #11, keep `.changes/widget/` retired, and resolve the supplied Watchdog findings against the current PR comparison. Do not recreate or revise the Implementation Ledger or create another Artifact Completion. Map every finding to its resolution commit and supporting evidence in the Result Document, and update the `## Audit ledger` in the Submission body to the current head. Resolve every `BLOCK`; materialize code-local `NOTE` findings as `DEBT(#11/W<n>)` comments. This obligation holds even when the supplied feedback is empty or still pending: retrieve every required stream before concluding there are no findings.
 
 ## Established work
 
@@ -74,8 +74,9 @@ Work only in `<worktree>`. Every new or updated Submission targets `main`; integ
 1. Run Inspect before editing. It must confirm the retired ledger and resolved historical endpoints. If it reports a violation or any other progress, repair or stop according to that continuation; never recreate the ledger.
 2. Read the accepted `intent.md`, `behavior.md`, `plan.md`, and completed `tasks.md` from the historical endpoint commands returned by inspection. Treat the supplied Watchdog summary and inline findings as evidence to resolve, not as new frozen requirements.
 3. Fix one active finding at a time. Run the focused test or check that proves each fix, commit it, and preserve each finding identity. Do not re-clean untouched code.
-4. Review the rework against the ordinary PR comparison with `main`, focused on the supplied findings. Run the repository Full Gate after the fixes. Do not invoke Audit again on this Rework round.
-5. Run Inspect again after all edits. It must still report the same valid retired ledger and no violations.
+4. Select the latest applicable supplied review whose verdict caused the current Rework and use that review's `Commit` as the fixed point. Stop rather than guess when the applicable reviewed commit is missing or ambiguous.
+5. Invoke the bundled Audit exactly once over `<reviewed-commit>...HEAD`. Apply every Audit `HARD` finding. For each `JUDGEMENT`, fix it, decline it with a reason, or carry it as debt. If a disposition changes code, run its affected checks and a final Full Gate before handoff. Do not invoke Audit again in this execution.
+6. Run Inspect again after all edits. It must still report the same valid retired ledger and no violations.
 
 Push with `git -C '<worktree>' push 'origin' 'widget'`. A push does not authorize review or merge.
 
@@ -97,7 +98,7 @@ A `fix_required` result retains this Claim and prose. Repair the reported invari
 
 Implement the accepted artifacts, honor what they exclude, and treat sibling behavior they never mention as separate work. Read callers of shared code you change and fix regressions this change causes. Do not tidy unrelated code. Absence of a decision in the artifacts delegates the smallest repository-consistent implementation to you.
 
-Respect the applicable Audit dispositions: Apply its findings yourself. A declined judgement call with a stated reason is a decision, not an omission. During Rework, preserve those recorded dispositions without rerunning Audit.
+Respect the applicable Audit dispositions: Apply its findings yourself. A declined judgement call with a stated reason is a decision, not an omission. During Rework, preserve those recorded dispositions and never invoke Audit more than once in the same execution.
 
 ## When only a human can decide
 
@@ -162,14 +163,7 @@ description: Review the changes since a fixed point (commit, branch, tag or merg
 Two-axis review of the diff between `HEAD` and a fixed point the user supplies:
 
 - **Standards** — does the code conform to this repo's documented coding standards? This includes any documented standard in the repo but also make use of project/repo specific skills to aid here. E.g. the repo has a specific skill to review a module or a layer present in the project
-- **Artifacts** — does the code faithfully implement the originating intent, behaviors, plan and tasks?
-  1. The Workflow Engine's endpoint inspection reports identical paths, regular non-executable blobs, and exact bytes except permitted lowercase completion ticks, with Manual Verification unchecked; normal submission also requires completed automated boxes and later ledger retirement
-  2. Every `intent.md` item in "Definition of Done" is demonstrably met
-  3. Every `behavior.md` scenario has materialized as a test (or for prose changes, encoded)
-  4. The full suite is green
-  5. Read `plan.md` against the diff. If the implementation diverged, note it.
-
-Item 1 is what stops the contract moving to meet the code. The rest are judged against the **complete final implementation**, even when the diff under review is only the latest increment.
+- **Artifacts** — do the supplied Watchdog findings remain resolved, and did the Rework delta regress the frozen Contract, introduce unnecessary behavior, or leave inadequate regression coverage at accepted seams? This focused axis does not reopen unrelated unchanged code or whole-change omissions.
 
 Both axes run as **parallel sub-agents** when the harness supports them, so they don't pollute each other's context, then this skill aggregates their findings. The sequential fallback below preserves both axes when it does not.
 
@@ -180,13 +174,13 @@ Use the supplied Work Item and Submission facts for originating context. This sk
 
 ### 1. Pin the fixed point
 
-This bundled Audit reviews one claimed change. Pin the fixed point to the merge-base with `main` and the parent of this change's first commit; never that first commit itself, because `git diff <it>...HEAD` would omit everything it introduced. Implement's finding-driven Rework reviews the current PR comparison and the supplied findings instead of inventing a previous-review cache. First-pass Audit may precede the final completion ticks and the ledger retirement, and it reports those endpoints as pending rather than inferring them. An explicit fixed point the caller supplies replaces the default above.
+This bundled Audit reviews one finding-driven Rework delta. Use the `Commit` on the latest applicable supplied review whose verdict caused the current Rework as the fixed point, and review only `<reviewed-commit>...HEAD`. Stop rather than guess when the applicable reviewed commit is missing or ambiguous. Do not use a review's `Final head` as the fixed point.
 
 
-Artifact integrity uses its own, unmoving Artifact Baseline and Artifact Completion from the engine's endpoint inspection. They never advance with review rounds. They are not resolved in this invocation yet: run `skl implement inspect --repo '<worktree>' --remote 'origin' --item 7` to resolve the Artifact Baseline and Completion from the fetched history, and never invent an endpoint or take one from the working tree. The engine validates endpoint identity and snapshots, while you read and judge the historical contract.
+Rework Audit relies on the historical Contract endpoints already established by Implement. Audit does not repeat artifact endpoint or retirement inspection; Implement owns Inspect before editing and after all edits.
 
 
-An explicit fixed point the caller supplies — a commit SHA, branch name, tag, `main`, `HEAD~5`, etc. — replaces the default above; the default never has to be asked for.
+The supplied review evidence is authoritative for this fixed point; no caller-provided comparison may replace it.
 
 
 Capture the diff command once: `git diff <fixed-point>...HEAD` (three-dot, so the comparison is against the merge-base). Also note the list of commits via `git log <fixed-point>..HEAD --oneline`.
@@ -208,8 +202,9 @@ On top of whatever the repo documents, the Standards axis always carries the **s
 
 These two produce facts, not judgements — a diff read or an exit code. Run them here, before spawning anything, and hand the recorded results to both briefs. Two reviewers running them concurrently would contend over the same worktree, and a fact produced inside a reviewer's context is a fact the two axes can end up reporting differently.
 
-1. **The documented gate** — the project's full suite, typecheck and lint, exactly once per invocation. A red gate is worth knowing before spending two reviewer contexts on it.
-2. **Artifact integrity** — record the engine's endpoint inspection: Baseline, optional Completion, provisional/present/retired phase, and every violation. Compare only the resolved Baseline and Completion, or Baseline and current provisional head before Completion; do not inspect intermediate artifact contents, infer Completion from deletion, or require monotonic intermediate ticks. First-pass Audit may precede final ticks and retirement, so label those facts pending rather than claim review readiness. Normal submission requires completed automated boxes at Completion and ledger absence at the review head; Rework keeps it absent. For an independent Audit without engine facts, compare the supplied endpoint snapshots directly and report missing integrity evidence explicitly.
+1. **The documented gate** — Rework Audit owns one Full Gate run: the project's full suite, typecheck and lint, exactly once in this Audit invocation. A red gate is worth knowing before spending two reviewer contexts on it.
+2. **Artifact integrity** — do not run it here. Audit does not repeat artifact endpoint or retirement inspection; use the current valid result supplied by Implement as context for the reviewers.
+
 
 ### 5. Spawn both sub-agents in parallel
 
@@ -222,20 +217,23 @@ The recipe changes how the two axes are dispatched, never what they check: both 
 
 **Standards sub-agent prompt** — include:
 
-- The full diff command and commit list.
+- The full diff command and commit list. Restrict Standards findings to violations or smells caused by the Rework delta; surrounding code may be read only to understand those consequences.
 - The list of standards-source files you found in step 3, plus `skl skill --resource reference/smells.md audit`. Instruct the sub-agent to read those files and the command's output.
 - The gate results from step 4.
 - The precedence between sources, so the sub-agent knows what outranks what: frozen artifacts, then required tooling and CI, then the project's `AGENTS.md`, standards docs and quality skills, then language and framework correctness, security and accessibility rules, then the generic smell baseline. An explicit project or language `MUST`, `ALWAYS`, `NEVER` or equivalent can be a hard violation; a generic smell stays a judgement call unless a local rule or a concrete behavior or maintenance impact elevates it.
-- The brief: "Report — per file/hunk where relevant — (a) every place the diff violates a documented standard: cite the standard (file + the rule); and (b) any baseline smell you spot: name it and quote the hunk. Tag each finding as `HARD` or `JUDGEMENT` as its first token; documented-standard breaches can be `HARD`, but baseline smells are always `JUDGEMENT`, and a documented repo standard overrides the baseline. Skip anything tooling enforces. Report each finding as its own bullet, anchored to `file:line`. Under 500 words. Compress findings rather than omit any."
+- The brief: "Report only violations or smells caused by the Rework delta. Do not reopen findings against unrelated unchanged code or whole-change omissions. For each finding, cite the standard or name the baseline smell and quote the hunk. Tag each finding as `HARD` or `JUDGEMENT` as its first token; documented-standard breaches can be `HARD`, but baseline smells are always `JUDGEMENT`, and a documented repo standard overrides the baseline. Skip anything tooling enforces. Report each finding as its own bullet, anchored to `file:line`. Under 500 words. Compress findings rather than omit any."
 
 **Artifacts sub-agent prompt** — include:
 
 - The diff command and commit list.
 - The paths or fetched contents of the Artifacts at the exact Baseline and, when available, Completion or provisional head.
 - The gate and artifact-integrity results from step 4.
-- The brief: "Report: (a) requirements, intent and behaviors the artifacts asked for that are missing or partial; (b) behaviour in the diff that wasn't asked for (scope creep); (c) requirements that look implemented but where the implementation looks wrong; (d) the gate result you were given, if it is not green — do not rerun it; (e) read `plan.md` against the diff and note any divergence; (f) any endpoint violation the integrity result reports, without adding intermediate-history or deletion-inference rules. Judge (a) to (c) against the complete final implementation even when the diff is only the latest increment. Quote the spec line for each finding. Tag each finding `HARD` or `JUDGEMENT` as its first token: (a), (b), (c) and (f) are `HARD`; (d) is `HARD` when the gate is red; (e) is `JUDGEMENT` unless the divergence breaks a frozen requirement. Report each finding as its own bullet, anchored to `file:line`. Under 500 words — compress findings rather than omit any."
+- The brief: "Check resolution of the supplied Watchdog findings, Contract regressions caused by the Rework delta, unnecessary behavior introduced by the fixes, and regression coverage at the accepted seams. Watchdog findings are evidence and resolution targets, never new frozen Contract Items. Report only problems caused by or necessary to verify the Rework delta; neither axis reopens findings against unrelated unchanged code or whole-change omissions. Quote the relevant frozen Contract line or supplied finding for each result. Tag each finding `HARD` or `JUDGEMENT` as its first token and anchor it to `file:line`. Under 500 words — compress findings rather than omit any."
+
 
 Nothing written after the artifacts were published is a requirement: not review comments, not rework notes. They can be evidence, never a spec line to hold the implementation against.
+
+Assign every new Audit Finding an `F<n>` identity. Begin with `F1` when no `F<n>` exists; otherwise continue after the greatest existing `F<n>`. Preserve historical identifiers in other formats unchanged and never renumber earlier findings.
 
 If the Artifacts is missing, skip the Artifacts sub-agent and note this in the final report.
 

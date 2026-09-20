@@ -2790,7 +2790,7 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 		}
 	})
 
-	t.Run("B12 implementation and Audit need no previous review cache", func(t *testing.T) {
+	t.Run("B12 implementation Audit uses supplied review evidence", func(t *testing.T) {
 		f := newReviewFixture(t)
 		f.forge.labels = []string{"rework"}
 		f.forge.summaries = []map[string]any{{"body": "visible review feedback", "commit_id": f.head, "state": "CHANGES_REQUESTED"}}
@@ -2800,10 +2800,10 @@ func TestWatchdogReviewCheckpoints(t *testing.T) {
 		}
 		resumed := f.run(t, f.root, "implement", "resume", "--item", "7")
 		for _, instructions := range []string{got.Packet.Instructions, resumed.Packet.Instructions} {
-			required := []string{"ordinary PR comparison", "merge-base with `main` and the parent of this change's first commit", "Two-axis review", "Standards", "Artifacts", "full suite", "documented gate", "Artifact integrity", "complete final implementation"}
+			required := []string{"latest applicable supplied review", "review's `Commit` as the fixed point", "<reviewed-commit>...HEAD", "Two-axis review", "Standards", "Artifacts", "Rework Audit owns one Full Gate run", "does not repeat artifact endpoint or retirement inspection"}
 			missing := slices.DeleteFunc(required, func(text string) bool { return strings.Contains(instructions, text) })
 			if strings.Contains(instructions, "previous-reviewed-head") || strings.Contains(instructions, "cache repair") || strings.Contains(instructions, "required previous-review") || !strings.Contains(instructions, "## Included Skill: audit") || len(missing) != 0 {
-				t.Fatalf("implementation/Audit fallback missing %v: %q", missing, instructions)
+				t.Fatalf("implementation/Rework Audit guidance missing %v: %q", missing, instructions)
 			}
 		}
 	})

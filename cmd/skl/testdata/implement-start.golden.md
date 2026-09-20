@@ -72,7 +72,7 @@ A `fix_required` result retains this Claim and prose. Repair the reported invari
 
 Implement the accepted artifacts, honor what they exclude, and treat sibling behavior they never mention as separate work. Read callers of shared code you change and fix regressions this change causes. Do not tidy unrelated code. Absence of a decision in the artifacts delegates the smallest repository-consistent implementation to you.
 
-Respect the applicable Audit dispositions: Apply its findings yourself. A declined judgement call with a stated reason is a decision, not an omission. During Rework, preserve those recorded dispositions without rerunning Audit.
+Respect the applicable Audit dispositions: Apply its findings yourself. A declined judgement call with a stated reason is a decision, not an omission. During Rework, preserve those recorded dispositions and never invoke Audit more than once in the same execution.
 
 ## When only a human can decide
 
@@ -155,7 +155,7 @@ Use the supplied Work Item and Submission facts for originating context. This sk
 
 ### 1. Pin the fixed point
 
-This bundled Audit reviews one claimed change. Pin the fixed point to the merge-base with `main` and the parent of this change's first commit; never that first commit itself, because `git diff <it>...HEAD` would omit everything it introduced. Implement's finding-driven Rework reviews the current PR comparison and the supplied findings instead of inventing a previous-review cache. First-pass Audit may precede the final completion ticks and the ledger retirement, and it reports those endpoints as pending rather than inferring them. An explicit fixed point the caller supplies replaces the default above.
+This bundled Audit reviews one claimed change. Pin the fixed point to the merge-base with `main` and the parent of this change's first commit; never that first commit itself, because `git diff <it>...HEAD` would omit everything it introduced. First-pass Audit may precede the final completion ticks and the ledger retirement, and it reports those endpoints as pending rather than inferring them. An explicit fixed point the caller supplies replaces the default above.
 
 
 Artifact integrity uses its own, unmoving Artifact Baseline and Artifact Completion from the engine's endpoint inspection. They never advance with review rounds. They are not resolved in this invocation yet: run `skl implement inspect --repo '<worktree>' --remote 'origin' --item 7` to resolve the Artifact Baseline and Completion from the fetched history, and never invent an endpoint or take one from the working tree. The engine validates endpoint identity and snapshots, while you read and judge the historical contract.
@@ -186,6 +186,7 @@ These two produce facts, not judgements — a diff read or an exit code. Run the
 1. **The documented gate** — the project's full suite, typecheck and lint, exactly once per invocation. A red gate is worth knowing before spending two reviewer contexts on it.
 2. **Artifact integrity** — record the engine's endpoint inspection: Baseline, optional Completion, provisional/present/retired phase, and every violation. Compare only the resolved Baseline and Completion, or Baseline and current provisional head before Completion; do not inspect intermediate artifact contents, infer Completion from deletion, or require monotonic intermediate ticks. First-pass Audit may precede final ticks and retirement, so label those facts pending rather than claim review readiness. Normal submission requires completed automated boxes at Completion and ledger absence at the review head; Rework keeps it absent. For an independent Audit without engine facts, compare the supplied endpoint snapshots directly and report missing integrity evidence explicitly.
 
+
 ### 5. Spawn both sub-agents in parallel
 
 Dispatch both axes in fresh contexts using exactly this invocation's established execution capability:
@@ -210,7 +211,10 @@ The recipe changes how the two axes are dispatched, never what they check: both 
 - The gate and artifact-integrity results from step 4.
 - The brief: "Report: (a) requirements, intent and behaviors the artifacts asked for that are missing or partial; (b) behaviour in the diff that wasn't asked for (scope creep); (c) requirements that look implemented but where the implementation looks wrong; (d) the gate result you were given, if it is not green — do not rerun it; (e) read `plan.md` against the diff and note any divergence; (f) any endpoint violation the integrity result reports, without adding intermediate-history or deletion-inference rules. Judge (a) to (c) against the complete final implementation even when the diff is only the latest increment. Quote the spec line for each finding. Tag each finding `HARD` or `JUDGEMENT` as its first token: (a), (b), (c) and (f) are `HARD`; (d) is `HARD` when the gate is red; (e) is `JUDGEMENT` unless the divergence breaks a frozen requirement. Report each finding as its own bullet, anchored to `file:line`. Under 500 words — compress findings rather than omit any."
 
+
 Nothing written after the artifacts were published is a requirement: not review comments, not rework notes. They can be evidence, never a spec line to hold the implementation against.
+
+Assign every new Audit Finding an `F<n>` identity. Begin with `F1` when no `F<n>` exists; otherwise continue after the greatest existing `F<n>`. Preserve historical identifiers in other formats unchanged and never renumber earlier findings.
 
 If the Artifacts is missing, skip the Artifacts sub-agent and note this in the final report.
 

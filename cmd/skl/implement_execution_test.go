@@ -294,6 +294,183 @@ func TestB2ProcedureSelectionIgnoresIncidentalEvidence(t *testing.T) {
 	}
 }
 
+func renderAuditReworkFixes(t *testing.T) string {
+	t.Helper()
+	root := proposalRepository(t)
+	prepareSlice(t, root, "widget")
+	backend := &implementationMemory{work: []workflow.ImplementationItem{{
+		ID: "7", Branch: "widget", State: workflow.Rework, Claimed: true,
+		Submission: &workflow.Submission{ID: "11", Base: "main", Comments: []skilldist.ReviewComment{{
+			Source: skilldist.PullReviewsEvidenceSource("acme/widgets", 11), Body: "W1 BLOCK: fix transport", Commit: strings.Repeat("a", 40), Verdict: "rework", ReviewNumber: 1,
+		}}},
+	}}}
+	got := implementCLI(t, root, backend, "resume", "--item", "7")
+	if got.Packet == nil || got.Packet.Facts.Implementation.Procedure != skilldist.FindingDrivenRework {
+		t.Fatalf("fixture did not render finding-driven Rework: %#v", got)
+	}
+	return got.Packet.Instructions
+}
+
+// TestAuditReworkFixesAuditsTheApplicableReviewedCommit materializes the
+// finding-driven Rework fixed-point scenario at the public Implement seam.
+func TestAuditReworkFixesAuditsTheApplicableReviewedCommit(t *testing.T) {
+	rendered := renderAuditReworkFixes(t)
+	for _, required := range []string{
+		"Invoke the bundled Audit exactly once",
+		"latest applicable supplied review whose verdict caused the current Rework",
+		"review's `Commit` as the fixed point",
+		"`<reviewed-commit>...HEAD`",
+		"Stop rather than guess when the applicable reviewed commit is missing or ambiguous",
+		"no caller-provided comparison may replace it",
+	} {
+		if !strings.Contains(rendered, required) {
+			t.Errorf("Rework execution lacks %q", required)
+		}
+	}
+}
+
+// TestAuditReworkFixesScopesBothAxesToDeltaConsequences materializes the
+// focused Standards and Contracts review scenario.
+func TestAuditReworkFixesScopesBothAxesToDeltaConsequences(t *testing.T) {
+	rendered := renderAuditReworkFixes(t)
+	for _, required := range []string{
+		"Standards findings to violations or smells caused by the Rework delta",
+		"resolution of the supplied Watchdog findings",
+		"Contract regressions caused by the Rework delta",
+		"unnecessary behavior introduced by the fixes",
+		"regression coverage at the accepted seams",
+		"neither axis reopens findings against unrelated unchanged code or whole-change omissions",
+		"evidence and resolution targets, never new frozen Contract Items",
+		"This focused axis does not reopen unrelated unchanged code or whole-change omissions",
+	} {
+		if !strings.Contains(rendered, required) {
+			t.Errorf("focused Rework Audit lacks %q", required)
+		}
+	}
+}
+
+// TestAuditReworkFixesKeepsChecksAtResponsibleStages materializes the
+// Rework Full Gate and Implement inspection ownership scenario.
+func TestAuditReworkFixesKeepsChecksAtResponsibleStages(t *testing.T) {
+	rendered := renderAuditReworkFixes(t)
+	for _, required := range []string{
+		"Rework Audit owns one Full Gate run",
+		"Audit does not repeat artifact endpoint or retirement inspection",
+		"Run Inspect before editing",
+		"Run Inspect again after all edits",
+	} {
+		if !strings.Contains(rendered, required) {
+			t.Errorf("Rework check ownership lacks %q", required)
+		}
+	}
+}
+
+// TestAuditReworkFixesDisposesFindingsWithoutAuditLoop materializes the
+// post-Audit disposition and verification scenario.
+func TestAuditReworkFixesDisposesFindingsWithoutAuditLoop(t *testing.T) {
+	rendered := renderAuditReworkFixes(t)
+	for _, required := range []string{
+		"Apply every Audit `HARD` finding",
+		"For each `JUDGEMENT`, fix it, decline it with a reason, or carry it as debt",
+		"If a disposition changes code, run its affected checks and a final Full Gate before handoff",
+		"Do not invoke Audit again in this execution",
+	} {
+		if !strings.Contains(rendered, required) {
+			t.Errorf("Rework Audit disposition guidance lacks %q", required)
+		}
+	}
+}
+
+// TestAuditReworkFixesIdentifiesInitialAuditFindings materializes the shared
+// F<n> identity rule for an initial Implement Audit.
+func TestAuditReworkFixesIdentifiesInitialAuditFindings(t *testing.T) {
+	root := proposalRepository(t)
+	prepareSlice(t, root, "widget")
+	backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}}
+
+	rendered := implementCLI(t, root, backend, "next").Packet.Instructions
+	for _, required := range []string{
+		"Assign every new Audit Finding an `F<n>` identity",
+		"Begin with `F1` when no `F<n>` exists",
+		"continue after the greatest existing `F<n>`",
+		"Preserve historical identifiers in other formats unchanged",
+	} {
+		if !strings.Contains(rendered, required) {
+			t.Errorf("initial Audit identity guidance lacks %q", required)
+		}
+	}
+}
+
+// TestAuditReworkFixesContinuesTheCumulativeLedger materializes the Rework
+// finding identity and audited-head scenario in the deferred Result Document.
+func TestAuditReworkFixesContinuesTheCumulativeLedger(t *testing.T) {
+	rendered := renderResource(t, "implement", "reference/submission.md",
+		"result_directory="+t.TempDir(), "procedure=rework")
+	for _, required := range []string{
+		"continue after the greatest existing `F<n>` or begin with `F1`",
+		"Preserve every historical finding identifier unchanged",
+		"Advance the existing cumulative Audit ledger to the newly audited head",
+		"Do not add a round-specific provenance section",
+	} {
+		if !strings.Contains(rendered, required) {
+			t.Errorf("Rework Result Document guidance lacks %q", required)
+		}
+	}
+}
+
+// TestAuditReworkFixesAddsNoSyntheticCleanFinding materializes the clean
+// focused-Audit ledger scenario.
+func TestAuditReworkFixesAddsNoSyntheticCleanFinding(t *testing.T) {
+	rendered := renderResource(t, "implement", "reference/submission.md",
+		"result_directory="+t.TempDir(), "procedure=rework")
+	for _, required := range []string{
+		"When the focused Audit is clean, add no synthetic Audit Finding",
+		"still advance the cumulative ledger to the newly audited head",
+	} {
+		if !strings.Contains(rendered, required) {
+			t.Errorf("clean Rework Audit guidance lacks %q", required)
+		}
+	}
+}
+
+// TestAuditReworkFixesPreservesNonReworkAuditBehavior materializes the
+// regression scenario for initial, resumed, and standalone Audit procedures.
+func TestAuditReworkFixesPreservesNonReworkAuditBehavior(t *testing.T) {
+	for _, procedure := range []struct {
+		name string
+		item workflow.ImplementationItem
+		args []string
+	}{
+		{name: "initial", item: workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Ready}, args: []string{"next"}},
+		{name: "resumed", item: workflow.ImplementationItem{ID: "7", Branch: "widget", State: workflow.Ready, Claimed: true}, args: []string{"resume", "--item", "7"}},
+	} {
+		t.Run(procedure.name, func(t *testing.T) {
+			root := proposalRepository(t)
+			prepareSlice(t, root, "widget")
+			backend := &implementationMemory{work: []workflow.ImplementationItem{procedure.item}}
+			rendered := implementCLI(t, root, backend, procedure.args...).Packet.Instructions
+			for _, retained := range []string{"merge-base with `main` and the parent of this change's first commit", "Artifact integrity", "two axes", "Assign every new Audit Finding an `F<n>` identity"} {
+				if !strings.Contains(rendered, retained) {
+					t.Errorf("%s Audit lost %q", procedure.name, retained)
+				}
+			}
+			if strings.Contains(rendered, "This bundled Audit reviews one finding-driven Rework delta") {
+				t.Errorf("%s Audit contains Rework scope", procedure.name)
+			}
+		})
+	}
+
+	standalone, err := skilldist.BuildPacket("audit", skilldist.InvocationFacts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, retained := range []string{"First workflow review of a change", "Repeat review after a bounce", "Artifact integrity", "two axes", "Assign every new Audit Finding an `F<n>` identity"} {
+		if !strings.Contains(standalone.Instructions, retained) {
+			t.Errorf("standalone Audit lost %q", retained)
+		}
+	}
+}
+
 // TestB3MetadataOnlyStartupBindsEveryAlreadyEstablishedReference materializes
 // the B3 outline. Startup may only use metadata the invocation already
 // established, so every bound command must be literal and usable as printed.
