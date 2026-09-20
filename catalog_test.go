@@ -76,7 +76,7 @@ func TestTestingPolicyPointersAndDesignGuidanceAgree(t *testing.T) {
 	if !slices.Equal(propose.IncludedSkills, []string{"design", "testing"}) {
 		t.Fatalf("propose included skills = %v", propose.IncludedSkills)
 	}
-	for _, want := range []string{"use `testing`", "skl skill --resource reference/tests.md testing"} {
+	for _, want := range []string{"Use `testing`", "skl skill --resource reference/tests.md testing"} {
 		if !strings.Contains(propose.Instructions, want) {
 			t.Errorf("Propose is missing %q", want)
 		}
@@ -100,10 +100,12 @@ func TestTestingPolicyPointersAndDesignGuidanceAgree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(tasks), "one or more related scenarios") {
-		t.Errorf("Propose tasks do not permit grouped contract work:\n%s", tasks)
+	for _, want := range []string{"coherent implementation outcome", "Scenario count, test count", "stable IDs are optional"} {
+		if !strings.Contains(string(tasks), want) {
+			t.Errorf("Propose tasks do not preserve grouped optional contract work %q:\n%s", want, tasks)
+		}
 	}
-	for _, forbidden := range []string{"One behavioral task per Gherkin scenario", "one per scenario → a red-green cycle"} {
+	for _, forbidden := range []string{"One behavioral task per Gherkin scenario", "one per scenario → a red-green cycle", "Stable ids (B1"} {
 		if strings.Contains(string(tasks), forbidden) {
 			t.Errorf("Propose tasks retain %q", forbidden)
 		}
