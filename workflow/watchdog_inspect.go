@@ -64,7 +64,7 @@ func InspectWatchdog(ctx context.Context, root, remote string, id WorkItemID, su
 		// A zero-count checkpoint still records the fixed reviewed head. It is
 		// not a previous completed review, so startup intentionally leaves
 		// PreviousReviewedHead empty and the first inspection is full.
-		checkpointChanged = checkpointChanged || checkpoint.Head != "" && checkpoint.Head != reviewed
+		checkpointChanged = checkpointChanged || previous != "" || checkpoint.Head != "" && checkpoint.Head != reviewed
 	} else {
 		checkpointChanged = checkpointChanged || checkpoint.Head != previous
 	}
