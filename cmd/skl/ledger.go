@@ -301,11 +301,11 @@ func pushDetail(acceptance *ledger.Acceptance) string {
 	return ""
 }
 
-func attachmentWord(attachment *ledger.ForgeAttachment, note ledger.PublicationNote) string {
+func attachmentWord(attachment *ledger.ForgeAttachment, note *ledger.PublicationNote) string {
 	if attachment != nil {
 		return "attached " + attachment.Repository + "#" + fmt.Sprint(attachment.Number)
 	}
-	if note.Status != "" {
+	if note != nil && note.Status != "" {
 		return note.Status + ": " + note.Detail
 	}
 	return "none"

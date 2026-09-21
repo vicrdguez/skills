@@ -37,32 +37,32 @@ type Forge interface {
 
 // SliceAcceptance is the acceptance outcome of one slice.
 type SliceAcceptance struct {
-	Name         string
-	Title        string
-	Branch       string
-	Dependencies []string
-	State        string
-	Issue        *ForgeAttachment
-	IssueStatus  PublicationNote
-	PushStatus   PublicationNote
+	Name         string           `json:"name"`
+	Title        string           `json:"title"`
+	Branch       string           `json:"branch"`
+	Dependencies []string         `json:"dependencies,omitempty"`
+	State        string           `json:"state"`
+	Issue        *ForgeAttachment `json:"issue,omitempty"`
+	IssueStatus  *PublicationNote `json:"issue_status,omitempty"`
+	PushStatus   *PublicationNote `json:"push_status,omitempty"`
 }
 
 // Acceptance is the complete outcome of one acceptance invocation.
 type Acceptance struct {
 	// Status is "accepted" for a new local acceptance and "existing" when
 	// the unchanged proposal was already accepted.
-	Status      string
-	Project     string
-	Repository  string
-	Proposal    string
-	ParentTitle string
-	ParentIssue *ForgeAttachment
-	ParentNote  PublicationNote
+	Status      string           `json:"status"`
+	Project     string           `json:"project"`
+	Repository  string           `json:"repository"`
+	Proposal    string           `json:"proposal"`
+	ParentTitle string           `json:"parent_title,omitempty"`
+	ParentIssue *ForgeAttachment `json:"parent_issue,omitempty"`
+	ParentNote  *PublicationNote `json:"parent_note,omitempty"`
 	// Commit is the full ledger commit that carries the accepted records
 	// after this invocation's local writes.
-	Commit  string
-	Slices  []SliceAcceptance
-	HeadRef string
+	Commit  string            `json:"commit"`
+	Slices  []SliceAcceptance `json:"slices"`
+	HeadRef string            `json:"head_ref"`
 }
 
 // Refusal renders as the actionable refusal of one acceptance attempt.
@@ -165,7 +165,7 @@ func (s *Store) freeze(project Project, declaration *ProposalDeclaration, accept
 			return err
 		}
 	}
-	return s.commit("accept " + project.Name + "/" + declaration.Proposal)
+	return s.commit("accept "+project.Name+"/"+declaration.Proposal, filepath.Join(projectsRoot, project.Name))
 }
 
 // loadAcceptedStates reads the just-written or existing slice states into
@@ -186,10 +186,10 @@ func (s *Store) loadAcceptedStates(project string, declaration *ProposalDeclarat
 		}
 		if state.Publication != nil {
 			if state.Publication.Issue != nil {
-				acceptance.IssueStatus = *state.Publication.Issue
+				acceptance.IssueStatus = state.Publication.Issue
 			}
 			if state.Publication.Push != nil {
-				acceptance.PushStatus = *state.Publication.Push
+				acceptance.PushStatus = state.Publication.Push
 			}
 		}
 		outcome.Slices = append(outcome.Slices, acceptance)
@@ -208,8 +208,15 @@ func (a *Acceptance) slice(name string) *SliceAcceptance {
 	return nil
 }
 
-// commit records the currently staged paths as one brief local mutation.
-func (s *Store) commit(message string) error {
+// commit stages exactly the given record paths and records them as one
+// brief local mutation. Staging explicit paths keeps unrelated work out of
+// the acceptance commit.
+func (s *Store) commit(message string, paths ...string) error {
+	if len(paths) > 0 {
+		if _, err := git(s.Root, append([]string{"add", "--"}, paths...)...); err != nil {
+			return fmt.Errorf("stage the ledger records at %s: %v", s.Root, gitError(s.Root, []string{"add"}, err))
+		}
+	}
 	if _, err := git(s.Root, "commit", "-m", message); err != nil {
 		return fmt.Errorf("commit the ledger at %s: %v; configure user.name and user.email in the ledger clone and retry", s.Root, gitError(s.Root, []string{"commit"}, err))
 	}

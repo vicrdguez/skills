@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -41,25 +42,37 @@ func SettingsLocation(getenv func(string) string) (string, bool, error) {
 	return path, err == nil, nil
 }
 
-// LoadConfig reads and validates the config file at path, returning a
-// concrete repair message for every unusable shape. It never invents a
-// default ledger location.
+// LoadConfig reads and validates the config file at path, returning an
+// actionable refusal for every unusable shape. It never invents a default
+// ledger location.
 func LoadConfig(path string) (Config, error) {
 	contents, err := os.ReadFile(path)
 	if err != nil {
-		return Config{}, fmt.Errorf("cannot read skl configuration %s: %w; create it as {\"ledger\": \"/absolute/path/to/ledger-clone\"}", path, err)
+		return Config{}, refuse(
+			"cannot read skl configuration "+path+": "+err.Error(),
+			"create it as {\"ledger\": \"/absolute/path/to/ledger-clone\"}",
+		)
 	}
 	var config Config
 	decoder := json.NewDecoder(strings.NewReader(string(contents)))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&config); err != nil {
-		return Config{}, fmt.Errorf("malformed skl configuration %s: %v; write it as {\"ledger\": \"/absolute/path/to/ledger-clone\"}", path, err)
+		return Config{}, refuse(
+			"malformed skl configuration "+path+": "+err.Error(),
+			"write it as {\"ledger\": \"/absolute/path/to/ledger-clone\"}",
+		)
 	}
 	if strings.TrimSpace(config.Ledger) == "" {
-		return Config{}, fmt.Errorf("skl configuration %s has no ledger setting; write it as {\"ledger\": \"/absolute/path/to/ledger-clone\"}", path)
+		return Config{}, refuse(
+			"skl configuration "+path+" has no ledger setting",
+			"write it as {\"ledger\": \"/absolute/path/to/ledger-clone\"}",
+		)
 	}
 	if !filepath.IsAbs(config.Ledger) {
-		return Config{}, fmt.Errorf("skl configuration %s has a relative ledger path %q; use an absolute path to an existing local Git clone", path, config.Ledger)
+		return Config{}, refuse(
+			"skl configuration "+path+" has a relative ledger path "+strconv.Quote(config.Ledger),
+			"use an absolute path to an existing local Git clone",
+		)
 	}
 	return config, nil
 }
@@ -76,10 +89,16 @@ type Store struct {
 func Open(path string) (*Store, error) {
 	root, err := git(path, "rev-parse", "--show-toplevel")
 	if err != nil {
-		return nil, fmt.Errorf("configured ledger %s is not a usable local Git clone; clone the ledger repository there and point skl/config.json at it", path)
+		return nil, refuse(
+			"configured ledger "+path+" is not a usable local Git clone",
+			"clone the ledger repository there and point skl/config.json at it",
+		)
 	}
 	if _, err := git(root, "rev-parse", "HEAD"); err != nil {
-		return nil, fmt.Errorf("configured ledger %s has no commits; clone or initialize the ledger repository with a commit first", root)
+		return nil, refuse(
+			"configured ledger "+root+" has no commits",
+			"clone or initialize the ledger repository with a commit first",
+		)
 	}
 	return &Store{Root: root}, nil
 }

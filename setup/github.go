@@ -512,6 +512,8 @@ func (b *GitHubBackend) CreateIssue(ctx context.Context, title, body string) (in
 	if err != nil {
 		return 0, err
 	}
+	b.issueIDs[issue.Number] = issue.ID
+	b.issueBodies[issue.Number] = body
 	return issue.Number, nil
 }
 

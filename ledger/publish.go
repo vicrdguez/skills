@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 )
 
@@ -46,7 +47,7 @@ func Publish(ctx context.Context, store *Store, project string, declaration *Pro
 	publication := &Publication{}
 	if forge == nil {
 		for index := range outcome.Slices {
-			outcome.Slices[index].IssueStatus = PublicationNote{
+			outcome.Slices[index].IssueStatus = &PublicationNote{
 				Status: IssuePending,
 				Detail: "issue publication inputs are unavailable: no forge attachment surface",
 			}
@@ -57,22 +58,24 @@ func Publish(ctx context.Context, store *Store, project string, declaration *Pro
 	// The reported push outcome is the replication of the accepted records
 	// themselves; a best-effort second push below only carries publication
 	// bookkeeping and never downgrades that fact.
-	publication.Push, _ = store.push()
+	note, _ := store.push()
+	publication.Push = note
 	for index := range outcome.Slices {
-		outcome.Slices[index].PushStatus = publication.Push
+		outcome.Slices[index].PushStatus = &note
 	}
-	pushed := publication.Push.Status == PushPushed
+	pushed := note.Status == PushPushed
 	if err := store.recordPublication(project, declaration, outcome, pushed); err != nil {
 		return nil, err
 	}
 	if pushed {
-		if note, ok := store.push(); !ok {
-			publication.Push = PublicationNote{
+		if retry, ok := store.push(); !ok {
+			detail := &PublicationNote{
 				Status: PushPushed,
-				Detail: "the accepted records were pushed, but pushing the publication bookkeeping stayed " + note.Status + ": " + note.Detail,
+				Detail: "the accepted records were pushed, but pushing the publication bookkeeping stayed " + retry.Status + ": " + retry.Detail,
 			}
+			publication.Push = *detail
 			for index := range outcome.Slices {
-				outcome.Slices[index].PushStatus = publication.Push
+				outcome.Slices[index].PushStatus = detail
 			}
 		}
 	}
@@ -97,19 +100,19 @@ func publishIssues(ctx context.Context, declaration *ProposalDeclaration, outcom
 		}
 		body, supplied := declaration.IssueBodies[slice.Name]
 		if !supplied {
-			state.IssueStatus = PublicationNote{Status: IssuePending, Detail: "no descriptive issue body was supplied"}
+			state.IssueStatus = &PublicationNote{Status: IssuePending, Detail: "no descriptive issue body was supplied"}
 			continue
 		}
 		// A previously unresolved publication is resolved safely before any
 		// new creation, so a duplicate is never created blindly.
-		previouslyUnresolved := state.IssueStatus.Status == IssueUnresolved
+		previouslyUnresolved := state.IssueStatus != nil && state.IssueStatus.Status == IssueUnresolved
 		number, note := createOrAdoptIssue(ctx, forge, slice.Title, string(body), previouslyUnresolved)
 		if number != 0 {
 			state.Issue = &ForgeAttachment{Repository: repository, Number: number}
 			attachedChildren++
 			continue
 		}
-		state.IssueStatus = note
+		state.IssueStatus = &note
 	}
 	if len(declaration.Slices) < 2 {
 		return
@@ -119,16 +122,16 @@ func publishIssues(ctx context.Context, declaration *ProposalDeclaration, outcom
 	// yet.
 	if outcome.ParentIssue == nil {
 		if attachedChildren == 0 {
-			outcome.ParentNote = PublicationNote{Status: IssuePending, Detail: "no child issue is attached yet"}
+			outcome.ParentNote = &PublicationNote{Status: IssuePending, Detail: "no child issue is attached yet"}
 			return
 		}
 		if declaration.ParentBody == nil {
-			outcome.ParentNote = PublicationNote{Status: IssuePending, Detail: "no parent issue body was supplied"}
+			outcome.ParentNote = &PublicationNote{Status: IssuePending, Detail: "no parent issue body was supplied"}
 			return
 		}
 		number, note := createOrAdoptIssue(ctx, forge, strings.TrimSpace(declaration.ParentTitle), string(declaration.ParentBody), false)
 		if number == 0 {
-			outcome.ParentNote = note
+			outcome.ParentNote = &note
 			return
 		}
 		outcome.ParentIssue = &ForgeAttachment{Repository: repository, Number: number}
@@ -143,7 +146,7 @@ func publishIssues(ctx context.Context, declaration *ProposalDeclaration, outcom
 			continue
 		}
 		if err := forge.AttachChild(ctx, outcome.ParentIssue.Number, child.Issue.Number); err != nil {
-			child.IssueStatus = PublicationNote{Status: IssuePending, Detail: "grouping under the parent issue failed: " + err.Error()}
+			child.IssueStatus = &PublicationNote{Status: IssuePending, Detail: "grouping under the parent issue failed: " + err.Error()}
 		}
 	}
 }
@@ -220,8 +223,8 @@ func (s *Store) push() (PublicationNote, bool) {
 	if remote == "" {
 		return PublicationNote{Status: PushNoUpstream, Detail: "the ledger clone has no configured remote upstream"}, false
 	}
-	if _, err := git(s.Root, "fetch", "--quiet", remote, "refs/heads/"+branch); err != nil {
-		return PublicationNote{Status: PushPending, Detail: "upstream is unavailable: " + gitError(s.Root, []string{"fetch", remote, branch}, err).Error()}, false
+	if _, err := git(s.Root, "fetch", "--quiet", remote); err != nil {
+		return PublicationNote{Status: PushPending, Detail: "upstream is unavailable: " + gitError(s.Root, []string{"fetch", remote}, err).Error()}, false
 	}
 	diverged, err := s.diverged(remote, branch)
 	if err != nil {
@@ -271,25 +274,20 @@ func (s *Store) upstream() (remote, branch string, err error) {
 	return "", "", nil
 }
 
-// diverged reports whether the upstream branch and the local head each hold
-// commits the other lacks. A missing upstream branch is a plain first push,
-// not divergence.
+// diverged reports whether the upstream branch holds history the local
+// head does not contain. A push is safe only when the observed upstream is
+// an ancestor of the local head; anything else is competing history that
+// requires explicit reconciliation. A missing upstream branch is a plain
+// first push, not divergence.
 func (s *Store) diverged(remote, branch string) (bool, error) {
-	local, err := git(s.Root, "rev-parse", "HEAD")
-	if err != nil {
-		return false, err
-	}
 	upstream := "refs/remotes/" + remote + "/" + branch
 	if !gitOK(s.Root, "show-ref", "--verify", "--quiet", upstream) {
 		return false, nil
 	}
-	remoteHead, err := git(s.Root, "rev-parse", upstream)
-	if err != nil {
-		return false, err
+	if gitOK(s.Root, "merge-base", "--is-ancestor", upstream, "HEAD") {
+		return false, nil
 	}
-	ahead := gitOK(s.Root, "merge-base", "--is-ancestor", upstream, "HEAD") && remoteHead != local
-	behind := gitOK(s.Root, "merge-base", "--is-ancestor", "HEAD", upstream)
-	return ahead && behind, nil
+	return true, nil
 }
 
 // recordPublication commits the publication bookkeeping: attachments and
@@ -316,7 +314,7 @@ func (s *Store) recordPublication(project string, declaration *ProposalDeclarati
 			}
 			return err
 		}
-		before := state.Publication
+		before, previousIssue := state.Publication, state.Issue
 		publication := PublicationState{}
 		if before != nil {
 			publication = *before
@@ -324,22 +322,20 @@ func (s *Store) recordPublication(project string, declaration *ProposalDeclarati
 		if acceptance.Issue != nil {
 			state.Issue = acceptance.Issue
 			publication.Issue = nil
-		} else if acceptance.IssueStatus.Status != "" {
-			note := acceptance.IssueStatus
-			publication.Issue = &note
+		} else if acceptance.IssueStatus != nil && acceptance.IssueStatus.Status != "" {
+			publication.Issue = acceptance.IssueStatus
 		}
 		if pushed {
 			publication.Push = nil
-		} else if acceptance.PushStatus.Status != "" {
-			note := acceptance.PushStatus
-			publication.Push = &note
+		} else if acceptance.PushStatus != nil && acceptance.PushStatus.Status != "" {
+			publication.Push = acceptance.PushStatus
 		}
 		if publication.Push == nil && publication.Issue == nil {
 			state.Publication = nil
 		} else {
 			state.Publication = &publication
 		}
-		if !samePublication(before, state.Publication) || !sameAttachment(state.Issue, acceptance.Issue) {
+		if !samePublication(before, state.Publication) || !sameAttachment(previousIssue, state.Issue) {
 			changed = true
 			if err := s.writeSliceState(project, declaration.Proposal, slice.Name, state); err != nil {
 				return err
@@ -352,7 +348,7 @@ func (s *Store) recordPublication(project string, declaration *ProposalDeclarati
 	if err := s.writeProposalMeta(project, declaration.Proposal, meta); err != nil {
 		return err
 	}
-	return s.commit("record publication " + project + "/" + declaration.Proposal)
+	return s.commit("record publication "+project+"/"+declaration.Proposal, filepath.Join(projectsRoot, project))
 }
 
 func samePublication(before, after *PublicationState) bool {

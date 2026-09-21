@@ -16,8 +16,6 @@ import (
 // only when the author supplied them.
 var contractFiles = map[string]bool{"intent.md": true, "behavior.md": true, "plan.md": true, "tasks.md": true}
 
-const requiredContractCount = 2
-
 // SliceDeclaration is one declared slice of a proposal intake.
 type SliceDeclaration struct {
 	Name     string   `json:"name"`
@@ -128,7 +126,10 @@ func LoadDeclaration(directory string, bodies map[string][]byte, parentBody []by
 			if seen[dependency] {
 				continue
 			}
-			return nil, refuse("dependency "+dependency+" of slice "+slice.Name+" does not resolve", "reference a declared sibling slice or an existing ledger Work Item as proposals/<proposal>/<slice>")
+			parts := strings.Split(strings.TrimPrefix(dependency, "proposals/"), "/")
+			if len(parts) != 2 || !ValidRecordName(parts[0]) || !ValidRecordName(parts[1]) {
+				return nil, refuse("dependency "+dependency+" of slice "+slice.Name+" does not resolve", "reference a declared sibling slice or an existing ledger Work Item as proposals/<proposal>/<slice>")
+			}
 		}
 	}
 	if cycle := declaration.Cycle(); cycle != "" {
@@ -209,14 +210,10 @@ func loadContract(directory string) (map[string][]byte, error) {
 		}
 		contract[entry.Name()] = contents
 	}
-	if len(contract) < requiredContractCount {
-		return nil, refuse("slice directory "+directory+" misses required contract files", "supply at least intent.md and behavior.md; add plan.md and tasks.md only when warranted")
-	}
-	if _, ok := contract["intent.md"]; !ok {
-		return nil, refuse("slice directory "+directory+" misses intent.md", "supply intent.md with the slice's intent, scope, and Definition of Done")
-	}
-	if _, ok := contract["behavior.md"]; !ok {
-		return nil, refuse("slice directory "+directory+" misses behavior.md", "supply behavior.md with the slice's binding rules and scenarios")
+	for _, required := range []string{"intent.md", "behavior.md"} {
+		if _, ok := contract[required]; !ok {
+			return nil, refuse("slice directory "+directory+" misses "+required, "supply at least intent.md and behavior.md; add plan.md and tasks.md only when warranted")
+		}
 	}
 	return contract, nil
 }
