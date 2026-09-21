@@ -46,6 +46,8 @@ type SliceAcceptance struct {
 	IssueStatus    *PublicationNote `json:"issue_status,omitempty"`
 	GroupingStatus *PublicationNote `json:"grouping_status,omitempty"`
 	PushStatus     *PublicationNote `json:"push_status,omitempty"`
+
+	ownsIssueReservation bool
 }
 
 // Acceptance is the complete outcome of one acceptance invocation.
@@ -60,6 +62,8 @@ type Acceptance struct {
 	ParentIssue       *ForgeAttachment `json:"parent_issue,omitempty"`
 	ParentNote        *PublicationNote `json:"parent_note,omitempty"`
 	BookkeepingStatus *PublicationNote `json:"bookkeeping_status,omitempty"`
+
+	ownsParentReservation bool
 	// Commit is the full ledger commit that carries the accepted records
 	// after this invocation's local writes.
 	Commit  string            `json:"commit"`
@@ -265,6 +269,22 @@ func (s *Store) withMutation(mutate func() error) error {
 
 // requireCleanTree refuses a local mutation while the ledger holds
 // uncommitted edits or leftovers of an interrupted write.
+func (s *Store) requireCleanPaths(paths ...string) error {
+	arguments := []string{"status", "--porcelain", "--"}
+	arguments = append(arguments, paths...)
+	dirty, err := git(s.Root, arguments...)
+	if err != nil {
+		return err
+	}
+	if dirty == "" {
+		return nil
+	}
+	return refuse(
+		"the ledger records needed for publication bookkeeping have uncommitted changes",
+		"commit or restore those record edits; unrelated index and worktree changes may remain because skl commits only its exact bookkeeping paths",
+	)
+}
+
 func (s *Store) requireCleanTree() error {
 	dirty, err := git(s.Root, "status", "--porcelain")
 	if err != nil {

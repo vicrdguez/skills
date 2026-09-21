@@ -30,6 +30,7 @@ const (
 	IssueAttached      = "attached"
 	IssuePending       = "pending"
 	IssueUnresolved    = "unresolved"
+	issueReserved      = "reserved"
 )
 
 // Publish attempts the initial publication surfaces after local acceptance:
@@ -38,6 +39,7 @@ const (
 // failure stays visibly pending; successful attachments are recorded, and
 // no public body is persisted in the ledger.
 func Publish(ctx context.Context, store *Store, project string, declaration *ProposalDeclaration, outcome *Acceptance, forge Forge, acceptedRevision string) error {
+	reservations := publicationReservations{issues: make(map[string]bool)}
 	if forge == nil {
 		for index := range outcome.Slices {
 			outcome.Slices[index].IssueStatus = &PublicationNote{
@@ -46,7 +48,14 @@ func Publish(ctx context.Context, store *Store, project string, declaration *Pro
 			}
 		}
 	} else {
-		publishIssues(ctx, declaration, outcome, forge)
+		var err error
+		reservations, acceptedRevision, err = store.reserveIssuePublication(project, declaration, outcome)
+		if err != nil {
+			outcome.BookkeepingStatus = &PublicationNote{Status: IssuePending, Detail: "issue publication was not reserved safely: " + err.Error()}
+		} else {
+			outcome.Commit = acceptedRevision
+			publishIssues(ctx, declaration, outcome, forge, reservations)
+		}
 	}
 	// The reported push outcome is the replication of the accepted records
 	// themselves; a best-effort second push below only carries publication
@@ -94,7 +103,12 @@ func Publish(ctx context.Context, store *Store, project string, declaration *Pro
 // publishIssues creates, adopts, or leaves pending each slice's descriptive
 // issue and the multi-slice parent grouping. Already-attached issues are
 // never recreated.
-func publishIssues(ctx context.Context, declaration *ProposalDeclaration, outcome *Acceptance, forge Forge) {
+type publicationReservations struct {
+	issues map[string]bool
+	parent bool
+}
+
+func publishIssues(ctx context.Context, declaration *ProposalDeclaration, outcome *Acceptance, forge Forge, reservations publicationReservations) {
 	repository := outcome.Repository
 	attachedChildren := 0
 	for index := range declaration.Slices {
@@ -112,10 +126,18 @@ func publishIssues(ctx context.Context, declaration *ProposalDeclaration, outcom
 			state.IssueStatus = &PublicationNote{Status: IssuePending, Detail: "no descriptive issue body was supplied"}
 			continue
 		}
-		// Resolve the exact title and body before every creation attempt. This
-		// recovers both durable uncertain facts and successful attachments that
-		// could not be recorded because the ledger became unsafe to mutate.
-		number, note := createOrAdoptIssue(ctx, forge, slice.Title, string(body), true)
+		var number int
+		var note PublicationNote
+		switch {
+		case reservations.issues[slice.Name]:
+			// A fresh, durably reserved attempt creates the supplied issue; it
+			// never adopts an unrelated pre-existing title/body match.
+			number, note = createOrAdoptIssue(ctx, forge, slice.Title, string(body), false)
+		case state.IssueStatus != nil && state.IssueStatus.Status == issueReserved:
+			number, note = resolveReservedIssue(ctx, forge, slice.Title, string(body))
+		default:
+			number, note = createOrAdoptIssue(ctx, forge, slice.Title, string(body), true)
+		}
 		if number != 0 {
 			state.Issue = &ForgeAttachment{Repository: repository, Number: number}
 			state.IssueStatus = nil
@@ -139,7 +161,16 @@ func publishIssues(ctx context.Context, declaration *ProposalDeclaration, outcom
 			outcome.ParentNote = &PublicationNote{Status: IssuePending, Detail: "no parent issue body was supplied"}
 			return
 		}
-		number, note := createOrAdoptIssue(ctx, forge, strings.TrimSpace(declaration.ParentTitle), string(declaration.ParentBody), true)
+		var number int
+		var note PublicationNote
+		switch {
+		case reservations.parent:
+			number, note = createOrAdoptIssue(ctx, forge, strings.TrimSpace(declaration.ParentTitle), string(declaration.ParentBody), false)
+		case outcome.ParentNote != nil && outcome.ParentNote.Status == issueReserved:
+			number, note = resolveReservedIssue(ctx, forge, strings.TrimSpace(declaration.ParentTitle), string(declaration.ParentBody))
+		default:
+			number, note = createOrAdoptIssue(ctx, forge, strings.TrimSpace(declaration.ParentTitle), string(declaration.ParentBody), true)
+		}
 		if number == 0 {
 			outcome.ParentNote = &note
 			return
@@ -178,6 +209,16 @@ func containsInt(values []int, wanted int) bool {
 // attempt is resolved safely by exact title-and-body match before any
 // duplicate could be created; an unresolved outcome is reported for repair
 // rather than guessed.
+func resolveReservedIssue(ctx context.Context, forge Forge, title, body string) (int, PublicationNote) {
+	if number, note, decided := adoptMatchingIssue(ctx, forge, title, body); decided && number != 0 {
+		return number, note
+	}
+	return 0, PublicationNote{
+		Status: issueReserved,
+		Detail: "another invocation reserved issue creation and no unique exact matching open issue is observable yet; repeat after that attempt settles rather than creating a duplicate",
+	}
+}
+
 func createOrAdoptIssue(ctx context.Context, forge Forge, title, body string, resolveFirst bool) (int, PublicationNote) {
 	if resolveFirst {
 		if number, note, decided := adoptMatchingIssue(ctx, forge, title, body); decided {
@@ -226,6 +267,114 @@ func adoptMatchingIssue(ctx context.Context, forge Forge, title, body string) (i
 	}
 }
 
+// reserveIssuePublication durably establishes which fresh issue creations
+// belong to this invocation. Concurrent invocations only observe/adopt those
+// attempts; they never perform the same list-then-create race.
+func (s *Store) reserveIssuePublication(project string, declaration *ProposalDeclaration, outcome *Acceptance) (publicationReservations, string, error) {
+	reservations := publicationReservations{issues: make(map[string]bool)}
+	var revision string
+	err := s.withMutation(func() error {
+		proposalPath := filepath.Join(projectsRoot, project, "proposals", declaration.Proposal)
+		paths := []string{filepath.Join(proposalPath, "proposal.json")}
+		for index := range declaration.Slices {
+			paths = append(paths, filepath.Join(proposalPath, declaration.Slices[index].Name, "state.json"))
+		}
+		if err := s.requireCleanPaths(paths...); err != nil {
+			return err
+		}
+		meta, _, err := s.readProposalMeta(project, declaration.Proposal)
+		if err != nil {
+			return err
+		}
+		metaChanged := false
+		if meta.ParentIssue != nil {
+			outcome.ParentIssue = meta.ParentIssue
+			outcome.ParentNote = nil
+		} else if len(declaration.Slices) > 1 && declaration.ParentBodySupplied() {
+			switch {
+			case meta.ParentPublication == nil || meta.ParentPublication.Status == IssuePending:
+				note := &PublicationNote{Status: issueReserved, Detail: "parent issue creation is reserved before network publication"}
+				meta.ParentPublication = note
+				outcome.ParentNote = note
+				outcome.ownsParentReservation = true
+				reservations.parent = true
+				metaChanged = true
+			default:
+				outcome.ParentNote = meta.ParentPublication
+			}
+		}
+
+		type stateUpdate struct {
+			path  string
+			state SliceState
+		}
+		var updates []stateUpdate
+		for index := range declaration.Slices {
+			slice := &declaration.Slices[index]
+			acceptance := outcome.slice(slice.Name)
+			if acceptance == nil {
+				return fmt.Errorf("acceptance outcome lacks slice %s", slice.Name)
+			}
+			state, found, err := s.readSliceState(project, declaration.Proposal, slice.Name)
+			if err != nil || !found {
+				if err == nil {
+					return fmt.Errorf("record of slice %s is missing its state.json", slice.Name)
+				}
+				return err
+			}
+			if state.Issue != nil {
+				acceptance.Issue = state.Issue
+				acceptance.IssueStatus = nil
+				continue
+			}
+			publication := PublicationState{}
+			if state.Publication != nil {
+				publication = *state.Publication
+			}
+			if publication.Issue != nil {
+				acceptance.IssueStatus = publication.Issue
+			}
+			if _, supplied := declaration.IssueBodies[slice.Name]; !supplied {
+				continue
+			}
+			if publication.Issue != nil && publication.Issue.Status != IssuePending {
+				continue
+			}
+			note := &PublicationNote{Status: issueReserved, Detail: "issue creation is reserved before network publication"}
+			publication.Issue = note
+			state.Publication = &publication
+			acceptance.IssueStatus = note
+			acceptance.ownsIssueReservation = true
+			reservations.issues[slice.Name] = true
+			updates = append(updates, stateUpdate{
+				path: filepath.Join(proposalPath, slice.Name, "state.json"), state: state,
+			})
+		}
+		var changedPaths []string
+		if metaChanged {
+			if err := s.writeProposalMeta(project, declaration.Proposal, meta); err != nil {
+				return err
+			}
+			changedPaths = append(changedPaths, filepath.Join(proposalPath, "proposal.json"))
+		}
+		for _, update := range updates {
+			if err := writeJSON(filepath.Join(s.Root, update.path), update.state); err != nil {
+				return err
+			}
+			changedPaths = append(changedPaths, update.path)
+		}
+		if len(changedPaths) > 0 {
+			if err := s.commit("reserve publication "+project+"/"+declaration.Proposal, changedPaths...); err != nil {
+				return err
+			}
+		}
+		var headErr error
+		revision, headErr = s.head()
+		return headErr
+	})
+	return reservations, revision, err
+}
+
 // push attempts replication through the clone's own remote/upstream
 // configuration and classifies the outcome. It never merges, rebases, or
 // force-pushes, and never discards local or remote history.
@@ -242,6 +391,9 @@ func (s *Store) push(revision string) (PublicationNote, bool) {
 	}
 	if _, err := git(s.Root, "fetch", "--quiet", remote); err != nil {
 		return PublicationNote{Status: PushPending, Detail: "upstream is unavailable: " + gitError(s.Root, []string{"fetch", remote}, err).Error()}, false
+	}
+	if s.destinationContains(remote, remoteBranch, revision) {
+		return PublicationNote{Status: PushPushed}, true
 	}
 	diverged, err := s.diverged(remote, remoteBranch, revision)
 	if err != nil {
@@ -301,7 +453,7 @@ func (s *Store) observeReplication(remote, branch, revision string, pushSucceede
 	if err != nil {
 		return PublicationNote{}, false
 	}
-	if remoteHead == revision {
+	if remoteHead == revision || gitOK(s.Root, "merge-base", "--is-ancestor", revision, upstream) {
 		return PublicationNote{Status: PushPushed}, true
 	}
 	if !pushSucceeded && gitOK(s.Root, "merge-base", "--is-ancestor", upstream, revision) {
@@ -314,6 +466,12 @@ func (s *Store) observeReplication(remote, branch, revision string, pushSucceede
 		Status: PushReconciliation,
 		Detail: "upstream " + remote + "/" + branch + " changed while replicating " + revision + "; skl merges, rebases, and force-pushes nothing",
 	}, true
+}
+
+func (s *Store) destinationContains(remote, branch, revision string) bool {
+	upstream := "refs/remotes/" + remote + "/" + branch
+	return gitOK(s.Root, "show-ref", "--verify", "--quiet", upstream) &&
+		gitOK(s.Root, "merge-base", "--is-ancestor", revision, upstream)
 }
 
 // diverged reports whether the upstream branch holds history that is not an
@@ -336,7 +494,12 @@ func (s *Store) diverged(remote, branch, revision string) (bool, error) {
 func (s *Store) recordPublication(project string, declaration *ProposalDeclaration, outcome *Acceptance, pushed bool) (string, error) {
 	var revision string
 	err := s.withMutation(func() error {
-		if err := s.requireCleanTree(); err != nil {
+		proposalPath := filepath.Join(projectsRoot, project, "proposals", declaration.Proposal)
+		recordPaths := []string{filepath.Join(proposalPath, "proposal.json")}
+		for index := range declaration.Slices {
+			recordPaths = append(recordPaths, filepath.Join(proposalPath, declaration.Slices[index].Name, "state.json"))
+		}
+		if err := s.requireCleanPaths(recordPaths...); err != nil {
 			return err
 		}
 		meta, _, err := s.readProposalMeta(project, declaration.Proposal)
@@ -357,14 +520,20 @@ func (s *Store) recordPublication(project string, declaration *ProposalDeclarati
 		case outcome.ParentIssue != nil:
 			meta.ParentIssue = outcome.ParentIssue
 			meta.ParentPublication = nil
+		case meta.ParentPublication != nil && meta.ParentPublication.Status == issueReserved && !outcome.ownsParentReservation:
+			outcome.ParentNote = meta.ParentPublication
 		case outcome.ParentNote != nil:
 			meta.ParentPublication = outcome.ParentNote
 		default:
 			outcome.ParentNote = meta.ParentPublication
 		}
 		parentChanged := !sameAttachment(previousParentIssue, meta.ParentIssue) || !sameNote(previousParentNote, meta.ParentPublication)
-		changed := parentChanged
-		var changedPaths []string
+
+		type stateUpdate struct {
+			path  string
+			state SliceState
+		}
+		var updates []stateUpdate
 		for index := range declaration.Slices {
 			slice := &declaration.Slices[index]
 			acceptance := outcome.slice(slice.Name)
@@ -393,10 +562,13 @@ func (s *Store) recordPublication(project string, declaration *ProposalDeclarati
 			if before != nil {
 				publication = *before
 			}
-			if acceptance.Issue != nil {
+			switch {
+			case acceptance.Issue != nil:
 				state.Issue = acceptance.Issue
 				publication.Issue = nil
-			} else if acceptance.IssueStatus != nil && acceptance.IssueStatus.Status != "" {
+			case publication.Issue != nil && publication.Issue.Status == issueReserved && !acceptance.ownsIssueReservation:
+				acceptance.IssueStatus = publication.Issue
+			case acceptance.IssueStatus != nil && acceptance.IssueStatus.Status != "":
 				publication.Issue = acceptance.IssueStatus
 			}
 			if acceptance.GroupingStatus != nil && acceptance.GroupingStatus.Status != "" {
@@ -415,26 +587,29 @@ func (s *Store) recordPublication(project string, declaration *ProposalDeclarati
 				state.Publication = &publication
 			}
 			if !samePublication(before, state.Publication) || !sameAttachment(previousIssue, state.Issue) {
-				changed = true
-				if err := s.writeSliceState(project, declaration.Proposal, slice.Name, state); err != nil {
-					return err
-				}
-				changedPaths = append(changedPaths, filepath.Join(projectsRoot, project, "proposals", declaration.Proposal, slice.Name, "state.json"))
+				updates = append(updates, stateUpdate{
+					path: filepath.Join(proposalPath, slice.Name, "state.json"), state: state,
+				})
 			}
 		}
-		if !changed {
-			var headErr error
-			revision, headErr = s.head()
-			return headErr
-		}
+
+		var changedPaths []string
 		if parentChanged {
 			if err := s.writeProposalMeta(project, declaration.Proposal, meta); err != nil {
 				return err
 			}
-			changedPaths = append(changedPaths, filepath.Join(projectsRoot, project, "proposals", declaration.Proposal, "proposal.json"))
+			changedPaths = append(changedPaths, filepath.Join(proposalPath, "proposal.json"))
 		}
-		if err := s.commit("record publication "+project+"/"+declaration.Proposal, changedPaths...); err != nil {
-			return err
+		for _, update := range updates {
+			if err := writeJSON(filepath.Join(s.Root, update.path), update.state); err != nil {
+				return err
+			}
+			changedPaths = append(changedPaths, update.path)
+		}
+		if len(changedPaths) > 0 {
+			if err := s.commit("record publication "+project+"/"+declaration.Proposal, changedPaths...); err != nil {
+				return err
+			}
 		}
 		var headErr error
 		revision, headErr = s.head()

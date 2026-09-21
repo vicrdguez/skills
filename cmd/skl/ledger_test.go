@@ -1523,35 +1523,9 @@ func TestConcurrentAcceptanceCannotOverwriteFrozenContract(t *testing.T) {
 	secondSpec := singleSlice("concurrent-contract")
 	secondSpec.slices[0].files["intent.md"] = "# Different accepted intent\n"
 	directories := []string{writeProposal(t, "", firstSpec), writeProposal(t, "", secondSpec)}
-	results := []string{filepath.Join(t.TempDir(), "first.json"), filepath.Join(t.TempDir(), "second.json")}
-	commands := make([]*exec.Cmd, len(directories))
-	logs := make([]bytes.Buffer, len(directories))
-	for index := range directories {
-		command := exec.Command(os.Args[0], "-test.run=^TestConcurrentAcceptanceHelper$")
-		command.Env = append(os.Environ(),
-			"SKL_CONCURRENT_ACCEPT_HELPER=1",
-			"SKL_CONCURRENT_ACCEPT_REPO="+root,
-			"SKL_CONCURRENT_ACCEPT_PROPOSAL="+directories[index],
-			"SKL_CONCURRENT_ACCEPT_RESULT="+results[index],
-		)
-		command.Stdout = &logs[index]
-		command.Stderr = &logs[index]
-		commands[index] = command
-		if err := command.Start(); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for index, command := range commands {
-		if err := command.Wait(); err != nil {
-			t.Fatalf("concurrent helper: %v\n%s", err, logs[index].String())
-		}
-	}
+	outcomes := runConcurrentAcceptanceHelpers(t, root, directories)
 	accepted, refused := 0, 0
-	for _, path := range results {
-		var outcome ledgerOutcome
-		if err := json.Unmarshal([]byte(readFile(t, path)), &outcome); err != nil {
-			t.Fatalf("decode helper outcome: %v", err)
-		}
+	for _, outcome := range outcomes {
 		switch outcome.Status {
 		case "accepted":
 			accepted++
@@ -1573,24 +1547,92 @@ func TestConcurrentAcceptanceCannotOverwriteFrozenContract(t *testing.T) {
 	}
 }
 
+func TestConcurrentIssuePublicationUsesDurableReservation(t *testing.T) {
+	fixture := newLedgerFixture(t)
+	root := sourceRepository(t, "acme", "widgets")
+	forge := newForgeServer(t)
+	spec := singleSlice("concurrent-publication")
+	directories := []string{writeProposal(t, "", spec), writeProposal(t, "", spec)}
+	body := writeTemp(t, t, "shared body\n")
+	outcomes := runConcurrentAcceptanceHelpers(t, root, directories,
+		"SKL_CONCURRENT_ACCEPT_FORGE="+forge.server.URL,
+		"SKL_CONCURRENT_ACCEPT_ISSUE="+body,
+	)
+	for _, outcome := range outcomes {
+		if outcome.Status != "accepted" && outcome.Status != "existing" {
+			t.Fatalf("concurrent publication failed: %s", mustJSON(t, outcome))
+		}
+	}
+	if forge.createdCount() != 1 {
+		t.Fatalf("concurrent publication created %d issues, want one", forge.createdCount())
+	}
+	state := readLedgerFile(t, fixture.clone, "projects/widgets/proposals/concurrent-publication/foundation/state.json")
+	if !strings.Contains(state, `"number": 101`) {
+		t.Fatalf("concurrent publication did not retain the one attachment: %s", state)
+	}
+}
+
+func runConcurrentAcceptanceHelpers(t *testing.T, root string, directories []string, extraEnv ...string) []ledgerOutcome {
+	t.Helper()
+	results := make([]string, len(directories))
+	commands := make([]*exec.Cmd, len(directories))
+	logs := make([]bytes.Buffer, len(directories))
+	for index := range directories {
+		results[index] = filepath.Join(t.TempDir(), fmt.Sprintf("result-%d.json", index))
+		command := exec.Command(os.Args[0], "-test.run=^TestConcurrentAcceptanceHelper$")
+		command.Env = append(os.Environ(),
+			"SKL_CONCURRENT_ACCEPT_HELPER=1",
+			"SKL_CONCURRENT_ACCEPT_REPO="+root,
+			"SKL_CONCURRENT_ACCEPT_PROPOSAL="+directories[index],
+			"SKL_CONCURRENT_ACCEPT_RESULT="+results[index],
+		)
+		command.Env = append(command.Env, extraEnv...)
+		command.Stdout = &logs[index]
+		command.Stderr = &logs[index]
+		commands[index] = command
+		if err := command.Start(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for index, command := range commands {
+		if err := command.Wait(); err != nil {
+			t.Fatalf("concurrent helper: %v\n%s", err, logs[index].String())
+		}
+	}
+	outcomes := make([]ledgerOutcome, len(results))
+	for index, path := range results {
+		if err := json.Unmarshal([]byte(readFile(t, path)), &outcomes[index]); err != nil {
+			t.Fatalf("decode helper outcome: %v", err)
+		}
+	}
+	return outcomes
+}
+
 func TestConcurrentAcceptanceHelper(t *testing.T) {
 	if os.Getenv("SKL_CONCURRENT_ACCEPT_HELPER") != "1" {
 		return
 	}
 	var output bytes.Buffer
 	factory := func(repository github.RepositoryID) (setup.Backend, error) {
-		backend := setup.NewGitHubBackend("http://127.0.0.1:1", "secret", http.DefaultClient)
+		baseURL := os.Getenv("SKL_CONCURRENT_ACCEPT_FORGE")
+		if baseURL == "" {
+			baseURL = "http://127.0.0.1:1"
+		}
+		backend := setup.NewGitHubBackend(baseURL, "secret", http.DefaultClient)
 		backend.BindRepository(repository)
 		return backend, nil
 	}
 	app := newApp(factory, bytes.NewReader(nil), &output, &output)
-	err := app.Run([]string{
+	arguments := []string{
 		"skl", "ledger", "accept",
 		"--repo", os.Getenv("SKL_CONCURRENT_ACCEPT_REPO"),
 		"--proposal-dir", os.Getenv("SKL_CONCURRENT_ACCEPT_PROPOSAL"),
 		"--format", "json",
-	})
-	if err != nil {
+	}
+	if issue := os.Getenv("SKL_CONCURRENT_ACCEPT_ISSUE"); issue != "" {
+		arguments = append(arguments, "--issue=foundation="+issue)
+	}
+	if err := app.Run(arguments); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(os.Getenv("SKL_CONCURRENT_ACCEPT_RESULT"), output.Bytes(), 0o600); err != nil {
@@ -1618,8 +1660,8 @@ func TestPublicationBookkeepingPreservesConcurrentStagedWork(t *testing.T) {
 	}
 	directory := writeProposal(t, "", singleSlice("concurrent-bookkeeping"))
 	outcome := cli.accept(t, root, directory, issueFile(t, "foundation", "body\n"))
-	if outcome.Status != "accepted" || outcome.Acceptance.BookkeepingStatus == nil {
-		t.Fatalf("unsafe bookkeeping was not retained as an actionable accepted outcome: %s", mustJSON(t, outcome))
+	if outcome.Status != "accepted" || outcome.Acceptance.BookkeepingStatus != nil {
+		t.Fatalf("safe path-limited bookkeeping did not complete: %s", mustJSON(t, outcome))
 	}
 	if exec.Command("git", "-C", fixture.clone, "cat-file", "-e", "HEAD:human-private.txt").Run() == nil {
 		t.Fatal("unrelated staged work was absorbed into a ledger commit")
@@ -1629,6 +1671,10 @@ func TestPublicationBookkeepingPreservesConcurrentStagedWork(t *testing.T) {
 	}
 	if outcome.Acceptance.Slices[0].Issue == nil || forge.createdCount() != 1 {
 		t.Fatalf("completed forge attachment was lost: %s", mustJSON(t, outcome))
+	}
+	state := readLedgerFile(t, fixture.clone, "projects/widgets/proposals/concurrent-bookkeeping/foundation/state.json")
+	if !strings.Contains(state, `"number": 101`) {
+		t.Fatalf("successful attachment was not durable while unrelated work stayed staged: %s", state)
 	}
 
 	forge.before = nil
@@ -1789,6 +1835,20 @@ func TestGroupingFailureIsDurableAndFreshRetryRepairsIt(t *testing.T) {
 	}
 }
 
+func TestFreshPublicationDoesNotAdoptPreexistingMatch(t *testing.T) {
+	newLedgerFixture(t)
+	root := sourceRepository(t, "acme", "widgets")
+	forge := newForgeServer(t)
+	forge.list = append(forge.list, map[string]any{
+		"id": 1777, "number": 777, "state": "open", "title": "Add foundation", "body": "same body\n",
+	})
+	outcome := newLedgerApp(t, forge).accept(t, root, writeProposal(t, "", singleSlice("fresh-publication")), issueFile(t, "foundation", "same body\n"))
+	issue := outcome.Acceptance.Slices[0].Issue
+	if issue == nil || issue.Number == 777 || forge.createdCount() != 1 {
+		t.Fatalf("fresh publication adopted a pre-existing forge record: %s", mustJSON(t, outcome))
+	}
+}
+
 func TestTruncatedSuccessfulIssueResponseIsResolvedWithoutDuplicate(t *testing.T) {
 	newLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
@@ -1843,7 +1903,7 @@ func TestPushRaceRequiresReconciliation(t *testing.T) {
 	}
 }
 
-func TestSuccessfulPushWithImmediateCompetitionRequiresReconciliation(t *testing.T) {
+func TestSuccessfulPushDescendantStillContainsAcceptedRevision(t *testing.T) {
 	fixture := newLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	hook := filepath.Join(fixture.upstream, "hooks", "post-receive")
@@ -1859,12 +1919,16 @@ git --git-dir=%q update-ref "$ref" "$competing" "$new"
 		t.Fatal(err)
 	}
 	outcome := newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", singleSlice("post-push-race")))
-	if outcome.Acceptance.Slices[0].PushStatus.Status != ledger.PushReconciliation {
-		t.Fatalf("post-success competition was misclassified: %s", mustJSON(t, outcome))
+	push := outcome.Acceptance.Slices[0].PushStatus
+	if push.Status != ledger.PushPushed {
+		t.Fatalf("remote descendant containing the accepted revision was not counted as replicated: %s", mustJSON(t, outcome))
+	}
+	if !strings.Contains(push.Detail, ledger.PushReconciliation) {
+		t.Fatalf("the later competing bookkeeping push was not distinguished: %s", mustJSON(t, outcome))
 	}
 	state := readLedgerFile(t, fixture.clone, "projects/widgets/proposals/post-push-race/foundation/state.json")
 	if !strings.Contains(state, ledger.PushReconciliation) {
-		t.Fatalf("post-success reconciliation was not durable: %s", state)
+		t.Fatalf("bookkeeping reconciliation was not durable: %s", state)
 	}
 }
 
