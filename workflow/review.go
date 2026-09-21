@@ -86,18 +86,19 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, fix
 		}
 		finalBody = string(body)
 	}
-	attachmentMatches := func(submission Submission) (bool, error) {
-		if submission.ID != fixedSubmission || submission.Base != fixedBase {
-			return false, nil
-		}
-		if fmt.Sprintf("%x", sha256.Sum256([]byte(submission.Body))) == fixedBodySHA256 {
-			return true, nil
-		}
-		if verdict != "pass" {
+	attachmentIdentityMatches := func(submission Submission) bool {
+		return submission.ID == fixedSubmission && submission.Base == fixedBase
+	}
+	originalAttachmentMatches := func(submission Submission) bool {
+		return attachmentIdentityMatches(submission) && fmt.Sprintf("%x", sha256.Sum256([]byte(submission.Body))) == fixedBodySHA256
+	}
+	finalAttachmentMatches := func(submission Submission) (bool, error) {
+		if verdict != "pass" || !attachmentIdentityMatches(submission) {
 			return false, nil
 		}
 		return backend.SubmissionBodyMatches(id, submission.Body, finalBody)
 	}
+	finalBodyPublished := false
 	items, err := loadImplementation(ctx, backend)
 	if err != nil {
 		return ImplementationOutcome{}, err
@@ -115,13 +116,14 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, fix
 		return ImplementationOutcome{}, Refuse("verdict requires the selected review Claim or an exactly observable fixed-number retry")
 	}
 	if fixedAttachment {
-		matches, err := attachmentMatches(*item.Submission)
+		finalMatches, err := finalAttachmentMatches(*item.Submission)
 		if err != nil {
 			return ImplementationOutcome{}, err
 		}
-		if !matches {
+		if !originalAttachmentMatches(*item.Submission) && !finalMatches {
 			return ImplementationOutcome{}, Refuse("selected Submission attachment changed from this invocation; inspect the fixed handoff and stop")
 		}
+		finalBodyPublished = finalMatches
 	}
 	checkpoint, err := loadReviewCheckpoint(root, item.Branch)
 	if err != nil {
@@ -167,9 +169,12 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, fix
 			return err
 		}
 		if fixedAttachment {
-			matches, err := attachmentMatches(submission)
-			if err != nil {
-				return err
+			matches := originalAttachmentMatches(submission)
+			if finalBodyPublished {
+				matches, err = finalAttachmentMatches(submission)
+				if err != nil {
+					return err
+				}
 			}
 			if !matches {
 				return Refuse("selected Submission attachment changed during verdict; inspect the fixed handoff and stop")
@@ -349,6 +354,7 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, fix
 		if published.Head != head {
 			return ImplementationOutcome{}, Refuse("Submission head changed during final body publication")
 		}
+		finalBodyPublished = true
 	}
 	published, err := backend.ImplementationItems(ctx)
 	if err != nil {

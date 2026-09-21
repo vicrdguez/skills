@@ -25,15 +25,17 @@ import (
 
 type implementationMemory struct {
 	memoryBackend
-	coordination     []workflow.CoordinationItem
-	work             []workflow.ImplementationItem
-	remoteHeads      map[string]string
-	afterPublish     func()
-	decisions        map[workflow.WorkItemID]string
-	failTransition   bool
-	beforeTransition func()
-	afterCompletion  func()
-	reviewClock      int
+	coordination           []workflow.CoordinationItem
+	work                   []workflow.ImplementationItem
+	remoteHeads            map[string]string
+	afterPublish           func()
+	decisions              map[workflow.WorkItemID]string
+	failTransition         bool
+	beforeTransition       func()
+	afterCompletion        func()
+	beforeReviewSubmission func(int)
+	reviewSubmissionCalls  int
+	reviewClock            int
 }
 
 func (b *implementationMemory) reviewTime() string {

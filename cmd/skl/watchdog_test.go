@@ -420,6 +420,10 @@ func (b *implementationMemory) AnchorSide(side string) bool {
 }
 
 func (b *implementationMemory) ReviewSubmission(_ context.Context, id workflow.SubmissionID) (workflow.Submission, error) {
+	b.reviewSubmissionCalls++
+	if b.beforeReviewSubmission != nil {
+		b.beforeReviewSubmission(b.reviewSubmissionCalls)
+	}
 	for i := range b.work {
 		if b.work[i].Submission != nil && b.work[i].Submission.ID == id {
 			b.work[i] = workflow.ReconcileImplementation(implementationFixture(b.work[i]))
