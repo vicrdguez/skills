@@ -404,7 +404,7 @@ func implementCLI(t *testing.T, root string, backend *implementationMemory, args
 		return backend, nil
 	}, bytes.NewReader(nil), &output, &output)
 	command := append([]string{"skl", "implement"}, args...)
-	command = append(command, "--repo", root)
+	command = append(command, "--format", "json", "--repo", root)
 	if err := app.Run(command); err != nil {
 		t.Fatalf("%v: %v\n%s", command, err, &output)
 	}
@@ -1206,7 +1206,7 @@ func TestInstalledImplementActivationLoadsDefinitionsOnce(t *testing.T) {
 				output.Reset()
 				args := strings.Fields(command)
 				if args[1] == "implement" {
-					args = append(args, "--repo", root)
+					args = append(args, "--format", "json", "--repo", root)
 				}
 				if err := app.Run(args); err != nil {
 					t.Fatal(err)
@@ -1229,7 +1229,7 @@ func TestInstalledImplementActivationLoadsDefinitionsOnce(t *testing.T) {
 			}
 			for _, marker := range []struct{ name, text string }{
 				{"implement", "## The scope is already decided"},
-				{"tdd", "\n\n## Included Skill: tdd\n\n"},
+				{"testing", "\n\n## Included Skill: testing\n\n"},
 				{"audit", "\n\n## Included Skill: audit\n\n"},
 				{"design", "\n\n## Included Skill: design\n\n"},
 				{"domain", "\n\n## Included Skill: domain\n\n"},
@@ -1326,21 +1326,26 @@ func TestImplementBundlesInstructionsWithoutTargetPin(t *testing.T) {
 	if got.Packet == nil || got.Packet.Facts.Implementation.InspectCommand == "" || got.Packet.Facts.Implementation.FetchCommand == "" || got.Packet.Facts.Implementation.WorktreeCommand == "" {
 		t.Fatalf("packet = %#v", got)
 	}
-	if got.Packet.Skill != "implement" || !reflect.DeepEqual(got.Packet.IncludedSkills, []string{"tdd", "audit", "design", "domain"}) {
+	if got.Packet.Skill != "implement" || !reflect.DeepEqual(got.Packet.IncludedSkills, []string{"testing", "audit", "design", "domain"}) {
 		t.Fatalf("manifest = %#v", got.Packet)
 	}
 	if strings.Contains(got.Packet.Markdown(), "git merge ") || strings.Contains(got.Packet.Facts.Implementation.ResumeCommand, "target-snapshot") {
 		t.Fatalf("packet retained target integration: %s", got.Packet.Markdown())
 	}
-	_, markdown, found := strings.Cut(got.Packet.Markdown(), "\n\n## Work Start\n")
+	definition, _, found := strings.Cut(got.Packet.Instructions, "\n\n## Included Skill: testing\n\n")
 	if !found {
-		t.Fatal("packet lacks Work Start instructions")
+		t.Fatal("packet lacks the specialized Implement definition")
 	}
 	facts := got.Packet.Facts.Implementation
 	golden := readRepositoryFile(t, "cmd/skl/testdata/implement-start.golden.md")
-	normalized := strings.NewReplacer(facts.Worktree, "<worktree>", facts.ResultDirectory, "<result>", filepath.Dir(filepath.Dir(facts.Worktree)), "<main>", baseline, "<baseline>").Replace("## Work Start\n" + markdown)
+	normalized := normalizeRepresentativeExecution(got.Packet.Instructions, facts)
 	if normalized != golden {
-		t.Fatalf("Work Start Markdown differs from golden:\n%s", normalized)
+		t.Fatalf("complete specialized Implement execution differs from golden:\n%s", normalized)
+	}
+	for _, unresolved := range []string{"{{if", "{{else", "{{end", "{{.Implementation"} {
+		if strings.Contains(definition, unresolved) {
+			t.Fatalf("specialized definition left %q unrendered", unresolved)
+		}
 	}
 	if strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD")) != baseline {
 		t.Fatal("Work Start changed Git")
@@ -1364,15 +1369,29 @@ func TestImplementBundlesInstructionsWithoutTargetPin(t *testing.T) {
 		"audit":    {"merge-base with `main`", "explicitly supplies", "Artifact Baseline"},
 	} {
 		output.Reset()
-		err := app.Run([]string{"skl", "skill", skill})
+		rendered := got.Packet.Instructions
+		if skill == "watchdog" {
+			packet, err := skilldist.BuildPacket("watchdog", skilldist.InvocationFacts{
+				Watchdog: &skilldist.WatchdogFacts{WorkItem: 7, Submission: 11},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rendered = packet.Instructions
+		} else if skill != "implement" {
+			if err := app.Run([]string{"skl", "skill", skill}); err != nil {
+				t.Fatal(err)
+			}
+			rendered = output.String()
+		}
 		missing := ""
 		for _, text := range required {
-			if !strings.Contains(output.String(), text) {
+			if !strings.Contains(rendered, text) {
 				missing = text
 			}
 		}
-		if err != nil || strings.Contains(output.String(), "--target-snapshot") || strings.Contains(output.String(), "resolve merge conflicts with `main`") || missing != "" {
-			t.Fatalf("%s guidance retained integration obligation or lacks %q: %v\n%s", skill, missing, err, &output)
+		if strings.Contains(rendered, "--target-snapshot") || strings.Contains(rendered, "resolve merge conflicts with `main`") || missing != "" {
+			t.Fatalf("%s guidance retained integration obligation or lacks %q:\n%s", skill, missing, rendered)
 		}
 	}
 }
@@ -1885,7 +1904,7 @@ func TestImplementRequiresLifecycleObservations(t *testing.T) {
 			ID: "7", Branch: "widget", State: workflow.Ready, Claimed: true, Source: source,
 			Submission: &workflow.Submission{ID: "11", State: workflow.Rework},
 		}}}}
-		got, err := workflow.InspectImplementation(context.Background(), root, "7", workflow.ArtifactEndpoints{}, b)
+		got, err := workflow.InspectImplementation(context.Background(), root, "origin", "7", workflow.ArtifactEndpoints{}, b)
 		if err != nil || got.Item == nil || !strings.Contains(got.Item.Problem, "missing lifecycle observations") {
 			t.Fatalf("incomplete observation accepted: %#v, %v; item=%#v", got, err, got.Item)
 		}
@@ -2123,7 +2142,7 @@ func TestImplementInspectionUsesCurrentLifecycleWithoutResumeCursor(t *testing.T
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
 	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", Source: &workflow.LifecycleObservation{Open: true, States: []workflow.State{workflow.Ready}}}}}
-	got, err := workflow.InspectImplementation(context.Background(), root, "7", workflow.ArtifactEndpoints{}, b)
+	got, err := workflow.InspectImplementation(context.Background(), root, "origin", "7", workflow.ArtifactEndpoints{}, b)
 	if err != nil || got.Item.State != workflow.Ready {
 		t.Fatalf("inspection changed current lifecycle evidence: %#v, %v", got, err)
 	}

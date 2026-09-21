@@ -208,7 +208,7 @@ func TestReadyStartAndResumeDoNotObserveIntegrationTargetThroughGitHub(t *testin
 			return backend, nil
 		}, bytes.NewReader(nil), &output, &output)
 		command := append([]string{"skl", "implement"}, args...)
-		command = append(command, "--repo", root)
+		command = append(command, "--format", "json", "--repo", root)
 		if err := app.Run(command); err != nil {
 			t.Fatalf("%v: %v\n%s", command, err, &output)
 		}
@@ -370,8 +370,11 @@ func TestStaleSynchronizationReworkUsesOrdinaryCLIFlow(t *testing.T) {
 			backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
 			return backend, nil
 		}, bytes.NewReader(nil), &output, &output)
-		command := append([]string{"skl"}, args...)
+		command := structuredStageCommand(args...)
 		command = append(command, "--repo", root)
+		if len(args) > 0 && args[0] == "watchdog" {
+			command = append(command, "--format", "json")
+		}
 		if err := app.Run(command); err != nil {
 			t.Fatalf("%v: %v\n%s", command, err, &output)
 		}
@@ -545,8 +548,11 @@ func TestWatchdogPassRetryAndStatusIgnoreMergeabilityThroughGitHub(t *testing.T)
 					backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
 					return backend, nil
 				}, bytes.NewReader(nil), &output, &output)
-				command := append([]string{"skl"}, args...)
+				command := structuredStageCommand(args...)
 				command = append(command, "--repo", root)
+				if len(args) > 0 && args[0] == "watchdog" {
+					command = append(command, "--format", "json")
+				}
 				err := app.Run(command)
 				return slices.Clone(output.Bytes()), err
 			}
@@ -680,7 +686,14 @@ func TestNonMainSubmissionRefusesPublicHandoffsThroughGitHub(t *testing.T) {
 				args = append(args, "--item", "7", "--review-number", "1", "--reviewed-head", head, "--verdict", "pass", "--summary", summary, "--body", body)
 			}
 			args = append([]string{"skl"}, args...)
+			if strings.HasPrefix(operation, "implement") {
+				// The Implement default transport is the Execution Skill Markdown.
+				args = append(args, "--format", "json")
+			}
 			args = append(args, "--repo", root)
+			if operation == "watchdog submit" {
+				args = append(args, "--format", "json")
+			}
 			if err := app.Run(args); err != nil {
 				t.Fatal(err)
 			}
@@ -814,7 +827,7 @@ func TestNeedsHumanPreservesDraftMainSubmissionThroughGitHub(t *testing.T) {
 		backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
 		return backend, nil
 	}, bytes.NewReader(nil), &output, &output)
-	if err := app.Run([]string{"skl", "implement", "resume", "--repo", root, "--item", "7"}); err != nil {
+	if err := app.Run([]string{"skl", "implement", "resume", "--format", "json", "--repo", root, "--item", "7"}); err != nil {
 		t.Fatal(err)
 	}
 	var start setup.ImplementationOutput
@@ -830,7 +843,7 @@ func TestNeedsHumanPreservesDraftMainSubmissionThroughGitHub(t *testing.T) {
 		t.Fatal(err)
 	}
 	output.Reset()
-	if err := app.Run([]string{"skl", "implement", "needs-human", "--repo", root, "--item", "7", "--body", body, "--decision", decision, "--reason", "mandatory_rule"}); err != nil {
+	if err := app.Run([]string{"skl", "implement", "needs-human", "--format", "json", "--repo", root, "--item", "7", "--body", body, "--decision", decision, "--reason", "mandatory_rule"}); err != nil {
 		t.Fatal(err)
 	}
 	var result setup.ImplementationOutput
@@ -969,8 +982,11 @@ func TestSubmitRefusesLateRetargetThroughGitHub(t *testing.T) {
 			backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
 			return backend, nil
 		}, bytes.NewReader(nil), &output, &output)
-		command := append([]string{"skl"}, args...)
+		command := structuredStageCommand(args...)
 		command = append(command, "--repo", root)
+		if len(args) > 0 && args[0] == "watchdog" {
+			command = append(command, "--format", "json")
+		}
 		err := app.Run(command)
 		return slices.Clone(output.Bytes()), err
 	}
@@ -1228,8 +1244,11 @@ func TestSubmitRefusesRecoveredNonMainSubmissionThroughGitHub(t *testing.T) {
 			backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
 			return backend, nil
 		}, bytes.NewReader(nil), &output, &output)
-		command := append([]string{"skl"}, args...)
+		command := structuredStageCommand(args...)
 		command = append(command, "--repo", root)
+		if len(args) > 0 && args[0] == "watchdog" {
+			command = append(command, "--format", "json")
+		}
 		err := app.Run(command)
 		return slices.Clone(output.Bytes()), err
 	}
@@ -1425,7 +1444,7 @@ func TestWatchdogRefusesInvalidReviewedEvidenceThroughGitHub(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				command := []string{"skl", "watchdog", "submit", "--item", "7", "--review-number", "1", "--reviewed-head", supplied, "--verdict", "pass", "--summary", summary, "--body", body}
+				command := []string{"skl", "watchdog", "submit", "--format", "json", "--item", "7", "--review-number", "1", "--reviewed-head", supplied, "--verdict", "pass", "--summary", summary, "--body", body}
 				if tc.divergentHead {
 					command = append(command, "--head", head)
 				}

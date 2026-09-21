@@ -41,6 +41,7 @@ type decisionData struct {
 
 type reviewData struct {
 	ResultDirectory string
+	PR              int
 	Round           int
 	ReviewedHead    string
 }
@@ -105,7 +106,7 @@ func resourceSpecFor(resource string) resourceSpec {
 		data := &submissionData{}
 		return resourceSpec{data: data, inputs: []resourceInput{
 			{flag: &cli.StringFlag{Name: "result_directory", Required: true, Usage: resultDirectoryUsage, Destination: &data.ResultDirectory}},
-			{flag: &cli.StringFlag{Name: "procedure", Required: true, Usage: "Which submission procedure to render.", Destination: &data.Procedure}, choices: []string{"initial", "rework"}},
+			{flag: &cli.StringFlag{Name: "procedure", Required: true, Usage: "Which submission procedure to render.", Destination: &data.Procedure}, choices: []string{"initial", "resumed", "rework"}},
 		}, validate: func(resource string) error {
 			return checkResultDirectory(resource, data.ResultDirectory)
 		}}
@@ -121,9 +122,13 @@ func resourceSpecFor(resource string) resourceSpec {
 		data := &reviewData{}
 		return resourceSpec{data: data, inputs: []resourceInput{
 			{flag: &cli.StringFlag{Name: "result_directory", Required: true, Usage: resultDirectoryUsage, Destination: &data.ResultDirectory}},
+			{flag: &cli.IntFlag{Name: "pr", Required: true, Usage: "Selected Submission PR number.", Destination: &data.PR}},
 			{flag: &cli.IntFlag{Name: "round", Required: true, Usage: "Review round number for this Submission.", Destination: &data.Round}},
 			{flag: &cli.StringFlag{Name: "reviewed_head", Required: true, Usage: "Original full SHA of the reviewed head.", Destination: &data.ReviewedHead}},
 		}, validate: func(resource string) error {
+			if data.PR < 1 {
+				return fmt.Errorf("invalid input %q for resource %q: want a positive Submission PR number", "pr", resource)
+			}
 			if data.Round < 1 {
 				return fmt.Errorf("invalid input %q for resource %q: want a positive review round", "round", resource)
 			}
