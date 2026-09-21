@@ -18,7 +18,7 @@ Branch: `widget`
 Worktree: `<worktree>`
 Private result location: `<result>`, which this invocation already created
 
-Prepare: `git -C '<main>' fetch 'origin' '+refs/heads/widget:refs/remotes/origin/widget'` then `git -C '<main>' worktree add -b 'widget' '<worktree>' 'origin/widget'`; safely reuse a clean existing worktree instead of recreating it, and preserve dirty files, the index, and existing branch progress. Never reset, stash, rebase, force-push, or merge the target merely to make preparation or presentation convenient.
+Prepare: `git -C '<main>' fetch 'origin' '+refs/heads/widget:refs/remotes/origin/widget'` then `git -C '<main>' worktree add -b 'widget' '<worktree>' 'origin/widget'`; safely reuse a clean existing worktree instead of recreating it, and preserve dirty files, the index, and existing branch progress. Never reset, stash, rebase, force-push, or merge the target merely to make preparation or presentation convenient. A preparation-time fetch or merge does not satisfy the required late pre-Audit integration below.
 Push: `git -C '<worktree>' push 'origin' 'widget'`
 Inspect: `skl implement inspect --repo '<worktree>' --remote 'origin' --item 7` resolves the Artifact Baseline, Artifact Completion, and current ledger progress from fetched history.
 Resume: `skl implement resume --item 7 --remote 'origin'`; this is the only command for continuing the same Claim.
@@ -69,14 +69,27 @@ A read that fails, returns an error, or whose pagination stops early is a `retri
 
 ## Execute the change
 
-Work only in `<worktree>`. Every new or updated Submission targets `main`; integration with `main`, conflict resolution, and merge belong to the human Merge Authority after review. Never rewrite history: the Artifact Baseline, Artifact Completion, and prior Reviewed heads must remain reachable.
+Work only in `<worktree>`. Every new or updated Submission targets `main`. The worker-owned late merge of one observed `origin/main` snapshot into the work branch is required before Audit; it is distinct from the human Merge Authority's later integration and final merge of the reviewed Submission into `main`. Never rewrite history: the Artifact Baseline, Artifact Completion, and prior Reviewed heads must remain reachable.
+
+### Late pre-Audit target integration
+
+After implementation or finding resolution and its focused checks, immediately before this submission round's Audit, observe the selected target once through ordinary Git:
+
+1. Run `git -C '<worktree>' fetch 'origin' main`.
+2. Resolve and record the full observed target SHA with `git -C '<worktree>' rev-parse FETCH_HEAD`.
+3. Merge that exact SHA with `git -C '<worktree>' merge --no-edit <observed-target-sha>`.
+
+Preparation-time target state does not satisfy this step. Resolve every conflict before normal Audit and include conflict-resolution effects in focused checks and review; no conflict-only review stage is added. Unrelated code inherited unchanged from the target is not scope creep merely because the merge makes it visible, while concrete regressions and material risks remain reviewable. If a conflict requires a consequential behavioral or architectural choice the accepted contract does not settle, use the existing Needs Human path rather than guessing. If observation or merge fails, preserve commits, the index, and ordinary work, report the limitation, and repair or resume without substituting a stale SHA, rewriting history, claiming successful integration, or claiming a completed Audit.
+
+A successful observed SHA is this round's integration cutoff. Later target movement alone does not require another merge, invalidate evidence for an unchanged candidate, or restart review. Resuming alone also does not repeat a completed late integration. Do not merge another target snapshot after Audit merely because `main` moved. If another merge or functional edit nevertheless changes the candidate, earlier evidence is stale: review the new effects and run affected checks plus a Full Gate covering the final functional state; use a later Implement execution if another Audit is required rather than rerunning Audit in this execution.
 
 1. Run Inspect before editing. It must confirm the retired ledger and resolved historical endpoints. If it reports a violation or any other progress, repair or stop according to that continuation; never recreate the ledger.
 2. Read the accepted `intent.md`, `behavior.md`, `plan.md`, and completed `tasks.md` from the historical endpoint commands returned by inspection. Treat the supplied Watchdog summary and inline findings as evidence to resolve, not as new frozen requirements.
 3. Resolve every active finding against the complete accepted contract. Organize implementation, verification, and in-scope refactoring as the work requires; preserve each finding identity, existing behavioral and failure-mode protection, and untouched scope. Run focused checks that distinguish each claimed resolution from the reported failure.
 4. Select the latest applicable supplied review whose verdict caused the current Rework and use that review's `Commit` as the fixed point. Stop rather than guess when the applicable reviewed commit is missing or ambiguous.
-5. Invoke the bundled Audit exactly once over `<reviewed-commit>...HEAD`. Apply every Audit `HARD` finding. For each `JUDGEMENT`, fix it, decline it with a reason, or carry it as debt. If a disposition changes code, run its affected checks and a final Full Gate before handoff. Do not invoke Audit again in this execution.
-6. Run Inspect again after all edits. It must still report the same valid retired ledger and no violations.
+5. Perform the late pre-Audit target integration above unless preserved Git history and evidence show it already completed for this unchanged submission round. Run Inspect after the resulting edits and merge; it must still report the same valid retired ledger and no violations.
+6. Invoke the bundled Audit exactly once over `<reviewed-commit>...HEAD`. Apply every Audit `HARD` finding. For each `JUDGEMENT`, fix it, decline it with a reason, or carry it as debt. If a disposition changes functional code, run its affected checks and a final Full Gate covering the final functional state before handoff. Record the Audit head and later verification truthfully rather than presenting earlier evidence as proof of changed code. Do not invoke Audit again in this execution.
+7. Run Inspect again before handoff. It must still report the same valid retired ledger and no violations.
 
 Push with `git -C '<worktree>' push 'origin' 'widget'`. A push does not authorize review or merge.
 
@@ -184,7 +197,7 @@ Two-axis review of the diff between `HEAD` and a fixed point the user supplies:
 
 Both axes run as **parallel sub-agents** when the harness supports them, so they don't pollute each other's context, then this skill aggregates their findings. The sequential fallback below preserves both axes when it does not.
 
-Use the supplied Work Item and Submission facts for originating context. This skill performs no backend mutations or workflow transitions.
+Use the supplied Work Item and Submission facts for originating context. This skill performs no backend mutations or workflow transitions. Audit reviews the candidate after the implementor's late target integration. Review conflict-resolution and integration effects, but do not label unrelated code inherited unchanged from the integrated target as scope creep or reopen settled preferences merely because that code is visible; concrete regressions and material risks remain reviewable.
 
 
 ## Process
@@ -241,6 +254,7 @@ The recipe changes how the two axes are dispatched, never what they check: both 
 - The shared criteria from `skl skill --resource reference/acceptance.md audit`.
 - The gate results from step 4.
 - The precedence between sources, so the sub-agent knows what outranks what: frozen artifacts, then required tooling and CI, then the project's `AGENTS.md`, standards docs and quality skills, then language and framework correctness, security and accessibility rules, then the generic smell baseline. An explicit project or language `MUST`, `ALWAYS`, `NEVER` or equivalent can be a hard violation; a generic smell stays a judgement call unless a local rule or a concrete behavior or maintenance impact elevates it.
+- The recorded integrated target SHA and instruction to review merge/conflict-resolution effects while excluding unrelated target additions inherited unchanged by the work branch.
 - The brief: "Report only violations or smells caused by the Rework delta. Do not reopen findings against unrelated unchanged code or whole-change omissions. For each finding, cite the standard or name the baseline smell and quote the hunk. Tag each finding as `HARD` or `JUDGEMENT` as its first token; documented-standard breaches can be `HARD`, but baseline smells are always `JUDGEMENT`, and a documented repo standard overrides the baseline. Skip anything tooling enforces. Report each finding as its own bullet, anchored to `file:line`. Under 500 words. Compress findings rather than omit any."
 
 **Artifacts sub-agent prompt** — include:
@@ -249,7 +263,7 @@ The recipe changes how the two axes are dispatched, never what they check: both 
 - The paths or fetched contents of the Artifacts at the exact Baseline and, when available, Completion or provisional head.
 - The shared criteria from `skl skill --resource reference/acceptance.md audit`.
 - The gate and artifact-integrity results from step 4.
-- The brief: "Check resolution of the supplied Watchdog findings, Contract regressions caused by the Rework delta, unnecessary behavior introduced by the fixes, and regression coverage at the accepted seams. Watchdog findings are evidence and resolution targets, never new frozen Contract Items. Report only problems caused by or necessary to verify the Rework delta; neither axis reopens findings against unrelated unchanged code or whole-change omissions. Quote the relevant frozen Contract line or supplied finding for each result. Tag each finding `HARD` or `JUDGEMENT` as its first token and anchor it to `file:line`. Under 500 words — compress findings rather than omit any."
+- The brief: "Check resolution of the supplied Watchdog findings, Contract regressions caused by the Rework delta, unnecessary behavior introduced by the fixes, regression coverage at the accepted seams, and integration or conflict-resolution effects. Watchdog findings are evidence and resolution targets, never new frozen Contract Items. Report only problems caused by or necessary to verify the Rework delta; neither axis reopens findings against unrelated unchanged code or whole-change omissions, and unrelated additions inherited from the integrated target are not scope creep. Quote the relevant frozen Contract line or supplied finding for each result. Tag each finding `HARD` or `JUDGEMENT` as its first token and anchor it to `file:line`. Under 500 words — compress findings rather than omit any."
 
 
 Nothing written after the artifacts were published is a requirement: not review comments, not rework notes. They can be evidence, never a spec line to hold the implementation against.

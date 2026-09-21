@@ -34,7 +34,7 @@ func TestWatchdogNextDeliversCompleteFirstReviewInMarkdown(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := output.String()
-	for _, want := range []string{"name: watchdog", "Work Item #7", "Submission is #11", head, "Full Gate", "Artifact Baseline", "Audit ledger", "critical", "skl watchdog submit", "skl skill --resource reference/acceptance.md audit", "skl skill --resource reference/review.md", "complete frozen contract", "additional executable challenges", "Post-Marker Check", "Manual verification", "--head <actual-pushed-final-SHA>", "human"} {
+	for _, want := range []string{"name: watchdog", "Work Item #7", "Submission is #11", head, "Full Gate", "Artifact Baseline", "Audit ledger", "critical", "skl watchdog submit", "skl skill --resource reference/acceptance.md audit", "skl skill --resource reference/review.md", "complete frozen contract", "additional executable challenges", "Post-Marker Check", "Manual verification", "--head <actual-pushed-final-SHA>", "integrated target SHA", "review the merge and any conflict-resolution effects", "Do not call unrelated target additions scope creep", "round's cutoff", "human"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("execution missing %q", want)
 		}
@@ -755,7 +755,7 @@ func TestWatchdogReviewResourceBindsSelectedPRBeforeDispositions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"PR #11", "round 2", head, directory + "/summary.md", "WAIVE", "BLOCK", "NOTE"} {
+	for _, want := range []string{"PR #11", "round 2", head, directory + "/summary.md", "WAIVE", "BLOCK", "NOTE", "integrated target SHA", "fixed reviewed head"} {
 		if !strings.Contains(output.String(), want) {
 			t.Errorf("review resource missing %q", want)
 		}
@@ -785,7 +785,7 @@ func TestWatchdogInspectResolvesHistoricalReadsForFixedReview(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := output.String()
-	for _, want := range []string{"Work Item #7", head, "Artifact Baseline", "Artifact Completion", " show ", "intent.md", "behavior.md", "extra.md", " diff ", "full"} {
+	for _, want := range []string{"Work Item #7", head, "Artifact Baseline", "Artifact Completion", " show ", "intent.md", "behavior.md", "extra.md", " diff ", "full", "integrated target SHA", "confirm it is reachable from the reviewed head", "review merge and conflict-resolution effects", "Do not treat unrelated target additions as scope creep", "recorded cutoff"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("inspection missing %q: %.600s", want, got)
 		}

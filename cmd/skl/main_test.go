@@ -2762,7 +2762,7 @@ func TestBundleGuaranteedSupportingSkills(t *testing.T) {
 	// independent-mode alternatives the invocation already resolved.
 	specialized := map[string][]string{
 		"testing": {"After preparation, read the accepted"},
-		"audit":   {"merge-base with `main` and the parent of this change's first commit"},
+		"audit":   {"normal PR-base merge-base of the recorded integrated `main` SHA and the post-integration candidate head"},
 		"design":  {"does not require a new design exercise"},
 		"domain":  {"outside the accepted change"},
 	}
