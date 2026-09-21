@@ -31,6 +31,8 @@ The dedicated worktree, selected project commits, and artifact objects may still
 
 {{template "evidence" .Implementation}}
 
+{{template "delegation" .Implementation}}
+
 ## Execute the change
 
 Work only in `{{.Implementation.Worktree}}`. Every new or updated Submission targets `main`. The worker-owned late merge of one observed `{{.Implementation.Remote}}/main` snapshot into the work branch is required before Audit; it is distinct from the human Merge Authority's later integration and final merge of the reviewed Submission into `main`. Never rewrite history: the Artifact Baseline{{if .Implementation.ArtifactBaseline}} `{{.Implementation.ArtifactBaseline}}`{{end}}, Artifact Completion{{if .Implementation.ArtifactCompletion}} `{{.Implementation.ArtifactCompletion}}`{{end}}, and prior Reviewed heads must remain reachable.

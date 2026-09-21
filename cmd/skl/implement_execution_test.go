@@ -955,6 +955,73 @@ func TestB7AuditRecipesFollowCapabilitiesRatherThanHarnessNames(t *testing.T) {
 	}
 }
 
+// TestDelegateClaimedWorkCapabilityGuidance verifies that adapter-established
+// capability, rather than harness identity, controls optional implementation
+// and testing delegation in both complete executions and continuations.
+func TestDelegateClaimedWorkCapabilityGuidance(t *testing.T) {
+	cases := []struct {
+		capability string
+		want       []string
+	}{
+		{"claude-agents", []string{"established the supported Claude Agent helper mechanism", "may use `Agent` for bounded, non-conflicting implementation or testing assignments"}},
+		{"pi-subagents", []string{"established the supported Pi subagent helper mechanism", "may use `subagent` for bounded, non-conflicting implementation or testing assignments"}},
+		{"sequential", []string{"no supported helper-launch mechanism is available", "Perform implementation and testing subwork serially as the owner", "does not alter the separately mandatory Audit procedure"}},
+		{"", []string{"did not establish whether a supported helper mechanism is available", "A harness name alone proves nothing", "one small bounded runtime check", "otherwise perform the subwork serially"}},
+	}
+	for _, testCase := range cases {
+		name := testCase.capability
+		if name == "" {
+			name = "unknown"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := proposalRepository(t)
+			prepareSlice(t, root, "widget")
+			backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}}
+			args := []string{"next"}
+			if testCase.capability != "" {
+				args = append(args, "--capability", testCase.capability)
+			}
+			started := implementCLI(t, root, backend, args...)
+			facts := started.Packet.Facts.Implementation
+			execution := started.Packet.Instructions
+			capabilityFlag := " --capability " + skilldist.ShellQuote(testCase.capability)
+			for _, command := range []string{facts.ResumeCommand, facts.InspectCommand} {
+				if testCase.capability != "" && !strings.Contains(command, capabilityFlag) {
+					t.Errorf("known capability was lost from continuation command %q", command)
+				}
+				if testCase.capability == "" && strings.Contains(command, " --capability ") {
+					t.Errorf("unknown capability invented a continuation flag in %q", command)
+				}
+			}
+			for _, required := range append(testCase.want,
+				"Do not require delegation, a separate test writer, a fixed helper count, or a worktree per helper",
+				"authoritative contract references or contents",
+				"Prevent conflicting concurrent writers and Git operations",
+				"Helpers must not select queue work, acquire another Claim, change Workflow State, make the final Submission",
+				"The owner inspects and integrates every contribution",
+				"Helper reports or isolated passing checks never replace affected integrated checks",
+				"## Delegated testing during Implement",
+			) {
+				if !strings.Contains(execution, required) {
+					t.Errorf("complete execution lacks %q", required)
+				}
+			}
+
+			worktree, _, inspectionBackend := inspectionFixture(t, "baseline-only")
+			inspectArgs := []string{"inspect", "--item", "7"}
+			if testCase.capability != "" {
+				inspectArgs = append(inspectArgs, "--capability", testCase.capability)
+			}
+			continuation := implementCLI(t, worktree, inspectionBackend, inspectArgs...).Packet.Instructions
+			for _, required := range append(testCase.want, "## Optional bounded delegation", "The selected Work Item and its Claim remain with this owner") {
+				if !strings.Contains(continuation, required) {
+					t.Errorf("inspection continuation lacks %q", required)
+				}
+			}
+		})
+	}
+}
+
 // TestB8AlreadyFetchedEvidenceIsCompleteDataNotTemplateSource materializes the
 // B8 scenario. Supplied bodies are data: they are presented whole, once, and
 // labeled, and they never become instructions or rendering input.
@@ -2113,8 +2180,12 @@ func TestB21ThePiRunnerReportsOneItemInNormalMarkdown(t *testing.T) {
 		"never report success the engine did not verify",
 		"Do not drain the queue",
 		"do not launch a replacement worker after an empty, uncertain, or incomplete result",
-		"Use `subagent` only for the parallel review `audit` requires",
-		"launch those reviewers in fresh contexts",
+		"may permit optional `subagent` use for bounded, non-conflicting implementation or testing assignments within this one Claim",
+		"authoritative contract inputs",
+		"serialize overlaps, inspect and integrate its work",
+		"Helpers must not select queue work, acquire Claims, change Workflow State, or publish",
+		"Use fresh contexts for the parallel reviewers the bundled `audit` requires",
+		"optional serial fallback never weakens that Audit",
 	} {
 		if !strings.Contains(runner, required) {
 			t.Errorf("runner lacks %q", required)

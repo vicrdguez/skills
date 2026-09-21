@@ -256,32 +256,85 @@ func TestWatchdogSubmitRefusesReplacementSubmission(t *testing.T) {
 }
 
 func TestWatchdogSubmitExplainsVerifiedReadyForHumanMerge(t *testing.T) {
-	root := proposalRepository(t)
-	prepareSlice(t, root, "widget")
-	completeAndRetireSlice(t, root, "widget")
-	head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
-	backend := &implementationMemory{work: []workflow.ImplementationItem{{
-		ID: "7", Branch: "widget", State: workflow.AwaitingReview, Claimed: true,
-		Submission: &workflow.Submission{ID: "11", Head: head, Base: "main", Mergeability: "conflicting"},
-	}}, remoteHeads: map[string]string{"widget": head}}
-	worktree := filepath.Join(root, ".worktrees", "widget")
-	runGit(t, root, "switch", "main")
-	runGit(t, root, "worktree", "add", worktree, "widget")
-	dir := t.TempDir()
-	summary, body := filepath.Join(dir, "summary.md"), filepath.Join(dir, "submission.md")
-	for path, content := range map[string]string{summary: "no findings\n", body: "final PR body\n"} {
-		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	var output bytes.Buffer
-	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
-	if err := app.Run([]string{"skl", "watchdog", "submit", "--repo", worktree, "--item", "7", "--review-number", "1", "--reviewed-head", head, "--verdict", "pass", "--summary", summary, "--body", body}); err != nil {
-		t.Fatal(err)
-	}
-	got := output.String()
-	if !strings.Contains(got, "Status: ready_for_merge") || !strings.Contains(got, "human") || strings.HasPrefix(got, "{") {
-		t.Fatalf("verified outcome was not explained in Markdown: %s", got)
+	for _, test := range []struct {
+		name      string
+		interrupt bool
+		drift     bool
+		rollback  bool
+	}{
+		{name: "fixed attachment pass"},
+		{name: "fixed attachment retry after final body publication", interrupt: true},
+		{name: "unrelated body drift", drift: true},
+		{name: "final body rollback", rollback: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := proposalRepository(t)
+			prepareSlice(t, root, "widget")
+			completeAndRetireSlice(t, root, "widget")
+			head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+			backend := &implementationMemory{work: []workflow.ImplementationItem{{
+				ID: "7", Branch: "widget", State: workflow.AwaitingReview, Claimed: true,
+				Submission: &workflow.Submission{ID: "11", Head: head, Base: "main", Mergeability: "conflicting"},
+			}}, remoteHeads: map[string]string{"widget": head}}
+			worktree := filepath.Join(root, ".worktrees", "widget")
+			runGit(t, root, "switch", "main")
+			runGit(t, root, "worktree", "add", worktree, "widget")
+			dir := t.TempDir()
+			summary, body := filepath.Join(dir, "summary.md"), filepath.Join(dir, "submission.md")
+			for path, content := range map[string]string{summary: "no findings\n", body: "final PR body\n"} {
+				if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var output bytes.Buffer
+			app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+			args := []string{"skl", "watchdog", "submit", "--repo", worktree, "--item", "7", "--submission", "11", "--base", "main", "--submission-body-sha256", fmt.Sprintf("%x", sha256.Sum256(nil)), "--review-number", "1", "--reviewed-head", head, "--verdict", "pass", "--summary", summary, "--body", body}
+			if test.drift {
+				backend.work[0].Submission.Body = "unrelated body\n"
+			}
+			if test.interrupt {
+				backend.afterPublish = func() { backend.remoteHeads["widget"] = "deadbeef" }
+			}
+			if test.rollback {
+				backend.beforeReviewSubmission = func(call int) {
+					if call == 4 {
+						backend.work[0].Submission.Body = ""
+					}
+				}
+			}
+			err := app.Run(args)
+			if test.drift || test.rollback {
+				stage := "before publication"
+				if test.rollback {
+					stage = "after final body publication"
+				}
+				if err != nil || !strings.Contains(output.String(), "Status: fix_required") || !strings.Contains(output.String(), "attachment changed") || !backend.work[0].Claimed {
+					t.Fatalf("unrelated body drift was not refused %s: err=%v; output=%s; item=%#v", stage, err, &output, backend.work[0])
+				}
+				if test.drift && len(backend.work[0].Submission.Comments) != 0 {
+					t.Fatalf("pre-publication body drift published review evidence: %#v", backend.work[0].Submission.Comments)
+				}
+				return
+			}
+			if !test.interrupt && err != nil {
+				t.Fatal(err)
+			}
+			if test.interrupt {
+				if err != nil || !strings.Contains(output.String(), "Status: fix_required") || !strings.Contains(output.String(), "remote reviewed head changed") || !backend.work[0].Claimed || backend.work[0].Submission.Body != "final PR body\n\n\nCloses #7\n" {
+					t.Fatalf("interrupted pass did not retain its Claim and authorized final body: err=%v; output=%s; body=%q; item=%#v", err, &output, backend.work[0].Submission.Body, backend.work[0])
+				}
+				backend.afterPublish = nil
+				backend.remoteHeads["widget"] = head
+				output.Reset()
+				if err := app.Run(args); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got := output.String()
+			if !strings.Contains(got, "Status: ready_for_merge") || !strings.Contains(got, "human") || strings.HasPrefix(got, "{") || backend.work[0].Claimed {
+				t.Fatalf("verified outcome was not explained in Markdown: %s; item=%#v", got, backend.work[0])
+			}
+		})
 	}
 }
 

@@ -67,6 +67,15 @@ The attached Submission is #11, so its body, discussion, review summaries, and i
 A read that fails, returns an error, or whose pagination stops early is a `retrieval failure` to repair or retry, or to stop on. Only `fetched empty` may be reported as no findings; never turn a `pending` or failed stream into one.
 
 
+## Optional bounded delegation
+
+The invocation did not establish whether a supported helper mechanism is available. A harness name alone proves nothing. Only if delegation would help, make one small bounded runtime check for the supported Claude `Agent` or Pi `subagent` mechanism; use a recipe only after support is established, otherwise perform the subwork serially. Do not install tools, create a capability registry or scheduler, or keep probing.
+
+Do not require delegation, a separate test writer, a fixed helper count, or a worktree per helper. The selected Work Item and its Claim remain with this owner. Give each fresh helper a self-contained brief containing the bounded assignment, selected Work Item and working location, authoritative contract references or contents, relevant architectural commitments and standards, required observations, and explicit write responsibilities. Distinguish those obligations from implementation-detail preferences: helper choices remain subordinate to the accepted contract.
+
+Prevent conflicting concurrent writers and Git operations by dividing responsibilities or serializing overlapping work. Helpers must not select queue work, acquire another Claim, change Workflow State, make the final Submission, or decide consequential unresolved requirements; return such decisions through the owner to the existing human-decision path. Helpers return contributions, checks, evidence, and limitations. The owner inspects and integrates every contribution, finishes missing work, and verifies the resulting functional state. Helper reports or isolated passing checks never replace affected integrated checks, the final Full Gate and Audit, artifact integrity, independent Watchdog Review, owner-controlled submission, or human-only merge.
+
+
 ## Execute the change
 
 Work only in `<worktree>`. Every new or updated Submission targets `main`. The worker-owned late merge of one observed `origin/main` snapshot into the work branch is required before Audit; it is distinct from the human Merge Authority's later integration and final merge of the reviewed Submission into `main`. Never rewrite history: the Artifact Baseline, Artifact Completion, and prior Reviewed heads must remain reachable.
@@ -144,6 +153,12 @@ After preparation, read the accepted `intent.md`, `behavior.md`, and `plan.md` a
 
 An unspecified detail is delegated only when the available choices preserve those obligations and standards. You may implement and test an unambiguously implied case without rewriting the frozen scenario list. If a consequential behavioral or architectural choice remains unresolved, use the execution's human-decision path rather than infer permission from silence.
 
+
+## Delegated testing during Implement
+
+When the invocation establishes a supported helper mechanism, the owner may delegate a bounded testing assignment; delegation is optional, and unavailable support—or unknown support that the Implement guidance's bounded check does not establish—means the owner performs it serially. Give a fresh helper the accepted behavioral and architectural obligations, required observations, working location, standards, and non-conflicting write responsibility. State preferred test organization only as a preference, not an acceptance criterion.
+
+The helper returns its contribution, evidence, and limitations to the same owner without selecting work, acquiring a Claim, changing Workflow State, or publishing the Submission. The owner inspects and integrates the contribution and verifies the final functional state. A helper's isolated passing check is evidence, not a substitute for affected integrated checks, the Full Gate, Audit, or independent Watchdog Review.
 
 ## Verify observable behavior
 
