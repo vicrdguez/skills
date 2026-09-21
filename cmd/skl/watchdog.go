@@ -22,6 +22,13 @@ func watchdogCommands(newBackend backendFactory, stdout io.Writer) []*cli.Comman
 			if c.NArg() != 0 || (name == "resume" || name == "inspect") && c.Int("item") <= 0 || name == "next" && c.IsSet("item") {
 				return fmt.Errorf("resume requires --item; next selects its own Work Item")
 			}
+			format := implementationFormatKind(c.String("format"))
+			if name == "next" || name == "resume" {
+				gated, err := gateUnsupportedDelivery(stdout, format, c.Path("repo"), c.String("remote"), "watchdog "+name)
+				if gated || err != nil {
+					return err
+				}
+			}
 			repository, err := setup.ResolveRepository(c.Path("repo"), c.String("remote"))
 			if err != nil {
 				return err

@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/vicrdguez/skills/github"
+	"github.com/vicrdguez/skills/ledger"
 	"github.com/vicrdguez/skills/workflow"
 )
 
@@ -480,6 +481,90 @@ func (b *GitHubBackend) repositoryPath(repository github.RepositoryID) string {
 	return "/repos/" + url.PathEscape(repository.Owner) + "/" + url.PathEscape(repository.Name)
 }
 
+// TransportFailure marks a forge request whose outcome is unknown: the
+// request was sent but no reliable response arrived, so the server may or
+// may not have processed it.
+type TransportFailure struct{ Cause error }
+
+func (t *TransportFailure) Error() string { return "GitHub transport failure: " + t.Cause.Error() }
+
+func (t *TransportFailure) Unwrap() error { return t.Cause }
+
+// UnknownOutcome marks the failure as an unknown-outcome transport failure
+// so callers can distinguish it from a definite forge rejection.
+func (t *TransportFailure) UnknownOutcome() bool { return true }
+
+// IsTransportFailure reports whether err is an unknown-outcome transport
+// failure rather than a definite forge rejection.
+func IsTransportFailure(err error) bool {
+	var transport *TransportFailure
+	return errors.As(err, &transport)
+}
+
+// CreateIssue publishes one descriptive human-facing issue and returns its
+// number. It adds no workflow label and writes no state: the body is opaque
+// temporary transport authored outside skl.
+func (b *GitHubBackend) CreateIssue(ctx context.Context, title, body string) (int, error) {
+	if err := b.requireRepository(); err != nil {
+		return 0, err
+	}
+	issue, err := b.createIssue(ctx, b.repository, title, body)
+	if err != nil {
+		return 0, err
+	}
+	return issue.Number, nil
+}
+
+// ListOpenIssues lists open non-pull-request issues of the bound
+// repository for safe resolution of uncertain publications.
+func (b *GitHubBackend) ListOpenIssues(ctx context.Context) ([]ledger.ForgeIssue, error) {
+	if err := b.requireRepository(); err != nil {
+		return nil, err
+	}
+	issues, err := b.listIssues(ctx, b.repository)
+	if err != nil {
+		return nil, err
+	}
+	var open []ledger.ForgeIssue
+	for _, issue := range issues {
+		if issue.State == "open" && len(issue.PullRequest) == 0 {
+			open = append(open, ledger.ForgeIssue{Number: issue.Number, Title: issue.Title, Body: issue.Body})
+		}
+	}
+	return open, nil
+}
+
+// ListChildren lists the issue numbers grouped under one parent issue.
+func (b *GitHubBackend) ListChildren(ctx context.Context, parent int) ([]int, error) {
+	if err := b.requireRepository(); err != nil {
+		return nil, err
+	}
+	var children []struct {
+		Number int `json:"number"`
+	}
+	path := b.repositoryPath(b.repository) + fmt.Sprintf("/issues/%d/sub_issues?per_page=100&page=1", parent)
+	if err := b.request(ctx, http.MethodGet, path, nil, &children); err != nil {
+		return nil, err
+	}
+	numbers := make([]int, 0, len(children))
+	for _, child := range children {
+		numbers = append(numbers, child.Number)
+	}
+	return numbers, nil
+}
+
+// AttachChild groups one child issue under its parent issue.
+func (b *GitHubBackend) AttachChild(ctx context.Context, parent, child int) error {
+	if err := b.requireRepository(); err != nil {
+		return err
+	}
+	id, ok := b.issueIDs[child]
+	if !ok {
+		return fmt.Errorf("GitHub issue id unavailable for #%d", child)
+	}
+	return b.request(ctx, http.MethodPost, b.repositoryPath(b.repository)+fmt.Sprintf("/issues/%d/sub_issues", parent), map[string]int64{"sub_issue_id": id}, nil)
+}
+
 func (b *GitHubBackend) request(ctx context.Context, method, path string, body, destination any) error {
 	_, err := b.requestStatus(ctx, method, path, body, destination)
 	return err
@@ -524,7 +609,8 @@ func (b *GitHubBackend) requestStatus(ctx context.Context, method, path string, 
 	}
 	response, err := b.client.Do(request)
 	if err != nil {
-		return 0, err
+		// The outcome is unknown: the server may have processed the request.
+		return 0, &TransportFailure{Cause: err}
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {

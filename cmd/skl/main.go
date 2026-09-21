@@ -161,6 +161,10 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 				if remote == "" {
 					remote = "origin"
 				}
+				gated, err := gateUnsupportedDelivery(stdout, formatMarkdown, command.Path("repo"), remote, "propose cleanup")
+				if gated || err != nil {
+					return err
+				}
 				repository, err := setup.ResolveRepository(command.Path("repo"), remote)
 				if err != nil {
 					return err
@@ -228,7 +232,7 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 			return err
 		},
 	}}
-	app.Commands = append(app.Commands, statusCommand(newBackend, stdout))
+	app.Commands = append(app.Commands, statusCommand(newBackend, stdout), ledgerCommands(newBackend, stdout))
 	return &stageApp{app}
 }
 
