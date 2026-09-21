@@ -126,8 +126,7 @@ func LoadDeclaration(directory string, bodies map[string][]byte, parentBody []by
 			if seen[dependency] {
 				continue
 			}
-			parts := strings.Split(strings.TrimPrefix(dependency, "proposals/"), "/")
-			if len(parts) != 2 || !ValidRecordName(parts[0]) || !ValidRecordName(parts[1]) {
+			if _, _, valid := workItemReference(dependency); !valid {
 				return nil, refuse("dependency "+dependency+" of slice "+slice.Name+" does not resolve", "reference a declared sibling slice or an existing ledger Work Item as proposals/<proposal>/<slice>")
 			}
 		}
@@ -229,6 +228,16 @@ func sameProposalReference(proposal, dependency string) (string, bool) {
 	return sibling, true
 }
 
+// workItemReference splits one canonical proposals/<proposal>/<slice>
+// reference into its record components.
+func workItemReference(dependency string) (proposal, slice string, ok bool) {
+	parts := strings.Split(strings.TrimPrefix(dependency, "proposals/"), "/")
+	if len(parts) != 2 || !ValidRecordName(parts[0]) || !ValidRecordName(parts[1]) {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
+}
+
 // validBranch rejects planned branch identities Git could not create. It is
 // a safety check, not a full ref-format parser.
 func validBranch(branch string) error {
@@ -239,14 +248,21 @@ func validBranch(branch string) error {
 	return nil
 }
 
+// normalizeDependency resolves same-proposal path references to their
+// sibling slice names.
+func (d *ProposalDeclaration) normalizeDependency(dependency string) string {
+	if sibling, ok := sameProposalReference(d.Proposal, dependency); ok {
+		return sibling
+	}
+	return dependency
+}
+
 // CanonicalDependencies returns the ledger Work Item references a slice
 // depends on, with sibling names resolved to their canonical paths.
 func (d *ProposalDeclaration) CanonicalDependencies(slice SliceDeclaration) []string {
 	var references []string
 	for _, dependency := range slice.Depends {
-		if sibling, ok := sameProposalReference(d.Proposal, dependency); ok {
-			dependency = sibling
-		}
+		dependency = d.normalizeDependency(dependency)
 		if d.sliceByName(dependency) != nil {
 			references = append(references, ItemPath(d.Proposal, dependency))
 			continue

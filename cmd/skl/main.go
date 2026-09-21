@@ -161,12 +161,12 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 				if remote == "" {
 					remote = "origin"
 				}
-				gated, err := gateUnsupportedDelivery(stdout, formatMarkdown, command.Path("repo"), remote, "propose cleanup")
-				if gated || err != nil {
-					return err
-				}
 				repository, err := setup.ResolveRepository(command.Path("repo"), remote)
 				if err != nil {
+					return err
+				}
+				gated, err := gateUnsupportedDelivery(stdout, formatMarkdown, repository.Repository, "propose cleanup")
+				if gated || err != nil {
 					return err
 				}
 				backend, err := newBackend(repository.Repository)

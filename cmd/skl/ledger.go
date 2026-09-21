@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/urfave/cli/v2"
+	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/ledger"
 	"github.com/vicrdguez/skills/setup"
 )
@@ -66,7 +67,10 @@ func ledgerCommands(newBackend backendFactory, stdout io.Writer) *cli.Command {
 				if err != nil {
 					return renderLedgerRefusal(stdout, format, err)
 				}
-				forge, _ := backend.(ledger.Forge)
+				forge, ok := backend.(ledger.Forge)
+				if !ok {
+					return fmt.Errorf("workflow backend does not support ledger issue publication")
+				}
 				acceptance, err := ledger.Accept(command.Context, store, repository.Repository, declaration, forge, time.Now)
 				if err != nil {
 					return renderLedgerRefusal(stdout, format, err)
@@ -327,9 +331,11 @@ func safeFence(content string) string {
 
 // gateUnsupportedDelivery refuses the legacy worker entrypoints for a
 // Project that has adopted the ledger, before any legacy selection, Claim,
-// packet, or Git preparation can occur. It returns the rendered refusal, or
-// ok=false when the legacy flow remains the supported path.
-func gateUnsupportedDelivery(stdout io.Writer, format implementationFormatKind, repositoryRoot string, remote string, operation string) (bool, error) {
+// packet, or Git preparation can occur. It receives the already-resolved
+// source repository, so callers resolve it exactly once. It returns the
+// rendered refusal, or gated=false when the legacy flow remains the
+// supported path.
+func gateUnsupportedDelivery(stdout io.Writer, format implementationFormatKind, repository github.RepositoryID, operation string) (bool, error) {
 	path, exists, err := ledger.SettingsLocation(os.Getenv)
 	if err != nil || !exists {
 		// An unconfigured machine keeps the legacy flow; configuration is
@@ -350,14 +356,10 @@ func gateUnsupportedDelivery(stdout io.Writer, format implementationFormatKind, 
 			Repair: "repair the configured ledger clone before selecting work; skl uses no forge fallback while it is unusable",
 		})
 	}
-	repository, err := setup.ResolveRepository(repositoryRoot, remote)
-	if err != nil {
-		return false, nil
-	}
-	adopted, err := store.Adopted(repository.Repository)
+	adopted, err := store.Adopted(repository)
 	if err != nil {
 		return true, renderLedgerOutcome(stdout, format, ledgerOutcome{
-			Status: "fix_required", Reason: "the ledger records of project " + repository.Repository.Name + " are unreadable: " + err.Error(),
+			Status: "fix_required", Reason: "the ledger records of project " + repository.Name + " are unreadable: " + err.Error(),
 			Repair: "repair the ledger records before selecting work; skl uses no forge fallback through unreadable records",
 		})
 	}

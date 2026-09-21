@@ -312,9 +312,8 @@ func readFileString(t *testing.T, path string) string {
 	return string(readFile(t, path))
 }
 
-// singleSlice is one minimal but complete proposal: two slices named
-// foundation and feature with feature depending on foundation, or a single
-// slice when feature is empty.
+// singleSlice is one minimal but complete single-slice proposal whose only
+// slice is named foundation. dualSlice adds a feature slice and a parent.
 func singleSlice(name string) proposalSpec {
 	return proposalSpec{
 		name:        name,
@@ -1004,7 +1003,8 @@ func TestPublicationSucceedsWithoutPersistingBodies(t *testing.T) {
 		t.Fatalf("parent attachment not recorded: %s", metaJSON)
 	}
 
-	// Edited public bodies never change local readback.
+	// Edited public bodies, titles, or comments never change local readback:
+	// the accepted bytes, not the edited forge content, come back.
 	forge.mu.Lock()
 	for index := range forge.list {
 		forge.list[index]["body"] = "edited by a human"
@@ -1012,8 +1012,20 @@ func TestPublicationSucceedsWithoutPersistingBodies(t *testing.T) {
 	}
 	forge.mu.Unlock()
 	readback, _ := cli.run(t, []string{"skl", "ledger", "show", "--repo", root, "--item", "published-work/foundation", "--format", "json"})
-	if readback.Status != "shown" || !strings.Contains(readback.Readback.Documents[0].Contents, "Readback") && readback.Readback.Item != "published-work/foundation" {
+	if readback.Status != "shown" || readback.Readback.Item != "published-work/foundation" {
 		t.Fatalf("readback changed after forge edits: %s", mustJSON(t, readback))
+	}
+	intentSeen := false
+	for _, document := range readback.Readback.Documents {
+		if strings.HasSuffix(document.Path, "/intent.md") {
+			intentSeen = true
+			if document.Contents != spec.slices[0].files["intent.md"] {
+				t.Fatalf("readback substituted edited forge content: %q", document.Contents)
+			}
+		}
+	}
+	if !intentSeen {
+		t.Fatalf("intent.md missing from readback after forge edits: %s", mustJSON(t, readback))
 	}
 
 	// Repeating acceptance does not recreate known attached issues.

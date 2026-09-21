@@ -140,32 +140,20 @@ func ShowReference(store *Store, commit, path string) (ContractDocument, error) 
 	}
 	contents, err := showPath(store, commit, path)
 	if err != nil {
-		var refusal *Refusal
-		if asRefusal(err, &refusal) {
-			return ContractDocument{}, refuse(
-				"path "+path+" is unavailable at commit "+commit,
-				"correct the path or choose the revision that holds it; skl substitutes no other revision, forge body, or source artifact",
-			)
-		}
-		return ContractDocument{}, err
+		return ContractDocument{}, refuse(
+			"path "+path+" is unavailable at commit "+commit+": "+err.Error(),
+			"correct the path or choose the revision that holds it; skl substitutes no other revision, forge body, or source artifact",
+		)
 	}
 	return ContractDocument{Path: path, Commit: commit, Contents: contents}, nil
 }
 
-func asRefusal(err error, target **Refusal) bool {
-	refusal, ok := err.(*Refusal)
-	if ok {
-		*target = refusal
-	}
-	return ok
-}
-
-// showPath reads one path at one exact revision, preserving bytes.
+// showPath reads one path at one exact revision, preserving bytes and
+// reporting the concrete Git cause of any miss.
 func showPath(store *Store, commit, path string) (string, error) {
-	command := exec.Command("git", "-C", store.Root, "show", commit+":"+path)
-	raw, err := command.Output()
+	raw, err := exec.Command("git", "-C", store.Root, "show", commit+":"+path).Output()
 	if err != nil {
-		return "", refuse("unavailable reference", "repair")
+		return "", gitError(store.Root, []string{"show", commit + ":" + path}, err)
 	}
 	return string(raw), nil
 }

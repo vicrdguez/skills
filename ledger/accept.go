@@ -2,7 +2,6 @@ package ledger
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -65,9 +64,6 @@ type Acceptance struct {
 	HeadRef string            `json:"head_ref"`
 }
 
-// Refusal renders as the actionable refusal of one acceptance attempt.
-func (a Acceptance) refusalReason() string { return "" }
-
 // Accept validates and freezes one proposal into the local ledger, then
 // attempts initial publication. The local commit is authoritative; push and
 // issue publication are best-effort surfaces whose failures stay visibly
@@ -123,8 +119,7 @@ func Accept(ctx context.Context, store *Store, repository github.RepositoryID, d
 		}
 	}
 
-	publication, err := Publish(ctx, store, project.Name, declaration, outcome, forge)
-	if err != nil {
+	if err := Publish(ctx, store, project.Name, declaration, outcome, forge); err != nil {
 		return nil, err
 	}
 	head, err := store.head()
@@ -133,7 +128,6 @@ func Accept(ctx context.Context, store *Store, repository github.RepositoryID, d
 	}
 	outcome.Commit = head
 	outcome.HeadRef = fmt.Sprintf("%s/%s", projectsRoot, project.Name)
-	_ = publication
 	return outcome, nil
 }
 
@@ -250,17 +244,14 @@ func (s *Store) resolveExternalDependencies(project string, declaration *Proposa
 	for index := range declaration.Slices {
 		slice := declaration.Slices[index]
 		for _, dependency := range slice.Depends {
-			if sibling, ok := sameProposalReference(declaration.Proposal, dependency); ok {
-				dependency = sibling
-			}
+			dependency = declaration.normalizeDependency(dependency)
 			if declared[dependency] {
 				continue
 			}
-			parts := strings.Split(strings.TrimPrefix(dependency, "proposals/"), "/")
-			if len(parts) != 2 || !ValidRecordName(parts[0]) || !ValidRecordName(parts[1]) {
+			if _, _, valid := workItemReference(dependency); !valid {
 				return refuse(
-					"dependency "+dependency+" of slice "+slice.Name+" is not a ledger Work Item reference",
-					"reference an existing ledger Work Item as proposals/<proposal>/<slice>",
+					"dependency "+dependency+" of slice "+slice.Name+" does not resolve",
+					"reference a declared sibling slice or an existing ledger Work Item as proposals/<proposal>/<slice>",
 				)
 			}
 			if _, err := os.Stat(filepath.Join(s.Root, projectsRoot, project, dependency, "state.json")); err != nil {
@@ -272,10 +263,4 @@ func (s *Store) resolveExternalDependencies(project string, declaration *Proposa
 		}
 	}
 	return nil
-}
-
-// ErrorsAs conveniences for callers distinguishing refusals.
-func IsRefusal(err error) bool {
-	var refusal *Refusal
-	return errors.As(err, &refusal)
 }

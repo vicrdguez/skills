@@ -23,15 +23,15 @@ func watchdogCommands(newBackend backendFactory, stdout io.Writer) []*cli.Comman
 				return fmt.Errorf("resume requires --item; next selects its own Work Item")
 			}
 			format := implementationFormatKind(c.String("format"))
-			if name == "next" || name == "resume" {
-				gated, err := gateUnsupportedDelivery(stdout, format, c.Path("repo"), c.String("remote"), "watchdog "+name)
-				if gated || err != nil {
-					return err
-				}
-			}
 			repository, err := setup.ResolveRepository(c.Path("repo"), c.String("remote"))
 			if err != nil {
 				return err
+			}
+			if name == "next" || name == "resume" {
+				gated, err := gateUnsupportedDelivery(stdout, format, repository.Repository, "watchdog "+name)
+				if gated || err != nil {
+					return err
+				}
 			}
 			backend, err := newBackend(repository.Repository)
 			if err != nil {

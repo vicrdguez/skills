@@ -32,19 +32,12 @@ const (
 	IssueUnresolved    = "unresolved"
 )
 
-// Publication is the aggregate outcome of one invocation's publication
-// attempts.
-type Publication struct {
-	Push PublicationNote
-}
-
 // Publish attempts the initial publication surfaces after local acceptance:
 // the ledger push through the clone's own remote configuration and the
 // descriptive forge issues carrying the supplied temporary bodies. Every
 // failure stays visibly pending; successful attachments are recorded, and
 // no public body is persisted in the ledger.
-func Publish(ctx context.Context, store *Store, project string, declaration *ProposalDeclaration, outcome *Acceptance, forge Forge) (*Publication, error) {
-	publication := &Publication{}
+func Publish(ctx context.Context, store *Store, project string, declaration *ProposalDeclaration, outcome *Acceptance, forge Forge) error {
 	if forge == nil {
 		for index := range outcome.Slices {
 			outcome.Slices[index].IssueStatus = &PublicationNote{
@@ -59,13 +52,12 @@ func Publish(ctx context.Context, store *Store, project string, declaration *Pro
 	// themselves; a best-effort second push below only carries publication
 	// bookkeeping and never downgrades that fact.
 	note, _ := store.push()
-	publication.Push = note
 	for index := range outcome.Slices {
 		outcome.Slices[index].PushStatus = &note
 	}
 	pushed := note.Status == PushPushed
 	if err := store.recordPublication(project, declaration, outcome, pushed); err != nil {
-		return nil, err
+		return err
 	}
 	if pushed {
 		if retry, ok := store.push(); !ok {
@@ -73,13 +65,12 @@ func Publish(ctx context.Context, store *Store, project string, declaration *Pro
 				Status: PushPushed,
 				Detail: "the accepted records were pushed, but pushing the publication bookkeeping stayed " + retry.Status + ": " + retry.Detail,
 			}
-			publication.Push = *detail
 			for index := range outcome.Slices {
 				outcome.Slices[index].PushStatus = detail
 			}
 		}
 	}
-	return publication, nil
+	return nil
 }
 
 // publishIssues creates, adopts, or leaves pending each slice's descriptive

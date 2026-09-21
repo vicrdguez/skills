@@ -494,13 +494,6 @@ func (t *TransportFailure) Unwrap() error { return t.Cause }
 // so callers can distinguish it from a definite forge rejection.
 func (t *TransportFailure) UnknownOutcome() bool { return true }
 
-// IsTransportFailure reports whether err is an unknown-outcome transport
-// failure rather than a definite forge rejection.
-func IsTransportFailure(err error) bool {
-	var transport *TransportFailure
-	return errors.As(err, &transport)
-}
-
 // CreateIssue publishes one descriptive human-facing issue and returns its
 // number. It adds no workflow label and writes no state: the body is opaque
 // temporary transport authored outside skl.
