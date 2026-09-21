@@ -48,6 +48,7 @@ func PresentWatchdogInspection(root string, result workflow.ReviewInspection) Wa
 	} else {
 		fmt.Fprintf(&body, "This is the first full PR comparison. Preserve any supplied prior finding identities even if the Review Checkpoint was lost.\n")
 	}
+	fmt.Fprintf(&body, "\nContinue the fixed-head Watchdog procedure. Read the Submission's integrated target SHA as Verification evidence, confirm it is reachable from the reviewed head, and review merge and conflict-resolution effects. Do not treat unrelated target additions as scope creep or fetch a newer target merely because it moved after the recorded cutoff.\n")
 	output.Instructions = body.String()
 	return output
 }

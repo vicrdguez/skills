@@ -11,7 +11,9 @@ Describe the implemented change and its scope.
 
 Account for every rule, scenario, and architectural obligation using grouped many-to-many references to concrete tests, commands, or appropriate inspection evidence. One evidence item may support several obligations, and one obligation may require several observations; separate rows are not required.
 
-Record results and material limitations, including the focused checks, Full Gate, and artifact inspection. Prose assurance alone is insufficient for ordinary executable behavior, and listing an evidence gap does not make it acceptable.
+Record results and material limitations, including the focused checks, Full Gate, and artifact inspection. Identify the selected remote and the full target SHA actually observed and merged at the late pre-Audit step. The integrated target SHA is Verification evidence written in this opaque Markdown, not a rendering input or engine metadata field, and it does not replace the review baseline, Artifact Baseline, Artifact Completion, or a Watchdog invocation's fixed reviewed head.
+
+Evidence must cover the submitted functional state. If Audit dispositions changed functional code, record the affected checks and final Full Gate that covered that later state, distinguishing the audited head from the final verified head. If another target merge changed the candidate, identify that later SHA as the integrated target snapshot in Verification, replacing the earlier integrated-SHA reference without replacing the review baseline, artifact endpoints, or fixed reviewed head; record its integration-effects review and final-state checks rather than reusing evidence from the earlier state. Prose assurance alone is insufficient for ordinary executable behavior, and listing an evidence gap does not make it acceptable.
 
 ## Audit ledger --<fixed-point>...<audited-head>
 

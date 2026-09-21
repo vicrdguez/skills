@@ -36,6 +36,9 @@ Read the historical accepted artifacts from the resolved endpoints rather than f
 
 - `git -C {{quote .Worktree}} show {{quote (printf "%s:.changes/%s/tasks.md" .ArtifactCompletion .Branch)}}`
 {{end}}
+{{template "delegation" .}}
 {{end}}
 Refresh integrity with `{{.InspectCommand}}` before editing, before Audit, and before handoff, wherever the current procedure needs current evidence.
+
+Inspection does not observe or integrate the current target and a preparation-time fetch does not satisfy that obligation. After the remaining implementation or finding work and focused checks, immediately before this submission round's Audit, return to the main Implement procedure: fetch `main` from the selected remote `{{.Remote}}`, record `git -C {{quote .Worktree}} rev-parse FETCH_HEAD`, and merge that exact observed SHA before resolving conflicts and reviewing the integrated state. Preserve evidence of a successful late integration across resume; resuming or later target movement alone does not require another merge. If observation, merge, or a consequential conflict cannot be completed, preserve progress and use ordinary repair, resume, or Needs Human guidance without claiming successful integration or a completed Audit.
 {{end}}

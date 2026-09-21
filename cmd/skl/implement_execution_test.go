@@ -294,6 +294,45 @@ func TestB2ProcedureSelectionIgnoresIncidentalEvidence(t *testing.T) {
 	}
 }
 
+// TestIntegrateBeforeAuditContinuesThroughInspection verifies that a narrow
+// inspection continuation does not mistake preparation for late integration.
+func TestIntegrateBeforeAuditContinuesThroughInspection(t *testing.T) {
+	worktree, _, backend := inspectionFixture(t, "baseline-only")
+	got := implementCLI(t, worktree, backend, "inspect", "--item", "7")
+	for _, required := range []string{
+		"Inspection does not observe or integrate the current target",
+		"fetch `main` from the selected remote `origin`",
+		"rev-parse FETCH_HEAD",
+		"merge that exact observed SHA",
+		"resuming or later target movement alone does not require another merge",
+		"without claiming successful integration or a completed Audit",
+	} {
+		if !strings.Contains(got.Packet.Instructions, required) {
+			t.Errorf("inspection continuation lacks %q", required)
+		}
+	}
+}
+
+// TestIntegrateBeforeAuditDefersIntegratedSHAEvidence verifies that the actual
+// observed SHA remains opaque Result Document prose rather than renderer input.
+func TestIntegrateBeforeAuditDefersIntegratedSHAEvidence(t *testing.T) {
+	rendered := renderResource(t, "implement", "reference/submission.md",
+		"result_directory="+t.TempDir(), "procedure=initial")
+	for _, required := range []string{
+		"full target SHA actually observed and merged",
+		"not a rendering input or engine metadata field",
+		"does not replace the review baseline, Artifact Baseline, Artifact Completion, or a Watchdog invocation's fixed reviewed head",
+		"Full Gate that covered that later state",
+		"identify that later SHA as the integrated target snapshot",
+		"replacing the earlier integrated-SHA reference",
+		"integration-effects review and final-state checks",
+	} {
+		if !strings.Contains(rendered, required) {
+			t.Errorf("Submission resource lacks %q", required)
+		}
+	}
+}
+
 func renderAuditReworkFixes(t *testing.T) string {
 	t.Helper()
 	root := proposalRepository(t)
@@ -357,7 +396,7 @@ func TestAuditReworkFixesKeepsChecksAtResponsibleStages(t *testing.T) {
 		"Rework Audit owns one Full Gate run",
 		"Audit does not repeat artifact endpoint or retirement inspection",
 		"Run Inspect before editing",
-		"Run Inspect again after all edits",
+		"Run Inspect again before handoff",
 	} {
 		if !strings.Contains(rendered, required) {
 			t.Errorf("Rework check ownership lacks %q", required)
@@ -372,7 +411,7 @@ func TestAuditReworkFixesDisposesFindingsWithoutAuditLoop(t *testing.T) {
 	for _, required := range []string{
 		"Apply every Audit `HARD` finding",
 		"For each `JUDGEMENT`, fix it, decline it with a reason, or carry it as debt",
-		"If a disposition changes code, run its affected checks and a final Full Gate before handoff",
+		"If a disposition changes functional code, run its affected checks and a final Full Gate covering the final functional state before handoff",
 		"Do not invoke Audit again in this execution",
 	} {
 		if !strings.Contains(rendered, required) {
@@ -449,7 +488,7 @@ func TestAuditReworkFixesPreservesNonReworkAuditBehavior(t *testing.T) {
 			prepareSlice(t, root, "widget")
 			backend := &implementationMemory{work: []workflow.ImplementationItem{procedure.item}}
 			rendered := implementCLI(t, root, backend, procedure.args...).Packet.Instructions
-			for _, retained := range []string{"merge-base with `main` and the parent of this change's first commit", "Artifact integrity", "two axes", "Assign every new Audit Finding an `F<n>` identity"} {
+			for _, retained := range []string{"normal PR-base merge-base of the recorded integrated `main` SHA and the post-integration candidate head", "Artifact integrity", "two axes", "Assign every new Audit Finding an `F<n>` identity"} {
 				if !strings.Contains(rendered, retained) {
 					t.Errorf("%s Audit lost %q", procedure.name, retained)
 				}
@@ -503,6 +542,9 @@ func TestB3MetadataOnlyStartupBindsEveryAlreadyEstablishedReference(t *testing.T
 			if facts.Repository != "acme/widgets" || facts.Remote != "upstream" || facts.Worktree != worktree || facts.ResultDirectory == "" {
 				t.Fatalf("established identities = %#v", facts)
 			}
+			lateFetch := "git -C " + quote(worktree) + " fetch " + quote("upstream") + " main"
+			lateResolve := "git -C " + quote(worktree) + " rev-parse FETCH_HEAD"
+			lateMerge := "git -C " + quote(worktree) + " merge --no-edit <observed-target-sha>"
 			for _, bound := range []string{
 				"Repository: acme/widgets on the selected remote `upstream`",
 				"Work Item: #7",
@@ -511,6 +553,9 @@ func TestB3MetadataOnlyStartupBindsEveryAlreadyEstablishedReference(t *testing.T
 				"Private result location: `" + facts.ResultDirectory + "`",
 				"Prepare: `git -C " + quote(root) + " fetch " + quote("upstream") + " " + quote("+refs/heads/slice-seven:refs/remotes/upstream/slice-seven") + "` then `git -C " + quote(root) + " worktree add -b " + quote("slice-seven") + " " + quote(worktree) + " " + quote("upstream/slice-seven") + "`",
 				"Push: `git -C " + quote(worktree) + " push " + quote("upstream") + " " + quote("slice-seven") + "`",
+				lateFetch,
+				lateResolve,
+				lateMerge,
 				"Inspect: `skl implement inspect --repo " + quote(worktree) + " --remote " + quote("upstream") + " --item 7 --artifact-baseline " + baseline + " --artifact-completion " + completion + "`",
 				"Resume: `skl implement resume --item 7 --remote " + quote("upstream") + " --artifact-baseline " + baseline + " --artifact-completion " + completion + "`",
 				"`skl implement submit --repo " + quote(worktree) + " --remote " + quote("upstream") + " --item 7 --body " + quote(filepath.Join(facts.ResultDirectory, "submission.md")) + " --artifact-baseline " + baseline + " --artifact-completion " + completion + "`",
@@ -521,6 +566,10 @@ func TestB3MetadataOnlyStartupBindsEveryAlreadyEstablishedReference(t *testing.T
 				if !strings.Contains(rendered, bound) {
 					t.Errorf("Execution Skill lacks the bound reference:\n%s", bound)
 				}
+			}
+			fetchAt, resolveAt, mergeAt := strings.Index(rendered, lateFetch), strings.Index(rendered, lateResolve), strings.Index(rendered, lateMerge)
+			if fetchAt < 0 || resolveAt <= fetchAt || mergeAt <= resolveAt {
+				t.Errorf("late integration is not bound to upstream/main in fetch-resolve-merge order")
 			}
 			if info, err := os.Stat(facts.ResultDirectory); err != nil || !info.IsDir() {
 				t.Fatalf("private result location is not established: %v", err)
@@ -802,7 +851,7 @@ func TestB6TheCompleteBundlePreservesTheCurrentImplementationContract(t *testing
 	// the bundle replaces independent-mode discovery with the resolved ones or
 	// with the exact command that establishes them.
 	for _, resolved := range []string{
-		"merge-base with `main` and the parent of this change's first commit",
+		"normal PR-base merge-base of the recorded integrated `main` SHA and the post-integration candidate head",
 		"run `" + facts.InspectCommand + "` to resolve the Artifact Baseline and Completion",
 		"`--artifact-baseline " + facts.SuppliedArtifactBaseline + "`",
 		"The artifacts are the accepted `.changes/widget/` files of this Work Item",
@@ -827,7 +876,8 @@ func TestB6TheCompleteBundlePreservesTheCurrentImplementationContract(t *testing
 		"Every rule, scenario, and architectural obligation", "shared contract criteria", "do not impose preferred test organization or implementation",
 		"two axes", "exactly once per invocation", "endpoint inspection", "complete final implementation",
 		"`HARD`", "`JUDGEMENT`", "Do **not** merge or rerank findings", "disposition",
-		"integration with `main`, conflict resolution, and merge belong to the human Merge Authority",
+		"worker-owned late merge of one observed `origin/main` snapshot",
+		"human Merge Authority's later integration and final merge",
 		"## When only a human can decide", "The scope is already decided",
 		"does not require a new design exercise", "outside the accepted change",
 	} {
@@ -835,8 +885,9 @@ func TestB6TheCompleteBundlePreservesTheCurrentImplementationContract(t *testing
 			t.Errorf("bundle dropped the retained obligation %q", required)
 		}
 	}
-	// The redesign does not restore target synchronization or legacy queue mechanics.
-	for _, outOfScope := range []string{"target-snapshot", "Target Snapshot", "Synchronization Rework", "git merge ", "git rebase"} {
+	// The redesign keeps startup metadata-only and adds no engine-owned target
+	// snapshot or synchronization mode; ordinary Git performs the late merge.
+	for _, outOfScope := range []string{"target-snapshot", "Target Snapshot", "Synchronization Rework", "git rebase"} {
 		if strings.Contains(instructions, outOfScope) {
 			t.Errorf("bundle introduced out-of-scope behavior %q", outOfScope)
 		}
@@ -899,6 +950,73 @@ func TestB7AuditRecipesFollowCapabilitiesRatherThanHarnessNames(t *testing.T) {
 			// Capability knowledge changes instructions only, never the workflow.
 			if !backend.work[1].Claimed || backend.work[0].Claimed || len(backend.work) != 2 {
 				t.Fatalf("capability changed eligibility or the Claim: %#v", backend.work)
+			}
+		})
+	}
+}
+
+// TestDelegateClaimedWorkCapabilityGuidance verifies that adapter-established
+// capability, rather than harness identity, controls optional implementation
+// and testing delegation in both complete executions and continuations.
+func TestDelegateClaimedWorkCapabilityGuidance(t *testing.T) {
+	cases := []struct {
+		capability string
+		want       []string
+	}{
+		{"claude-agents", []string{"established the supported Claude Agent helper mechanism", "may use `Agent` for bounded, non-conflicting implementation or testing assignments"}},
+		{"pi-subagents", []string{"established the supported Pi subagent helper mechanism", "may use `subagent` for bounded, non-conflicting implementation or testing assignments"}},
+		{"sequential", []string{"no supported helper-launch mechanism is available", "Perform implementation and testing subwork serially as the owner", "does not alter the separately mandatory Audit procedure"}},
+		{"", []string{"did not establish whether a supported helper mechanism is available", "A harness name alone proves nothing", "one small bounded runtime check", "otherwise perform the subwork serially"}},
+	}
+	for _, testCase := range cases {
+		name := testCase.capability
+		if name == "" {
+			name = "unknown"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := proposalRepository(t)
+			prepareSlice(t, root, "widget")
+			backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}}
+			args := []string{"next"}
+			if testCase.capability != "" {
+				args = append(args, "--capability", testCase.capability)
+			}
+			started := implementCLI(t, root, backend, args...)
+			facts := started.Packet.Facts.Implementation
+			execution := started.Packet.Instructions
+			capabilityFlag := " --capability " + skilldist.ShellQuote(testCase.capability)
+			for _, command := range []string{facts.ResumeCommand, facts.InspectCommand} {
+				if testCase.capability != "" && !strings.Contains(command, capabilityFlag) {
+					t.Errorf("known capability was lost from continuation command %q", command)
+				}
+				if testCase.capability == "" && strings.Contains(command, " --capability ") {
+					t.Errorf("unknown capability invented a continuation flag in %q", command)
+				}
+			}
+			for _, required := range append(testCase.want,
+				"Do not require delegation, a separate test writer, a fixed helper count, or a worktree per helper",
+				"authoritative contract references or contents",
+				"Prevent conflicting concurrent writers and Git operations",
+				"Helpers must not select queue work, acquire another Claim, change Workflow State, make the final Submission",
+				"The owner inspects and integrates every contribution",
+				"Helper reports or isolated passing checks never replace affected integrated checks",
+				"## Delegated testing during Implement",
+			) {
+				if !strings.Contains(execution, required) {
+					t.Errorf("complete execution lacks %q", required)
+				}
+			}
+
+			worktree, _, inspectionBackend := inspectionFixture(t, "baseline-only")
+			inspectArgs := []string{"inspect", "--item", "7"}
+			if testCase.capability != "" {
+				inspectArgs = append(inspectArgs, "--capability", testCase.capability)
+			}
+			continuation := implementCLI(t, worktree, inspectionBackend, inspectArgs...).Packet.Instructions
+			for _, required := range append(testCase.want, "## Optional bounded delegation", "The selected Work Item and its Claim remain with this owner") {
+				if !strings.Contains(continuation, required) {
+					t.Errorf("inspection continuation lacks %q", required)
+				}
 			}
 		})
 	}
@@ -2062,8 +2180,12 @@ func TestB21ThePiRunnerReportsOneItemInNormalMarkdown(t *testing.T) {
 		"never report success the engine did not verify",
 		"Do not drain the queue",
 		"do not launch a replacement worker after an empty, uncertain, or incomplete result",
-		"Use `subagent` only for the parallel review `audit` requires",
-		"launch those reviewers in fresh contexts",
+		"may permit optional `subagent` use for bounded, non-conflicting implementation or testing assignments within this one Claim",
+		"authoritative contract inputs",
+		"serialize overlaps, inspect and integrate its work",
+		"Helpers must not select queue work, acquire Claims, change Workflow State, or publish",
+		"Use fresh contexts for the parallel reviewers the bundled `audit` requires",
+		"optional serial fallback never weakens that Audit",
 	} {
 		if !strings.Contains(runner, required) {
 			t.Errorf("runner lacks %q", required)

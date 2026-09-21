@@ -167,7 +167,7 @@ The terminal **Workflow State** of an abandoned Work Item whose replacement requ
 _Avoid_: Needs human, merged
 
 **Merge Authority**:
-The human who decides how to integrate an approved **Submission**, resolves integration conflicts, and performs the merge outside the **Workflow Engine**.
+The human who decides how to integrate an approved **Submission** after review, resolves conflicts caused by later **Integration Target** movement, and performs the final merge outside the **Workflow Engine**. This is distinct from an Agent Worker's required pre-Audit merge of one observed target revision into the work branch.
 _Avoid_: Reviewer, agent worker
 
 **Manual Verification**:
@@ -262,7 +262,7 @@ _Avoid_: Local Git helper, GitHub cache
 >
 > **Developer:** Does a merge conflict invalidate a successful Watchdog Review?
 >
-> **Domain expert:** No. Review approval and integration are separate decisions; the Merge Authority handles integration and merge.
+> **Domain expert:** No. The Agent Worker resolves conflicts from its bounded pre-Audit target merge before review. A later target advance does not invalidate that historical verdict; any resulting post-review integration conflict and the final merge belong to the Merge Authority.
 >
 > **Developer:** What does an unavailable previously reviewed revision mean for review scope?
 >

@@ -220,8 +220,12 @@ func PresentImplementation(outcome workflow.ImplementationOutcome, invocation In
 		f.EvidenceStreams = evidenceStreams(output.Item, f)
 		f.ResumeCommand = fmt.Sprintf("skl implement resume --item %d", f.WorkItem)
 		f.ResumeCommand += " --remote " + quote(f.Remote)
+		capabilityFlag := ""
+		if f.Capability != skilldist.UnknownCapability {
+			capabilityFlag = " --capability " + quote(string(f.Capability))
+		}
 		flags := endpointFlags(f.SuppliedArtifactBaseline, f.SuppliedArtifactCompletion)
-		f.ResumeCommand += flags
+		f.ResumeCommand += capabilityFlag + flags
 		if outcome.Status == "fix_required" {
 			output.Reason += "; resume with `" + f.ResumeCommand + "`"
 			return output, nil
@@ -232,7 +236,7 @@ func PresentImplementation(outcome workflow.ImplementationOutcome, invocation In
 		f.InspectCommand = fmt.Sprintf("skl implement inspect --repo %s --remote %s --item %d", quote(f.Worktree), quote(f.Remote), f.WorkItem)
 		f.SubmitCommand = fmt.Sprintf("skl implement submit --repo %s --remote %s --item %d --body %s", quote(f.Worktree), quote(f.Remote), f.WorkItem, quote(filepath.Join(directory, "submission.md")))
 		f.NeedsHumanCommand = fmt.Sprintf("skl implement needs-human --repo %s --remote %s --item %d --reason <permitted-reason> --decision %s", quote(f.Worktree), quote(f.Remote), f.WorkItem, quote(filepath.Join(directory, "decision.md")))
-		f.InspectCommand += flags
+		f.InspectCommand += capabilityFlag + flags
 		f.SubmitCommand += flags
 		f.NeedsHumanCommand += flags
 	} else if source := facts.Watchdog; source != nil {
