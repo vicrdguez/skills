@@ -25,8 +25,8 @@ completion ticks or edits here.
 <!--
 Observable completion outcomes. Give each independently tracked outcome its
 descriptive local label (B<n> for behavior rules, A<n> for architectural
-commitments, warranted T<n>) and map them many-to-many to rules, scenarios,
-and checks; do not create one item per scenario or test.
+commitments, warranted T<n>). Rules and scenarios may map many-to-many to these
+outcomes; do not create one item per scenario or test.
 
 Use Markdown task bullets: `- [ ]`.
 -->
