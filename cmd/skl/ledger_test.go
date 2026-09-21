@@ -105,15 +105,22 @@ type forgeServer struct {
 	fail   func(method, path string) int
 	// drop simulates an unknown-outcome transport failure: the server acts
 	// but the caller receives a broken connection.
-	drop     func(method, path string) bool
-	truncate func(method, path string) bool
-	before   func(method, path string)
-	children map[int][]int
-	bodies   []string
+	drop          func(method, path string) bool
+	truncate      func(method, path string) bool
+	before        func(method, path string)
+	outsideBefore func(method, path string)
+	children      map[int][]int
+	bodies        []string
 }
 
 func (f *forgeServer) handler() http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		f.mu.Lock()
+		outsideBefore := f.outsideBefore
+		f.mu.Unlock()
+		if outsideBefore != nil {
+			outsideBefore(request.Method, request.URL.Path)
+		}
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		body := ""
@@ -1572,6 +1579,152 @@ func TestConcurrentIssuePublicationUsesDurableReservation(t *testing.T) {
 	}
 }
 
+func TestReservationObserverDoesNotAdoptPreexistingMatch(t *testing.T) {
+	t.Run("slice", func(t *testing.T) {
+		fixture := newLedgerFixture(t)
+		root := sourceRepository(t, "acme", "widgets")
+		forge := newForgeServer(t)
+		directory := writeProposal(t, "", singleSlice("reserved-slice"))
+		body := writeTemp(t, t, "same body\n")
+		forge.mu.Lock()
+		forge.list = append(forge.list, map[string]any{
+			"id": 1777, "number": 777, "state": "open", "title": "Add foundation", "body": "same body\n",
+		})
+		forge.mu.Unlock()
+
+		started, release := make(chan struct{}), make(chan struct{})
+		forge.mu.Lock()
+		forge.outsideBefore = func(method, path string) {
+			if method == http.MethodPost && path == "/repos/acme/widgets/issues" {
+				close(started)
+				<-release
+			}
+		}
+		forge.mu.Unlock()
+		first := startConcurrentAcceptanceHelper(t, root, directory,
+			"SKL_CONCURRENT_ACCEPT_FORGE="+forge.server.URL,
+			"SKL_CONCURRENT_ACCEPT_ISSUE="+body,
+		)
+		<-started
+		second := startConcurrentAcceptanceHelper(t, root, directory,
+			"SKL_CONCURRENT_ACCEPT_FORGE="+forge.server.URL,
+			"SKL_CONCURRENT_ACCEPT_ISSUE="+body,
+		)
+		observer := second.wait(t)
+		if observer.Acceptance.Slices[0].Issue != nil || observer.Acceptance.Slices[0].IssueStatus == nil || observer.Acceptance.Slices[0].IssueStatus.Status != "reserved" {
+			t.Fatalf("reservation observer guessed a pre-existing attachment: %s", mustJSON(t, observer))
+		}
+		close(release)
+		creator := first.wait(t)
+		if creator.Acceptance.Slices[0].Issue == nil || creator.Acceptance.Slices[0].Issue.Number != 101 {
+			t.Fatalf("reservation creator's successful attachment was not retained: %s", mustJSON(t, creator))
+		}
+		state := readLedgerFile(t, fixture.clone, "projects/widgets/proposals/reserved-slice/foundation/state.json")
+		if !strings.Contains(state, `"number": 101`) || strings.Contains(state, `"number": 777`) {
+			t.Fatalf("slice reservation recorded the wrong issue: %s", state)
+		}
+	})
+
+	t.Run("parent", func(t *testing.T) {
+		fixture := newLedgerFixture(t)
+		root := sourceRepository(t, "acme", "widgets")
+		forge := newForgeServer(t)
+		directory := writeProposal(t, "Deliver reserved-parent", dualSlice("reserved-parent"))
+		foundation := writeTemp(t, t, "foundation body\n")
+		feature := writeTemp(t, t, "feature body\n")
+		parent := writeTemp(t, t, "same parent body\n")
+		postCount := 0
+		forge.fail = func(method, path string) int {
+			if method == http.MethodPost && path == "/repos/acme/widgets/issues" {
+				postCount++
+				if postCount == 3 {
+					return http.StatusServiceUnavailable
+				}
+			}
+			return 0
+		}
+		flags := []string{"--issue=foundation=" + foundation, "--issue=feature=" + feature, "--parent-body=" + parent}
+		initial := newLedgerApp(t, forge).accept(t, root, directory, flags...)
+		if initial.Acceptance.ParentIssue != nil || initial.Acceptance.ParentNote == nil {
+			t.Fatalf("parent publication failure was not retained: %s", mustJSON(t, initial))
+		}
+
+		started, release := make(chan struct{}), make(chan struct{})
+		forge.mu.Lock()
+		forge.fail = nil
+		forge.list = append(forge.list, map[string]any{
+			"id": 1777, "number": 777, "state": "open", "title": "Deliver reserved-parent", "body": "same parent body\n",
+		})
+		forge.outsideBefore = func(method, path string) {
+			if method == http.MethodPost && path == "/repos/acme/widgets/issues" {
+				close(started)
+				<-release
+			}
+		}
+		forge.mu.Unlock()
+		environment := []string{
+			"SKL_CONCURRENT_ACCEPT_FORGE=" + forge.server.URL,
+			"SKL_CONCURRENT_ACCEPT_ISSUE=" + foundation,
+			"SKL_CONCURRENT_ACCEPT_FEATURE=" + feature,
+			"SKL_CONCURRENT_ACCEPT_PARENT=" + parent,
+		}
+		first := startConcurrentAcceptanceHelper(t, root, directory, environment...)
+		<-started
+		second := startConcurrentAcceptanceHelper(t, root, directory, environment...)
+		observer := second.wait(t)
+		if observer.Acceptance.ParentIssue != nil || observer.Acceptance.ParentNote == nil || observer.Acceptance.ParentNote.Status != "reserved" {
+			t.Fatalf("parent reservation observer guessed a pre-existing attachment: %s", mustJSON(t, observer))
+		}
+		close(release)
+		creator := first.wait(t)
+		if creator.Acceptance.ParentIssue == nil || creator.Acceptance.ParentIssue.Number != 103 {
+			t.Fatalf("parent reservation creator's successful attachment was not retained: %s", mustJSON(t, creator))
+		}
+		proposal := readLedgerFile(t, fixture.clone, "projects/widgets/proposals/reserved-parent/proposal.json")
+		if !strings.Contains(proposal, `"number": 103`) || strings.Contains(proposal, `"number": 777`) {
+			t.Fatalf("parent reservation recorded the wrong issue: %s", proposal)
+		}
+	})
+}
+
+type concurrentAcceptanceHelper struct {
+	command *exec.Cmd
+	result  string
+	log     *bytes.Buffer
+}
+
+func startConcurrentAcceptanceHelper(t *testing.T, root, directory string, extraEnv ...string) concurrentAcceptanceHelper {
+	t.Helper()
+	result := filepath.Join(t.TempDir(), "result.json")
+	log := new(bytes.Buffer)
+	command := exec.Command(os.Args[0], "-test.run=^TestConcurrentAcceptanceHelper$")
+	command.Env = append(os.Environ(),
+		"SKL_CONCURRENT_ACCEPT_HELPER=1",
+		"SKL_CONCURRENT_ACCEPT_REPO="+root,
+		"SKL_CONCURRENT_ACCEPT_PROPOSAL="+directory,
+		"SKL_CONCURRENT_ACCEPT_RESULT="+result,
+	)
+	command.Env = append(command.Env, extraEnv...)
+	command.Stdout = log
+	command.Stderr = log
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	return concurrentAcceptanceHelper{command: command, result: result, log: log}
+}
+
+func (h concurrentAcceptanceHelper) wait(t *testing.T) ledgerOutcome {
+	t.Helper()
+	if err := h.command.Wait(); err != nil {
+		t.Fatalf("concurrent helper: %v\n%s", err, h.log.String())
+	}
+	var outcome ledgerOutcome
+	if err := json.Unmarshal([]byte(readFile(t, h.result)), &outcome); err != nil {
+		t.Fatalf("decode helper outcome: %v", err)
+	}
+	return outcome
+}
+
 func runConcurrentAcceptanceHelpers(t *testing.T, root string, directories []string, extraEnv ...string) []ledgerOutcome {
 	t.Helper()
 	results := make([]string, len(directories))
@@ -1631,6 +1784,12 @@ func TestConcurrentAcceptanceHelper(t *testing.T) {
 	}
 	if issue := os.Getenv("SKL_CONCURRENT_ACCEPT_ISSUE"); issue != "" {
 		arguments = append(arguments, "--issue=foundation="+issue)
+	}
+	if issue := os.Getenv("SKL_CONCURRENT_ACCEPT_FEATURE"); issue != "" {
+		arguments = append(arguments, "--issue=feature="+issue)
+	}
+	if parent := os.Getenv("SKL_CONCURRENT_ACCEPT_PARENT"); parent != "" {
+		arguments = append(arguments, "--parent-body="+parent)
 	}
 	if err := app.Run(arguments); err != nil {
 		t.Fatal(err)

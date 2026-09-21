@@ -134,7 +134,7 @@ func publishIssues(ctx context.Context, declaration *ProposalDeclaration, outcom
 			// never adopts an unrelated pre-existing title/body match.
 			number, note = createOrAdoptIssue(ctx, forge, slice.Title, string(body), false)
 		case state.IssueStatus != nil && state.IssueStatus.Status == issueReserved:
-			number, note = resolveReservedIssue(ctx, forge, slice.Title, string(body))
+			number, note = waitForReservedIssue()
 		default:
 			number, note = createOrAdoptIssue(ctx, forge, slice.Title, string(body), true)
 		}
@@ -167,7 +167,7 @@ func publishIssues(ctx context.Context, declaration *ProposalDeclaration, outcom
 		case reservations.parent:
 			number, note = createOrAdoptIssue(ctx, forge, strings.TrimSpace(declaration.ParentTitle), string(declaration.ParentBody), false)
 		case outcome.ParentNote != nil && outcome.ParentNote.Status == issueReserved:
-			number, note = resolveReservedIssue(ctx, forge, strings.TrimSpace(declaration.ParentTitle), string(declaration.ParentBody))
+			number, note = waitForReservedIssue()
 		default:
 			number, note = createOrAdoptIssue(ctx, forge, strings.TrimSpace(declaration.ParentTitle), string(declaration.ParentBody), true)
 		}
@@ -205,20 +205,20 @@ func containsInt(values []int, wanted int) bool {
 	return false
 }
 
+// waitForReservedIssue leaves another invocation's reservation unresolved.
+// An exact title/body match cannot prove that an issue belongs to an in-flight
+// creation when unrelated matching work may already exist.
+func waitForReservedIssue() (int, PublicationNote) {
+	return 0, PublicationNote{
+		Status: issueReserved,
+		Detail: "another invocation reserved issue creation; repeat after that attempt settles rather than guessing which open issue belongs to it or creating a duplicate",
+	}
+}
+
 // createOrAdoptIssue publishes one descriptive issue. An uncertain creation
 // attempt is resolved safely by exact title-and-body match before any
 // duplicate could be created; an unresolved outcome is reported for repair
 // rather than guessed.
-func resolveReservedIssue(ctx context.Context, forge Forge, title, body string) (int, PublicationNote) {
-	if number, note, decided := adoptMatchingIssue(ctx, forge, title, body); decided && number != 0 {
-		return number, note
-	}
-	return 0, PublicationNote{
-		Status: issueReserved,
-		Detail: "another invocation reserved issue creation and no unique exact matching open issue is observable yet; repeat after that attempt settles rather than creating a duplicate",
-	}
-}
-
 func createOrAdoptIssue(ctx context.Context, forge Forge, title, body string, resolveFirst bool) (int, PublicationNote) {
 	if resolveFirst {
 		if number, note, decided := adoptMatchingIssue(ctx, forge, title, body); decided {
