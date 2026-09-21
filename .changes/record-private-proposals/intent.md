@@ -32,13 +32,13 @@ These three proposal files are a temporary bootstrap carrier, published through 
 
 ## Definition of Done
 
-- [ ] B1-B2 and A1: configuration resolves the specified local clone, and Project identity follows the remote repository rather than checkout names, refusing different-repository name collisions safely.
-- [ ] B3 and A2: single- and multi-slice proposals freeze complete Contracts and declared relationships locally in the exact ADR layout, without source preparation or accidental acceptance of invalid/changed work.
-- [ ] B4 and A3: public CLI readback returns exact accepted content and explicit full commit/path references independently of forge availability, marker discovery, and later ledger activity.
-- [ ] B5-B6 and A2/A4: local acceptance survives ordinary publication failures with honest pending state; successful attachments are retained and competing ledger history requires reconciliation rather than automatic merging or grants.
-- [ ] B7 and A3: distributed Propose guidance authors frozen, locally identified Contracts and descriptive temporary issue bodies, preserving #53's fidelity and ADR 0005 verification requirements.
-- [ ] B8 and A5: the intermediate release provides usable intake/readback, refuses unsupported execution without forge fallback, and preserves non-adopted work without migration or dual-authority machinery.
-- [ ] A6: existing CLI/Git/HTTP checks provide many-to-many evidence for all rules, scenarios, and architectural commitments; the Full Gate and independent review remain required.
+- [x] B1-B2 and A1: configuration resolves the specified local clone, and Project identity follows the remote repository rather than checkout names, refusing different-repository name collisions safely.
+- [x] B3 and A2: single- and multi-slice proposals freeze complete Contracts and declared relationships locally in the exact ADR layout, without source preparation or accidental acceptance of invalid/changed work.
+- [x] B4 and A3: public CLI readback returns exact accepted content and explicit full commit/path references independently of forge availability, marker discovery, and later ledger activity.
+- [x] B5-B6 and A2/A4: local acceptance survives ordinary publication failures with honest pending state; successful attachments are retained and competing ledger history requires reconciliation rather than automatic merging or grants.
+- [x] B7 and A3: distributed Propose guidance authors frozen, locally identified Contracts and descriptive temporary issue bodies, preserving #53's fidelity and ADR 0005 verification requirements.
+- [x] B8 and A5: the intermediate release provides usable intake/readback, refuses unsupported execution without forge fallback, and preserves non-adopted work without migration or dual-authority machinery.
+- [x] A6: existing CLI/Git/HTTP checks provide many-to-many evidence for all rules, scenarios, and architectural commitments; the Full Gate and independent review remain required.
 
 ## Manual verification
 
