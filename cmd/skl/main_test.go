@@ -951,7 +951,7 @@ func TestRetrieveConcreteProposeInstructions(t *testing.T) {
 			"Correct demonstrable transcription errors", "returns to the human for resolution",
 			"neither routine artifact-by-artifact rereading nor a second semantic approval ceremony",
 		},
-		"publication": {"skl propose publish", "skl propose cleanup"},
+		"ledger intake": {"skl ledger accept", "skl ledger show", "No source branch, worktree, or source artifact commit is prepared", "pending publication effects", "human-directed administrative cutover with normal workers stopped", "renewed proposal"},
 		"independent delivery": {
 			"Prefer separate Work Items for behaviors that deliver safe, useful results independently",
 			"after declared Dependencies are Merged, without requiring later Work Items",
@@ -1135,71 +1135,45 @@ func TestRetrieveRetiredLedgerInstructions(t *testing.T) {
 	}
 }
 
-func TestProposePacketPublishesDurableThinPointer(t *testing.T) {
+func TestProposePacketGuidesLedgerIntake(t *testing.T) {
 	var output bytes.Buffer
 	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output)
 	if err := app.Run([]string{"skl", "skill", "propose"}); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"thin-pointer template", "git rev-parse HEAD", "full commit SHA", "Replace every placeholder"} {
-		if !strings.Contains(output.String(), want) {
+	packet := output.String()
+	for _, want := range []string{
+		"skl ledger accept", "skl ledger show", "proposal.json", "proposal.md",
+		"planned source branch", "temporary Markdown files",
+		"transport, not Contract content",
+	} {
+		if !strings.Contains(packet, want) {
 			t.Fatalf("packet lacks %q", want)
 		}
 	}
-	_, template, found := strings.Cut(output.String(), "```markdown\n")
-	if !found {
-		t.Fatal("packet lacks thin-pointer Markdown template")
-	}
-	template, _, _ = strings.Cut(template, "\n```")
-	root := proposalRepository(t)
-	baseline := prepareSlice(t, root, "ship-widget")
-	authored := strings.NewReplacer("<summary>", "Ship widgets [opaque prose", "<slug>", "ship-widget", "<baseline-sha>", baseline).Replace(template) + "\n"
-	for _, want := range []string{"Branch: `ship-widget`", "Artifact Baseline: `" + baseline + "`", "`.changes/ship-widget/`"} {
-		if !strings.Contains(authored, want) {
-			t.Fatalf("thin pointer lacks %q: %s", want, authored)
+	for _, forbidden := range []string{
+		"thin-pointer template",
+		"git rev-parse HEAD",
+		"[baseline]",
+		"skl propose publish",
+		"skl propose cleanup",
+		"create `.worktrees/",
+		"worktree add",
+		"skl implement cleanup",
+	} {
+		if strings.Contains(packet, forbidden) {
+			t.Fatalf("packet retains the retired source-preparation guidance %q", forbidden)
 		}
 	}
-	bodyPath := filepath.Join(t.TempDir(), "body.md")
-	if err := os.WriteFile(bodyPath, []byte(authored), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	var durableBody string
-	ready := false
-	client := &http.Client{Transport: httpRoundTripFunc(func(request *http.Request) (*http.Response, error) {
-		body := `{}`
-		switch {
-		case request.Method == http.MethodGet && request.URL.Path == "/repos/acme/widgets/issues":
-			body = `[]`
-		case request.Method == http.MethodPost && request.URL.Path == "/repos/acme/widgets/issues":
-			var payload map[string]string
-			if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
-				t.Fatal(err)
-			}
-			durableBody = payload["body"]
-			body = `{"id":501,"number":1}`
-		case request.Method == http.MethodPost && request.URL.Path == "/repos/acme/widgets/issues/1/labels":
-			if durableBody != authored {
-				t.Fatalf("Ready before opaque thin pointer was durable: %q", durableBody)
-			}
-			ready = true
-		default:
-			t.Fatalf("unexpected request: %s %s", request.Method, request.URL.Path)
+	// Labels are authored locally; no CLI numbering service or mandatory tasks
+	// file exists.
+	for _, want := range []string{"B<n>", "A<n>", "T<n>", "M<n>"} {
+		if !strings.Contains(packet, want) {
+			t.Fatalf("packet lacks the label guidance %q", want)
 		}
-		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
-	})}
-	output.Reset()
-	app = newApp(func(repository github.RepositoryID) (setup.Backend, error) {
-		backend := setup.NewGitHubBackend("https://api.github.test", "secret", client)
-		if repository != (github.RepositoryID{}) {
-			backend.BindRepository(repository)
-		}
-		return backend, nil
-	}, bytes.NewReader(nil), &output, &output)
-	if err := app.Run([]string{"skl", "propose", "publish", "--repo", root, "--target", "main", "--slice", "ship-widget=" + bodyPath}); err != nil {
-		t.Fatal(err)
 	}
-	if output.String() != "completed\n" || !ready || durableBody != authored {
-		t.Fatalf("publication = %q ready=%v body=%q", output.String(), ready, durableBody)
+	if !strings.Contains(packet, "no CLI numbering service") || !strings.Contains(packet, "only when warranted") {
+		t.Fatal("packet turns labels into a numbering service or tasks into a mandate")
 	}
 }
 

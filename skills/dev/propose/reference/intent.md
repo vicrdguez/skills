@@ -4,8 +4,9 @@
 State the desired result compactly. Keep detailed rules and scenarios in
 behavior.md rather than repeating them here. Delete this comment in the real file.
 
-Frozen at the `[baseline] <slice-slug>` commit. The `[completion] <slice-slug>`
-endpoint may only tick an existing non-manual Done box `[ ]` → lowercase `[x]`.
+Frozen when `skl ledger accept` records the proposal. Accepted files stay
+read-only: progress and completion evidence live in phase reports, never in
+completion ticks or edits here.
 -->
 
 ## Why
@@ -22,8 +23,10 @@ endpoint may only tick an existing non-manual Done box `[ ]` → lowercase `[x]`
 
 ## Definition of Done
 <!--
-Observable completion outcomes. Rules and scenarios may map many-to-many to these
-outcomes; do not create one item per scenario or test.
+Observable completion outcomes. Give each independently tracked outcome its
+descriptive local label (B<n> for behavior rules, A<n> for architectural
+commitments, warranted T<n>) and map them many-to-many to rules, scenarios,
+and checks; do not create one item per scenario or test.
 
 Use Markdown task bullets: `- [ ]`.
 -->
@@ -31,9 +34,9 @@ Use Markdown task bullets: `- [ ]`.
 ## Manual verification
 <!--
 Human-owned checks an agent cannot run or observe, such as visual checks,
-third-party dashboards, unavailable credentials, or production-like data. Frozen
-like every other obligation and left unchecked at Artifact Completion. "None" is
-a valid answer.
+third-party dashboards, unavailable credentials, or production-like data.
+Label each check M<n>. Frozen like every other obligation. "None" is a valid
+answer.
 
 Use Markdown task bullets `- [ ]` when checks exist.
 -->

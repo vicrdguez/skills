@@ -6,9 +6,12 @@ decisions for a fresh implementer without inventing new ones. Reference existing
 ADRs instead of restating them, and label sketches that explain a decision as
 illustrative so they do not become accidental obligations.
 
-Frozen at the `[baseline] <slice-slug>` commit. A material architectural change
-requires human resolution and a new Proposal, not an edit at Artifact Completion.
-Delete this comment in the real file.
+Give each architectural commitment a descriptive local label A<n> so intent.md
+and behavior.md can reference it; number independently tracked commitments only.
+
+Frozen when `skl ledger accept` records the proposal. A material architectural
+change requires human resolution and a renewed Proposal, not an edit to accepted
+files. Delete this comment in the real file.
 -->
 
 ## Authority and assumptions
@@ -34,7 +37,7 @@ explicitly agreed.
 ## Architectural commitments
 <!--
 Record only deliberately agreed interfaces, ordering constraints, error modes,
-and other decisions the implementer must preserve.
+and other decisions the implementer must preserve. Label each A<n>.
 -->
 
 ### Module shapes & seams
