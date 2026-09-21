@@ -488,7 +488,7 @@ func TestAuditReworkFixesPreservesNonReworkAuditBehavior(t *testing.T) {
 			prepareSlice(t, root, "widget")
 			backend := &implementationMemory{work: []workflow.ImplementationItem{procedure.item}}
 			rendered := implementCLI(t, root, backend, procedure.args...).Packet.Instructions
-			for _, retained := range []string{"merge-base with the recorded integrated `main` SHA and the parent of this change's first commit", "Artifact integrity", "two axes", "Assign every new Audit Finding an `F<n>` identity"} {
+			for _, retained := range []string{"normal PR-base merge-base of the recorded integrated `main` SHA and the post-integration candidate head", "Artifact integrity", "two axes", "Assign every new Audit Finding an `F<n>` identity"} {
 				if !strings.Contains(rendered, retained) {
 					t.Errorf("%s Audit lost %q", procedure.name, retained)
 				}
@@ -851,7 +851,7 @@ func TestB6TheCompleteBundlePreservesTheCurrentImplementationContract(t *testing
 	// the bundle replaces independent-mode discovery with the resolved ones or
 	// with the exact command that establishes them.
 	for _, resolved := range []string{
-		"merge-base with the recorded integrated `main` SHA and the parent of this change's first commit",
+		"normal PR-base merge-base of the recorded integrated `main` SHA and the post-integration candidate head",
 		"run `" + facts.InspectCommand + "` to resolve the Artifact Baseline and Completion",
 		"`--artifact-baseline " + facts.SuppliedArtifactBaseline + "`",
 		"The artifacts are the accepted `.changes/widget/` files of this Work Item",
