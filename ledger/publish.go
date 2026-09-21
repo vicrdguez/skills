@@ -134,7 +134,7 @@ func publishIssues(ctx context.Context, declaration *ProposalDeclaration, outcom
 			// never adopts an unrelated pre-existing title/body match.
 			number, note = createOrAdoptIssue(ctx, forge, slice.Title, string(body), false)
 		case state.IssueStatus != nil && state.IssueStatus.Status == issueReserved:
-			number, note = waitForReservedIssue()
+			number, note = preserveReservedIssue()
 		default:
 			number, note = createOrAdoptIssue(ctx, forge, slice.Title, string(body), true)
 		}
@@ -167,7 +167,7 @@ func publishIssues(ctx context.Context, declaration *ProposalDeclaration, outcom
 		case reservations.parent:
 			number, note = createOrAdoptIssue(ctx, forge, strings.TrimSpace(declaration.ParentTitle), string(declaration.ParentBody), false)
 		case outcome.ParentNote != nil && outcome.ParentNote.Status == issueReserved:
-			number, note = waitForReservedIssue()
+			number, note = preserveReservedIssue()
 		default:
 			number, note = createOrAdoptIssue(ctx, forge, strings.TrimSpace(declaration.ParentTitle), string(declaration.ParentBody), true)
 		}
@@ -205,10 +205,10 @@ func containsInt(values []int, wanted int) bool {
 	return false
 }
 
-// waitForReservedIssue leaves another invocation's reservation unresolved.
+// preserveReservedIssue leaves another invocation's reservation unresolved.
 // An exact title/body match cannot prove that an issue belongs to an in-flight
 // creation when unrelated matching work may already exist.
-func waitForReservedIssue() (int, PublicationNote) {
+func preserveReservedIssue() (int, PublicationNote) {
 	return 0, PublicationNote{
 		Status: issueReserved,
 		Detail: "another invocation reserved issue creation; repeat after that attempt settles rather than guessing which open issue belongs to it or creating a duplicate",
