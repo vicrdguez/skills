@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -102,8 +105,11 @@ type forgeServer struct {
 	fail   func(method, path string) int
 	// drop simulates an unknown-outcome transport failure: the server acts
 	// but the caller receives a broken connection.
-	drop   func(method, path string) bool
-	bodies []string
+	drop     func(method, path string) bool
+	truncate func(method, path string) bool
+	before   func(method, path string)
+	children map[int][]int
+	bodies   []string
 }
 
 func (f *forgeServer) handler() http.Handler {
@@ -115,6 +121,9 @@ func (f *forgeServer) handler() http.Handler {
 			raw := new(bytes.Buffer)
 			_, _ = raw.ReadFrom(request.Body)
 			body = raw.String()
+		}
+		if f.before != nil {
+			f.before(request.Method, request.URL.Path)
 		}
 		if f.fail != nil {
 			if code := f.fail(request.Method, request.URL.Path); code != 0 {
@@ -137,16 +146,47 @@ func (f *forgeServer) handler() http.Handler {
 			_ = json.NewEncoder(response).Encode(f.list)
 		case request.Method == http.MethodPost && request.URL.Path == "/repos/acme/widgets/issues":
 			f.bodies = append(f.bodies, body)
-			issue := map[string]any{"number": len(f.issues) + 101, "state": "open", "title": "", "body": ""}
+			number := len(f.issues) + 101
+			issue := map[string]any{"id": number + 1000, "number": number, "state": "open", "title": "", "body": ""}
 			_ = json.Unmarshal([]byte(body), &issue)
 			f.issues = append(f.issues, issue)
 			f.list = append(f.list, issue)
+			if f.truncate != nil && f.truncate(request.Method, request.URL.Path) {
+				_, _ = io.WriteString(response, `{"number":`)
+				return
+			}
 			_ = json.NewEncoder(response).Encode(issue)
 		case request.Method == http.MethodGet && strings.HasSuffix(request.URL.Path, "/sub_issues"):
-			_ = json.NewEncoder(response).Encode([]any{})
+			parent := issueNumberFromPath(request.URL.Path, "sub_issues")
+			var children []map[string]any
+			for _, child := range f.children[parent] {
+				children = append(children, map[string]any{"number": child})
+			}
+			_ = json.NewEncoder(response).Encode(children)
 		case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/sub_issues"):
 			f.bodies = append(f.bodies, body)
+			parent := issueNumberFromPath(request.URL.Path, "sub_issues")
+			var payload struct {
+				ID int `json:"sub_issue_id"`
+			}
+			_ = json.Unmarshal([]byte(body), &payload)
+			for _, issue := range f.issues {
+				if id, _ := issue["id"].(int); id == payload.ID {
+					if !containsNumber(f.children[parent], issue["number"].(int)) {
+						f.children[parent] = append(f.children[parent], issue["number"].(int))
+					}
+				}
+			}
 			response.WriteHeader(http.StatusOK)
+		case request.Method == http.MethodGet && strings.HasPrefix(request.URL.Path, "/repos/acme/widgets/issues/"):
+			number := issueNumberFromPath(request.URL.Path, "")
+			for _, issue := range f.issues {
+				if issue["number"] == number {
+					_ = json.NewEncoder(response).Encode(issue)
+					return
+				}
+			}
+			http.Error(response, "missing issue", http.StatusNotFound)
 		default:
 			http.Error(response, "unexpected "+request.Method+" "+request.URL.Path, http.StatusNotFound)
 		}
@@ -155,7 +195,7 @@ func (f *forgeServer) handler() http.Handler {
 
 func newForgeServer(t *testing.T) *forgeServer {
 	t.Helper()
-	forge := &forgeServer{}
+	forge := &forgeServer{children: make(map[int][]int)}
 	forge.server = httptest.NewServer(forge.handler())
 	t.Cleanup(forge.server.Close)
 	return forge
@@ -171,6 +211,25 @@ func (f *forgeServer) receivedBodies() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.bodies...)
+}
+
+func issueNumberFromPath(path, trailing string) int {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	index := len(parts) - 1
+	if trailing != "" {
+		index--
+	}
+	number, _ := strconv.Atoi(parts[index])
+	return number
+}
+
+func containsNumber(numbers []int, wanted int) bool {
+	for _, number := range numbers {
+		if number == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 // ledgerCLI is the skl CLI bound to a controllable forge with its own
@@ -1420,5 +1479,491 @@ func TestProposeCleanupRefusedForAdoptedProjects(t *testing.T) {
 	}
 	if ledgerSnapshot(t, root) != before {
 		t.Fatalf("gated cleanup mutated source state:\n%s", ledgerSnapshot(t, root))
+	}
+}
+
+func TestLedgerRefusesSourceStorageOverlap(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		ledgerPath func(*testing.T, string) string
+	}{
+		{name: "same checkout", ledgerPath: func(_ *testing.T, root string) string { return root }},
+		{name: "linked worktree", ledgerPath: func(t *testing.T, root string) string {
+			worktree := filepath.Join(t.TempDir(), "ledger-worktree")
+			runGit(t, root, "worktree", "add", "-q", "-b", "ledger-storage", worktree, "HEAD")
+			return worktree
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := sourceRepository(t, "acme", "widgets")
+			ledgerPath := test.ledgerPath(t, root)
+			config := t.TempDir()
+			t.Setenv("XDG_CONFIG_HOME", config)
+			writeFile(t, filepath.Join(config, "skl", "config.json"), `{"ledger":"`+ledgerPath+`"}`)
+			forge := newForgeServer(t)
+			before := ledgerSnapshot(t, root)
+			outcome := newLedgerApp(t, forge).accept(t, root, writeProposal(t, "", singleSlice("private-work")))
+			if outcome.Status != "fix_required" || !strings.Contains(outcome.Reason, "shares Git storage") || !strings.Contains(outcome.Repair, "separate private ledger") {
+				t.Fatalf("overlap not refused with a repair: %s", mustJSON(t, outcome))
+			}
+			if ledgerSnapshot(t, root) != before || forge.createdCount() != 0 {
+				t.Fatalf("overlap mutated or published source records:\n%s", ledgerSnapshot(t, root))
+			}
+			if _, err := os.Stat(filepath.Join(root, "projects")); !os.IsNotExist(err) {
+				t.Fatalf("private records entered the source checkout: %v", err)
+			}
+		})
+	}
+}
+
+func TestConcurrentAcceptanceCannotOverwriteFrozenContract(t *testing.T) {
+	fixture := newLedgerFixture(t)
+	root := sourceRepository(t, "acme", "widgets")
+	firstSpec := singleSlice("concurrent-contract")
+	secondSpec := singleSlice("concurrent-contract")
+	secondSpec.slices[0].files["intent.md"] = "# Different accepted intent\n"
+	directories := []string{writeProposal(t, "", firstSpec), writeProposal(t, "", secondSpec)}
+	results := []string{filepath.Join(t.TempDir(), "first.json"), filepath.Join(t.TempDir(), "second.json")}
+	commands := make([]*exec.Cmd, len(directories))
+	logs := make([]bytes.Buffer, len(directories))
+	for index := range directories {
+		command := exec.Command(os.Args[0], "-test.run=^TestConcurrentAcceptanceHelper$")
+		command.Env = append(os.Environ(),
+			"SKL_CONCURRENT_ACCEPT_HELPER=1",
+			"SKL_CONCURRENT_ACCEPT_REPO="+root,
+			"SKL_CONCURRENT_ACCEPT_PROPOSAL="+directories[index],
+			"SKL_CONCURRENT_ACCEPT_RESULT="+results[index],
+		)
+		command.Stdout = &logs[index]
+		command.Stderr = &logs[index]
+		commands[index] = command
+		if err := command.Start(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for index, command := range commands {
+		if err := command.Wait(); err != nil {
+			t.Fatalf("concurrent helper: %v\n%s", err, logs[index].String())
+		}
+	}
+	accepted, refused := 0, 0
+	for _, path := range results {
+		var outcome ledgerOutcome
+		if err := json.Unmarshal([]byte(readFile(t, path)), &outcome); err != nil {
+			t.Fatalf("decode helper outcome: %v", err)
+		}
+		switch outcome.Status {
+		case "accepted":
+			accepted++
+		case "fix_required":
+			if !strings.Contains(outcome.Reason, "different content") {
+				t.Fatalf("concurrent loser had the wrong refusal: %s", mustJSON(t, outcome))
+			}
+			refused++
+		default:
+			t.Fatalf("unexpected concurrent outcome: %s", mustJSON(t, outcome))
+		}
+	}
+	if accepted != 1 || refused != 1 {
+		t.Fatalf("concurrent acceptance outcomes: accepted=%d refused=%d", accepted, refused)
+	}
+	commits := strings.Fields(runGitOutput(t, fixture.clone, "log", "--format=%H", "--grep=^accept widgets/concurrent-contract$"))
+	if len(commits) != 1 {
+		t.Fatalf("concurrent acceptance created %d acceptance commits", len(commits))
+	}
+}
+
+func TestConcurrentAcceptanceHelper(t *testing.T) {
+	if os.Getenv("SKL_CONCURRENT_ACCEPT_HELPER") != "1" {
+		return
+	}
+	var output bytes.Buffer
+	factory := func(repository github.RepositoryID) (setup.Backend, error) {
+		backend := setup.NewGitHubBackend("http://127.0.0.1:1", "secret", http.DefaultClient)
+		backend.BindRepository(repository)
+		return backend, nil
+	}
+	app := newApp(factory, bytes.NewReader(nil), &output, &output)
+	err := app.Run([]string{
+		"skl", "ledger", "accept",
+		"--repo", os.Getenv("SKL_CONCURRENT_ACCEPT_REPO"),
+		"--proposal-dir", os.Getenv("SKL_CONCURRENT_ACCEPT_PROPOSAL"),
+		"--format", "json",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(os.Getenv("SKL_CONCURRENT_ACCEPT_RESULT"), output.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPublicationBookkeepingPreservesConcurrentStagedWork(t *testing.T) {
+	fixture := newLedgerFixture(t)
+	root := sourceRepository(t, "acme", "widgets")
+	forge := newForgeServer(t)
+	cli := newLedgerApp(t, forge)
+	staged := false
+	forge.before = func(method, path string) {
+		if staged || method != http.MethodPost || path != "/repos/acme/widgets/issues" {
+			return
+		}
+		staged = true
+		if err := os.WriteFile(filepath.Join(fixture.clone, "human-private.txt"), []byte("human bytes\n"), 0o644); err != nil {
+			panic(err)
+		}
+		if err := exec.Command("git", "-C", fixture.clone, "add", "human-private.txt").Run(); err != nil {
+			panic(err)
+		}
+	}
+	directory := writeProposal(t, "", singleSlice("concurrent-bookkeeping"))
+	outcome := cli.accept(t, root, directory, issueFile(t, "foundation", "body\n"))
+	if outcome.Status != "accepted" || outcome.Acceptance.BookkeepingStatus == nil {
+		t.Fatalf("unsafe bookkeeping was not retained as an actionable accepted outcome: %s", mustJSON(t, outcome))
+	}
+	if exec.Command("git", "-C", fixture.clone, "cat-file", "-e", "HEAD:human-private.txt").Run() == nil {
+		t.Fatal("unrelated staged work was absorbed into a ledger commit")
+	}
+	if status := runGitOutput(t, fixture.clone, "status", "--porcelain"); !strings.Contains(status, "human-private.txt") {
+		t.Fatalf("unrelated staged work was not preserved: %s", status)
+	}
+	if outcome.Acceptance.Slices[0].Issue == nil || forge.createdCount() != 1 {
+		t.Fatalf("completed forge attachment was lost: %s", mustJSON(t, outcome))
+	}
+
+	forge.before = nil
+	runGit(t, fixture.clone, "reset", "--", "human-private.txt")
+	if err := os.Remove(filepath.Join(fixture.clone, "human-private.txt")); err != nil {
+		t.Fatal(err)
+	}
+	repeat := cli.accept(t, root, directory, issueFile(t, "foundation", "body\n"))
+	if repeat.Status != "existing" || repeat.Acceptance.Slices[0].Issue == nil || forge.createdCount() != 1 {
+		t.Fatalf("repair retry failed to adopt the completed attachment without duplication: %s", mustJSON(t, repeat))
+	}
+}
+
+func TestLedgerShowUsesOneCommittedRecord(t *testing.T) {
+	fixture := newLedgerFixture(t)
+	root := sourceRepository(t, "acme", "widgets")
+	cli := newLedgerApp(t, newForgeServer(t))
+	if outcome := cli.accept(t, root, writeProposal(t, "", singleSlice("committed-readback"))); outcome.Status != "accepted" {
+		t.Fatalf("acceptance failed: %s", mustJSON(t, outcome))
+	}
+	directory := filepath.Join(fixture.clone, "projects", "widgets", "proposals", "committed-readback", "foundation")
+	if err := os.Remove(filepath.Join(directory, "intent.md")); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(directory, "state.json"), `{"state":"ready_for_implementation","title":"Add foundation","branch":"uncommitted-branch"}`)
+	outcome, _ := cli.run(t, []string{"skl", "ledger", "show", "--repo", root, "--item", "committed-readback/foundation", "--format", "json"})
+	if outcome.Status != "shown" || outcome.Readback.Branch != "foundation" || len(outcome.Readback.Documents) != 2 {
+		t.Fatalf("readback mixed working-tree membership or state with HEAD: %s", mustJSON(t, outcome))
+	}
+	if !strings.Contains(outcome.Readback.Documents[1].Contents+outcome.Readback.Documents[0].Contents, "Manual verification") {
+		t.Fatalf("committed human obligations disappeared: %s", mustJSON(t, outcome.Readback.Documents))
+	}
+}
+
+func TestLedgerPushUsesCurrentBranchForTrackedDestination(t *testing.T) {
+	fixture := newLedgerFixture(t)
+	runGit(t, fixture.clone, "switch", "-q", "-c", "local-ledger", "--track", "origin/main")
+	root := sourceRepository(t, "acme", "widgets")
+	outcome := newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", singleSlice("tracked-destination")))
+	if outcome.Status != "accepted" || outcome.Acceptance.Slices[0].PushStatus.Status != ledger.PushPushed {
+		t.Fatalf("tracked destination was not pushed honestly: %s", mustJSON(t, outcome))
+	}
+	local := strings.TrimSpace(runGitOutput(t, fixture.clone, "rev-parse", "HEAD"))
+	remote := strings.TrimSpace(runGitOutput(t, fixture.upstream, "rev-parse", "refs/heads/main"))
+	if local != remote {
+		t.Fatalf("reported push omitted accepted revision: local %s remote %s", local, remote)
+	}
+}
+
+func TestParentUncertaintyIsDurableAndRecovered(t *testing.T) {
+	fixture := newLedgerFixture(t)
+	root := sourceRepository(t, "acme", "widgets")
+	forge := newForgeServer(t)
+	cli := newLedgerApp(t, forge)
+	postCount := 0
+	listingBroken := false
+	forge.fail = func(method, path string) int {
+		if listingBroken && method == http.MethodGet && path == "/repos/acme/widgets/issues" {
+			return http.StatusServiceUnavailable
+		}
+		return 0
+	}
+	forge.drop = func(method, path string) bool {
+		if method != http.MethodPost || path != "/repos/acme/widgets/issues" {
+			return false
+		}
+		postCount++
+		if postCount != 3 {
+			return false
+		}
+		issue := map[string]any{"id": 1999, "number": 999, "state": "open", "title": "Deliver parent-retry", "body": "parent body\n"}
+		forge.issues = append(forge.issues, issue)
+		forge.list = append(forge.list, issue)
+		listingBroken = true
+		return true
+	}
+	directory := writeProposal(t, "", dualSlice("parent-retry"))
+	flags := []string{
+		"--issue=foundation=" + writeTemp(t, t, "foundation body\n"),
+		"--issue=feature=" + writeTemp(t, t, "feature body\n"),
+		"--parent-body=" + writeTemp(t, t, "parent body\n"),
+	}
+	first := cli.accept(t, root, directory, flags...)
+	if first.Acceptance.ParentIssue != nil || first.Acceptance.ParentNote == nil || first.Acceptance.ParentNote.Status != ledger.IssueUnresolved {
+		t.Fatalf("uncertain parent was not retained: %s", mustJSON(t, first))
+	}
+	proposal := readLedgerFile(t, fixture.clone, "projects/widgets/proposals/parent-retry/proposal.json")
+	if !strings.Contains(proposal, `"parent_publication"`) || !strings.Contains(proposal, `"unresolved"`) {
+		t.Fatalf("parent uncertainty was not durable: %s", proposal)
+	}
+
+	forge.drop = nil
+	forge.fail = nil
+	listingBroken = false
+	repeat := newLedgerApp(t, forge).accept(t, root, directory, flags...)
+	if repeat.Status != "existing" || repeat.Acceptance.ParentIssue == nil || repeat.Acceptance.ParentIssue.Number != 999 {
+		t.Fatalf("fresh retry did not recover the original parent: %s", mustJSON(t, repeat))
+	}
+	if forge.createdCount() != 3 {
+		t.Fatalf("parent retry duplicated an issue: got %d issues", forge.createdCount())
+	}
+}
+
+func TestGroupingFailureIsDurableAndFreshRetryRepairsIt(t *testing.T) {
+	fixture := newLedgerFixture(t)
+	root := sourceRepository(t, "acme", "widgets")
+	forge := newForgeServer(t)
+	forge.fail = func(method, path string) int {
+		if method == http.MethodPost && strings.HasSuffix(path, "/sub_issues") {
+			return http.StatusServiceUnavailable
+		}
+		return 0
+	}
+	directory := writeProposal(t, "", dualSlice("grouping-retry"))
+	flags := []string{
+		"--issue=foundation=" + writeTemp(t, t, "foundation body\n"),
+		"--issue=feature=" + writeTemp(t, t, "feature body\n"),
+		"--parent-body=" + writeTemp(t, t, "parent body\n"),
+	}
+	cli := newLedgerApp(t, forge)
+	first := cli.accept(t, root, directory, flags...)
+	for _, slice := range first.Acceptance.Slices {
+		if slice.Issue == nil || slice.GroupingStatus == nil {
+			t.Fatalf("attachment and grouping failure were not reported separately: %s", mustJSON(t, first))
+		}
+		state := readLedgerFile(t, fixture.clone, "projects/widgets/proposals/grouping-retry/"+slice.Name+"/state.json")
+		if !strings.Contains(state, `"grouping"`) {
+			t.Fatalf("grouping failure was not durable: %s", state)
+		}
+	}
+	readback, _ := cli.run(t, []string{"skl", "ledger", "show", "--repo", root, "--item", "grouping-retry/foundation", "--format", "json"})
+	if readback.Readback.Pending == nil || readback.Readback.Pending.Grouping == nil {
+		t.Fatalf("local readback hid grouping failure: %s", mustJSON(t, readback))
+	}
+	cli.out.Reset()
+	if err := cli.app.Run([]string{"skl", "ledger", "accept", "--repo", root, "--proposal-dir", directory, flags[0], flags[1], flags[2]}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(cli.out.String(), "Parent grouping: pending") {
+		t.Fatalf("Markdown hid grouping failure: %s", cli.out.String())
+	}
+
+	forge.fail = nil
+	repeat := newLedgerApp(t, forge).accept(t, root, directory, flags...)
+	if repeat.Status != "existing" || forge.createdCount() != 3 {
+		t.Fatalf("fresh grouping retry recreated issues: %s", mustJSON(t, repeat))
+	}
+	forge.mu.Lock()
+	grouped := len(forge.children[repeat.Acceptance.ParentIssue.Number])
+	forge.mu.Unlock()
+	if grouped != 2 {
+		t.Fatalf("fresh retry grouped %d children, want 2", grouped)
+	}
+	for _, slice := range repeat.Acceptance.Slices {
+		if slice.GroupingStatus != nil {
+			t.Fatalf("repaired grouping stayed pending: %s", mustJSON(t, repeat))
+		}
+	}
+}
+
+func TestTruncatedSuccessfulIssueResponseIsResolvedWithoutDuplicate(t *testing.T) {
+	newLedgerFixture(t)
+	root := sourceRepository(t, "acme", "widgets")
+	forge := newForgeServer(t)
+	truncated := false
+	forge.truncate = func(method, path string) bool {
+		if !truncated && method == http.MethodPost && path == "/repos/acme/widgets/issues" {
+			truncated = true
+			return true
+		}
+		return false
+	}
+	directory := writeProposal(t, "", singleSlice("truncated-response"))
+	flag := issueFile(t, "foundation", "body\n")
+	cli := newLedgerApp(t, forge)
+	first := cli.accept(t, root, directory, flag)
+	if first.Acceptance.Slices[0].Issue == nil || forge.createdCount() != 1 {
+		t.Fatalf("lost success response was not resolved safely: %s", mustJSON(t, first))
+	}
+	repeat := newLedgerApp(t, forge).accept(t, root, directory, flag)
+	if repeat.Acceptance.Slices[0].Issue == nil || forge.createdCount() != 1 {
+		t.Fatalf("retry duplicated a truncated successful creation: %s", mustJSON(t, repeat))
+	}
+}
+
+func TestPushRaceRequiresReconciliation(t *testing.T) {
+	fixture := newLedgerFixture(t)
+	root := sourceRepository(t, "acme", "widgets")
+	competitor := filepath.Join(t.TempDir(), "competitor")
+	runGit(t, t.TempDir(), "clone", "-q", fixture.upstream, competitor)
+	runGit(t, competitor, "config", "user.name", "Other")
+	runGit(t, competitor, "config", "user.email", "other@example.com")
+	writeFile(t, filepath.Join(competitor, "competing.txt"), "history\n")
+	runGit(t, competitor, "add", "competing.txt")
+	runGit(t, competitor, "commit", "-q", "-m", "competing history")
+	competitorHead := strings.TrimSpace(runGitOutput(t, competitor, "rev-parse", "HEAD"))
+	hook := filepath.Join(fixture.clone, ".git", "hooks", "pre-push")
+	writeFile(t, hook, fmt.Sprintf("#!/bin/sh\nrm -f \"$0\"\ngit -C %q push -q origin main\n", competitor))
+	if err := os.Chmod(hook, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outcome := newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", singleSlice("push-race")))
+	if outcome.Acceptance.Slices[0].PushStatus.Status != ledger.PushReconciliation {
+		t.Fatalf("push race was misclassified: %s", mustJSON(t, outcome))
+	}
+	if remote := strings.TrimSpace(runGitOutput(t, fixture.upstream, "rev-parse", "refs/heads/main")); remote != competitorHead {
+		t.Fatalf("competing remote history was not preserved: got %s want %s", remote, competitorHead)
+	}
+	state := readLedgerFile(t, fixture.clone, "projects/widgets/proposals/push-race/foundation/state.json")
+	if !strings.Contains(state, ledger.PushReconciliation) {
+		t.Fatalf("reconciliation requirement was not durable: %s", state)
+	}
+}
+
+func TestSuccessfulPushWithImmediateCompetitionRequiresReconciliation(t *testing.T) {
+	fixture := newLedgerFixture(t)
+	root := sourceRepository(t, "acme", "widgets")
+	hook := filepath.Join(fixture.upstream, "hooks", "post-receive")
+	script := fmt.Sprintf(`#!/bin/sh
+read old new ref
+rm -f "$0"
+tree=$(git --git-dir=%q rev-parse "$new^{tree}")
+competing=$(printf 'post-push competition\n' | GIT_AUTHOR_NAME=Other GIT_AUTHOR_EMAIL=other@example.com GIT_COMMITTER_NAME=Other GIT_COMMITTER_EMAIL=other@example.com git --git-dir=%q commit-tree "$tree" -p "$new")
+git --git-dir=%q update-ref "$ref" "$competing" "$new"
+`, fixture.upstream, fixture.upstream, fixture.upstream)
+	writeFile(t, hook, script)
+	if err := os.Chmod(hook, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outcome := newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", singleSlice("post-push-race")))
+	if outcome.Acceptance.Slices[0].PushStatus.Status != ledger.PushReconciliation {
+		t.Fatalf("post-success competition was misclassified: %s", mustJSON(t, outcome))
+	}
+	state := readLedgerFile(t, fixture.clone, "projects/widgets/proposals/post-push-race/foundation/state.json")
+	if !strings.Contains(state, ledger.PushReconciliation) {
+		t.Fatalf("post-success reconciliation was not durable: %s", state)
+	}
+}
+
+func TestBookkeepingPushRaceIsDurablyReconciliationRequired(t *testing.T) {
+	fixture := newLedgerFixture(t)
+	root := sourceRepository(t, "acme", "widgets")
+	competitor := filepath.Join(t.TempDir(), "competitor")
+	runGit(t, t.TempDir(), "clone", "-q", fixture.upstream, competitor)
+	runGit(t, competitor, "config", "user.name", "Other")
+	runGit(t, competitor, "config", "user.email", "other@example.com")
+	counter := filepath.Join(t.TempDir(), "first-push-complete")
+	competingFile := filepath.Join(competitor, "bookkeeping-race.txt")
+	hook := filepath.Join(fixture.clone, ".git", "hooks", "pre-push")
+	script := fmt.Sprintf(`#!/bin/sh
+if [ ! -f %q ]; then
+  : > %q
+  exit 0
+fi
+git -C %q fetch -q origin main
+git -C %q reset -q --hard origin/main
+printf 'competing bookkeeping history\n' > %q
+git -C %q add bookkeeping-race.txt
+git -C %q commit -q -m 'competing bookkeeping history'
+git -C %q push -q origin main
+rm -f "$0"
+`, counter, counter, competitor, competitor, competingFile, competitor, competitor, competitor)
+	writeFile(t, hook, script)
+	if err := os.Chmod(hook, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outcome := newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", singleSlice("bookkeeping-race")), issueFile(t, "foundation", "body\n"))
+	push := outcome.Acceptance.Slices[0].PushStatus
+	if push == nil || push.Status != ledger.PushPushed || !strings.Contains(push.Detail, ledger.PushReconciliation) {
+		t.Fatalf("bookkeeping race was not reported distinctly from accepted-record replication: %s", mustJSON(t, outcome))
+	}
+	state := readLedgerFile(t, fixture.clone, "projects/widgets/proposals/bookkeeping-race/foundation/state.json")
+	if !strings.Contains(state, `"status": "reconciliation_required"`) {
+		t.Fatalf("bookkeeping reconciliation was not durable: %s", state)
+	}
+}
+
+func TestMalformedDocumentsAndGitInvalidBranchAreRefusedWhole(t *testing.T) {
+	t.Run("configuration trailing value", func(t *testing.T) {
+		fixture := newLedgerFixture(t)
+		root := sourceRepository(t, "acme", "widgets")
+		fixture.misconfigure(t, `{"ledger":"`+fixture.clone+`"} trailing`)
+		before := ledgerSnapshot(t, fixture.clone)
+		outcome := newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", singleSlice("bad-config")))
+		if outcome.Status != "fix_required" || !strings.Contains(outcome.Reason, "malformed") || ledgerSnapshot(t, fixture.clone) != before {
+			t.Fatalf("trailing configuration was accepted: %s", mustJSON(t, outcome))
+		}
+	})
+	t.Run("declaration trailing value", func(t *testing.T) {
+		fixture := newLedgerFixture(t)
+		root := sourceRepository(t, "acme", "widgets")
+		directory := writeProposal(t, "", singleSlice("bad-declaration"))
+		path := filepath.Join(directory, "proposal.json")
+		writeFile(t, path, readFileString(t, path)+` {"extra":true}`)
+		before := ledgerSnapshot(t, fixture.clone)
+		outcome := newLedgerApp(t, newForgeServer(t)).accept(t, root, directory)
+		if outcome.Status != "fix_required" || !strings.Contains(outcome.Reason, "malformed") || ledgerSnapshot(t, fixture.clone) != before {
+			t.Fatalf("trailing declaration was accepted: %s", mustJSON(t, outcome))
+		}
+	})
+	t.Run("Git-invalid branch", func(t *testing.T) {
+		fixture := newLedgerFixture(t)
+		root := sourceRepository(t, "acme", "widgets")
+		spec := singleSlice("bad-branch")
+		spec.slices[0].branch = "bad."
+		before := ledgerSnapshot(t, fixture.clone)
+		outcome := newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", spec))
+		if outcome.Status != "fix_required" || !strings.Contains(outcome.Reason, "invalid planned branch") || ledgerSnapshot(t, fixture.clone) != before {
+			t.Fatalf("Git-invalid branch was accepted: %s", mustJSON(t, outcome))
+		}
+	})
+}
+
+func TestProposePublishRefusedForAdoptedProjects(t *testing.T) {
+	fixture := newLedgerFixture(t)
+	root := proposalRepository(t)
+	prepareSlice(t, root, "legacy-publish")
+	forge := newForgeServer(t)
+	cli := newLedgerApp(t, forge)
+	if outcome := cli.accept(t, root, writeProposal(t, "", singleSlice("adopted-publish"))); outcome.Status != "accepted" {
+		t.Fatalf("adoption acceptance failed: %s", mustJSON(t, outcome))
+	}
+	if _, err := os.Stat(filepath.Join(fixture.clone, "projects", "widgets", "proposals", "adopted-publish")); err != nil {
+		t.Fatalf("adoption not recorded: %v", err)
+	}
+	before := ledgerSnapshot(t, root)
+	created := forge.createdCount()
+	cli.out.Reset()
+	if err := cli.app.Run([]string{"skl", "propose", "publish", "--repo", root, "--target", "main", "--slice", proposalSliceFlag(t, "legacy-publish")}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !strings.Contains(cli.out.String(), "Status: unsupported") || !strings.Contains(cli.out.String(), "propose publish") {
+		t.Fatalf("legacy publication was not gated: %s", cli.out.String())
+	}
+	if ledgerSnapshot(t, root) != before || forge.createdCount() != created {
+		t.Fatalf("gated legacy publication mutated source or forge state")
 	}
 }

@@ -3,9 +3,9 @@ package ledger
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -50,6 +50,9 @@ func LoadDeclaration(directory string, bodies map[string][]byte, parentBody []by
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&declaration); err != nil {
 		return nil, refuse("proposal declaration is malformed: "+err.Error(), "correct proposal.json so skl can read the proposal and its slices, then retry")
+	}
+	if err := requireJSONEnd(decoder); err != nil {
+		return nil, refuse("proposal declaration is malformed: "+err.Error(), "keep exactly one JSON object in proposal.json with no trailing values or text, then retry")
 	}
 	if !ValidRecordName(declaration.Proposal) {
 		return nil, refuse("proposal name "+declaration.Proposal+" is not a valid record name", "use a lowercase kebab-case name such as add-order-cancellation")
@@ -238,14 +241,10 @@ func workItemReference(dependency string) (proposal, slice string, ok bool) {
 	return parts[0], parts[1], true
 }
 
-// validBranch rejects planned branch identities Git could not create. It is
-// a safety check, not a full ref-format parser.
+// validBranch delegates planned branch validation to Git so acceptance and
+// later source-branch creation use exactly the same ref-format rules.
 func validBranch(branch string) error {
-	if branch == "" || strings.HasPrefix(branch, "-") || strings.HasPrefix(branch, "/") || strings.HasSuffix(branch, "/") ||
-		strings.Contains(branch, "..") || strings.Contains(branch, "//") || strings.HasSuffix(branch, ".lock") || strings.ContainsAny(branch, " ~^:?*[\\\x00") {
-		return errors.New("invalid branch")
-	}
-	return nil
+	return exec.Command("git", "check-ref-format", "--branch", branch).Run()
 }
 
 // normalizeDependency resolves same-proposal path references to their

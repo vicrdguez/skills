@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -62,6 +63,12 @@ func LoadConfig(path string) (Config, error) {
 			"write it as {\"ledger\": \"/absolute/path/to/ledger-clone\"}",
 		)
 	}
+	if err := requireJSONEnd(decoder); err != nil {
+		return Config{}, refuse(
+			"malformed skl configuration "+path+": "+err.Error(),
+			"keep exactly one JSON object in the file with no trailing values or text",
+		)
+	}
 	if strings.TrimSpace(config.Ledger) == "" {
 		return Config{}, refuse(
 			"skl configuration "+path+" has no ledger setting",
@@ -101,6 +108,71 @@ func Open(path string) (*Store, error) {
 		)
 	}
 	return &Store{Root: root}, nil
+}
+
+// RefuseSourceOverlap verifies that the private ledger and source checkout do
+// not share Git repository storage. Comparing the common Git directory catches
+// equivalent paths and linked worktrees as well as the same checkout.
+func (s *Store) RefuseSourceOverlap(sourceRoot string) error {
+	ledgerGit, err := gitCommonDir(s.Root)
+	if err != nil {
+		return fmt.Errorf("resolve ledger Git storage: %w", err)
+	}
+	sourceGit, err := gitCommonDir(sourceRoot)
+	if err != nil {
+		return fmt.Errorf("resolve source Git storage: %w", err)
+	}
+	if filepath.Clean(ledgerGit) == filepath.Clean(sourceGit) {
+		return sourceOverlapRefusal(sourceRoot)
+	}
+	ledgerInfo, err := os.Stat(ledgerGit)
+	if err != nil {
+		return fmt.Errorf("inspect ledger Git storage %s: %w", ledgerGit, err)
+	}
+	sourceInfo, err := os.Stat(sourceGit)
+	if err != nil {
+		return fmt.Errorf("inspect source Git storage %s: %w", sourceGit, err)
+	}
+	if os.SameFile(ledgerInfo, sourceInfo) {
+		return sourceOverlapRefusal(sourceRoot)
+	}
+	return nil
+}
+
+func sourceOverlapRefusal(sourceRoot string) error {
+	return refuse(
+		"the configured ledger shares Git storage with the source repository at "+sourceRoot,
+		"configure ledger to an existing clone of a separate private ledger repository; source repositories and their worktrees cannot store private Workflow Ledger records",
+	)
+}
+
+func gitCommonDir(root string) (string, error) {
+	directory, err := git(root, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return "", gitError(root, []string{"rev-parse", "--git-common-dir"}, err)
+	}
+	if !filepath.IsAbs(directory) {
+		directory = filepath.Join(root, directory)
+	}
+	directory, err = filepath.Abs(directory)
+	if err != nil {
+		return "", err
+	}
+	if resolved, resolveErr := filepath.EvalSymlinks(directory); resolveErr == nil {
+		directory = resolved
+	}
+	return filepath.Clean(directory), nil
+}
+
+func requireJSONEnd(decoder *json.Decoder) error {
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return errors.New("contains an additional JSON value")
+		}
+		return err
+	}
+	return nil
 }
 
 // LoadSettings resolves, reads, and opens the applicable machine

@@ -44,8 +44,9 @@ type PublicationNote struct {
 // PublicationState collects the pending-publication facts applicable to one
 // slice. An absent field means no pending fact is known for it.
 type PublicationState struct {
-	Push  *PublicationNote `json:"push,omitempty"`
-	Issue *PublicationNote `json:"issue,omitempty"`
+	Push     *PublicationNote `json:"push,omitempty"`
+	Issue    *PublicationNote `json:"issue,omitempty"`
+	Grouping *PublicationNote `json:"grouping,omitempty"`
 }
 
 // SliceState is the persisted state.json of one slice. It owns the current
@@ -63,9 +64,10 @@ type SliceState struct {
 // ProposalMeta is the persisted proposal.json: proposal metadata only. The
 // directory membership defines the slices; no child inventory is stored.
 type ProposalMeta struct {
-	Accepted    string           `json:"accepted"`
-	ParentTitle string           `json:"parent_title,omitempty"`
-	ParentIssue *ForgeAttachment `json:"parent_issue,omitempty"`
+	Accepted          string           `json:"accepted"`
+	ParentTitle       string           `json:"parent_title,omitempty"`
+	ParentIssue       *ForgeAttachment `json:"parent_issue,omitempty"`
+	ParentPublication *PublicationNote `json:"parent_publication,omitempty"`
 }
 
 // contractFileNames returns the frozen contract file names of one slice in a

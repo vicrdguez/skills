@@ -1,10 +1,11 @@
 package ledger
 
 import (
+	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/vicrdguez/skills/github"
@@ -22,19 +23,20 @@ type ContractDocument struct {
 // Readback is the complete readback of one accepted slice: its recorded
 // facts and the exact bytes of every accepted document.
 type Readback struct {
-	Project      string             `json:"project"`
-	Repository   string             `json:"repository"`
-	Proposal     string             `json:"proposal"`
-	Slice        string             `json:"slice"`
-	Item         string             `json:"item"`
-	State        string             `json:"state"`
-	Title        string             `json:"title"`
-	Branch       string             `json:"branch"`
-	Dependencies []DependencyState  `json:"dependencies"`
-	Issue        *ForgeAttachment   `json:"issue,omitempty"`
-	ParentIssue  *ForgeAttachment   `json:"parent_issue,omitempty"`
-	Pending      *PublicationState  `json:"pending_publication,omitempty"`
-	Documents    []ContractDocument `json:"documents"`
+	Project       string             `json:"project"`
+	Repository    string             `json:"repository"`
+	Proposal      string             `json:"proposal"`
+	Slice         string             `json:"slice"`
+	Item          string             `json:"item"`
+	State         string             `json:"state"`
+	Title         string             `json:"title"`
+	Branch        string             `json:"branch"`
+	Dependencies  []DependencyState  `json:"dependencies"`
+	Issue         *ForgeAttachment   `json:"issue,omitempty"`
+	ParentIssue   *ForgeAttachment   `json:"parent_issue,omitempty"`
+	ParentPending *PublicationNote   `json:"parent_pending_publication,omitempty"`
+	Pending       *PublicationState  `json:"pending_publication,omitempty"`
+	Documents     []ContractDocument `json:"documents"`
 }
 
 // DependencyState is one recorded dependency with the blocker's currently
@@ -48,10 +50,6 @@ type DependencyState struct {
 // ledger records. It reads the committed head, needs no forge access, no
 // source markers, and no history search.
 func ShowItem(store *Store, repository github.RepositoryID, item string) (*Readback, error) {
-	project, err := store.resolveProject(repository)
-	if err != nil {
-		return nil, err
-	}
 	proposal, slice, found := strings.Cut(item, "/")
 	if !found || !ValidRecordName(proposal) || !ValidRecordName(slice) {
 		return nil, refuse(
@@ -59,57 +57,85 @@ func ShowItem(store *Store, repository github.RepositoryID, item string) (*Readb
 			"use the identity and readback command the acceptance reported, such as add-order-cancellation/foundation",
 		)
 	}
-	state, found, err := store.readSliceState(project.Name, proposal, slice)
-	if err != nil {
-		return nil, err
-	}
-	if !found {
-		return nil, refuse(
-			"no accepted record for "+item+" in project "+project.Name,
-			"check the identity with the acceptance output, or supply an exact --commit and --path reference",
-		)
-	}
-	meta, recorded, err := store.readProposalMeta(project.Name, proposal)
-	if err != nil {
-		return nil, err
-	}
-	if !recorded {
-		return nil, refuse(
-			"record proposals/"+proposal+" has no readable proposal.json",
-			"repair or remove the damaged record with human direction",
-		)
-	}
 	head, err := store.head()
 	if err != nil {
 		return nil, err
 	}
-	directory := filepath.Join(projectsRoot, project.Name, "proposals", proposal, slice)
+	projectName := repository.Name
+	identity := repository.Owner + "/" + repository.Name
+	var project ProjectIdentity
+	if err := readJSONAt(store, head, filepath.Join(projectsRoot, projectName, "project.json"), &project); err != nil {
+		return nil, refuse(
+			"no committed Project record for "+identity+" at ledger head "+head,
+			"check the configured ledger and source repository; skl reads no uncommitted or forge substitute",
+		)
+	}
+	if project.Repository != identity {
+		return nil, refuse(
+			"project "+projectName+" belongs to "+project.Repository+", which is a different repository from "+identity,
+			"choose the correct source repository or repair the ledger Project with human direction",
+		)
+	}
+	directory := filepath.Join(projectsRoot, projectName, "proposals", proposal, slice)
+	var state SliceState
+	if err := readJSONAt(store, head, filepath.Join(directory, "state.json"), &state); err != nil {
+		return nil, refuse(
+			"no accepted record for "+item+" in project "+projectName+" at committed ledger head "+head,
+			"check the identity with the acceptance output, or supply an exact --commit and --path reference",
+		)
+	}
+	var meta ProposalMeta
+	if err := readJSONAt(store, head, filepath.Join(projectsRoot, projectName, "proposals", proposal, "proposal.json"), &meta); err != nil {
+		return nil, refuse(
+			"committed record proposals/"+proposal+" has no readable proposal.json at ledger head "+head,
+			"repair or restore the damaged record with human direction",
+		)
+	}
 	readback := &Readback{
-		Project: project.Name, Repository: project.Repository,
+		Project: projectName, Repository: project.Repository,
 		Proposal: proposal, Slice: slice, Item: item,
 		State: state.State, Title: state.Title, Branch: state.Branch,
-		Issue: state.Issue, ParentIssue: meta.ParentIssue, Pending: state.Publication,
+		Issue: state.Issue, ParentIssue: meta.ParentIssue, ParentPending: meta.ParentPublication, Pending: state.Publication,
 	}
 	for _, dependency := range state.Dependencies {
 		dependencyState := DependencyState{Item: dependency}
-		if blocker, _, err := store.readStateByReference(project.Name, dependency); err == nil {
+		if blocker, err := store.readStateByReferenceAt(head, projectName, dependency); err == nil {
 			dependencyState.State = blocker
 		}
 		readback.Dependencies = append(readback.Dependencies, dependencyState)
 	}
-	for _, name := range acceptedFileNames(store, directory) {
-		contents, err := showPath(store, head, filepath.Join(directory, name))
+	names, err := acceptedFileNamesAt(store, head, directory)
+	if err != nil {
+		return nil, refuse(
+			"committed record of "+item+" is unreadable at ledger head "+head+": "+err.Error(),
+			"repair or restore the complete accepted record with human direction",
+		)
+	}
+	for _, required := range []string{"behavior.md", "intent.md"} {
+		if !containsString(names, required) {
+			return nil, refuse(
+				"committed record of "+item+" is incomplete at ledger head "+head+": "+required+" is missing",
+				"repair or restore the complete accepted record with human direction; skl never omits accepted obligations silently",
+			)
+		}
+	}
+	for _, name := range names {
+		path := filepath.ToSlash(filepath.Join(directory, name))
+		contents, err := showPath(store, head, path)
 		if err != nil {
-			return nil, err
+			return nil, refuse(
+				"committed contract "+filepath.ToSlash(path)+" is unavailable at ledger head "+head+": "+err.Error(),
+				"repair or restore the complete accepted record with human direction; skl substitutes no working-tree or forge content",
+			)
 		}
 		readback.Documents = append(readback.Documents, ContractDocument{
-			Path: filepath.ToSlash(filepath.Join(directory, name)), Commit: head, Contents: contents,
+			Path: filepath.ToSlash(path), Commit: head, Contents: contents,
 		})
 	}
 	if len(readback.Documents) == 0 {
 		return nil, refuse(
-			"record of "+item+" holds no contract files",
-			"repair or remove the damaged record with human direction",
+			"committed record of "+item+" holds no contract files at ledger head "+head,
+			"repair or restore the complete accepted record with human direction",
 		)
 	}
 	return readback, nil
@@ -158,28 +184,53 @@ func showPath(store *Store, commit, path string) (string, error) {
 	return string(raw), nil
 }
 
-// acceptedFileNames lists the contract files present in one slice record.
-func acceptedFileNames(store *Store, directory string) []string {
-	entries, err := os.ReadDir(filepath.Join(store.Root, directory))
+func readJSONAt(store *Store, commit, path string, destination any) error {
+	contents, err := showPath(store, commit, filepath.ToSlash(path))
 	if err != nil {
-		return nil
+		return err
 	}
-	var names []string
-	for _, entry := range entries {
-		if !entry.IsDir() && contractFiles[entry.Name()] {
-			names = append(names, entry.Name())
-		}
+	if err := json.Unmarshal([]byte(contents), destination); err != nil {
+		return fmt.Errorf("decode %s at %s: %w", filepath.ToSlash(path), commit, err)
 	}
-	return names
+	return nil
 }
 
-// readStateByReference reads the current state of a dependency reference.
-func (s *Store) readStateByReference(project, reference string) (string, bool, error) {
+func containsString(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+// acceptedFileNamesAt lists the contract files committed in one slice tree.
+func acceptedFileNamesAt(store *Store, commit, directory string) ([]string, error) {
+	contents, err := git(store.Root, "ls-tree", "--name-only", commit+":"+filepath.ToSlash(directory))
+	if err != nil {
+		return nil, gitError(store.Root, []string{"ls-tree", "--name-only", commit + ":" + filepath.ToSlash(directory)}, err)
+	}
+	var names []string
+	for _, name := range strings.Fields(contents) {
+		if contractFiles[name] {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// readStateByReferenceAt reads a dependency state from the same committed
+// ledger revision as the surrounding readback.
+func (s *Store) readStateByReferenceAt(commit, project, reference string) (string, error) {
 	trimmed := strings.TrimPrefix(reference, "proposals/")
 	proposal, slice, found := strings.Cut(trimmed, "/")
 	if !found {
-		return "", false, fmt.Errorf("reference %s is not a Work Item reference", reference)
+		return "", fmt.Errorf("reference %s is not a Work Item reference", reference)
 	}
-	state, found, err := s.readSliceState(project, proposal, slice)
-	return state.State, found, err
+	var state SliceState
+	if err := readJSONAt(s, commit, filepath.Join(projectsRoot, project, "proposals", proposal, slice, "state.json"), &state); err != nil {
+		return "", err
+	}
+	return state.State, nil
 }

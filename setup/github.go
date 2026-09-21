@@ -505,6 +505,9 @@ func (b *GitHubBackend) CreateIssue(ctx context.Context, title, body string) (in
 	if err != nil {
 		return 0, err
 	}
+	if issue.Number <= 0 || issue.ID <= 0 {
+		return 0, &TransportFailure{Cause: errors.New("successful issue creation returned no reliable issue identity")}
+	}
 	b.issueIDs[issue.Number] = issue.ID
 	b.issueBodies[issue.Number] = body
 	return issue.Number, nil
@@ -553,11 +556,28 @@ func (b *GitHubBackend) AttachChild(ctx context.Context, parent, child int) erro
 	if err := b.requireRepository(); err != nil {
 		return err
 	}
-	id, ok := b.issueIDs[child]
-	if !ok {
-		return fmt.Errorf("GitHub issue id unavailable for #%d", child)
+	id, err := b.issueID(ctx, child)
+	if err != nil {
+		return err
 	}
 	return b.request(ctx, http.MethodPost, b.repositoryPath(b.repository)+fmt.Sprintf("/issues/%d/sub_issues", parent), map[string]int64{"sub_issue_id": id}, nil)
+}
+
+func (b *GitHubBackend) issueID(ctx context.Context, number int) (int64, error) {
+	if id, ok := b.issueIDs[number]; ok {
+		return id, nil
+	}
+	var issue githubIssue
+	path := b.repositoryPath(b.repository) + fmt.Sprintf("/issues/%d", number)
+	if err := b.request(ctx, http.MethodGet, path, nil, &issue); err != nil {
+		return 0, fmt.Errorf("resolve GitHub issue id for #%d: %w", number, err)
+	}
+	if issue.Number != number || issue.ID == 0 {
+		return 0, fmt.Errorf("GitHub issue #%d returned no stable database id", number)
+	}
+	b.issueIDs[number] = issue.ID
+	b.issueBodies[number] = issue.Body
+	return issue.ID, nil
 }
 
 func (b *GitHubBackend) request(ctx context.Context, method, path string, body, destination any) error {
@@ -613,7 +633,15 @@ func (b *GitHubBackend) requestStatus(ctx context.Context, method, path string, 
 		return response.StatusCode, fmt.Errorf("GitHub %s %s: %s: %s", method, path, response.Status, strings.TrimSpace(string(message)))
 	}
 	if destination != nil {
-		return response.StatusCode, json.NewDecoder(response.Body).Decode(destination)
+		if err := json.NewDecoder(response.Body).Decode(destination); err != nil {
+			// A successful response with an unreadable body does not establish
+			// whether a mutating request completed. Preserve that uncertainty so
+			// issue publication resolves by observation before any retry.
+			if method != http.MethodGet {
+				return response.StatusCode, &TransportFailure{Cause: err}
+			}
+			return response.StatusCode, err
+		}
 	}
 	return response.StatusCode, nil
 }

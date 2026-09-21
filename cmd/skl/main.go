@@ -130,6 +130,10 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 					return err
 				}
 				request.Root, request.Remote = repository.Root, repository.Remote
+				gated, err := gateUnsupportedDelivery(stdout, formatMarkdown, repository.Repository, "propose publish")
+				if gated || err != nil {
+					return err
+				}
 				backend, err := newBackend(repository.Repository)
 				if err != nil {
 					return err

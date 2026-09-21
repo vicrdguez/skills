@@ -63,6 +63,9 @@ func ledgerCommands(newBackend backendFactory, stdout io.Writer) *cli.Command {
 				if failure != nil {
 					return renderLedgerRefusal(stdout, format, failure)
 				}
+				if err := store.RefuseSourceOverlap(repository.Root); err != nil {
+					return renderLedgerRefusal(stdout, format, err)
+				}
 				backend, err := newBackend(repository.Repository)
 				if err != nil {
 					return renderLedgerRefusal(stdout, format, err)
@@ -229,6 +232,12 @@ func ledgerMarkdown(outcome ledgerOutcome) string {
 		line("Ledger push: %s%s", pushWord(acceptance), pushDetail(acceptance))
 		if acceptance.ParentTitle != "" {
 			line("Parent issue: %s", attachmentWord(acceptance.ParentIssue, acceptance.ParentNote))
+			if acceptance.ParentIssue != nil && acceptance.ParentNote != nil {
+				line("Parent publication: %s: %s", acceptance.ParentNote.Status, acceptance.ParentNote.Detail)
+			}
+		}
+		if acceptance.BookkeepingStatus != nil {
+			line("Publication bookkeeping: %s: %s", acceptance.BookkeepingStatus.Status, acceptance.BookkeepingStatus.Detail)
 		}
 		for _, slice := range acceptance.Slices {
 			line("Slice %s: %s (branch %s)", slice.Name, slice.Title, slice.Branch)
@@ -239,6 +248,12 @@ func ledgerMarkdown(outcome ledgerOutcome) string {
 				line("  Depends on: %s", dependency)
 			}
 			line("  Issue: %s", attachmentWord(slice.Issue, slice.IssueStatus))
+			if slice.Issue != nil && slice.IssueStatus != nil {
+				line("  Issue publication: %s: %s", slice.IssueStatus.Status, slice.IssueStatus.Detail)
+			}
+			if slice.GroupingStatus != nil {
+				line("  Parent grouping: %s: %s", slice.GroupingStatus.Status, slice.GroupingStatus.Detail)
+			}
 			line("  Readback: skl ledger show --item %s/%s", acceptance.Proposal, slice.Name)
 		}
 		line("The local acceptance is authoritative; pending publication effects stay readable and can be retried by repeating this acceptance.")
@@ -265,12 +280,18 @@ func ledgerMarkdown(outcome ledgerOutcome) string {
 		if readback.ParentIssue != nil {
 			line("Parent issue: %s#%d", readback.ParentIssue.Repository, readback.ParentIssue.Number)
 		}
+		if readback.ParentPending != nil {
+			line("Pending parent issue: %s: %s", readback.ParentPending.Status, readback.ParentPending.Detail)
+		}
 		if pending := readback.Pending; pending != nil {
 			if pending.Push != nil {
 				line("Pending push: %s: %s", pending.Push.Status, pending.Push.Detail)
 			}
 			if pending.Issue != nil {
 				line("Pending issue: %s: %s", pending.Issue.Status, pending.Issue.Detail)
+			}
+			if pending.Grouping != nil {
+				line("Pending parent grouping: %s: %s", pending.Grouping.Status, pending.Grouping.Detail)
 			}
 		}
 		for _, document := range readback.Documents {
