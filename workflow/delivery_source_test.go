@@ -116,6 +116,34 @@ func TestDeliverySourcePrepareUsesAvailableLocalInputsOffline(t *testing.T) {
 	}
 }
 
+func TestDeliverySourcePrepareRetainsFetchedTargetForOfflineUse(t *testing.T) {
+	root := newGitRepository(t)
+	remote := newBareRemote(t, root)
+	publisher := t.TempDir()
+	runGit(t, publisher, "clone", "-q", "--branch", "main", remote, ".")
+	runGit(t, publisher, "config", "user.name", "Publisher")
+	runGit(t, publisher, "config", "user.email", "publisher@example.com")
+	commitFile(t, publisher, "later-main.txt", "later target\n")
+	runGit(t, publisher, "push", "-q", "origin", "main")
+	target := gitOutput(t, publisher, "rev-parse", "HEAD")
+
+	// A remote may track only selected branches. Preparation still observes
+	// main explicitly and must retain that observation for offline fallback.
+	runGit(t, root, "config", "remote.upstream.fetch", "+refs/heads/tracked-only:refs/remotes/upstream/tracked-only")
+	online, err := PrepareDeliverySource(root, "upstream", "online-slice", "", "")
+	if err != nil || online.Target != target {
+		t.Fatalf("online preparation = %#v, %v; want target %s", online, err, target)
+	}
+	runGit(t, root, "remote", "set-url", "upstream", filepath.Join(t.TempDir(), "unavailable"))
+	offline, err := PrepareDeliverySource(root, "upstream", "offline-slice", "", "")
+	if err != nil || offline.Target != target || offline.Head != target {
+		t.Fatalf("offline preparation = %#v, %v; want last observed target %s", offline, err, target)
+	}
+	if !strings.HasPrefix(offline.FetchStatus, "local:") {
+		t.Fatalf("offline preparation claimed freshness: %q", offline.FetchStatus)
+	}
+}
+
 func TestDeliverySourcePreparePreservesRecordedTargetAfterFetch(t *testing.T) {
 	root := newGitRepository(t)
 	newBareRemote(t, root)

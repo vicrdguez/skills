@@ -286,7 +286,11 @@ func deliveryFetch(root, remote, ref string) (string, error) {
 	}
 	destination := deliveryFetchRef(ref)
 	defer func() { _ = gitOK(root, "update-ref", "-d", destination) }()
-	if err := gitOK(root, "fetch", "--no-tags", remote, "+"+ref+":"+destination); err != nil {
+	// Retain the observation for offline preparation even when this remote's
+	// configured fetch refmap excludes it. Resolve only the private destination:
+	// another caller may update the shared tracking ref before this fetch returns.
+	tracking := "refs/remotes/" + remote + "/" + ref
+	if err := gitOK(root, "fetch", "--no-tags", remote, "+"+ref+":"+destination, "+"+ref+":"+tracking); err != nil {
 		return "", err
 	}
 	fetched := deliveryResolveCommit(root, destination)
