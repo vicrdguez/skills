@@ -72,6 +72,7 @@ type deliveryForge struct {
 	// many have succeeded, so a final confirmation can be unavailable.
 	failReadsAfter int
 	reads          int
+	beforePullRead func(*deliveryPull)
 }
 
 type deliveryRequest struct{ method, path string }
@@ -226,6 +227,9 @@ func (f *deliveryForge) serveOne(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		f.reads++
+		if f.beforePullRead != nil {
+			f.beforePullRead(pull)
+		}
 		if f.failReadsAfter > 0 && f.reads > f.failReadsAfter {
 			http.Error(w, "pull request unreadable", http.StatusInternalServerError)
 			return
@@ -695,6 +699,77 @@ func TestDeliveryPublicationReportsUnresolvedReadinessCorrection(t *testing.T) {
 	}
 	if pull.Head != "bbb-unreviewed" || pull.Body != "approved aaa" {
 		t.Fatalf("correction failure rewrote source or body: %#v", pull)
+	}
+}
+
+func TestDeliveryPublicationPreservesNewerApprovalDuringCorrection(t *testing.T) {
+	for _, scenario := range []struct {
+		name       string
+		beforeRead int
+		head, body string
+	}{
+		{"new approval before mismatch read", 3, "bbb-unreviewed", "approved bbb"},
+		{"new approval before correction read", 4, "ccc-reviewed", "approved ccc"},
+		{"further source movement with unchanged body", 4, "ccc-reviewed", "approved aaa"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			forge := newDeliveryForge(t)
+			forge.add(deliveryPull{Number: 5, Body: "earlier public body", Draft: true, Head: "aaa"})
+			forge.moveHeadOnReady = "bbb-unreviewed"
+			forge.beforePullRead = func(pull *deliveryPull) {
+				if forge.reads == scenario.beforeRead {
+					pull.Head, pull.Body = scenario.head, scenario.body
+					pull.Draft = false
+				}
+			}
+			server := forge.server()
+			defer server.Close()
+
+			_, err := deliveryBackend(server).PresentPull(context.Background(), ledger.PullPresentation{
+				Number: 5, Body: "approved aaa", Branch: "widget", Head: "aaa", Approved: true,
+			})
+			if err == nil || !strings.Contains(err.Error(), "unresolved") {
+				t.Errorf("superseded correction was not reported unresolved: %v", err)
+			}
+			pull := forge.pull(5)
+			if pull.Draft || pull.Head != scenario.head || pull.Body != scenario.body {
+				t.Fatalf("old attempt changed newer approval: %#v", pull)
+			}
+			if mutations := forge.mutations(); len(mutations) != 1 {
+				t.Fatalf("old attempt dispatched a correction over newer work: %v", mutations)
+			}
+		})
+	}
+}
+
+func TestDeliveryPublicationReportsUnconfirmedReadinessCorrection(t *testing.T) {
+	for _, unreadable := range []bool{false, true} {
+		t.Run(fmt.Sprintf("unreadable=%t", unreadable), func(t *testing.T) {
+			forge := newDeliveryForge(t)
+			forge.add(deliveryPull{Number: 5, Body: "earlier public body", Draft: true, Head: "aaa"})
+			forge.moveHeadOnReady = "bbb-unreviewed"
+			if unreadable {
+				forge.failReadsAfter = 4
+			} else {
+				forge.beforePullRead = func(pull *deliveryPull) {
+					if forge.reads == 5 {
+						pull.Draft = false
+					}
+				}
+			}
+			server := forge.server()
+			defer server.Close()
+
+			_, err := deliveryBackend(server).PresentPull(context.Background(), ledger.PullPresentation{
+				Number: 5, Body: "approved aaa", Branch: "widget", Head: "aaa", Approved: true,
+			})
+			if err == nil || !strings.Contains(err.Error(), "correction remains unresolved") {
+				t.Fatalf("unconfirmed correction was not reported unresolved: %v", err)
+			}
+			if mutations := forge.mutations(); len(mutations) != 2 {
+				t.Fatalf("expected one bounded correction, got %v", mutations)
+			}
+		})
 	}
 }
 

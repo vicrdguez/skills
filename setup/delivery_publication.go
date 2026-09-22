@@ -136,14 +136,14 @@ func (b *GitHubBackend) createPresentedPull(ctx context.Context, repository gith
 	}
 }
 
-// presentationAttempt names the one readiness direction a presentation
-// dispatched for a pull request. It lets a later proof that the source was not
-// the reviewed one correct exactly the non-draft readiness this attempt may
-// have established, never readiness another writer owns.
+// presentationAttempt tracks a dispatched readiness mutation and the public
+// presentation against which a bounded correction can be checked. GitHub has
+// no conditional readiness mutation; observable newer work must be preserved.
 type presentationAttempt struct {
-	number int
-	nodeID string
-	ready  bool
+	number   int
+	nodeID   string
+	ready    bool
+	expected ledger.PullPresentation
 }
 
 // applyPresentedPull writes only the supplied public body and the native
@@ -152,7 +152,7 @@ type presentationAttempt struct {
 // before writing, so a branch that already moved receives neither the public
 // body nor the ready presentation.
 func (b *GitHubBackend) applyPresentedPull(ctx context.Context, repository github.RepositoryID, presentation ledger.PullPresentation, pull githubPull) (presentationAttempt, error) {
-	attempt := presentationAttempt{number: pull.Number}
+	attempt := presentationAttempt{number: pull.Number, expected: presentation}
 	if presentation.Approved {
 		fresh, err := b.pullForPresentation(ctx, repository, pull.Number)
 		if err != nil {
@@ -182,11 +182,10 @@ func (b *GitHubBackend) applyPresentedPull(ctx context.Context, repository githu
 	return attempt, nil
 }
 
-// correctPresentedReadiness restores draft readiness only for the non-draft
-// mutation this attempt dispatched. It re-reads the attachment before mutating
-// so readiness this attempt did not establish is left untouched, and it reports
-// a correction it could not confirm as explicitly unresolved rather than
-// treating a still-ready presentation of unreviewed code as harmless.
+// correctPresentedReadiness attempts one draft correction after dispatching
+// readiness. It preserves an observably changed attachment or public body and
+// confirms the result rather than treating a mutation response as proof. This
+// is bounded reconciliation, not an atomic compare-and-set with external writers.
 func (b *GitHubBackend) correctPresentedReadiness(ctx context.Context, repository github.RepositoryID, attempt presentationAttempt, cause error) error {
 	if !attempt.ready {
 		return cause
@@ -198,17 +197,17 @@ func (b *GitHubBackend) correctPresentedReadiness(ctx context.Context, repositor
 	if pull.Draft {
 		return cause
 	}
-	nodeID := pull.NodeID
-	if nodeID == "" {
-		nodeID = attempt.nodeID
+	if pull.NodeID != attempt.nodeID || pull.Body != attempt.expected.Body || presentedPullMismatch(*pull, repository, attempt.expected) != "" {
+		return fmt.Errorf("%v; pull request #%d changed since this attempt's observation; newer work was preserved and readiness correction remains unresolved", cause, attempt.number)
 	}
-	if nodeID == "" {
-		return fmt.Errorf("%v; the ready presentation this attempt established has no stable node identity for correction and remains unresolved: pull request #%d may still present unreviewed code as ready", cause, attempt.number)
-	}
-	if err := b.setPullPresentation(ctx, nodeID, true); err != nil {
+	if err := b.setPullPresentation(ctx, attempt.nodeID, true); err != nil {
 		return fmt.Errorf("%v; restoring draft readiness failed (%v) and remains unresolved: pull request #%d may still present unreviewed code as ready", cause, err, attempt.number)
 	}
-	return fmt.Errorf("%v; the ready presentation this attempt established was restored to draft", cause)
+	confirmed, err := b.pullForPresentation(ctx, repository, attempt.number)
+	if err != nil || confirmed.NodeID != attempt.nodeID || !confirmed.Draft {
+		return fmt.Errorf("%v; draft correction for pull request #%d was not confirmed (read error: %v); correction remains unresolved", cause, attempt.number, err)
+	}
+	return fmt.Errorf("%v; draft readiness was confirmed after this attempt's correction", cause)
 }
 
 // setPullPresentation performs the one native readiness mutation the adapter
@@ -236,15 +235,18 @@ func (b *GitHubBackend) setPullPresentation(ctx context.Context, nodeID string, 
 
 // refreshPresentedPull re-reads the final attachment and refuses unless the
 // observed source identity, public body, and readiness are exactly the ones
-// this presentation established. A source that moved after the readiness
-// mutation cannot remain presented as approved: the attempt restores the
-// non-draft readiness it established and reports the mismatch explicitly.
+// this presentation established. A source mismatch triggers a bounded draft
+// correction while preserving observable newer work; unresolved correction is
+// reported explicitly, never as successful approval.
 func (b *GitHubBackend) refreshPresentedPull(ctx context.Context, repository github.RepositoryID, presentation ledger.PullPresentation, attempt presentationAttempt) (int, error) {
 	pull, err := b.pullForPresentation(ctx, repository, attempt.number)
 	if err != nil {
 		return 0, b.correctPresentedReadiness(ctx, repository, attempt, fmt.Errorf("the presented pull request could not be re-read: %v", err))
 	}
 	if reason := presentedPullMismatch(*pull, repository, presentation); reason != "" {
+		// Allow correction of this observed head movement, but not a further
+		// source change between detecting the mismatch and correcting it.
+		attempt.expected.Head = pull.Head.SHA
 		return 0, b.correctPresentedReadiness(ctx, repository, attempt, workflow.Refuse(reason+"; inspect the pull request before retrying the same handoff"))
 	}
 	if pull.Body != presentation.Body {
