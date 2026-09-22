@@ -66,18 +66,18 @@ Work Item does not prescribe test organization or construction order.
 
 ## Definition of Done
 
-- [ ] B1: Project-scoped selection and exclusive Claims preserve lane priority, normal dependency gating, and concurrency across different slices.
-- [ ] B2: Claimed work prepares or safely reuses source workspaces and consumes the exact private Contract without source-tree contract machinery.
-- [ ] B3: Execution skills and deferred resources bind known facts and commands without worker-owned ledger bookkeeping or engine-resolvable procedure choices.
-- [ ] B4: Versioned phase metadata round-trips through the documented persisted format while Markdown remains unchanged and unsupported formats are refused explicitly.
-- [ ] B5: Local handoffs commit report and state together, survive interrupted delivery, and cannot count a retry twice or overwrite later work.
-- [ ] B6: Implementation supplies explicit current completion evidence and Audit dispositions without the engine judging prose or rewriting Contracts.
-- [ ] B7: Watchdog drives pass, rework, and human pause with durable completed-review counts, including same-code new reviews and retry distinction.
-- [ ] B8: Review scope and reviewed/final source revisions preserve the independent-review and permitted-marker rules.
-- [ ] B9: Resume/release and network-failure handling preserve source progress and fixed inputs without automatic expiry or fabricated availability.
-- [ ] B10: Normal PR attempts use explicitly authored public material and adapter-owned draft/readiness behavior without gating local success.
-- [ ] B11: Fixed-item operations do not reconstruct unrelated project history, inspect source markers, or use forge conversations as authority.
-- [ ] B12: Existing CLI and real-Git verification covers the complete delivery path and failure boundaries, with schema and execution-resource documentation available through `skl`.
+- [x] B1: Project-scoped selection and exclusive Claims preserve lane priority, normal dependency gating, and concurrency across different slices.
+- [x] B2: Claimed work prepares or safely reuses source workspaces and consumes the exact private Contract without source-tree contract machinery.
+- [x] B3: Execution skills and deferred resources bind known facts and commands without worker-owned ledger bookkeeping or engine-resolvable procedure choices.
+- [x] B4: Versioned phase metadata round-trips through the documented persisted format while Markdown remains unchanged and unsupported formats are refused explicitly.
+- [x] B5: Local handoffs commit report and state together, survive interrupted delivery, and cannot count a retry twice or overwrite later work.
+- [x] B6: Implementation supplies explicit current completion evidence and Audit dispositions without the engine judging prose or rewriting Contracts.
+- [x] B7: Watchdog drives pass, rework, and human pause with durable completed-review counts, including same-code new reviews and retry distinction.
+- [x] B8: Review scope and reviewed/final source revisions preserve the independent-review and permitted-marker rules.
+- [x] B9: Resume/release and network-failure handling preserve source progress and fixed inputs without automatic expiry or fabricated availability.
+- [x] B10: Normal PR attempts use explicitly authored public material and adapter-owned draft/readiness behavior without gating local success.
+- [x] B11: Fixed-item operations do not reconstruct unrelated project history, inspect source markers, or use forge conversations as authority.
+- [x] B12: Existing CLI and real-Git verification covers the complete delivery path and failure boundaries, with schema and execution-resource documentation available through `skl`.
 
 ## Manual verification
 
