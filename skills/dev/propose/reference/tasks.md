@@ -1,23 +1,25 @@
 # Tasks — {change title}
 
 <!--
-This the coordination ledger for implementation. Write it when there's more than a couple of scenarios or any non-behavioral chores. Rules:
+This optional coordination ledger exists only when useful sequencing,
+dependencies, or coordination benefit from explicit tracking. Group work by a
+coherent implementation outcome. Scenario count, test count, and construction
+order never require matching tasks, and stable IDs are optional rather than a
+requirement database. Label warranted tasks T<n>; do not number every step.
 
-- One behavioral task per Gherkin scenario → each is one red-green TDD cycle.
-- Stable ids (B1, C1, D1…) so an orchestrator can dispatch and track.
-
-Frozen at the `[baseline] <slice-slug>` commit: the `[completion] <slice-slug>` endpoint may only change an existing non-manual `[ ]` to lowercase `[x]`. No task is added during implementation or rework.
+Frozen when `skl ledger accept` records the proposal. Accepted files are
+read-only: completion evidence lives in reports, not in ticks here. Delete this
+comment in the real file.
 -->
 
-## Behavioral  (one per scenario → a red-green cycle)
-- [ ] B1  {Scenario name}            → behavior.md §1
-- [ ] B2  {Scenario name}            → behavior.md §2
+## Behavioral contract work
+- [ ] {coherent behavior group; reference relevant rules or scenarios when useful}
 
-## Chores  (non-behavioral work: migrations, wiring, config)
-- [ ] C1  {chore}
+## Chores
+- [ ] {non-behavioral migration, wiring, or configuration work}
 
 ## Docs
-- [ ] D1  {documentation task}
+- [ ] {documentation work}
 
 ---
 
@@ -26,12 +28,9 @@ Frozen at the `[baseline] <slice-slug>` commit: the `[completion] <slice-slug>` 
 ```md
 # Tasks — add-order-cancellation
 
-## Behavioral
-- [ ] B1  Cancel an unshipped order            → behavior.md §1
-- [ ] B2  Reject cancelling a shipped order     → behavior.md §2
-- [ ] B3  Refund amount matches the order total → behavior.md §3
+## Behavioral contract work
+- [ ] Deliver cancellation eligibility, state change, and refund outcomes.
 
 ## Chores
-- [ ] C1  Migration: add orders.cancelled_at
-- [ ] C2  Wire OrderCancelled → refund handler
+- [ ] Add the cancellation timestamp migration before wiring the refund handler.
 ```
