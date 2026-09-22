@@ -59,6 +59,19 @@ type deliveryForge struct {
 	listStatus      int
 	listAfterCreate bool
 	graphqlStatus   int
+
+	// graphqlDraftStatus, when non-zero, fails only a draft conversion, so a
+	// readiness correction can succeed or fail independently of the non-draft
+	// mutation it reverses.
+	graphqlDraftStatus int
+	// moveHeadOnReady, when set, advances the matching pull request's head exactly
+	// when a non-draft readiness mutation arrives, simulating a branch that moves
+	// between the last preflight read and the readiness mutation.
+	moveHeadOnReady string
+	// failReadsAfter, when greater than zero, fails pull request reads once that
+	// many have succeeded, so a final confirmation can be unavailable.
+	failReadsAfter int
+	reads          int
 }
 
 type deliveryRequest struct{ method, path string }
@@ -212,6 +225,11 @@ func (f *deliveryForge) serveOne(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
+		f.reads++
+		if f.failReadsAfter > 0 && f.reads > f.failReadsAfter {
+			http.Error(w, "pull request unreadable", http.StatusInternalServerError)
+			return
+		}
 		json.NewEncoder(w).Encode(pull.record())
 	case http.MethodPatch:
 		var payload map[string]any
@@ -237,13 +255,20 @@ func (f *deliveryForge) serveGraphQL(w http.ResponseWriter, r *http.Request) {
 	json.NewDecoder(r.Body).Decode(&payload)
 	f.mu.Lock()
 	f.draftQueries = append(f.draftQueries, payload.Query)
+	ready := strings.Contains(payload.Query, "markPullRequestReadyForReview")
 	status := f.graphqlStatus
+	if status == 0 && !ready {
+		status = f.graphqlDraftStatus
+	}
 	if status == 0 {
 		for _, pull := range f.pulls {
 			if pull.NodeID != payload.Variables["id"] {
 				continue
 			}
-			pull.Draft = !strings.Contains(payload.Query, "markPullRequestReadyForReview")
+			if ready && f.moveHeadOnReady != "" {
+				pull.Head = f.moveHeadOnReady
+			}
+			pull.Draft = !ready
 		}
 	}
 	f.mu.Unlock()
@@ -609,5 +634,115 @@ func TestDeliveryPublicationUsesOnlyPresentationSurfaces(t *testing.T) {
 	}
 	if mutations := forge.mutations(); len(mutations) != 1 {
 		t.Fatalf("unexpected readiness mutations: %v", mutations)
+	}
+}
+
+// TestDeliveryPublicationCorrectsReadinessWhenSourceMovesBeforeApproval covers
+// the observed gap where the branch advances between the last preflight read and
+// the native readiness mutation. The pull request must not stay presented as an
+// approval of code that was never reviewed, and the newer source and the
+// authored body must survive the correction.
+func TestDeliveryPublicationCorrectsReadinessWhenSourceMovesBeforeApproval(t *testing.T) {
+	forge := newDeliveryForge(t)
+	forge.add(deliveryPull{Number: 5, Body: "earlier public body", Draft: true, Head: "aaa"})
+	forge.moveHeadOnReady = "bbb-unreviewed"
+	server := forge.server()
+	defer server.Close()
+
+	_, err := deliveryBackend(server).PresentPull(context.Background(), ledger.PullPresentation{
+		Number: 5, Body: "approved aaa", Branch: "widget", Head: "aaa", Approved: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "not the expected aaa") {
+		t.Fatalf("source movement was not refused: %v", err)
+	}
+	pull := forge.pull(5)
+	if pull == nil || !pull.Draft {
+		t.Fatalf("unreviewed code stayed ready: %#v", pull)
+	}
+	if pull.Head != "bbb-unreviewed" {
+		t.Fatalf("newer source was rewritten: %q", pull.Head)
+	}
+	if pull.Body != "approved aaa" {
+		t.Fatalf("authored body was not preserved: %q", pull.Body)
+	}
+	mutations := forge.mutations()
+	if len(mutations) != 2 || !strings.Contains(mutations[0], "markPullRequestReadyForReview") || !strings.Contains(mutations[1], "convertPullRequestToDraft") {
+		t.Fatalf("readiness reconciliation mutations = %v", mutations)
+	}
+}
+
+// TestDeliveryPublicationReportsUnresolvedReadinessCorrection covers the
+// correction itself failing. The adapter must not report the mismatch as if the
+// ready presentation had been made safe; it names the unresolved state so the
+// operator inspects the pull request.
+func TestDeliveryPublicationReportsUnresolvedReadinessCorrection(t *testing.T) {
+	forge := newDeliveryForge(t)
+	forge.add(deliveryPull{Number: 5, Body: "earlier public body", Draft: true, Head: "aaa"})
+	forge.moveHeadOnReady = "bbb-unreviewed"
+	forge.graphqlDraftStatus = http.StatusInternalServerError
+	server := forge.server()
+	defer server.Close()
+
+	_, err := deliveryBackend(server).PresentPull(context.Background(), ledger.PullPresentation{
+		Number: 5, Body: "approved aaa", Branch: "widget", Head: "aaa", Approved: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "unresolved") {
+		t.Fatalf("unresolved correction was not reported: %v", err)
+	}
+	pull := forge.pull(5)
+	if pull == nil || pull.Draft {
+		t.Fatalf("test expected the uncorrected ready state to stay observable: %#v", pull)
+	}
+	if pull.Head != "bbb-unreviewed" || pull.Body != "approved aaa" {
+		t.Fatalf("correction failure rewrote source or body: %#v", pull)
+	}
+}
+
+// TestDeliveryPublicationPreservesNewerProseOnSourceMismatch covers preserving
+// unrelated authored content: a presentation for a stale head must not overwrite
+// the pull request's current body or readiness.
+func TestDeliveryPublicationPreservesNewerProseOnSourceMismatch(t *testing.T) {
+	forge := newDeliveryForge(t)
+	forge.add(deliveryPull{Number: 5, Body: "newer authored prose", Draft: true, Head: "bbb-unreviewed"})
+	server := forge.server()
+	defer server.Close()
+
+	_, err := deliveryBackend(server).PresentPull(context.Background(), ledger.PullPresentation{
+		Number: 5, Body: "approved aaa", Branch: "widget", Head: "aaa", Approved: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "not the expected aaa") {
+		t.Fatalf("stale presentation was not refused: %v", err)
+	}
+	pull := forge.pull(5)
+	if pull.Body != "newer authored prose" || !pull.Draft {
+		t.Fatalf("stale presentation rewrote newer prose or readiness: %#v", pull)
+	}
+	if len(forge.patchPayloads) != 0 || len(forge.mutations()) != 0 {
+		t.Fatalf("stale presentation wrote to the forge: patches=%v mutations=%v", forge.patchPayloads, forge.mutations())
+	}
+}
+
+// TestDeliveryPublicationDoesNotReverseReadinessItDidNotEstablish covers the
+// ownership boundary: when the ready presentation already exists, this attempt
+// dispatches no readiness mutation, so an unconfirmable final read must not
+// convert someone else's ready state back to draft.
+func TestDeliveryPublicationDoesNotReverseReadinessItDidNotEstablish(t *testing.T) {
+	forge := newDeliveryForge(t)
+	forge.add(deliveryPull{Number: 5, Body: "approved aaa", Draft: false, Head: "aaa"})
+	forge.failReadsAfter = 2
+	server := forge.server()
+	defer server.Close()
+
+	_, err := deliveryBackend(server).PresentPull(context.Background(), ledger.PullPresentation{
+		Number: 5, Body: "approved aaa", Branch: "widget", Head: "aaa", Approved: true,
+	})
+	if err == nil {
+		t.Fatal("unreadable final confirmation was accepted")
+	}
+	if mutations := forge.mutations(); len(mutations) != 0 {
+		t.Fatalf("readiness this attempt did not establish was mutated: %v", mutations)
+	}
+	if pull := forge.pull(5); pull == nil || pull.Draft {
+		t.Fatalf("unrelated ready presentation was reverted: %#v", pull)
 	}
 }
