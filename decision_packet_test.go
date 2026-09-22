@@ -38,7 +38,6 @@ func decisionRequestFacts(project, item string) DecisionRequest {
 		},
 		Source: &DecisionSource{
 			Branch:      "decision",
-			Worktree:    "/tmp/decision",
 			Submission:  11,
 			SourceHead:  strings.Repeat("a", 40),
 			Target:      strings.Repeat("b", 40),
@@ -290,7 +289,7 @@ func TestDecisionRetirementGuardsPartialDelivery(t *testing.T) {
 		"another slice is still claimed",
 		"release or complete the active slice before retiring",
 		"`repair/active`",
-		"was not retired while active or claimed work remains",
+		"was not retired for the reason above",
 		"nothing was released, merged, or silently abandoned",
 	} {
 		if !strings.Contains(refused.Instructions, want) {
@@ -350,16 +349,16 @@ func TestDecisionTriageResourceAndInstallation(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"grouped when they concern the same rule",
-		"Keep each request's identity, exact references, and item-specific differences intact",
-		"do not invent it",
+		"Group related questions freely",
+		"keep each request's identity, exact reference, commitment, conflict",
+		"never invented, guessed, or filled in by inference",
 		"not authorization",
-		"do not demand a ceremonial second confirmation",
+		"without a ceremonial second confirmation",
 		"applied`, `already_applied`, `refused`, or `unresolved",
 		"never claim the whole group succeeded",
 		"renewed proposal and re-slicing",
-		"reports partial delivery rather than all-delivered completion",
-		"A Superseded blocker is not Merged",
+		"reports partial delivery, never all-delivered completion",
+		"a Superseded blocker is not Merged",
 	} {
 		if !strings.Contains(string(resource), want) {
 			t.Errorf("triage resource is missing %q", want)

@@ -24,6 +24,8 @@ const (
 	DecisionPartial DecisionStatus = "partial"
 	// DecisionRefused records direction that changed nothing.
 	DecisionRefused DecisionStatus = "refused"
+	// DecisionUnresolved reports an unconfirmed local result requiring repair.
+	DecisionUnresolved DecisionStatus = "unresolved"
 )
 
 // Continuation routes a recorded Human Decision may select. The route is part
@@ -84,7 +86,6 @@ type DecisionRequest struct {
 // the request. It is optional context, never ledger navigation.
 type DecisionSource struct {
 	Branch      string `json:"branch,omitempty"`
-	Worktree    string `json:"worktree,omitempty"`
 	Submission  int    `json:"submission,omitempty"`
 	SourceHead  string `json:"source_head,omitempty"`
 	Target      string `json:"target,omitempty"`

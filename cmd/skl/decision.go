@@ -81,6 +81,10 @@ func runDecisionInbox(command *cli.Context, stdout io.Writer) error {
 			"read the ledger-wide inbox, or narrow it with --project <name>")
 	}
 	filter := command.String("project")
+	if command.IsSet("project") && strings.TrimSpace(filter) == "" {
+		return renderDecisionRefusal(stdout, format, "an explicit Project filter cannot be empty",
+			"supply --project <name>, or omit the flag to read the ledger-wide inbox")
+	}
 	store, failure := openConfiguredLedger()
 	if failure != nil {
 		return renderDecisionUnavailable(stdout, format, failure)
@@ -293,7 +297,7 @@ func runDecisionRetire(command *cli.Context, stdout io.Writer) error {
 // selected item is resolved, partial when some are, refused when none are.
 func renderDecisionResults(stdout io.Writer, format implementationFormatKind, results []ledger.DecisionResult) error {
 	facts := &skilldist.DecisionFacts{Outcomes: make([]skilldist.DecisionOutcome, 0, len(results))}
-	resolved := 0
+	resolved, unresolved := 0, 0
 	for _, result := range results {
 		outcome := skilldist.DecisionOutcome{
 			Project: result.Project, Item: result.Item, Status: result.Status,
@@ -309,6 +313,10 @@ func renderDecisionResults(stdout io.Writer, format implementationFormatKind, re
 		if result.Status == ledger.DecisionApplied || result.Status == ledger.DecisionAlreadyApplied {
 			resolved++
 		}
+		if result.Status == ledger.DecisionUnresolved {
+			unresolved++
+			outcome.Repair = "repair the reported local failure and retry this exact scoped operation; preserve already-applied outcomes"
+		}
 		facts.Outcomes = append(facts.Outcomes, outcome)
 	}
 	switch {
@@ -316,6 +324,8 @@ func renderDecisionResults(stdout io.Writer, format implementationFormatKind, re
 		facts.Status = skilldist.DecisionApplied
 	case resolved > 0:
 		facts.Status = skilldist.DecisionPartial
+	case unresolved > 0:
+		facts.Status = skilldist.DecisionUnresolved
 	default:
 		facts.Status = skilldist.DecisionRefused
 	}

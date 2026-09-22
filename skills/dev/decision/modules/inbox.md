@@ -19,7 +19,7 @@
 
 - Wrong obligations require renewed proposal and re-slicing through `explore` and `propose`. Do not edit the accepted Contract or invent replacement work here.
 - `supersede` abandons unmerged work only. It preserves frozen Contracts, reports, exact references, Merged slices, and unmerged source work; a Superseded blocker is not Merged, so its dependents stay blocked.
-- An old parent is retired only when no active work or Claim remains. Retirement reports partial delivery, never all-delivered completion, and performs no archive move, dependency remapping, forge completion observation, or source deletion.
+- An old parent with abandoned slices is retired only when no active work or Claim remains. Retirement reports partial delivery, never all-delivered completion, and performs no archive move, dependency remapping, forge completion observation, or source deletion.
 {{end}}
 
 {{define "decision-inbox"}}# Decision Inbox
@@ -40,8 +40,7 @@ Project: {{.Project}}
 Repository: {{.Repository}}
 Proposal: {{.Proposal}}
 Answered-request reference: `{{.RequestCommit}}:{{.RequestPath}}`{{if .Source}}{{if .Source.Branch}}
-Branch: `{{.Source.Branch}}`{{end}}{{if .Source.Worktree}}
-Worktree: `{{.Source.Worktree}}`{{end}}{{if .Source.Submission}}
+Branch: `{{.Source.Branch}}`{{end}}{{if .Source.Submission}}
 Submission: #{{.Source.Submission}}{{end}}{{if .Source.SourceHead}}
 Source head: `{{.Source.SourceHead}}`{{end}}{{if .Source.Target}}
 Integration target: `{{.Source.Target}}`{{end}}{{if .Source.ReviewCount}}
@@ -63,11 +62,13 @@ Reference: `{{.Commit}}:{{.Path}}`
 
 {{template "decision-renewal" .}}
 
-## Record exactly what the human decided
+{{template "decision-recording" .}}
+{{end}}
+{{define "decision-recording"}}## Record exactly what the human decided
 
-Write the human's answer verbatim to a file and choose the continuation route. Submit it with the request's bound command above, replacing only the two unknown values: `--route <implement|watchdog|supersede>` and `--answer <human-answer-file>`. When the direction covers several named requests, submit each request's own command, or later submit one explicitly scoped multi-input file with `skl decision apply --input <json-file>`.
+Write the human's answer verbatim to a file and choose the continuation route. Submit it with the request's bound inbox command, replacing only the two unknown values: `--route <implement|watchdog|supersede>` and `--answer <human-answer-file>`. When the direction covers several independently named requests, submit each request's own command, or submit one explicitly scoped multi-input file with `skl decision apply --input <json-file>`. Report each item as `applied`, `already_applied`, `refused`, or `unresolved`; never claim the whole group succeeded when a member did not. An exact repeated operation recognizes the recorded result without a second decision or requeue and without releasing a later Claim or overwriting later work. For coupled direction, clarify unresolved conditions before writing; `--coupled` requires the entire selected group to validate together.
 
-The continuation route is part of the answer: `implement` returns the item to Ready for Implementation or Rework, `watchdog` returns it to Awaiting Review at the same code revision, and `supersede` abandons unmerged work. Only the CLI records the answer and its route together and atomically. A submission without an identified request and continuation route is refused without mutation.
+The continuation route is part of the answer: `implement` returns initial work to Ready for Implementation or finding-driven work to Rework, `watchdog` returns it to Awaiting Review at the same code revision, and `supersede` abandons unmerged work. Existing progress, Submission, fixed references, completed-review history, and the two-review automatic-rework limit remain intact; the next worker exercises independent judgment. Only the CLI records the answer and its route together and atomically. A submission without an identified request and continuation route is refused without mutation.
 
 Explicitly retiring the old parent of abandoned work uses `skl decision retire --project <project> --proposal <proposal>`; a parent is retired only when no active or claimed slice remains.
 {{end}}
@@ -87,7 +88,7 @@ The configured Workflow Ledger could not be resolved or read, so no inbox was ob
 {{end}}Repair the machine configuration or access problem and read the inbox again. The only configured source is `$XDG_CONFIG_HOME/skl/config.json`, falling back to `~/.config/skl/config.json`, with an absolute `ledger` path. The inbox never substitutes a forge search, a source checkout, or agent inference for the missing ledger.{{end}}
 {{define "decision-result"}}# Human Decision Result
 
-{{if eq .Status "applied"}}The selected direction was recorded. Every selected item below is resolved by one committed answer and route, so no separate confirmation is required.{{else if eq .Status "partial"}}The direction was recorded only in part. Applied items are committed, while refused and unresolved items changed nothing; this is not a successful whole-group decision.{{else}}No selected direction was recorded. Every item below changed nothing.{{end}}{{if .Reason}}
+{{if eq .Status "applied"}}The selected direction was recorded. Every selected item below is resolved by one committed answer and route, so no separate confirmation is required.{{else if eq .Status "partial"}}The direction was recorded only in part. Applied items are committed; refused items changed nothing, and unresolved outcomes need inspection. This is not a successful whole-group decision.{{else if eq .Status "unresolved"}}The selected direction could not be confirmed. Inspect unresolved outcomes before retrying; do not infer that nothing was recorded.{{else}}No selected direction was recorded. Every item below changed nothing.{{end}}{{if .Reason}}
 
 {{.Reason}}{{end}}{{if .Repair}}
 
@@ -127,4 +128,4 @@ Superseded slices: {{.Superseded}}
 {{end}}{{if .Repair}}Next: {{.Repair}}
 {{end}}Retire command: `skl decision retire --project {{quote .Project}} --proposal {{quote .Proposal}}`
 
-{{if eq .Status "retired"}}The parent is retired. This reports partial delivery, not all-delivered completion: Superseded slices stay Superseded, their dependents stay blocked, and no archive move, dependency remapping, forge completion observation, or source deletion occurs here.{{else}}The parent was not retired while active or claimed work remains; nothing was released, merged, or silently abandoned.{{end}}{{end}}{{end}}{{end}}
+{{if eq .Status "retired"}}The parent is retired. This reports partial delivery, not all-delivered completion: Superseded slices stay Superseded, their dependents stay blocked, and no archive move, dependency remapping, forge completion observation, or source deletion occurs here.{{else}}The parent was not retired for the reason above; nothing was released, merged, or silently abandoned.{{end}}{{end}}{{end}}{{end}}

@@ -186,7 +186,7 @@ skl decision apply --project <project> --item <proposal>/<slice> \
 
 The route is part of the answer: `implement` requeues for implementation, `watchdog` returns to review at the same code revision, and `supersede` abandons unmerged work. The engine records the answer and route together and atomically, reports every selected item as `applied`, `already_applied`, `refused`, or `unresolved`, and never claims a mixed group succeeded. Several named requests may instead be submitted later from one explicitly scoped `skl decision apply --input <json-file>`.
 
-Explicitly retire the old parent of abandoned work only when no active work or Claim remains:
+Explicitly retire the old parent of abandoned work only when at least one slice is Superseded and no active work or Claim remains. All-Merged proposals belong to completion observation, not this operation:
 
 ```sh
 skl decision retire --project <project> --proposal <proposal>

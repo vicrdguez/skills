@@ -628,6 +628,14 @@ func TestDecisionContinuationReachesWorkers(t *testing.T) {
 	if final := deliveryPersistedState(t, fixture.clone); final.Claim != nil || final.State != ledger.ReadyForMerge || final.Decision {
 		t.Fatalf("final state = %#v, want a consumed direction ready for merge", final)
 	}
+	beforeRetry := ledgerSnapshot(t, fixture.clone)
+	consumedRetry := decisionApplyAnswer(t, cli, request, ledger.RouteImplement, answer)
+	if len(consumedRetry.Results) != 1 || consumedRetry.Results[0].Status != ledger.DecisionAlreadyApplied {
+		t.Fatalf("consumed decision retry = %#v", consumedRetry)
+	}
+	if ledgerSnapshot(t, fixture.clone) != beforeRetry {
+		t.Fatal("consumed decision retry changed completed review or state")
+	}
 }
 
 // TestDecisionWatchdogContinuationAtSameCode covers B6/A3: a Watchdog
@@ -635,85 +643,95 @@ func TestDecisionContinuationReachesWorkers(t *testing.T) {
 // retains the completed-review count, produces round 3, and can reach Ready
 // for Merge without a new source commit.
 func TestDecisionWatchdogContinuationAtSameCode(t *testing.T) {
-	fixture := newLedgerFixture(t)
-	forge := newForgeServer(t)
-	source, target := deliverySourceRepo(t)
-	deliveryAcceptFixture(t, forge, source)
-	cli := decisionReadOnlyApp(t)
+	for _, final := range []struct{ outcome, state string }{{"pass", ledger.ReadyForMerge}, {"rework", ledger.NeedsHuman}} {
+		t.Run(final.outcome, func(t *testing.T) {
+			fixture := newLedgerFixture(t)
+			forge := newForgeServer(t)
+			source, target := deliverySourceRepo(t)
+			deliveryAcceptFixture(t, forge, source)
+			cli := decisionReadOnlyApp(t)
 
-	// Round 1: a change is implemented and reviewed as Rework.
-	started := decisionSelect(t, cli, source)
-	prepared, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--item", deliveryTestItem, "--claim", started.Execution.Claim.Commit, "--format", "json")
-	if err != nil || prepared.Source == nil {
-		t.Fatalf("prepare: %#v %v", prepared, err)
-	}
-	worktree := prepared.Source.Worktree
-	writeFile(t, filepath.Join(worktree, "feature.txt"), "foundation\n")
-	runGit(t, worktree, "add", "feature.txt")
-	runGit(t, worktree, "commit", "-q", "-m", "implement foundation")
-	head := deliveryTrimmed(t, worktree, "rev-parse", "HEAD")
-	bodyPath := filepath.Join(t.TempDir(), "implement-report.md")
-	writeFile(t, bodyPath, "# implementation result\n")
-	first, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", started.Execution.Claim.Commit,
-		"--head", head, "--target", target, "--body", bodyPath, "--format", "json")
-	if err != nil || first.Status != ledger.AwaitingReview {
-		t.Fatalf("implement submit: %#v %v", first, err)
-	}
-	reviewBody := filepath.Join(t.TempDir(), "watchdog-report.md")
-	writeFile(t, reviewBody, "# review result\n")
-	review1 := decisionSelectPhase(t, cli, ledger.WatchdogPhase, source)
-	reworked, err := cli.deliveryJSON(t, "skl", "watchdog", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", review1.Execution.Claim.Commit,
-		"--outcome", "rework", "--body", reviewBody, "--format", "json")
-	if err != nil || reworked.Status != ledger.Rework {
-		t.Fatalf("round 1 rework: %#v %v", reworked, err)
-	}
+			// Round 1: a change is implemented and reviewed as Rework.
+			started := decisionSelect(t, cli, source)
+			prepared, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--item", deliveryTestItem, "--claim", started.Execution.Claim.Commit, "--format", "json")
+			if err != nil || prepared.Source == nil {
+				t.Fatalf("prepare: %#v %v", prepared, err)
+			}
+			worktree := prepared.Source.Worktree
+			writeFile(t, filepath.Join(worktree, "feature.txt"), "foundation\n")
+			runGit(t, worktree, "add", "feature.txt")
+			runGit(t, worktree, "commit", "-q", "-m", "implement foundation")
+			head := deliveryTrimmed(t, worktree, "rev-parse", "HEAD")
+			bodyPath := filepath.Join(t.TempDir(), "implement-report.md")
+			writeFile(t, bodyPath, "# implementation result\n")
+			first, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", started.Execution.Claim.Commit,
+				"--head", head, "--target", target, "--body", bodyPath, "--format", "json")
+			if err != nil || first.Status != ledger.AwaitingReview {
+				t.Fatalf("implement submit: %#v %v", first, err)
+			}
+			reviewBody := filepath.Join(t.TempDir(), "watchdog-report.md")
+			writeFile(t, reviewBody, "# review result\n")
+			review1 := decisionSelectPhase(t, cli, ledger.WatchdogPhase, source)
+			reworked, err := cli.deliveryJSON(t, "skl", "watchdog", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", review1.Execution.Claim.Commit,
+				"--outcome", "rework", "--body", reviewBody, "--format", "json")
+			if err != nil || reworked.Status != ledger.Rework {
+				t.Fatalf("round 1 rework: %#v %v", reworked, err)
+			}
 
-	// Round 2: rework without a new commit, then a failing review reaches the
-	// automatic-rework cap and pauses for human direction.
-	reworkClaim := decisionSelect(t, cli, source)
-	prepared2, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--item", deliveryTestItem, "--claim", reworkClaim.Execution.Claim.Commit, "--format", "json")
-	if err != nil || prepared2.Source == nil || prepared2.Source.Head != head {
-		t.Fatalf("rework prepare: %#v %v", prepared2, err)
-	}
-	second, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", reworkClaim.Execution.Claim.Commit,
-		"--head", head, "--target", target, "--body", bodyPath, "--format", "json")
-	if err != nil || second.Status != ledger.AwaitingReview {
-		t.Fatalf("rework submit: %#v %v", second, err)
-	}
-	review2 := decisionSelectPhase(t, cli, ledger.WatchdogPhase, source)
-	roundTwo, err := cli.deliveryJSON(t, "skl", "watchdog", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", review2.Execution.Claim.Commit,
-		"--outcome", "rework", "--body", reviewBody, "--format", "json")
-	if err != nil || roundTwo.Status != ledger.NeedsHuman {
-		t.Fatalf("round 2 rework: %#v %v", roundTwo, err)
-	}
-	if state := deliveryPersistedState(t, fixture.clone); state.Claim != nil || state.State != ledger.NeedsHuman {
-		t.Fatalf("round 2 pause = %#v", state)
-	}
+			// Round 2: rework without a new commit, then a failing review reaches the
+			// automatic-rework cap and pauses for human direction.
+			reworkClaim := decisionSelect(t, cli, source)
+			prepared2, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--item", deliveryTestItem, "--claim", reworkClaim.Execution.Claim.Commit, "--format", "json")
+			if err != nil || prepared2.Source == nil || prepared2.Source.Head != head {
+				t.Fatalf("rework prepare: %#v %v", prepared2, err)
+			}
+			second, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", reworkClaim.Execution.Claim.Commit,
+				"--head", head, "--target", target, "--body", bodyPath, "--format", "json")
+			if err != nil || second.Status != ledger.AwaitingReview {
+				t.Fatalf("rework submit: %#v %v", second, err)
+			}
+			review2 := decisionSelectPhase(t, cli, ledger.WatchdogPhase, source)
+			roundTwo, err := cli.deliveryJSON(t, "skl", "watchdog", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", review2.Execution.Claim.Commit,
+				"--outcome", "rework", "--body", reviewBody, "--format", "json")
+			if err != nil || roundTwo.Status != ledger.NeedsHuman {
+				t.Fatalf("round 2 rework: %#v %v", roundTwo, err)
+			}
+			if state := deliveryPersistedState(t, fixture.clone); state.Claim != nil || state.State != ledger.NeedsHuman {
+				t.Fatalf("round 2 pause = %#v", state)
+			}
 
-	// Human direction returns the item to review at the unchanged revision.
-	request := decisionRequest(t, cli, "widgets", deliveryTestItem)
-	answer := "# Human direction\n\nReconsider the findings at the unchanged " + head + ".\n"
-	applied := decisionApplyAnswer(t, cli, request, ledger.RouteWatchdog, answer)
-	if applied.Status != ledger.DecisionApplied || applied.Results[0].State != ledger.AwaitingReview {
-		t.Fatalf("watchdog direction = %#v", applied)
-	}
+			// Human direction returns the item to review at the unchanged revision.
+			request := decisionRequest(t, cli, "widgets", deliveryTestItem)
+			answer := "# Human direction\n\nReconsider the findings at the unchanged " + head + ".\n"
+			applied := decisionApplyAnswer(t, cli, request, ledger.RouteWatchdog, answer)
+			if applied.Status != ledger.DecisionApplied || applied.Results[0].State != ledger.AwaitingReview {
+				t.Fatalf("watchdog direction = %#v", applied)
+			}
 
-	// Round 3 reviews the same code with the recorded count and can pass.
-	review3 := decisionSelectPhase(t, cli, ledger.WatchdogPhase, source)
-	if review3.Execution.Implement == nil || review3.Execution.Implement.Source.Head != head {
-		t.Fatalf("round 3 did not review the unchanged revision %s: %#v", head, review3.Execution)
-	}
-	if review3.Execution.State.Claim.Inputs.Decision == nil {
-		t.Fatalf("round 3 did not consume the direction: %#v", review3.Execution)
-	}
-	passed, err := cli.deliveryJSON(t, "skl", "watchdog", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", review3.Execution.Claim.Commit,
-		"--outcome", "pass", "--body", reviewBody, "--format", "json")
-	if err != nil || passed.Status != ledger.ReadyForMerge || passed.Result == nil {
-		t.Fatalf("round 3 pass: %#v %v", passed, err)
-	}
-	report, _ := deliveryCommittedReport(t, cli, passed.Result.Report, ledger.WatchdogPhase)
-	if report.Round != 3 || report.Source.Reviewed != head {
-		t.Fatalf("round 3 review = round %d of %s, want round 3 of the unchanged %s", report.Round, report.Source.Reviewed, head)
+			// Round 3 reviews the same code with the recorded count and can pass.
+			review3 := decisionSelectPhase(t, cli, ledger.WatchdogPhase, source)
+			if review3.Execution.Implement == nil || review3.Execution.Implement.Source.Head != head {
+				t.Fatalf("round 3 did not review the unchanged revision %s: %#v", head, review3.Execution)
+			}
+			if review3.Execution.State.Claim.Inputs.Decision == nil {
+				t.Fatalf("round 3 did not consume the direction: %#v", review3.Execution)
+			}
+			passed, err := cli.deliveryJSON(t, "skl", "watchdog", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", review3.Execution.Claim.Commit,
+				"--outcome", final.outcome, "--body", reviewBody, "--format", "json")
+			if err != nil || passed.Status != final.state || passed.Result == nil {
+				t.Fatalf("round 3 %s: %#v %v", final.outcome, passed, err)
+			}
+			report, _ := deliveryCommittedReport(t, cli, passed.Result.Report, ledger.WatchdogPhase)
+			if report.Round != 3 || report.Source.Reviewed != head {
+				t.Fatalf("round 3 review = round %d of %s, want round 3 of the unchanged %s", report.Round, report.Source.Reviewed, head)
+			}
+			if final.outcome == "rework" {
+				blocked, err := cli.deliveryJSON(t, "skl", "implement", "next", "--repo", source, "--format", "json")
+				if err != nil || blocked.Status != "no_work" {
+					t.Fatalf("round 3 failure regained automatic Rework: %#v %v", blocked, err)
+				}
+			}
+		})
 	}
 }
 
@@ -827,9 +845,9 @@ func TestDecisionStandaloneSkillAndTriageResource(t *testing.T) {
 	triage := output.String()
 	for _, want := range []string{
 		"only narrowing",
-		"ask for it; do not invent it",
+		"never invented, guessed, or filled in by inference",
 		"not authorization",
-		"do not demand a ceremonial second confirmation",
+		"without a ceremonial second confirmation",
 		"applied`, `already_applied`, `refused`, or `unresolved",
 		"renewed proposal and re-slicing",
 		"Superseded blocker is not Merged",

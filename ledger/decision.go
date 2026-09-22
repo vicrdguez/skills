@@ -40,6 +40,7 @@ const (
 	DecisionApplied        = "applied"
 	DecisionAlreadyApplied = "already_applied"
 	DecisionRefused        = "refused"
+	DecisionUnresolved     = "unresolved"
 )
 
 // Proposal retirement statuses.
@@ -471,11 +472,11 @@ func (s *Store) currentRequest(head, directory string, state SliceState) (string
 // per-item outcome. A refusal is reported in the result; only an unusable
 // ledger or store is returned as an error.
 func ApplyDecision(s *Store, input DecisionInput) (*DecisionResult, error) {
-	results, err := ApplyDecisions(s, []DecisionInput{input}, false)
+	result, err := applyIndependentDecision(s, input)
 	if err != nil {
 		return nil, err
 	}
-	return &results[0], nil
+	return &result, nil
 }
 
 // ApplyDecisions applies a set of explicitly scoped decisions. When coupled
@@ -497,7 +498,11 @@ func ApplyDecisions(s *Store, inputs []DecisionInput, coupled bool) ([]DecisionR
 	for _, input := range inputs {
 		result, err := applyIndependentDecision(s, input)
 		if err != nil {
-			return nil, err
+			// An independent member's failure cannot erase already committed
+			// outcomes or imply that the entire group changed nothing.
+			result = DecisionResult{Project: input.Project, Item: input.Item,
+				Status: DecisionUnresolved, Request: input.Request, Route: input.Route,
+				Refusal: err.Error()}
 		}
 		results = append(results, result)
 	}
@@ -523,9 +528,6 @@ func applyIndependentDecision(s *Store, input DecisionInput) (DecisionResult, er
 	var plan *decisionWrite
 	var committed string
 	err := s.withMutation(func() error {
-		if err := s.requireReconciled(); err != nil {
-			return err
-		}
 		var err error
 		plan, err = s.planDecision(input)
 		if err != nil {
@@ -533,6 +535,9 @@ func applyIndependentDecision(s *Store, input DecisionInput) (DecisionResult, er
 		}
 		if plan.already {
 			return nil
+		}
+		if err := s.requireReconciled(); err != nil {
+			return err
 		}
 		committed, err = s.commitDecisions(plan)
 		return err
@@ -555,18 +560,31 @@ func applyIndependentDecision(s *Store, input DecisionInput) (DecisionResult, er
 }
 
 func applyCoupledDecisions(s *Store, inputs []DecisionInput) ([]DecisionResult, error) {
+	seen := make(map[string]bool, len(inputs))
+	for _, input := range inputs {
+		key := input.Project + "/" + input.Item
+		if seen[key] {
+			return nil, refuse("duplicate Work Item in coupled direction: "+key,
+				"clarify one answer and route per selected Work Item before submitting the group")
+		}
+		seen[key] = true
+	}
 	var plans []*decisionWrite
 	var committed string
 	err := s.withMutation(func() error {
-		if err := s.requireReconciled(); err != nil {
-			return err
-		}
+		pending := false
 		for _, input := range inputs {
 			plan, err := s.planDecision(input)
 			if err != nil {
 				return err
 			}
 			plans = append(plans, plan)
+			pending = pending || !plan.already
+		}
+		if pending {
+			if err := s.requireReconciled(); err != nil {
+				return err
+			}
 		}
 		var err error
 		committed, err = s.commitDecisions(plans...)
@@ -656,7 +674,10 @@ func (s *Store) planDecision(input DecisionInput) (*decisionWrite, error) {
 		input: input, proposal: proposal, slice: slice, directory: directory,
 		decisionPath: directory + "/decision.md", statePath: directory + "/state.json", head: head,
 	}
-	if state.Decision {
+	// Consuming a decision clears its active marker, not its replay evidence.
+	// The current retained document is sufficient; do not search history or
+	// reroute later work to reconstruct an old effect.
+	if state.Decision || gitOK(s.Root, "cat-file", "-e", head+":"+plan.decisionPath) {
 		raw, err := showPath(s, head, plan.decisionPath)
 		if err != nil {
 			return nil, refuse(
@@ -674,10 +695,12 @@ func (s *Store) planDecision(input DecisionInput) (*decisionWrite, error) {
 			plan.already = true
 			return plan, nil
 		}
-		return nil, refuse(
-			"a Human Decision is already recorded for "+input.Item,
-			"inspect the recorded decision; a different answer requires renewed human direction rather than replacing the recorded result",
-		)
+		if state.Decision || record.AnsweredRequest == input.Request {
+			return nil, refuse(
+				"a Human Decision is already recorded for "+input.Item,
+				"inspect the recorded decision; a different answer requires renewed human direction rather than replacing the recorded result",
+			)
+		}
 	}
 	if state.State != NeedsHuman {
 		return nil, refuse(
@@ -1007,7 +1030,11 @@ func RetireProposal(s *Store, project, proposal string) (*RetirementResult, erro
 				"retire only a proposal whose every slice is Merged or Superseded and unclaimed",
 			)
 		}
-		result.PartialDelivery = len(result.Superseded) > 0
+		if len(result.Superseded) == 0 {
+			return refuse("proposal "+proposal+" has no Superseded slices",
+				"this operation retires abandoned work, not all-delivered proposals; leave completion observation to its own operation")
+		}
+		result.PartialDelivery = true
 		if meta.Retired {
 			result.Status = RetirementAlreadyRetired
 			return nil
