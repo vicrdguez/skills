@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -56,12 +57,11 @@ func (b *implementationMemory) CloseCoordination(_ context.Context, id workflow.
 	return nil
 }
 
-func TestStatusObservesHumanMergeAndReleasesDependencies(t *testing.T) {
+func TestStatusObservesHumanMergePreservingDependencies(t *testing.T) {
 	root := proposalRepository(t)
-	prepareSlice(t, root, "dependent")
 	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.ReadyForMerge, Submission: &workflow.Submission{ID: "11"}}, {ID: "8", Branch: "dependent", State: workflow.Ready, Blockers: []workflow.WorkItemID{"7"}}}}
-	if got := implementCLI(t, root, b, "next"); got.Status != "no_work" {
-		t.Fatalf("done released dependency: %#v", got)
+	if got := statusCLI(t, root, b); got.Items[0].State != workflow.ReadyForMerge {
+		t.Fatalf("approval was mistaken for a human merge: %#v", got)
 	}
 	b.work[0].Submission.Merged = true
 	got := statusCLI(t, root, b)
@@ -70,9 +70,6 @@ func TestStatusObservesHumanMergeAndReleasesDependencies(t *testing.T) {
 	}
 	if got.Items[0].Number != 7 || got.Items[0].Submission.Number != 11 || got.Items[1].Number != 8 || !reflect.DeepEqual(got.Items[1].Blockers, []int{7}) {
 		t.Fatalf("status lost numeric projections: %#v", got)
-	}
-	if next := implementCLI(t, root, b, "next"); next.Status != "work_available" || next.Item.Number != 8 {
-		t.Fatalf("merge did not release dependency: %#v", next)
 	}
 }
 
@@ -185,10 +182,6 @@ func TestStatusRecoversOnlyTheCandidateAcceptedByInterruptedPassThroughGitHub(t 
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newReviewFixture(t)
-			packet := f.start(t, f.root).Packet
-			if packet == nil {
-				t.Fatal("review did not start")
-			}
 			final := f.head
 			if tc.marker {
 				runGit(t, f.worktree, "commit", "--allow-empty", "-m", "debt marker")
@@ -196,7 +189,7 @@ func TestStatusRecoversOnlyTheCandidateAcceptedByInterruptedPassThroughGitHub(t 
 				f.forge.head = final
 			}
 			f.forge.mergeable = tc.mergeable
-			dir := packet.Facts.Watchdog.ResultDirectory
+			dir := t.TempDir()
 			summary, body := filepath.Join(dir, "summary.md"), filepath.Join(dir, "submission.md")
 			if err := os.WriteFile(summary, []byte("accepted candidate"), 0600); err != nil {
 				t.Fatal(err)
@@ -204,12 +197,20 @@ func TestStatusRecoversOnlyTheCandidateAcceptedByInterruptedPassThroughGitHub(t 
 			if err := os.WriteFile(body, []byte("final body"), 0600); err != nil {
 				t.Fatal(err)
 			}
-			f.forge.failDelete = tc.failDelete
-			command := []string{"watchdog", "submit", "--item", "7", "--review-number", "1", "--reviewed-head", f.head, "--verdict", "pass", "--summary", summary, "--body", body}
-			_, err := f.runResult(f.worktree, append(command, "--head", final)...)
-			if err == nil || !slices.Contains(f.forge.labels, "done") || !slices.Contains(f.forge.labels, "wip") || slices.Contains(f.forge.labels, "review") != (tc.failDelete == "review") || len(f.forge.summaries) != 1 {
-				t.Fatalf("pass was not interrupted at %s: %v labels=%v summaries=%v", tc.failDelete, err, f.forge.labels, f.forge.summaries)
+			// Seed a historical interrupted public projection directly. Active
+			// delivery no longer creates this forge-authoritative receipt, but
+			// status must still refuse unsafe recovery of existing records.
+			f.forge.labels = []string{"done", "wip"}
+			if tc.failDelete == "review" {
+				f.forge.labels = append(f.forge.labels, "review")
 			}
+			f.forge.timeline = append(f.forge.timeline, map[string]any{"event": "labeled", "created_at": "2026-01-01T00:00:02Z", "label": map[string]string{"name": "wip"}})
+			f.forge.clock = 5
+			f.forge.body = "final body\n\nCloses #7\n"
+			f.forge.summaries = []map[string]any{{
+				"author_association": "OWNER", "commit_id": f.head, "state": "COMMENTED", "submitted_at": "2026-01-01T00:00:04Z",
+				"body": fmt.Sprintf("<!-- skl.watchdog.review/v1\n{\"review_number\":1,\"verdict\":\"pass\",\"final_head\":%q}\n-->\naccepted candidate", final),
+			}}
 			switch tc.evidence {
 			case "replaced":
 				runGit(t, f.worktree, "commit", "--allow-empty", "-m", "unreviewed replacement")
@@ -250,12 +251,6 @@ func TestStatusRecoversOnlyTheCandidateAcceptedByInterruptedPassThroughGitHub(t 
 				}
 				if !slices.Equal(f.forge.labels, labels) || f.forge.writes != writes || checkpointSnapshot(f.checkpoint) != checkpoint {
 					t.Fatalf("refusal changed handoff: labels=%v writes=%d/%d checkpoint=%s", f.forge.labels, f.forge.writes, writes, checkpointSnapshot(f.checkpoint))
-				}
-				if tc.evidence == "replaced" {
-					got := f.run(t, f.worktree, append(command, "--head", f.forge.head)...)
-					if got.Status != "fix_required" || !strings.Contains(got.Reason, "recorded review differs") || f.forge.writes != writes || !slices.Equal(f.forge.labels, labels) || checkpointSnapshot(f.checkpoint) != checkpoint {
-						t.Fatalf("retry substituted a different final head: %#v labels=%v writes=%d/%d", got, f.forge.labels, f.forge.writes, writes)
-					}
 				}
 			}
 			if readFile(t, summary) != "accepted candidate" || readFile(t, body) != "final body" || f.forge.body != "final body\n\nCloses #7\n" {

@@ -47,6 +47,9 @@ type PublicationState struct {
 	Push     *PublicationNote `json:"push,omitempty"`
 	Issue    *PublicationNote `json:"issue,omitempty"`
 	Grouping *PublicationNote `json:"grouping,omitempty"`
+	Source   *PublicationNote `json:"source,omitempty"`
+	Pull     *PublicationNote `json:"pull,omitempty"`
+	Active   *Reference       `json:"active_delivery,omitempty"`
 }
 
 // SliceState is the persisted state.json of one slice. It owns the current
@@ -59,6 +62,9 @@ type SliceState struct {
 	Dependencies []string          `json:"dependencies,omitempty"`
 	Issue        *ForgeAttachment  `json:"issue,omitempty"`
 	Publication  *PublicationState `json:"publication,omitempty"`
+	Claim        *Claim            `json:"claim,omitempty"`
+	Submission   *ForgeAttachment  `json:"submission,omitempty"`
+	Decision     *Reference        `json:"decision,omitempty"`
 }
 
 // ProposalMeta is the persisted proposal.json: proposal metadata only. The

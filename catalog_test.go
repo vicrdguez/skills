@@ -138,8 +138,8 @@ func TestAuditAndWatchdogShareContractAcceptanceCriteria(t *testing.T) {
 	if !slices.Equal(audit.Resources, []string{"reference/acceptance.md", "reference/smells.md"}) {
 		t.Fatalf("audit resources = %v", audit.Resources)
 	}
-	for _, want := range []string{"grouped many-to-many evidence", "removed or weakened assertions", "architectural obligations"} {
-		if !strings.Contains(audit.Instructions, want) {
+	for _, want := range []string{"grouped many-to-many evidence", "removed or weakened assertions", "frozen architectural violations"} {
+		if !strings.Contains(strings.Join(strings.Fields(audit.Instructions), " "), want) {
 			t.Errorf("Audit is missing %q", want)
 		}
 	}

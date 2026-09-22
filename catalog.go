@@ -11,11 +11,47 @@ import (
 	"strconv"
 	"strings"
 	"text/template"
+
+	"github.com/vicrdguez/skills/ledger"
 )
 
 const InstructionProtocol = "skl.instructions/v1"
 
+// DeliveryFacts specializes both private-ledger worker phases. Exact evidence
+// is data, while the command fields are engine-bound procedures.
+type DeliveryFacts struct {
+	Phase                 string                    `json:"phase"`
+	Procedure             string                    `json:"procedure"`
+	Operation             string                    `json:"operation"`
+	Repository            string                    `json:"repository"`
+	Remote                string                    `json:"remote"`
+	Item                  string                    `json:"item"`
+	Branch                string                    `json:"branch"`
+	Worktree              string                    `json:"worktree"`
+	ResultDirectory       string                    `json:"result_directory"`
+	Claim                 string                    `json:"claim"`
+	PrepareCommand        string                    `json:"prepare_command"`
+	InspectCommand        string                    `json:"inspect_command"`
+	ResumeCommand         string                    `json:"resume_command"`
+	ReleaseCommand        string                    `json:"release_command"`
+	SubmitCommand         string                    `json:"submit_command"`
+	PauseCommand          string                    `json:"pause_command,omitempty"`
+	ResultResourceCommand string                    `json:"result_resource_command"`
+	RequiredHead          string                    `json:"required_head,omitempty"`
+	RecordedTarget        string                    `json:"recorded_target,omitempty"`
+	PreviousReviewed      string                    `json:"previous_reviewed,omitempty"`
+	SourceHead            string                    `json:"source_head,omitempty"`
+	SourceTarget          string                    `json:"source_target,omitempty"`
+	ReviewScope           string                    `json:"review_scope,omitempty"`
+	FetchStatus           string                    `json:"fetch_status,omitempty"`
+	ReviewCount           uint64                    `json:"review_count"`
+	ReviewNumber          uint64                    `json:"review_number"`
+	Capability            ExecutionCapability       `json:"capability,omitempty"`
+	Documents             []ledger.ContractDocument `json:"documents"`
+}
+
 type InvocationFacts struct {
+	Delivery       *DeliveryFacts       `json:"delivery,omitempty"`
 	Watchdog       *WatchdogFacts       `json:"watchdog,omitempty"`
 	Implementation *ImplementationFacts `json:"implementation,omitempty"`
 }
@@ -263,7 +299,7 @@ func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
 	// A read-only inspection returns a narrow continuation, not another copy of
 	// every bundled definition.
 	included := dependencies[name]
-	if facts.Implementation != nil && facts.Implementation.Inspection != nil {
+	if facts.Implementation != nil && facts.Implementation.Inspection != nil || facts.Delivery != nil && (facts.Delivery.Operation == "inspect" || facts.Delivery.Operation == "prepare") {
 		included = nil
 	}
 	for _, bundled := range included {
