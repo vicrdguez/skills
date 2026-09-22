@@ -163,6 +163,25 @@ Public PR bodies are deliberate human-facing summaries; detailed worker exchange
 
 Ledger-backed human-decision intake, terminal observation/archival, and final-review packaging are separate work, not implied by these delivery commands. Existing `skl status` and legacy proposal operations do not replace those ledger operations. In-flight forge-authoritative work must finish with its former binary or undergo an explicit administrative cutover with normal workers stopped; current delivery commands never silently adopt it.
 
+### Recover pending publication
+
+When an outage or lost response leaves an issue or PR presentation pending, inspect and explicitly recover the latest committed view without repeating implementation, review, or acceptance:
+
+```sh
+skl publication inspect --repo <path> --remote <origin> --item <proposal>/<slice> --kind issue|parent|pull
+skl publication recover --repo <path> --remote <origin> --item <proposal>/<slice> --kind issue|parent|pull --result-directory /tmp/skl-publication
+```
+
+`inspect` is read-only. `recover` reuses a registered current temporary body when it still matches the selected view; a missing, stale, or ambiguous body returns specialized authoring guidance, exact private `skl ledger show` references, and a bound continuation. `--view <token>` and `--body <absolute-path>` are required only to submit newly authored prose; `--findings <absolute-json-path>` optionally selects actionable inline findings with reviewed anchors. A parent is selected by any member Work Item.
+
+Author a fresh public body through the deferred resource and continue only through the bound `skl` command:
+
+```sh
+skl skill --resource reference/publication.md --input result_directory=/tmp/skl-publication propose
+```
+
+Recovery is presentation only. It acquires no Claim, reruns no stage, and never resets Workflow State, Claims, completed Review Count, reports, or Contracts; neither GitHub nor the ledger is written outside the bound `skl` operation. Public bodies describe the accepted commitments, delivered outcome or current progress, useful verification and risks, and appropriate human checks. Complete Manual Verification obligations stay privately accessible and human-owned, and explicitly selected reviewed-anchor findings are the only findings eligible for publication.
+
 ## Wait for claimable work
 
 Both lanes check once by default. Bounded waiting is optional:

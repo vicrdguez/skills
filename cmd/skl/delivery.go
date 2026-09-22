@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/urfave/cli/v2"
@@ -231,6 +232,14 @@ func submitDelivery(c *cli.Context, phase, operation string, repository setup.Re
 	}
 	var forge ledger.DeliveryForge
 	if public != nil {
+		// Register the supplied temporary public body before publication so a
+		// pending or interrupted presentation can be recovered without new
+		// prose. Registration failure never obscures the authoritative local
+		// handoff: the handoff is already committed and publication still uses
+		// the supplied bytes directly.
+		if absolute, absErr := filepath.Abs(c.Path("public-body")); absErr == nil {
+			_ = ledger.RememberDeliveryBody(store, repository.Repository, result, absolute)
+		}
 		backend, err := newBackend(repository.Repository)
 		if err != nil {
 			result.Publication = &ledger.PublicationNote{Status: ledger.IssuePending, Detail: "forge construction unavailable: " + err.Error()}

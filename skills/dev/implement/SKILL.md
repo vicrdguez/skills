@@ -4,7 +4,7 @@ description: Implement a single claimed change against its accepted behavioral a
 disable-model-invocation: true
 ---
 
-{{if .Delivery}}{{template "ledger-implementation" .Delivery}}{{else}}{{if and .Implementation .Implementation.Inspection}}{{template "inspection" .Implementation}}{{else if .Implementation}}Implement Work Item {{.Implementation.WorkItemReference}} in `{{.Implementation.Worktree}}`. This Execution Skill already represents the engine's completed Work Start operation; do not select or claim another Work Item.
+{{if .Publication}}{{template "publication" .Publication}}{{else if .Delivery}}{{template "ledger-implementation" .Delivery}}{{else}}{{if and .Implementation .Implementation.Inspection}}{{template "inspection" .Implementation}}{{else if .Implementation}}Implement Work Item {{.Implementation.WorkItemReference}} in `{{.Implementation.Worktree}}`. This Execution Skill already represents the engine's completed Work Start operation; do not select or claim another Work Item.
 
 ## Applicable procedure
 

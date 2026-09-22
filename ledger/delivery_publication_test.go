@@ -76,6 +76,7 @@ type deliveryForgeStub struct {
 	mu            sync.Mutex
 	presentations []ledger.PullPresentation
 	number        int
+	err           error
 	onPresent     func(ledger.PullPresentation)
 }
 
@@ -88,7 +89,7 @@ func (f *deliveryForgeStub) PresentPull(_ context.Context, presentation ledger.P
 	if f.onPresent != nil {
 		f.onPresent(presentation)
 	}
-	return f.number, nil
+	return f.number, f.err
 }
 
 func (f *deliveryForgeStub) calls() []ledger.PullPresentation {
@@ -475,4 +476,48 @@ func TestDeliveryPublicationBookkeepingPreservesConcurrentLocalWork(t *testing.T
 			t.Fatalf("original bookkeeping changed the local report: %#v %q", report, body)
 		}
 	})
+}
+
+// TestDeliveryPublicationRecordsUnconfirmedPresentation covers B4/A7: a normal
+// presentation whose response is lost is recorded as an unconfirmed attempt,
+// so later recovery observes the forge instead of treating the generic error
+// as observable absence and repeating the create.
+func TestDeliveryPublicationRecordsUnconfirmedPresentation(t *testing.T) {
+	l, source, store, result := deliveryPublicationFixture(t)
+	bodyFile := filepath.Join(t.TempDir(), "public.md")
+	publicBody := "deliberately public body\n"
+	deliveryWrite(t, bodyFile, publicBody)
+	if err := ledger.RememberDeliveryBody(store, deliveryWidgets(), result, bodyFile); err != nil {
+		t.Fatalf("remember body: %v", err)
+	}
+	forge := &deliveryForgeStub{err: fmt.Errorf("connection reset after the request was sent")}
+	ledger.PublishDelivery(context.Background(), store, deliveryWidgets(), source.root, source.remote, result, &publicBody, forge)
+
+	if calls := forge.calls(); len(calls) != 1 {
+		t.Fatalf("the forge received %d presentations, want 1", len(calls))
+	}
+	state := l.committedState(deliveryPublicationProject, deliveryPublicationSlice, deliveryPublicationBranch)
+	if state.Submission != nil {
+		t.Fatalf("an unconfirmed presentation recorded a submission: %#v", state.Submission)
+	}
+	if state.Publication == nil || state.Publication.Pull == nil || state.Publication.Pull.Status != ledger.IssueUnresolved {
+		t.Fatalf("unconfirmed presentation = %#v, want an unresolved attempt", state.Publication)
+	}
+
+	// Recovery must hand the unconfirmed create to the adapter so it observes
+	// before writing; a fresh create is not authorized.
+	var observed ledger.RecoveryPresentation
+	recovery := &recoveryForgeStub{receipt: ledger.RecoveryReceipt{Status: "ambiguous"}}
+	recovery.onRecover = func(presentation ledger.RecoveryPresentation) { observed = presentation }
+	outcome, err := ledger.RecoverPublication(context.Background(), store, deliveryWidgets(), source.root, source.remote,
+		ledger.PublicationRequest{Item: deliveryPublicationItem, Kind: "pull"}, recovery)
+	if err != nil {
+		t.Fatalf("recover unconfirmed presentation: %v", err)
+	}
+	if outcome.Status != "ambiguous" {
+		t.Fatalf("recovery of unconfirmed presentation = %#v, want ambiguous", outcome)
+	}
+	if !observed.MayHaveCreated || observed.ObserveOnly || observed.Number != 0 {
+		t.Fatalf("unconfirmed presentation facts = %#v, want observation of a possible create", observed)
+	}
 }

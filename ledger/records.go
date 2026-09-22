@@ -41,6 +41,30 @@ type PublicationNote struct {
 	Detail string `json:"detail,omitempty"`
 }
 
+// PublicationBody identifies one registered temporary public body. The ledger
+// never stores the prose: it records the temporary path, the exact digest of
+// the bytes registered there, and the selected-view token they were authored
+// for. Stored findings reuse that metadata so a repeated recovery can tell a
+// current temporary body from a lost, altered, or superseded one.
+type PublicationBody struct {
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
+	View   string `json:"view,omitempty"`
+}
+
+// FindingReceipt records one explicitly selected inline finding whose exact
+// effect was observed. It stores the authorized public prose by digest, never
+// the prose itself, together with the reviewed anchor that justified it.
+type FindingReceipt struct {
+	ID     string `json:"id"`
+	Body   string `json:"body_sha256"`
+	Commit string `json:"commit"`
+	Path   string `json:"path"`
+	Line   int    `json:"line"`
+	Side   string `json:"side"`
+	Status string `json:"status"`
+}
+
 // PublicationState collects the pending-publication facts applicable to one
 // slice. An absent field means no pending fact is known for it.
 type PublicationState struct {
@@ -50,6 +74,20 @@ type PublicationState struct {
 	Source   *PublicationNote `json:"source,omitempty"`
 	Pull     *PublicationNote `json:"pull,omitempty"`
 	Active   *Reference       `json:"active_delivery,omitempty"`
+
+	// Phase is the latest phase whose result was handed off, recorded at handoff
+	// rather than guessed from Markdown or Git history. IssueBody and PullBody
+	// are the registered temporary bodies of the pending issue and pull
+	// presentations. PublishedSource is the last source revision a normal or
+	// recovered publication verified on the remote, which establishes the
+	// expected source lag recovery may safely catch up. Findings retains the
+	// observed inline selections so an exact repeated selection is not posted
+	// twice.
+	Phase           string           `json:"phase,omitempty"`
+	IssueBody       *PublicationBody `json:"issue_body,omitempty"`
+	PullBody        *PublicationBody `json:"pull_body,omitempty"`
+	PublishedSource string           `json:"published_source,omitempty"`
+	Findings        []FindingReceipt `json:"findings,omitempty"`
 }
 
 // SliceState is the persisted state.json of one slice. It owns the current
@@ -74,6 +112,7 @@ type ProposalMeta struct {
 	ParentTitle       string           `json:"parent_title,omitempty"`
 	ParentIssue       *ForgeAttachment `json:"parent_issue,omitempty"`
 	ParentPublication *PublicationNote `json:"parent_publication,omitempty"`
+	ParentBody        *PublicationBody `json:"parent_body,omitempty"`
 }
 
 // contractFileNames returns the frozen contract file names of one slice in a

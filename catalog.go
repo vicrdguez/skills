@@ -54,6 +54,65 @@ type InvocationFacts struct {
 	Delivery       *DeliveryFacts       `json:"delivery,omitempty"`
 	Watchdog       *WatchdogFacts       `json:"watchdog,omitempty"`
 	Implementation *ImplementationFacts `json:"implementation,omitempty"`
+	Publication    *PublicationFacts    `json:"publication,omitempty"`
+}
+
+// PublicationFacts is one narrow published-view inspection or recovery. It
+// binds the selected committed presentation, its current recovery condition,
+// the exact private references, and the continuation. Presentation recovery
+// is not worker execution: it never selects or claims a Work Item.
+//
+// View carries the owner-defined ledger.PublicationView. Operation is
+// "inspect" or "recover"; Kind is "issue", "parent", or "pull". Condition
+// selects the narrow continuation, RecoverCommand is the only write path (a
+// supplied body is registered before publication), ResourceCommand defers the
+// public-body authoring guidance, and ReferenceCommands are the exact private
+// `skl ledger show` retrievals for the selected inputs.
+//
+// A caller supplies ResultDirectory only when an authoring continuation is
+// offered. RecoverCommand and ResourceCommand are bound by the CLI; the
+// renderer never constructs a forge command or invents a prose body.
+type PublicationFacts struct {
+	Operation         string                 `json:"operation"`
+	Kind              string                 `json:"kind"`
+	Condition         PublicationCondition   `json:"condition"`
+	RepositoryRoot    string                 `json:"repository_root"`
+	Remote            string                 `json:"remote"`
+	Item              string                 `json:"item"`
+	ResultDirectory   string                 `json:"result_directory,omitempty"`
+	RecoverCommand    string                 `json:"recover_command,omitempty"`
+	ResourceCommand   string                 `json:"resource_command,omitempty"`
+	ReferenceCommands []PublicationReference `json:"reference_commands,omitempty"`
+	View              ledger.PublicationView `json:"view"`
+}
+
+// PublicationCondition is the current recovery condition of one selected view.
+// It specializes the continuation without interpreting or classifying prose.
+// A pending condition still reuses a registered body when one remains.
+type PublicationCondition string
+
+const (
+	// PublicationCurrentBody: a registered temporary body still matches the view.
+	PublicationCurrentBody PublicationCondition = "current-body"
+	// PublicationProseNeeded: no applicable temporary body remains.
+	PublicationProseNeeded PublicationCondition = "prose-needed"
+	// PublicationStale: the available body describes a superseded view.
+	PublicationStale PublicationCondition = "stale"
+	// PublicationAmbiguous: observation could not establish the forge effect.
+	PublicationAmbiguous PublicationCondition = "ambiguous"
+	// PublicationSatisfied: the selected presentation already matches.
+	PublicationSatisfied PublicationCondition = "satisfied"
+	// PublicationPending: the effect is still unconfirmed locally.
+	PublicationPending PublicationCondition = "pending"
+)
+
+// PublicationReference is one exact private ledger document the agent reads as
+// data through its own retrieval command. It never carries the document body.
+type PublicationReference struct {
+	Commit  string `json:"commit"`
+	Path    string `json:"path"`
+	Purpose string `json:"purpose,omitempty"`
+	Command string `json:"command"`
 }
 
 type ReviewScope string
@@ -299,7 +358,7 @@ func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
 	// A read-only inspection returns a narrow continuation, not another copy of
 	// every bundled definition.
 	included := dependencies[name]
-	if facts.Implementation != nil && facts.Implementation.Inspection != nil || facts.Delivery != nil && (facts.Delivery.Operation == "inspect" || facts.Delivery.Operation == "prepare") {
+	if facts.Publication != nil || facts.Implementation != nil && facts.Implementation.Inspection != nil || facts.Delivery != nil && (facts.Delivery.Operation == "inspect" || facts.Delivery.Operation == "prepare") {
 		included = nil
 	}
 	for _, bundled := range included {
@@ -309,7 +368,7 @@ func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
 		}
 		instructions += "\n\n## Included Skill: " + bundled + "\n\n" + rendered
 	}
-	resources, err := resourceNames(definition)
+	resources, err := packetResources(definition, facts.Publication != nil)
 	if err != nil {
 		return Packet{}, err
 	}
@@ -407,6 +466,22 @@ func renderDocument(skillDirectory, file string, data any) (string, error) {
 // modulesDirectory holds a skill's authored internal modules: embedded and
 // composable into that skill's documents, but never public resources.
 const modulesDirectory = "modules"
+
+// publicationResource is the deferred public-body authoring resource each
+// owning skill exposes only to publication packets. It remains retrievable by
+// name, but a normal packet keeps its accepted resource manifest unchanged.
+const publicationResource = "reference/publication.md"
+
+func packetResources(definition string, publication bool) ([]string, error) {
+	names, err := resourceNames(definition)
+	if err != nil {
+		return nil, err
+	}
+	if publication {
+		return names, nil
+	}
+	return slices.DeleteFunc(names, func(name string) bool { return name == publicationResource }), nil
+}
 
 func resourceNames(definition string) ([]string, error) {
 	directory := path.Dir(definition)

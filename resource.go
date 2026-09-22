@@ -52,6 +52,14 @@ type reviewData struct {
 	ReviewedHead    string
 }
 
+// publicationData is the deliberately public body authoring guidance one
+// presentation recovery invocation renders. The owning skill distinguishes an
+// issue, a progress pull, or a Final Review Package; the engine supplies only
+// the private result location.
+type publicationData struct {
+	ResultDirectory string
+}
+
 // resourceInput declares one scalar a named resource accepts, using the CLI
 // library's own typed flags so declaration, description and parsing share one
 // schema.
@@ -134,6 +142,13 @@ func resourceSpecFor(resource string) resourceSpec {
 			if data.Round < 1 || !reviewedHeadPattern.MatchString(data.ReviewedHead) {
 				return fmt.Errorf("resource %s requires a positive round and full reviewed source SHA (40 lowercase hexadecimal characters for schema 1)", resource)
 			}
+			return checkResultDirectory(resource, data.ResultDirectory)
+		}}
+	case "reference/publication.md":
+		data := &publicationData{}
+		return resourceSpec{data: data, inputs: []resourceInput{
+			{flag: &cli.StringFlag{Name: "result_directory", Required: true, Usage: resultDirectoryUsage, Destination: &data.ResultDirectory}},
+		}, validate: func(resource string) error {
 			return checkResultDirectory(resource, data.ResultDirectory)
 		}}
 	case "reference/review.md":

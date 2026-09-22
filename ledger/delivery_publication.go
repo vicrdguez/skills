@@ -96,9 +96,13 @@ func PublishDelivery(ctx context.Context, s *Store, repository github.Repository
 		}
 		presented, err := forge.PresentPull(ctx, PullPresentation{Number: number, Title: result.State.Title, Body: *publicBody, Branch: result.State.Branch, Head: source.Head, Approved: result.Status == ReadyForMerge})
 		if err != nil {
-			pullNote = &PublicationNote{Status: IssuePending, Detail: err.Error()}
+			// The presentation was dispatched, so an unreliable response leaves an
+			// unconfirmed attempt. Record it as unresolved so later recovery
+			// observes the forge before repeating the write instead of treating a
+			// generic pending error as observable absence.
+			pullNote = &PublicationNote{Status: IssueUnresolved, Detail: err.Error()}
 		} else if presented <= 0 {
-			pullNote = &PublicationNote{Status: IssuePending, Detail: "forge returned no valid Submission attachment"}
+			pullNote = &PublicationNote{Status: IssueUnresolved, Detail: "forge returned no valid Submission attachment"}
 		} else {
 			attachment = &ForgeAttachment{Repository: repository.Owner + "/" + repository.Name, Number: presented}
 			pullNote = nil
@@ -135,6 +139,15 @@ func PublishDelivery(ctx context.Context, s *Store, repository github.Repository
 		if state.State == result.Status && wanted == current {
 			state.Publication.Source = sourceNote
 			state.Publication.Pull = pullNote
+			// A verified source push is a durable receipt of the published source
+			// revision; recovery uses it to recognize an expected lagging head.
+			if sourceNote == nil && source.Head != "" {
+				state.Publication.PublishedSource = source.Head
+			}
+			// A satisfied presentation releases its registered temporary path.
+			if pullNote == nil {
+				state.Publication.PullBody = nil
+			}
 		}
 		if err := writeJSON(filepath.Join(s.Root, directory, "state.json"), state); err != nil {
 			return err

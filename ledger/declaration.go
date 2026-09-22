@@ -33,6 +33,13 @@ type ProposalDeclaration struct {
 	Description []byte
 	IssueBodies map[string][]byte
 	ParentBody  []byte
+
+	// IssueBodyPaths and ParentBodyPath are the temporary filesystem locations
+	// of the descriptive issue bodies the CLI read. They are publication inputs
+	// populated by the caller, never declaration file fields: the ledger keeps
+	// the path and digest as coordination metadata but no prose snapshot.
+	IssueBodyPaths map[string]string `json:"-"`
+	ParentBodyPath string            `json:"-"`
 }
 
 // LoadDeclaration reads and validates the complete intake declaration from

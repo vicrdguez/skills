@@ -47,6 +47,14 @@ func Publish(ctx context.Context, store *Store, project string, declaration *Pro
 				Detail: "issue publication inputs are unavailable: no forge attachment surface",
 			}
 		}
+		// A missing forge is still durable pending metadata: without it, later
+		// recovery cannot tell an unattempted parent from one never requested.
+		if len(declaration.Slices) > 1 && outcome.ParentIssue == nil {
+			outcome.ParentNote = &PublicationNote{
+				Status: IssuePending,
+				Detail: "parent issue publication inputs are unavailable: no forge attachment surface",
+			}
+		}
 	} else {
 		var err error
 		reservations, acceptedRevision, err = store.reserveIssuePublication(project, declaration, outcome)
@@ -282,6 +290,10 @@ func (s *Store) reserveIssuePublication(project string, declaration *ProposalDec
 		if err := s.requireCleanPaths(paths...); err != nil {
 			return err
 		}
+		head, err := s.head()
+		if err != nil {
+			return err
+		}
 		meta, _, err := s.readProposalMeta(project, declaration.Proposal)
 		if err != nil {
 			return err
@@ -293,6 +305,13 @@ func (s *Store) reserveIssuePublication(project string, declaration *ProposalDec
 		} else if len(declaration.Slices) > 1 && declaration.ParentBodySupplied() {
 			switch {
 			case meta.ParentPublication == nil || meta.ParentPublication.Status == IssuePending:
+				record, err := s.parentBodyRecordAt(head, project, outcome.Repository, declaration.Proposal, declaration)
+				if err != nil {
+					return err
+				}
+				if record != nil {
+					meta.ParentBody = record
+				}
 				note := &PublicationNote{Status: issueReserved, Detail: "parent issue creation is reserved before network publication"}
 				meta.ParentPublication = note
 				outcome.ParentNote = note
@@ -342,6 +361,13 @@ func (s *Store) reserveIssuePublication(project string, declaration *ProposalDec
 			}
 			note := &PublicationNote{Status: issueReserved, Detail: "issue creation is reserved before network publication"}
 			publication.Issue = note
+			record, err := s.issueBodyRecordAt(head, project, outcome.Repository, declaration.Proposal, slice.Name, declaration, state)
+			if err != nil {
+				return err
+			}
+			if record != nil {
+				publication.IssueBody = record
+			}
 			state.Publication = &publication
 			acceptance.IssueStatus = note
 			acceptance.ownsIssueReservation = true
@@ -502,11 +528,15 @@ func (s *Store) recordPublication(project string, declaration *ProposalDeclarati
 		if err := s.requireCleanPaths(recordPaths...); err != nil {
 			return err
 		}
+		head, err := s.head()
+		if err != nil {
+			return err
+		}
 		meta, _, err := s.readProposalMeta(project, declaration.Proposal)
 		if err != nil {
 			return err
 		}
-		previousParentIssue, previousParentNote := meta.ParentIssue, meta.ParentPublication
+		previousParentIssue, previousParentNote, previousParentBody := meta.ParentIssue, meta.ParentPublication, meta.ParentBody
 		switch {
 		case meta.ParentIssue != nil && outcome.ParentIssue != nil && !sameAttachment(meta.ParentIssue, outcome.ParentIssue):
 			return refuse(
@@ -527,7 +557,20 @@ func (s *Store) recordPublication(project string, declaration *ProposalDeclarati
 		default:
 			outcome.ParentNote = meta.ParentPublication
 		}
-		parentChanged := !sameAttachment(previousParentIssue, meta.ParentIssue) || !sameNote(previousParentNote, meta.ParentPublication)
+		// Register the temporary parent body path and digest while the parent
+		// issue is still pending; attached parents keep no temporary prose link.
+		if meta.ParentIssue == nil && len(declaration.Slices) > 1 {
+			record, err := s.parentBodyRecordAt(head, project, outcome.Repository, declaration.Proposal, declaration)
+			if err != nil {
+				return err
+			}
+			if record != nil {
+				meta.ParentBody = record
+			}
+		} else if meta.ParentIssue != nil {
+			meta.ParentBody = nil
+		}
+		parentChanged := !sameAttachment(previousParentIssue, meta.ParentIssue) || !sameNote(previousParentNote, meta.ParentPublication) || !samePublicationBody(previousParentBody, meta.ParentBody)
 
 		type stateUpdate struct {
 			path  string
@@ -576,12 +619,25 @@ func (s *Store) recordPublication(project string, declaration *ProposalDeclarati
 			} else {
 				publication.Grouping = nil
 			}
+			// Register the temporary issue body path and digest for pending work;
+			// an already attached issue keeps no temporary prose link.
+			if state.Issue == nil {
+				record, err := s.issueBodyRecordAt(head, project, outcome.Repository, declaration.Proposal, slice.Name, declaration, state)
+				if err != nil {
+					return err
+				}
+				if record != nil {
+					publication.IssueBody = record
+				}
+			} else {
+				publication.IssueBody = nil
+			}
 			if pushed {
 				publication.Push = nil
 			} else if acceptance.PushStatus != nil && acceptance.PushStatus.Status != "" {
 				publication.Push = acceptance.PushStatus
 			}
-			if publication.Push == nil && publication.Issue == nil && publication.Grouping == nil && publication.Source == nil && publication.Pull == nil && publication.Active == nil {
+			if publication.Push == nil && publication.Issue == nil && publication.Grouping == nil && publication.Source == nil && publication.Pull == nil && publication.Active == nil && publication.Phase == "" && publication.IssueBody == nil && publication.PullBody == nil && publication.PublishedSource == "" && len(publication.Findings) == 0 {
 				state.Publication = nil
 			} else {
 				state.Publication = &publication
@@ -622,7 +678,26 @@ func samePublication(before, after *PublicationState) bool {
 	if before == nil || after == nil {
 		return before == after
 	}
-	return sameNote(before.Push, after.Push) && sameNote(before.Issue, after.Issue) && sameNote(before.Grouping, after.Grouping) && sameNote(before.Source, after.Source) && sameNote(before.Pull, after.Pull) && sameReference(before.Active, after.Active)
+	return sameNote(before.Push, after.Push) && sameNote(before.Issue, after.Issue) && sameNote(before.Grouping, after.Grouping) && sameNote(before.Source, after.Source) && sameNote(before.Pull, after.Pull) && sameReference(before.Active, after.Active) && before.Phase == after.Phase && samePublicationBody(before.IssueBody, after.IssueBody) && samePublicationBody(before.PullBody, after.PullBody) && before.PublishedSource == after.PublishedSource && sameFindingReceipts(before.Findings, after.Findings)
+}
+
+func samePublicationBody(before, after *PublicationBody) bool {
+	if before == nil || after == nil {
+		return before == after
+	}
+	return *before == *after
+}
+
+func sameFindingReceipts(before, after []FindingReceipt) bool {
+	if len(before) != len(after) {
+		return false
+	}
+	for index := range before {
+		if before[index] != after[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func sameNote(before, after *PublicationNote) bool {

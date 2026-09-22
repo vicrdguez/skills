@@ -122,6 +122,9 @@ func HandoffDelivery(s *Store, repository github.RepositoryID, item, phase, clai
 		if state.Publication == nil {
 			state.Publication = &PublicationState{}
 		}
+		// Record the latest phase explicitly at handoff so recovery never guesses
+		// which committed report the pending presentation describes.
+		state.Publication.Phase = phase
 		state.Publication.Source = &PublicationNote{Status: PushPending, Detail: "source synchronization has not been attempted for this phase result"}
 		state.Publication.Pull = &PublicationNote{Status: IssuePending, Detail: "human-facing phase presentation has not been attempted"}
 		if err := os.WriteFile(filepath.Join(s.Root, reportPath), contents, 0600); err != nil {

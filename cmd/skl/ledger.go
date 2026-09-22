@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -47,7 +48,7 @@ func ledgerCommands(newBackend backendFactory, stdout io.Writer) *cli.Command {
 				if err != nil {
 					return err
 				}
-				bodies, parentBody, err := issueBodyInputs(command)
+				bodies, parentBody, bodyPaths, parentBodyPath, err := issueBodyInputs(command)
 				if err != nil {
 					return err
 				}
@@ -59,6 +60,10 @@ func ledgerCommands(newBackend backendFactory, stdout io.Writer) *cli.Command {
 				if err != nil {
 					return renderLedgerRefusal(stdout, format, err)
 				}
+				// The temporary body locations are publication metadata: the ledger
+				// records the absolute path and digest, never the prose.
+				declaration.IssueBodyPaths = bodyPaths
+				declaration.ParentBodyPath = parentBodyPath
 				store, failure := openConfiguredLedger()
 				if failure != nil {
 					return renderLedgerRefusal(stdout, format, failure)
@@ -166,31 +171,44 @@ func (f *issueBodyFlag) Apply(set *flag.FlagSet) error {
 	return f.GenericFlag.Apply(set)
 }
 
-// issueBodyInputs reads the temporary issue bodies and parent body. They
-// are transport inputs, never persisted ledger content.
-func issueBodyInputs(command *cli.Context) (map[string][]byte, []byte, error) {
+// issueBodyInputs reads the temporary issue bodies and parent body, resolving
+// each to an absolute path. The bytes are transport inputs and the absolute
+// paths are publication metadata, never persisted ledger content.
+func issueBodyInputs(command *cli.Context) (map[string][]byte, []byte, map[string]string, string, error) {
 	values, _ := command.Generic("issue").(*rawInputs)
 	bodies := make(map[string][]byte)
+	paths := make(map[string]string)
 	for _, value := range *values {
 		slice, path, ok := strings.Cut(value, "=")
 		if !ok {
-			return nil, nil, fmt.Errorf("invalid --issue %q; want slice=body-file", value)
+			return nil, nil, nil, "", fmt.Errorf("invalid --issue %q; want slice=body-file", value)
 		}
-		contents, err := os.ReadFile(path)
+		absolute, err := filepath.Abs(path)
 		if err != nil {
-			return nil, nil, fmt.Errorf("read the temporary issue body for %s: %w", slice, err)
+			return nil, nil, nil, "", fmt.Errorf("resolve the temporary issue body for %s: %w", slice, err)
+		}
+		contents, err := os.ReadFile(absolute)
+		if err != nil {
+			return nil, nil, nil, "", fmt.Errorf("read the temporary issue body for %s: %w", slice, err)
 		}
 		bodies[slice] = contents
+		paths[slice] = absolute
 	}
 	var parentBody []byte
+	parentPath := ""
 	if command.Path("parent-body") != "" {
-		contents, err := os.ReadFile(command.Path("parent-body"))
+		absolute, err := filepath.Abs(command.Path("parent-body"))
 		if err != nil {
-			return nil, nil, fmt.Errorf("read the temporary parent issue body: %w", err)
+			return nil, nil, nil, "", fmt.Errorf("resolve the temporary parent issue body: %w", err)
+		}
+		contents, err := os.ReadFile(absolute)
+		if err != nil {
+			return nil, nil, nil, "", fmt.Errorf("read the temporary parent issue body: %w", err)
 		}
 		parentBody = contents
+		parentPath = absolute
 	}
-	return bodies, parentBody, nil
+	return bodies, parentBody, paths, parentPath, nil
 }
 
 // renderLedgerRefusal renders any refusal with its concrete repair.
