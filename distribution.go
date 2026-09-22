@@ -14,7 +14,7 @@ const StubProtocol = "skl.stub/v1"
 
 var ownedMarker = []byte("<!-- skl-owned: " + StubProtocol + " -->")
 
-//go:embed skills/dev/audit skills/dev/design skills/dev/domain skills/dev/explore skills/dev/implement skills/dev/propose skills/dev/tdd skills/dev/watchdog skills/misc/writing-for-agents skills/thinking/brainstorm skills/thinking/shape stubs/common.md
+//go:embed skills/dev/audit skills/dev/design skills/dev/domain skills/dev/explore skills/dev/implement skills/dev/propose skills/dev/testing skills/dev/watchdog skills/misc/writing-for-agents skills/thinking/brainstorm skills/thinking/shape stubs/common.md
 //go:embed prompts/implement-loop.md prompts/watchdog-loop.md prompts/queue-next.mjs agents/implement-runner.md agents/watchdog-runner.md
 var embedded embed.FS
 
@@ -36,6 +36,20 @@ func Install(home string) (InstallOutcome, error) {
 	}
 	var outcome InstallOutcome
 	for _, harness := range []string{".pi/agent/skills", ".codex/skills", ".claude/skills", ".config/opencode/skills"} {
+		legacyTDD := filepath.Join(home, harness, "tdd", "SKILL.md")
+		legacyContents, err := os.ReadFile(legacyTDD)
+		switch {
+		case err == nil && bytes.Contains(legacyContents, ownedMarker):
+			if err := os.Remove(legacyTDD); err != nil {
+				return outcome, fmt.Errorf("retire owned tdd stub for %s: %w", harness, err)
+			}
+			outcome.Changed++
+		case err == nil:
+			outcome.Unchanged++
+		case !os.IsNotExist(err):
+			return outcome, fmt.Errorf("inspect legacy tdd stub for %s: %w", harness, err)
+		}
+
 		for _, name := range SkillNames() {
 			frontmatter, err := definitionFrontmatter(name)
 			if err != nil {

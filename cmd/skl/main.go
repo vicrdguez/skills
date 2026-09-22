@@ -64,6 +64,12 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 			if resource == "" && len(inputs) > 0 {
 				return fmt.Errorf("--input requires --resource <owner-relative-name>")
 			}
+			if resource == "" && name == "implement" {
+				// The Implement Execution Skill is delivered by its own lane: a
+				// read-only retrieval would name no Work Item, open no Workflow
+				// Backend, and acquire no Claim.
+				return fmt.Errorf("the implement Skill Definition is not retrievable read-only; run `skl implement next` for one Work Item's complete Execution Skill, or `skl implement resume --item <proposal>/<slice> --claim <acquisition-commit>` to continue a Claim. Its named resources stay retrievable with `skl skill --resource <name> implement`")
+			}
 			if resource != "" {
 				if describe {
 					description, err := skilldist.DescribeResourceInputs(name, resource)
@@ -79,6 +85,9 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 				}
 				_, err = stdout.Write(contents)
 				return err
+			}
+			if name == "watchdog" {
+				return fmt.Errorf("the Watchdog Execution Skill requires selected work; run `skl watchdog next` for one Work Item or `skl watchdog resume --item <proposal>/<slice> --claim <acquisition-commit>` for an interrupted Claim. Named resources remain available with --resource")
 			}
 			packet, err := skilldist.BuildPacket(name, skilldist.InvocationFacts{})
 			if err != nil {
@@ -121,6 +130,10 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 					return err
 				}
 				request.Root, request.Remote = repository.Root, repository.Remote
+				gated, err := gateUnsupportedDelivery(stdout, formatMarkdown, repository.Repository, "propose publish")
+				if gated || err != nil {
+					return err
+				}
 				backend, err := newBackend(repository.Repository)
 				if err != nil {
 					return err
@@ -156,6 +169,10 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 				if err != nil {
 					return err
 				}
+				gated, err := gateUnsupportedDelivery(stdout, formatMarkdown, repository.Repository, "propose cleanup")
+				if gated || err != nil {
+					return err
+				}
 				backend, err := newBackend(repository.Repository)
 				if err != nil {
 					return err
@@ -179,10 +196,10 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 		}},
 	}, {
 		Name:        "implement",
-		Subcommands: implementationCommands(newBackend, stdout),
+		Subcommands: deliveryCommands("implement", newBackend, stdout),
 	}, {
 		Name:        "watchdog",
-		Subcommands: watchdogCommands(newBackend, stdout),
+		Subcommands: deliveryCommands("watchdog", newBackend, stdout),
 	}, {
 		Name: "setup",
 		Flags: []cli.Flag{
@@ -219,7 +236,7 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 			return err
 		},
 	}}
-	app.Commands = append(app.Commands, statusCommand(newBackend, stdout))
+	app.Commands = append(app.Commands, statusCommand(newBackend, stdout), ledgerCommands(newBackend, stdout))
 	return &stageApp{app}
 }
 

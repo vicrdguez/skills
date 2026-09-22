@@ -13,8 +13,9 @@ The thinking and decision making already happened, thus this stage is just preci
 
 ### 1. **Gather context**
 
-Work from what is already in the conversation context. 
-- If the user passes a reference (a spec path, an issue number or URL) as an argument, fetch it and read its full body and context. 
+Work from what is already in the conversation context.
+- Locate Explore's user-confirmed final recap of consequential rules, architectural commitments, and delegated choices, together with every decision it references. This is the approved source for materialization; if it is absent or unconfirmed, stop and suggest running `explore`.
+- If the user passes a reference (a spec path, an issue number or URL) as an argument, fetch it and read its full body and context.
 - A superseded change enters through `explore`. Proceed only if this conversation contains the user's confirmation of renewed shared understanding; otherwise stop and suggest running `explore`.
 
 ### 2. Explore the repo to understand the current state of the codebase (optional)
@@ -30,14 +31,12 @@ Break the work into **tracer-bullets** tickets.
 - Prefer separate Work Items for behaviors that deliver safe, useful results independently. Assess independence after declared Dependencies are Merged, without requiring later Work Items.
 - Combine independently useful behaviors only for a concrete reduction in overall implementation or review burden. Shared files or a shared Workflow stage alone are insufficient.
 - Assess review burden from the behavior and materially different correctness, failure, and recovery concerns a reviewer must understand together, using agreed requirements and focused repository inspection rather than line counts or exhaustive implementation planning. Different error cases alone do not require separate Work Items.
-- Write the artifacts, then publish them to the project's issue tracker as explained below. 
+- Draft the artifacts for every slice, then fidelity-check and publish them as explained below.
 
-Use the `design` skill to sketch the seams at which this change will be tested.
-- Always prefer existing seams rather than new ones
-- Use the highest seam possible
-- If new seams are needed, propose them at the highest point you can. The fewer seams across the codebase, the better.
-
-Check with the user if the seams match their expectations. 
+Use the `design` skill to materialize the approved seams at which this change can be verified.
+- Preserve any deliberately agreed seam.
+- Where seam choice was delegated, prefer an existing seam and use the highest one that exposes the promised consequence.
+- If a consequential seam is neither settled nor delegated, return it to the human before drafting rather than redesigning the accepted architecture.
 
 ### 4. Quiz the user
 
@@ -58,37 +57,50 @@ Iterate until the user approves the breakdown. A single ticket is possible if th
 
 If artifact elaboration materially changes proposed boundaries or Dependencies, return to this approval loop before publication: explain the discovery and propose the revised breakdown for approval before freezing the artifacts. Ordinary elaboration within an unchanged coherent delivery needs no renewed approval.
 
-### 5. Prepare and publish
+### 5. Materialize and review fidelity
 
-1. Run `skl propose cleanup --repo <root>` before preparing new slices. It removes only safe local Git state for Work Items already observed Merged and reports everything it preserves.
-2. Commit any durable `CONTEXT.md` or ADR changes to the target branch before creating slice branches.
-3. For each slice, choose a short verb-led kebab-case slug, create `.worktrees/<slug>` and its branch from the target, write `.changes/<slug>/`, and commit the complete ledger with subject `[baseline] <slug>` (optional explanatory text may follow after a space). Push that exact commit as the publication head.
-4. Write the parent and child issue bodies to private temporary Markdown files. For every child, use the thin-pointer template below. Replace every placeholder with the slice summary, branch slug, and full commit SHA from `git rev-parse HEAD` in that slice worktree; that pushed, marked head is its Artifact Baseline. Keep artifact prose in Git, not in the issue. The files are opaque transport: `skl` neither authors nor interprets them.
-5. Publish the prepared Proposal with `skl propose publish --repo <root> --target <branch> --slice <slug>=<body-file>`. Repeat `--slice` for every child and add `--depends <dependent>:<blocker>` for each Dependency. For a multi-slice Proposal also pass `--parent-title <title> --parent-body <body-file>`.
+Write every slice's artifacts using the guidance below. Before publication, run one bounded review in a fresh context across the complete proposed slice set.
 
-`skl propose publish` preflights the entire declaration before changing GitHub, creates children in blocker-first order, and applies Ready last. If it returns `fix_required`, make the stated Git repair and repeat the same command. If it returns `needs_human`, stop and present its reason; do not guess which existing record to reuse.
+Supply that reviewer explicitly with:
 
-Child thin-pointer template:
+- the exact user-confirmed Explore recap;
+- every referenced decision or ADR;
+- all proposed slices and their artifact drafts.
 
-```markdown
-<summary>
+The review checks only whether materialization omits, weakens, strengthens, contradicts, or invents obligations relative to those approved sources. It does not redesign the solution, reopen accepted choices, or fill a decision gap.
 
-Branch: `<slug>`
-Artifact Baseline: `<baseline-sha>`
-Implementation Ledger: `.changes/<slug>/` at the Artifact Baseline.
-```
+Correct demonstrable transcription errors against the approved source. An unsettled consequential choice, contradiction in the approved sources, or proposed semantic or architectural change returns to the human for resolution. If resolution changes slice boundaries or Dependencies, return to the approval loop in step 4. Faithful correction and ordinary elaboration require neither routine artifact-by-artifact rereading nor a second semantic approval ceremony.
+
+### 6. Prepare and accept into the Workflow Ledger
+
+1. Commit any durable `CONTEXT.md` or ADR changes to the target branch. Durable project knowledge stays in the project repository; the ledger holds workflow records, not project documentation.
+2. Prepare one intake directory for the proposal outside the source tree:
+   - `proposal.md`: the durable approved proposal description.
+   - `proposal.json`: `{"proposal": "<kebab-name>", "parent_title": "<multi-slice only>", "slices": [{"name": "<slug>", "title": "<issue title>", "branch": "<planned source branch>", "depends": ["<sibling slug or proposals/<proposal>/<slice>"]}]}`.
+   - one directory per slice holding its frozen Contract files: `intent.md` and `behavior.md` are required; add `plan.md` and `tasks.md` only when warranted. Nothing else belongs in a slice directory.
+3. Write the descriptive human-facing issue bodies to private temporary Markdown files — one per slice, plus a parent body for multi-slice work. Keep them self-contained descriptions; they are transport, not Contract content, and `skl` neither authors nor persists them in the ledger.
+4. Accept the proposal locally with `skl ledger accept --repo <root> --proposal-dir <dir> --issue <slice>=<body-file>` (repeat `--issue` per slice; add `--parent-body <file>` for multi-slice work). No source branch, worktree, or source artifact commit is prepared at this stage: the planned branch identity is recorded, not created.
+5. Handle the outcome: `accepted` or `existing` records the work; `fix_required` names a concrete repair — fix it and repeat the same command; pending publication effects (ledger push, issue publication) leave the local acceptance authoritative and are retried by repeating the same acceptance. A changed Contract is never replaced in place: direct a renewed proposal instead.
+6. Read accepted content back through the public CLI with `skl ledger show --repo <root> --item <proposal>/<slice>`. Its output carries the exact accepted documents with full ledger commit and path references; cite those references when a document must be identified exactly.
+7. A repository that has not adopted the Workflow Ledger keeps its established publication path until a human-directed administrative cutover with normal workers stopped; `skl` adopts existing work automatically in no case.
 
 ## Writing the change artifacts
 These are the artifacts that each vertical slice will use for implementation:
 
-Publishing them freezes them as the endpoint contract. Artifact Completion may differ from the marked Baseline only by ticking an existing `[ ]` to lowercase `[x]` outside Manual Verification — nothing added, removed, reordered or reworded, and Manual Verification remains unchecked. This is the acceptance baseline: if it can be rewritten mid-flight to match whatever got built, or grown with things discovered during review, it stops being a contract and the change stops converging. Discoveries belong in PR findings or in a new proposal. There is no later addition and no exception.
+Publishing them freezes them as the accepted contract. `skl ledger accept` records their exact bytes, and accepted files stay read-only from then on: progress and completion evidence live in phase reports, never in completion ticks or edits to these documents. This is the acceptance baseline: if it can be rewritten mid-flight to match whatever got built, or grown with things discovered during review, it stops being a contract and the change stops converging. Discoveries belong in PR findings or in a new proposal. There is no later addition and no exception.
 
 So resolve the contradictions now, while you still can — between the artifacts themselves, and between them and the project's own rules. Afterwards nobody downstream can fix them; they can only stop and ask you.
 
+Keep the artifact set compact and authoritative. Preserve approved decisions; do not turn incidental sketches, scenario count, test count, or a preferred construction order into new obligations. Within each artifact, use readable, uniquely referenceable descriptive headings without requiring IDs or a requirements database.
+
+Label independently tracked commitments with descriptive local labels: `B<n>` for binding behavior rules, `A<n>` for architectural commitments, warranted `T<n>` for tasks, and `M<n>` for human-owned Manual Verification. Number independently tracked commitments only — never every paragraph or heading — do not duplicate an identity across documents, and expect no CLI numbering service: the labels are yours to assign and keep stable from acceptance on.
+
 **Always**:
-- `intent.md`: Why / What / Scope / Out of scope / Definition of Done. Follow the template from `skl skill --resource reference/intent.md propose`
-- `behavior.md`: The exact required behavior(s) to implement, in *Gherkin notation* that map to `intent.md` *Definition of Done* section. Since seams are where we test at, use `tdd` to define good tests and avoid anti-patterns. The final list of behaviours will translate directly to what should be implemented and tested. Follow the template from `skl skill --resource reference/behavior.md propose`
+- `intent.md`: State the desired result, scope, exclusions, Definition of Done, and human-owned Manual Verification without duplicating detailed behavior. Follow the template from `skl skill --resource reference/intent.md propose`.
+- `behavior.md`: State scoped named rules where consequential ambiguity needs resolution, then add only binding scenarios that discriminate plausible interpretations. Rules govern their whole class of situations beyond the examples. Use `testing` and its public guidance (`skl skill --resource reference/tests.md testing`) to choose observable seams and credible evidence without prescribing one test or task per scenario. Follow the template from `skl skill --resource reference/behavior.md propose`.
 
 **When warranted**:
-- `plan.md`: The approach, the module shapes and seams chosen for implementation and any pinned decision the implementer MUST NOT make on its own. Follow the template from `skl skill --resource reference/plan.md propose`
-- `tasks.md`: Follow the template from `skl skill --resource reference/tasks.md propose` — it states when it is warranted
+- `plan.md`: Required when the approved design pins architecture. Preserve responsibility ownership, boundary assumptions, deliberately agreed interfaces, and verification strategy from the approved source; reference relevant existing ADRs and label incidental sketches as illustrative. Follow the template from `skl skill --resource reference/plan.md propose`.
+- `tasks.md`: Create it only when useful sequencing, dependencies, or coordination need an explicit ledger. Do not manufacture tasks from scenario or test counts. Follow the template from `skl skill --resource reference/tasks.md propose`.
+
+An unambiguously implied case may be implemented and tested without extending the frozen artifact set. Resolve every consequential behavioral or architectural gap before publication; silence does not delegate it, and no new convention relaxes an explicit obligation in an existing ledger.

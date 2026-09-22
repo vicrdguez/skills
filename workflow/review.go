@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -23,7 +24,7 @@ type ReviewBackend interface {
 	CompleteReview(context.Context, ImplementationItem, State, func() error) error
 }
 
-func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, reviewNumber uint64, reviewed, head, verdict, summaryPath, findingsPath, bodyPath string, endpoints ArtifactEndpoints, backend ReviewBackend) (outcome ImplementationOutcome, err error) {
+func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, fixedSubmission SubmissionID, fixedBase, fixedBodySHA256 string, reviewNumber uint64, reviewed, head, verdict, summaryPath, findingsPath, bodyPath string, endpoints ArtifactEndpoints, backend ReviewBackend) (outcome ImplementationOutcome, err error) {
 	defer func() {
 		warn := func(message string) {
 			if outcome.Reason == "" {
@@ -70,9 +71,34 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	if head == "" {
 		head = reviewed
 	}
+	fixedAttachment := fixedSubmission != "" || fixedBase != "" || fixedBodySHA256 != ""
 	if id == "" || reviewNumber == 0 || reviewed == "" || verdict != "rework" && verdict != "pass" && verdict != "needs-human" || summaryPath == "" || verdict == "pass" && bodyPath == "" {
 		return ImplementationOutcome{}, fmt.Errorf("submit requires --item, positive --review-number, --reviewed-head, --verdict rework|pass|needs-human and --summary; pass also requires --body")
 	}
+	if fixedAttachment && (fixedSubmission == "" || fixedBase == "" || len(fixedBodySHA256) != 64) {
+		return ImplementationOutcome{}, fmt.Errorf("fixed Submission handoff requires --submission, --base, and a 64-character --submission-body-sha256 together")
+	}
+	finalBody := ""
+	if verdict == "pass" {
+		body, err := os.ReadFile(bodyPath)
+		if err != nil {
+			return ImplementationOutcome{}, err
+		}
+		finalBody = string(body)
+	}
+	attachmentIdentityMatches := func(submission Submission) bool {
+		return submission.ID == fixedSubmission && submission.Base == fixedBase
+	}
+	originalAttachmentMatches := func(submission Submission) bool {
+		return attachmentIdentityMatches(submission) && fmt.Sprintf("%x", sha256.Sum256([]byte(submission.Body))) == fixedBodySHA256
+	}
+	finalAttachmentMatches := func(submission Submission) (bool, error) {
+		if verdict != "pass" || !attachmentIdentityMatches(submission) {
+			return false, nil
+		}
+		return backend.SubmissionBodyMatches(id, submission.Body, finalBody)
+	}
+	finalBodyPublished := false
 	items, err := loadImplementation(ctx, backend)
 	if err != nil {
 		return ImplementationOutcome{}, err
@@ -88,6 +114,16 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	}
 	if item.Problem != "" && item.Problem != "contradictory lifecycle projections" || item.Submission == nil || item.State == AwaitingReview && !item.Claimed {
 		return ImplementationOutcome{}, Refuse("verdict requires the selected review Claim or an exactly observable fixed-number retry")
+	}
+	if fixedAttachment {
+		finalMatches, err := finalAttachmentMatches(*item.Submission)
+		if err != nil {
+			return ImplementationOutcome{}, err
+		}
+		if !originalAttachmentMatches(*item.Submission) && !finalMatches {
+			return ImplementationOutcome{}, Refuse("selected Submission attachment changed from this invocation; inspect the fixed handoff and stop")
+		}
+		finalBodyPublished = finalMatches
 	}
 	checkpoint, err := loadReviewCheckpoint(root, item.Branch)
 	if err != nil {
@@ -131,6 +167,18 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 		submission, err := backend.ReviewSubmission(ctx, item.Submission.ID)
 		if err != nil {
 			return err
+		}
+		if fixedAttachment {
+			matches := originalAttachmentMatches(submission)
+			if finalBodyPublished {
+				matches, err = finalAttachmentMatches(submission)
+				if err != nil {
+					return err
+				}
+			}
+			if !matches {
+				return Refuse("selected Submission attachment changed during verdict; inspect the fixed handoff and stop")
+			}
 		}
 		if submission.Head != head || submission.Merged || submission.Draft {
 			return Refuse("Submission head changed during verdict")
@@ -192,14 +240,6 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 			comments = append(comments, skilldist.ReviewComment{Body: string(body), Commit: reviewed, Path: a.Path, Line: a.Line, Side: a.Side})
 		}
 	}
-	finalBody := ""
-	if verdict == "pass" {
-		body, err := os.ReadFile(bodyPath)
-		if err != nil {
-			return ImplementationOutcome{}, err
-		}
-		finalBody = string(body)
-	}
 	submission, err := backend.ReviewSubmission(ctx, item.Submission.ID)
 	if err != nil {
 		return ImplementationOutcome{}, err
@@ -227,10 +267,15 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 	if retry && item.State == AwaitingReview && !claimPrecedesReceipt(submission.ClaimAcquiredAt, receipt.CreatedAt) {
 		return ImplementationOutcome{}, Refuse("recorded review receipt does not belong to the current Awaiting Review Claim; replay the current round's original fixed-number command")
 	}
+	reviewPublished := retry
+	bodyPublished := verdict != "pass" || bodyMatches
 	if !retry && item.State == AwaitingReview {
 		currentSummaries, unambiguous := reviewSummariesForClaim(item.Submission.Comments, submission.ClaimAcquiredAt)
 		if !unambiguous || len(currentSummaries) > 0 && (len(currentSummaries) != 1 || !reviewCommentsMatch(currentSummaries[0], comments[0]) || !reviewEvidenceCompatible(item, comments, submission.ClaimAcquiredAt)) {
 			return ImplementationOutcome{}, Refuse("review publication already started under this Claim; replay its original fixed-number command and Result Documents")
+		}
+		if len(currentSummaries) == 1 {
+			reviewPublished = reviewEvidenceMatchesForClaim(item, comments, submission.ClaimAcquiredAt)
 		}
 	}
 	observedItem := item
@@ -294,10 +339,12 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 		result := completedReviewOutcome(item, head, checkpoint)
 		return result, guard()
 	}
-	if err := backend.PublishReview(ctx, item, comments, guard); err != nil {
-		return ImplementationOutcome{}, err
+	if !reviewPublished {
+		if err := backend.PublishReview(ctx, item, comments, guard); err != nil {
+			return ImplementationOutcome{}, err
+		}
 	}
-	if verdict == "pass" {
+	if verdict == "pass" && !bodyPublished {
 		wanted := *item.Submission
 		wanted.Body = finalBody
 		published, err := backend.PublishImplementation(ctx, item, wanted)
@@ -307,6 +354,7 @@ func SubmitWatchdog(ctx context.Context, root, remote string, id WorkItemID, rev
 		if published.Head != head {
 			return ImplementationOutcome{}, Refuse("Submission head changed during final body publication")
 		}
+		finalBodyPublished = true
 	}
 	published, err := backend.ImplementationItems(ctx)
 	if err != nil {

@@ -2,7 +2,7 @@
 
 Write opaque Markdown in this invocation's private directory: `{{.ResultDirectory}}/summary.md` always, `{{.ResultDirectory}}/submission.md` on a pass, and optional `{{.ResultDirectory}}/findings.json` for structured anchors.
 
-This is review round {{.Round}} of this Submission. The original reviewed head is `{{.ReviewedHead}}`; it remains the original reviewed head even after you commit permitted Debt Marker comments, which are reported separately through `--head`.
+This is review round {{.Round}} of PR #{{.PR}}. The original reviewed head is `{{.ReviewedHead}}`; it remains the original reviewed head even after you commit permitted Debt Marker comments, which are reported separately through `--head`.
 
 ## summary.md
 
@@ -26,4 +26,4 @@ Use `LEFT` for an old-side line or `RIGHT` for a new-side line. Write the findin
 
 ## On pass
 
-`{{.ResultDirectory}}/submission.md` is the complete final PR body including the historical Manual Verification section verbatim with every checkbox unchecked. Preserve the Audit ledger and review evidence. The engine appends `Closes #<source-issue>`; no archive or source-issue close occurs at Ready for Merge.
+`{{.ResultDirectory}}/submission.md` is the complete final PR body including the historical Manual Verification section verbatim with every checkbox unchecked. Preserve the Audit ledger, Verification evidence, and the integrated target SHA as a reference distinct from the review baseline, artifact endpoints, and fixed reviewed head. The engine appends `Closes #<source-issue>`; no archive or source-issue close occurs at Ready for Merge.

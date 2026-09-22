@@ -8,13 +8,50 @@ import (
 	"path"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"text/template"
+
+	"github.com/vicrdguez/skills/ledger"
 )
 
 const InstructionProtocol = "skl.instructions/v1"
 
+// DeliveryFacts specializes both private-ledger worker phases. Exact evidence
+// is data, while the command fields are engine-bound procedures.
+type DeliveryFacts struct {
+	Phase                 string                    `json:"phase"`
+	Procedure             string                    `json:"procedure"`
+	Operation             string                    `json:"operation"`
+	Repository            string                    `json:"repository"`
+	Remote                string                    `json:"remote"`
+	Item                  string                    `json:"item"`
+	Branch                string                    `json:"branch"`
+	Worktree              string                    `json:"worktree"`
+	ResultDirectory       string                    `json:"result_directory"`
+	Claim                 string                    `json:"claim"`
+	PrepareCommand        string                    `json:"prepare_command"`
+	InspectCommand        string                    `json:"inspect_command"`
+	ResumeCommand         string                    `json:"resume_command"`
+	ReleaseCommand        string                    `json:"release_command"`
+	SubmitCommand         string                    `json:"submit_command"`
+	PauseCommand          string                    `json:"pause_command,omitempty"`
+	ResultResourceCommand string                    `json:"result_resource_command"`
+	RequiredHead          string                    `json:"required_head,omitempty"`
+	RecordedTarget        string                    `json:"recorded_target,omitempty"`
+	PreviousReviewed      string                    `json:"previous_reviewed,omitempty"`
+	SourceHead            string                    `json:"source_head,omitempty"`
+	SourceTarget          string                    `json:"source_target,omitempty"`
+	ReviewScope           string                    `json:"review_scope,omitempty"`
+	FetchStatus           string                    `json:"fetch_status,omitempty"`
+	ReviewCount           uint64                    `json:"review_count"`
+	ReviewNumber          uint64                    `json:"review_number"`
+	Capability            ExecutionCapability       `json:"capability,omitempty"`
+	Documents             []ledger.ContractDocument `json:"documents"`
+}
+
 type InvocationFacts struct {
+	Delivery       *DeliveryFacts       `json:"delivery,omitempty"`
 	Watchdog       *WatchdogFacts       `json:"watchdog,omitempty"`
 	Implementation *ImplementationFacts `json:"implementation,omitempty"`
 }
@@ -27,65 +64,139 @@ const (
 )
 
 type WatchdogFacts struct {
-	WorkItemReference          string          `json:"-"`
-	SubmissionReference        string          `json:"-"`
-	Remote                     string          `json:"remote"`
-	Worktree                   string          `json:"worktree"`
-	FetchCommand               string          `json:"fetch_command"`
-	WorktreeCommand            string          `json:"worktree_command"`
-	InspectCommand             string          `json:"inspect_command"`
-	ResultDirectory            string          `json:"result_directory"`
-	SubmitCommand              string          `json:"submit_command"`
-	ResumeCommand              string          `json:"resume_command"`
-	ReviewCount                uint64          `json:"review_count"`
-	ReviewNumber               uint64          `json:"review_number"`
-	ReviewScope                ReviewScope     `json:"review_scope"`
-	PreviousReviewedHead       string          `json:"previous_reviewed_head,omitempty"`
-	WorkItem                   int             `json:"work_item"`
-	Submission                 int             `json:"submission"`
-	Branch                     string          `json:"branch"`
-	ReviewedHead               string          `json:"reviewed_head"`
-	ArtifactBaseline           string          `json:"artifact_baseline"`
-	ArtifactCompletion         string          `json:"artifact_completion"`
-	SuppliedArtifactBaseline   string          `json:"supplied_artifact_baseline,omitempty"`
-	SuppliedArtifactCompletion string          `json:"supplied_artifact_completion,omitempty"`
-	AuditBody                  string          `json:"audit_body"`
-	Comments                   []ReviewComment `json:"comments,omitempty"`
+	Repository                 string           `json:"repository,omitempty"`
+	EvidenceStreams            []EvidenceStream `json:"evidence_streams,omitempty"`
+	EvidenceInstructions       string           `json:"evidence_instructions,omitempty"`
+	Remote                     string           `json:"remote"`
+	Worktree                   string           `json:"worktree"`
+	FetchCommand               string           `json:"fetch_command"`
+	WorktreeCommand            string           `json:"worktree_command"`
+	InspectCommand             string           `json:"inspect_command"`
+	ResultDirectory            string           `json:"result_directory"`
+	SubmitCommand              string           `json:"submit_command"`
+	ResumeCommand              string           `json:"resume_command"`
+	ReviewCount                uint64           `json:"review_count"`
+	ReviewNumber               uint64           `json:"review_number"`
+	ReviewScope                ReviewScope      `json:"review_scope"`
+	PreviousReviewedHead       string           `json:"previous_reviewed_head,omitempty"`
+	WorkItem                   int              `json:"work_item"`
+	Submission                 int              `json:"submission"`
+	Branch                     string           `json:"branch"`
+	ReviewedHead               string           `json:"reviewed_head"`
+	SubmissionBase             string           `json:"submission_base"`
+	SubmissionBodySHA256       string           `json:"submission_body_sha256"`
+	ArtifactBaseline           string           `json:"artifact_baseline"`
+	ArtifactCompletion         string           `json:"artifact_completion"`
+	SuppliedArtifactBaseline   string           `json:"supplied_artifact_baseline,omitempty"`
+	SuppliedArtifactCompletion string           `json:"supplied_artifact_completion,omitempty"`
+	AuditBody                  string           `json:"audit_body"`
+	Comments                   []ReviewComment  `json:"comments,omitempty"`
 }
 
 type ImplementationFacts struct {
-	WorkItemReference          string             `json:"-"`
-	Remote                     string             `json:"remote"`
-	FetchCommand               string             `json:"fetch_command"`
-	WorktreeCommand            string             `json:"worktree_command"`
-	InspectCommand             string             `json:"inspect_command"`
-	NeedsHumanCommand          string             `json:"needs_human_command"`
-	ResultDirectory            string             `json:"result_directory"`
-	SubmitCommand              string             `json:"submit_command"`
-	Procedure                  ImplementProcedure `json:"procedure,omitempty"`
-	Submission                 int                `json:"submission,omitempty"`
-	Comments                   []ReviewComment    `json:"comments,omitempty"`
-	WorkItem                   int                `json:"work_item"`
-	Branch                     string             `json:"branch"`
-	Worktree                   string             `json:"worktree"`
-	ArtifactBaseline           string             `json:"artifact_baseline,omitempty"`
-	ArtifactCompletion         string             `json:"artifact_completion,omitempty"`
-	SuppliedArtifactBaseline   string             `json:"supplied_artifact_baseline,omitempty"`
-	SuppliedArtifactCompletion string             `json:"supplied_artifact_completion,omitempty"`
-	ResumeCommand              string             `json:"resume_command"`
+	WorkItemReference          string              `json:"-"`
+	Repository                 string              `json:"repository,omitempty"`
+	Remote                     string              `json:"remote"`
+	FetchCommand               string              `json:"fetch_command"`
+	WorktreeCommand            string              `json:"worktree_command"`
+	PushCommand                string              `json:"push_command"`
+	InspectCommand             string              `json:"inspect_command"`
+	NeedsHumanCommand          string              `json:"needs_human_command"`
+	ResultDirectory            string              `json:"result_directory"`
+	SubmitCommand              string              `json:"submit_command"`
+	Procedure                  ImplementProcedure  `json:"procedure,omitempty"`
+	Submission                 int                 `json:"submission,omitempty"`
+	SubmissionBody             *SubmissionEvidence `json:"submission_body,omitempty"`
+	EvidenceStreams            []EvidenceStream    `json:"evidence_streams,omitempty"`
+	Comments                   []ReviewComment     `json:"comments,omitempty"`
+	WorkItem                   int                 `json:"work_item"`
+	Branch                     string              `json:"branch"`
+	Worktree                   string              `json:"worktree"`
+	ArtifactBaseline           string              `json:"artifact_baseline,omitempty"`
+	ArtifactCompletion         string              `json:"artifact_completion,omitempty"`
+	SuppliedArtifactBaseline   string              `json:"supplied_artifact_baseline,omitempty"`
+	SuppliedArtifactCompletion string              `json:"supplied_artifact_completion,omitempty"`
+	ResumeCommand              string              `json:"resume_command"`
+	Inspection                 *InspectionFacts    `json:"inspection,omitempty"`
+	Capability                 ExecutionCapability `json:"capability,omitempty"`
+}
+
+// InspectionProgress is the observed artifact-ledger progress of one prepared
+// worktree. It comes from the read-only inspection, never from a lifecycle
+// label, a branch name, or an attached Submission.
+type InspectionProgress string
+
+const (
+	BaselineOnly      InspectionProgress = "baseline-only"
+	ProvisionalLedger InspectionProgress = "provisional"
+	CompletionPresent InspectionProgress = "completion-present"
+	RetiredLedger     InspectionProgress = "retired"
+	LedgerViolations  InspectionProgress = "violations"
+)
+
+// ExecutionCapability is the adapter capability an invocation established. It
+// selects supported helper recipes for optional implementation/testing delegation
+// and mandatory Audit dispatch; a harness name alone establishes nothing, and an
+// unknown capability keeps a bounded runtime choice.
+type ExecutionCapability string
+
+const (
+	ClaudeAgentReview ExecutionCapability = "claude-agents"
+	PiSubagentReview  ExecutionCapability = "pi-subagents"
+	SequentialReview  ExecutionCapability = "sequential"
+	UnknownCapability ExecutionCapability = ""
+)
+
+// InspectionFacts narrows one read-only inspection to the applicable
+// continuation. It is not a second full Execution Skill.
+type InspectionFacts struct {
+	Progress   InspectionProgress `json:"progress"`
+	Violations []string           `json:"violations,omitempty"`
 }
 
 // ImplementProcedure is the engine-established submission procedure for one
 // Implement invocation, decided from authoritative Workflow State rather than
-// inferred from an attached Submission.
+// inferred from an attached Submission, branch name, feedback contents, or any
+// unobserved artifact phase.
 type ImplementProcedure string
 
 const (
 	InitialSubmission   ImplementProcedure = "initial"
+	ResumedSubmission   ImplementProcedure = "resumed"
 	FindingDrivenRework ImplementProcedure = "rework"
 )
 
+// EvidenceSource is a canonical repository-bound identity for one observed or
+// required evidence stream.
+type EvidenceSource string
+
+// RepositoryEvidenceSource binds an API path to one owner/name repository.
+func RepositoryEvidenceSource(repository, apiPath string) EvidenceSource {
+	return EvidenceSource("repos/" + strings.Trim(repository, "/") + "/" + strings.TrimPrefix(apiPath, "/"))
+}
+
+func IssueCommentsEvidenceSource(repository string, number int) EvidenceSource {
+	return RepositoryEvidenceSource(repository, fmt.Sprintf("issues/%d/comments", number))
+}
+
+func PullEvidenceSource(repository string, number int) EvidenceSource {
+	return RepositoryEvidenceSource(repository, fmt.Sprintf("pulls/%d", number))
+}
+
+func PullDiscussionEvidenceSource(repository string, number int) EvidenceSource {
+	return RepositoryEvidenceSource(repository, fmt.Sprintf("issues/%d/comments", number))
+}
+
+func PullReviewsEvidenceSource(repository string, number int) EvidenceSource {
+	return RepositoryEvidenceSource(repository, fmt.Sprintf("pulls/%d/reviews", number))
+}
+
+func PullCommentsEvidenceSource(repository string, number int) EvidenceSource {
+	return RepositoryEvidenceSource(repository, fmt.Sprintf("pulls/%d/comments", number))
+}
+
 type ReviewComment struct {
+	RawBody         string `json:"-"`
 	Line            int    `json:"line,omitempty"`
 	Side            string `json:"side,omitempty"`
 	Body            string `json:"body"`
@@ -110,6 +221,32 @@ type ReviewComment struct {
 
 	// EvidenceAuthorized is the backend's assertion that a comment may count as published evidence.
 	EvidenceAuthorized bool `json:"evidence_authorized,omitempty"`
+	// Source is the observed repository-bound stream this body came from. It is
+	// part of the labeled evidence, never a rendering input.
+	Source EvidenceSource `json:"source,omitempty"`
+}
+
+// EvidenceStream is one required repository-bound evidence source. Bodies is how
+// many source bodies the invocation actually observed on it; Command is the
+// retrieval command the worker still has to run when it was never observed.
+// `fetched empty` (observed, zero bodies), `pending` (Command set), and
+// `retrieval failure` (an error rather than a rendered state) are different.
+type EvidenceStream struct {
+	Path    string         `json:"path,omitempty"`
+	State   string         `json:"state,omitempty"`
+	Source  EvidenceSource `json:"source,omitempty"`
+	Bodies  int            `json:"bodies,omitempty"`
+	Command string         `json:"command,omitempty"`
+}
+
+// SubmissionEvidence is the attached Submission's own source body, preserved
+// whole and labeled as data.
+type SubmissionEvidence struct {
+	Source      EvidenceSource `json:"source"`
+	Author      string         `json:"author,omitempty"`
+	Association string         `json:"association,omitempty"`
+	CreatedAt   string         `json:"created_at,omitempty"`
+	Body        string         `json:"body"`
 }
 
 type Packet struct {
@@ -130,15 +267,15 @@ var definitionPaths = map[string]string{
 	"implement":          "skills/dev/implement/SKILL.md",
 	"propose":            "skills/dev/propose/SKILL.md",
 	"shape":              "skills/thinking/shape/SKILL.md",
-	"tdd":                "skills/dev/tdd/SKILL.md",
+	"testing":            "skills/dev/testing/SKILL.md",
 	"watchdog":           "skills/dev/watchdog/SKILL.md",
 	"writing-for-agents": "skills/misc/writing-for-agents/SKILL.md",
 }
 
 var dependencies = map[string][]string{
 	"explore":   {"domain"},
-	"propose":   {"design", "tdd"},
-	"implement": {"tdd", "audit", "design", "domain"},
+	"propose":   {"design", "testing"},
+	"implement": {"testing", "audit", "design", "domain"},
 }
 
 func SkillNames() []string {
@@ -159,28 +296,18 @@ func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
 	if err != nil {
 		return Packet{}, err
 	}
-	for _, included := range dependencies[name] {
-		rendered, err := renderDefinition(definitionPaths[included], facts)
+	// A read-only inspection returns a narrow continuation, not another copy of
+	// every bundled definition.
+	included := dependencies[name]
+	if facts.Implementation != nil && facts.Implementation.Inspection != nil || facts.Delivery != nil && (facts.Delivery.Operation == "inspect" || facts.Delivery.Operation == "prepare") {
+		included = nil
+	}
+	for _, bundled := range included {
+		rendered, err := renderDefinition(definitionPaths[bundled], facts)
 		if err != nil {
 			return Packet{}, err
 		}
-		instructions += "\n\n## Included Skill: " + included + "\n\n" + rendered
-	}
-	if facts.Implementation != nil {
-		f := facts.Implementation
-		instructions += fmt.Sprintf("\n\n## Work Start\n\nWork Item: %s\nBranch: %s\nWorktree: %s\nPrepare: `%s` then `%s`; safely reuse a clean existing worktree instead of recreating it\nInspect: `%s` resolves the Artifact Baseline and Completion from the fetched history\nResume: `%s`\n", f.WorkItemReference, f.Branch, f.Worktree, f.FetchCommand, f.WorktreeCommand, f.InspectCommand, f.ResumeCommand)
-		if f.Procedure == FindingDrivenRework {
-			instructions += "\nFinding-driven Rework: sync nothing; inspect the current PR comparison, supplied summary, inline evidence, and human comments. Keep the ledger retired.\n"
-		}
-		instructions += "\nWrite the opaque Result Document using the named template, then run `" + f.SubmitCommand + "`. If pausing, run `" + f.NeedsHumanCommand + "` and add `--body <result>/submission.md` when preserving implementation changes.\n"
-	}
-	if f := facts.Watchdog; f != nil {
-		instructions += fmt.Sprintf("\n\n## Review Start\n\nWork Item: %s\nSubmission: %s\nWorktree: %s\nReviewed head: %s\nCompleted reviews: %d\nReview number: %d\nScope: %s; the comparison rule below applies after Git preparation\nPrepare: `%s` then `%s`; safely reuse a clean existing worktree instead of recreating it\nInspect: `%s` resolves the Artifact Baseline and Completion from the fetched history\nResume: `%s`\n\nRun the Inspect command after preparing the worktree, read the endpoint files from Git at the resolved Baseline and Completion, then use the opaque Submission body, prior findings, and human comments. Review the invocation's current head; rerun the Full Gate, active-finding verification, artifact checks, and whole-change critical-class scan. The engine has not run Audit or project checks.\n\nWrite `summary.md`, optional anchored findings, and on pass `submission.md` in %s. Run `%s --verdict <pass|rework|needs-human>`. Pass also requires `--body <result>/submission.md`; optional inline inputs use `--findings <result>/findings.json`. After permitted Debt Marker comments, commit and push, run the Post-Marker Check, and supply `--head <final-sha>` while retaining the original `--reviewed-head`.\n", f.WorkItemReference, f.SubmissionReference, f.Worktree, f.ReviewedHead, f.ReviewCount, f.ReviewNumber, f.ReviewScope, f.FetchCommand, f.WorktreeCommand, f.InspectCommand, f.ResumeCommand, f.ResultDirectory, f.SubmitCommand)
-		if f.PreviousReviewedHead != "" {
-			instructions += "\nAfter preparation, compare `" + f.PreviousReviewedHead + "..." + f.ReviewedHead + "` when that prior revision is available and an ancestor of the reviewed head; otherwise review the full PR comparison.\n"
-		} else {
-			instructions += "\nReview the full PR comparison; no usable retained reviewed revision is required or fetched.\n"
-		}
+		instructions += "\n\n## Included Skill: " + bundled + "\n\n" + rendered
 	}
 	resources, err := resourceNames(definition)
 	if err != nil {
@@ -189,7 +316,7 @@ func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
 	return Packet{
 		Protocol:       InstructionProtocol,
 		Skill:          name,
-		IncludedSkills: append([]string(nil), dependencies[name]...),
+		IncludedSkills: append([]string(nil), included...),
 		Facts:          facts,
 		Resources:      resources,
 		Instructions:   instructions,
@@ -197,12 +324,46 @@ func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
 }
 
 // templateFuncs is the deliberately small helper set authored templates share.
-var templateFuncs = template.FuncMap{"quote": ShellQuote}
+var templateFuncs = template.FuncMap{
+	"quote":    ShellQuote,
+	"fence":    markdownFence,
+	"evidence": evidenceBlock,
+	"anchor":   anchorValue,
+}
+
+func anchorValue(line *int) string {
+	if line == nil {
+		return "null"
+	}
+	return strconv.Itoa(*line)
+}
+
+// evidenceBlock chooses a fence that cannot be closed by opaque Markdown data.
+func evidenceBlock(body string) string {
+	fence := markdownFence(body)
+	return fence + "\n" + body + "\n" + fence
+}
 
 // ShellQuote renders value as one POSIX shell word without changing any of its
 // characters.
 func ShellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
+}
+
+// markdownFence returns a CommonMark fence that source text cannot close.
+// Evidence remains verbatim between the delimiters even when it contains
+// ordinary Markdown fences.
+func markdownFence(value string) string {
+	longest, current := 0, 0
+	for _, character := range value {
+		if character == '`' {
+			current++
+			longest = max(longest, current)
+			continue
+		}
+		current = 0
+	}
+	return strings.Repeat("`", max(3, longest+1))
 }
 
 func renderDefinition(file string, facts InvocationFacts) (string, error) {

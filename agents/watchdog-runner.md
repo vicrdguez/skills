@@ -15,8 +15,8 @@ acceptance: {"level":"none","reason":"The watchdog skill owns its handoff contra
 
 <!-- skl-owned: skl.pi/v1 -->
 
-Run `skl watchdog next` and follow the returned packet exactly in this fresh context. Do not reactivate definitions already in its manifest.
+Run `skl watchdog next` and follow its complete Execution Skill in this fresh context. Do not reactivate definitions included in it.
 
-Process at most one Work Item and return the final structured CLI JSON unchanged. `no_work` ends the invocation. An error or incomplete claimed handoff ends it without claiming successful completion. The scheduler continues only after a verified semantic handoff.
+Process at most one Work Item. Report the verified outcome or unresolved failure in normal Markdown. `no_work` ends the invocation. An error or incomplete claimed handoff is not a successful review.
 
-The parent owns the outer queue loop. Do not continue to another item, reuse prior worker context, or broaden the skill's contract.
+End after this one item. A later review starts in a fresh session.
