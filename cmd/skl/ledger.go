@@ -389,7 +389,7 @@ func gateUnsupportedDelivery(stdout io.Writer, format implementationFormatKind, 
 	}
 	return true, renderLedgerOutcome(stdout, format, ledgerOutcome{
 		Status: "unsupported",
-		Reason: operation + " does not deliver ledger-accepted work yet: ledger delivery awaits run-ledger-delivery, and this refusal grants no Claim, no execution packet, and no source branch or worktree",
-		Repair: "read the accepted Contract with `skl ledger show --item <proposal>/<slice>` and repeat it once ledger delivery ships; adopting in-flight work requires a human-directed administrative cutover with normal workers stopped",
+		Reason: operation + " is a legacy source-artifact operation and is unavailable for ledger-accepted work; this refusal grants no Claim and changes no source work",
+		Repair: "read the accepted Contract with `skl ledger show --item <proposal>/<slice>` and use the ledger-backed implement/watchdog commands for delivery; administrative cutover or cleanup requires human direction with normal workers stopped",
 	})
 }

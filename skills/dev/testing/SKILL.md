@@ -11,13 +11,14 @@ When exploring a codebase, read `CONTEXT.md` (if it exists) so test names and in
 
 ## Start from the obligation
 
-{{if .Implementation}}After preparation, read the accepted `intent.md`, `behavior.md`, and `plan.md` at the resolved Artifact Baseline. Treat explicit behavioral scenarios, architecture commitments, required observations, and mandatory standards as binding. The execution metadata does not interpret that prose for you.
+{{if .Delivery}}After preparation, read the exact frozen Contract supplied through `skl`. Treat every accepted behavior, scenario, architecture commitment, required observation, and mandatory standard as binding. Completion is a worker declaration in the current Phase Report, not a Contract edit. Use the existing human-decision path for consequential unresolved meaning; do not infer permission from silence.
+{{else if .Implementation}}After preparation, read the accepted `intent.md`, `behavior.md`, and `plan.md` at the resolved Artifact Baseline. Treat explicit behavioral scenarios, architecture commitments, required observations, and mandatory standards as binding. The execution metadata does not interpret that prose for you.
 
 An unspecified detail is delegated only when the available choices preserve those obligations and standards. You may implement and test an unambiguously implied case without rewriting the frozen scenario list. If a consequential behavioral or architectural choice remains unresolved, use the execution's human-decision path rather than infer permission from silence.
 {{else}}Identify the promised behavior, architecture commitments, and mandatory standards before judging evidence. Clarify a consequential unresolved behavioral or architectural choice with the user; do not turn silence into a requirement or an assumption.
 {{end}}
 
-{{if .Implementation}}## Delegated testing during Implement
+{{if or .Implementation .Delivery}}## Delegated testing during Implement
 
 When the invocation establishes a supported helper mechanism, the owner may delegate a bounded testing assignment; delegation is optional, and unavailable support—or unknown support that the Implement guidance's bounded check does not establish—means the owner performs it serially. Give a fresh helper the accepted behavioral and architectural obligations, required observations, working location, standards, and non-conflicting write responsibility. State preferred test organization only as a preference, not an acceptance criterion.
 

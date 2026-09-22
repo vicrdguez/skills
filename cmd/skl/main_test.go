@@ -20,6 +20,7 @@ import (
 
 	skilldist "github.com/vicrdguez/skills"
 	"github.com/vicrdguez/skills/github"
+	"github.com/vicrdguez/skills/ledger"
 	"github.com/vicrdguez/skills/setup"
 	"github.com/vicrdguez/skills/workflow"
 )
@@ -397,18 +398,64 @@ func TestPublishExplicitRemoteChecksItsOwnGitEvidence(t *testing.T) {
 	}
 }
 
-// implementBundle renders the complete Implement Execution Skill the way its
-// lane delivers it, so checks never depend on the refused read-only retrieval.
+// implementBundle renders the complete Implement Execution Skill through the
+// active private-ledger path, so checks never depend on the retired
+// forge-authoritative selection or on refused read-only retrieval.
 func implementBundle(t *testing.T) skilldist.Packet {
 	t.Helper()
-	root := proposalRepository(t)
-	prepareSlice(t, root, "widget")
-	backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}}
-	got := implementCLI(t, root, backend, "next")
+	newLedgerFixture(t)
+	forge := newForgeServer(t)
+	source := sourceRepository(t, "acme", "widgets")
+	cli := newLedgerApp(t, forge)
+	accepted := cli.accept(t, source, writeProposal(t, "", singleSlice("widget-proposal")))
+	if accepted.Status != "accepted" {
+		t.Fatalf("proposal acceptance = %q: %s", accepted.Status, mustJSON(t, accepted))
+	}
+	cli.out.Reset()
+	if err := cli.app.Run([]string{"skl", "implement", "next", "--repo", source, "--result-directory", t.TempDir(), "--format", "json"}); err != nil {
+		t.Fatalf("implement next: %v\n%s", err, cli.out.String())
+	}
+	var got deliveryOutput
+	if err := json.Unmarshal(cli.out.Bytes(), &got); err != nil {
+		t.Fatalf("decode implement next %q: %v", cli.out.String(), err)
+	}
 	if got.Packet == nil {
 		t.Fatalf("no Execution Skill: %#v", got)
 	}
 	return *got.Packet
+}
+
+// activeDeliveryPacket renders one private-ledger delivery packet through the
+// same production presentation seam the CLI uses. Procedure-specific coverage
+// uses it because the complete CLI lifecycle is already covered end to end in
+// delivery_test.go.
+func activeDeliveryPacket(t *testing.T, root, phase, operation string, state ledger.SliceState) skilldist.Packet {
+	t.Helper()
+	repository, err := setup.ResolveRepository(root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution := &ledger.Execution{
+		Project:    "widgets",
+		Repository: "acme/widgets",
+		Item:       "widget/foundation",
+		State:      state,
+		Claim:      ledger.Reference{Commit: strings.Repeat("c", 40), Path: "projects/widgets/proposals/widget/foundation/state.json"},
+		Documents: []ledger.ContractDocument{{
+			Commit:   strings.Repeat("1", 40),
+			Path:     "projects/widgets/proposals/widget/foundation/behavior.md",
+			Contents: "# Opaque accepted contract\n",
+		}},
+	}
+	if phase == ledger.WatchdogPhase {
+		execution.Implement = &ledger.Report{Source: ledger.SourceRevisions{Head: strings.Repeat("a", 40), Target: strings.Repeat("b", 40)}}
+		execution.Watchdog = &ledger.Report{Round: 1, Source: ledger.SourceRevisions{Reviewed: strings.Repeat("a", 40)}}
+	}
+	packet, err := setup.PresentDelivery(execution, repository, phase, operation, skilldist.UnknownCapability, nil, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return packet
 }
 
 func TestDocumentedResourceCommands(t *testing.T) {
@@ -417,8 +464,8 @@ func TestDocumentedResourceCommands(t *testing.T) {
 		skill string
 		want  []string
 	}{
-		{file: "README.md", want: []string{"reference/submission.md", "reference/decision.md", "reference/review.md", "reference/DEEPENING.md"}},
-		{file: "skills/dev/implement/SKILL.md", skill: "implement", want: []string{"reference/submission.md", "reference/decision.md"}},
+		{file: "README.md", want: []string{"reference/ledger-submission.md", "reference/report-schema.md", "reference/ledger-review.md", "reference/DEEPENING.md"}},
+		{file: "skills/dev/implement/SKILL.md", skill: "implement", want: []string{"reference/ledger-submission.md"}},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.file, func(t *testing.T) {
@@ -632,9 +679,9 @@ func TestEmbeddedResourceDelegationSmoke(t *testing.T) {
 		{"domain", "", "If any of the three is missing, skip the ADR. Use the format from `skl skill --resource reference/ADR-FORMAT.md domain`.", "skl skill --resource reference/ADR-FORMAT.md domain", "# ADR Format"},
 		{"testing", "", "See `skl skill --resource reference/tests.md testing` for examples", "skl skill --resource reference/tests.md testing", "# Behavioral and Regression Tests"},
 		{"testing", "", "`skl skill --resource reference/mocking.md testing` for boundary substitutes", "skl skill --resource reference/mocking.md testing", "# Boundary Substitutes and Controlled Reproductions"},
-		{"audit", "", "the Standards axis always carries the **smell baseline** from `skl skill --resource reference/smells.md audit`", "skl skill --resource reference/smells.md audit", "# Smell Baseline"},
-		{"audit", "", "Retrieve the shared contract criteria with `skl skill --resource reference/acceptance.md audit`", "skl skill --resource reference/acceptance.md audit", "# Contract Acceptance and Finding Criteria"},
-		{"audit", "", "The list of standards-source files you found in step 3, plus `skl skill --resource reference/smells.md audit`. Instruct the sub-agent to read those files and the command's output.", "skl skill --resource reference/smells.md audit", "**The repo overrides.** A documented repo standard always wins"},
+		{"audit", "", "Retrieve `skl skill --resource reference/smells.md audit`", "skl skill --resource reference/smells.md audit", "# Smell Baseline"},
+		{"audit", "", "`skl skill --resource reference/acceptance.md audit`. Supply both review", "skl skill --resource reference/acceptance.md audit", "# Contract Acceptance and Finding Criteria"},
+		{"audit", "", "Report every documented-standard violation", "skl skill --resource reference/smells.md audit", "**The repo overrides.** A documented repo standard always wins"},
 		{"design", "", "see `skl skill --resource reference/DEEPENING.md design`: dependency categories", "skl skill --resource reference/DEEPENING.md design", "### 2. Local-substitutable"},
 		{"design", "", "see `skl skill --resource reference/DESIGN-IT-TWICE.md design`: spin up parallel sub-agents", "skl skill --resource reference/DESIGN-IT-TWICE.md design", "Each must produce a **radically different** interface"},
 		{"design", "reference/DEEPENING.md", "the Design definition (retrieve with `skl skill design` if not already supplied)", "skl skill design", "# Codebase Design"},
@@ -1090,16 +1137,16 @@ func TestRetrieveApprovedContractGuidance(t *testing.T) {
 
 func TestRetrieveRetiredLedgerInstructions(t *testing.T) {
 	for skill, required := range map[string][]string{
-		"watchdog": {
-			"## Pass -> Ready for Merge",
-			"git show <artifact-baseline>:.changes/<slug>/intent.md",
-			"Copy its `Manual verification` section into the PR body verbatim, with every checkbox unchecked",
-			"Keep the retired Implementation Ledger absent; do not restore or archive it.",
-			"The change now awaits the **human's merge**. The watchdog does not merge.",
-		},
 		"implement": {
-			"then remove `.changes/widget/` in a later commit",
-			"Never bless the changes — that is the watchdog's job.",
+			"Never amend, tick, or retire the accepted documents",
+			"Never create, tick, or delete `.changes`",
+			"never rewrite the accepted Contract documents",
+			"Independent Watchdog Review and the human merge boundary are preserved",
+			"only a human merges the reviewed work",
+		},
+		"watchdog": {
+			"never look for the accepted Contract in source history or tick, retire, or recreate it",
+			"Only a human performs the final integration and merge",
 		},
 	} {
 		t.Run(skill, func(t *testing.T) {
@@ -1108,13 +1155,9 @@ func TestRetrieveRetiredLedgerInstructions(t *testing.T) {
 			case "implement":
 				got = implementBundle(t).Instructions
 			case "watchdog":
-				packet, err := skilldist.BuildPacket("watchdog", skilldist.InvocationFacts{
-					Watchdog: &skilldist.WatchdogFacts{WorkItem: 7, Submission: 11},
-				})
-				if err != nil {
-					t.Fatal(err)
-				}
-				got = packet.Instructions
+				got = activeDeliveryPacket(t, sourceRepository(t, "acme", "widgets"), ledger.WatchdogPhase, "next", ledger.SliceState{
+					State: ledger.AwaitingReview, Title: "Foundation", Branch: "foundation",
+				}).Instructions
 			}
 			for _, want := range required {
 				if !strings.Contains(got, want) {
@@ -1901,7 +1944,7 @@ func TestRetrieveAuditWithoutPonytail(t *testing.T) {
 				t.Fatalf("rendered Audit instructions differ from the independently reviewed golden:\n%s", instructions)
 			}
 			// A standalone Audit keeps its own caller-driven discovery.
-			if !strings.Contains(instructions, "If no PR comparison or fixed point can be resolved, ask for one") || strings.Contains(instructions, "This bundled Audit reviews one claimed change") {
+			if !strings.Contains(instructions, "Ask if no comparison was supplied") || strings.Contains(instructions, "This bundled Audit reviews one claimed change") {
 				t.Error("standalone Audit lost its own mode")
 			}
 			for _, forbidden := range []string{"ponytail", "750", "net-lines", "## Simplicity"} {
@@ -1909,8 +1952,8 @@ func TestRetrieveAuditWithoutPonytail(t *testing.T) {
 					t.Errorf("Audit retains or injects %q", forbidden)
 				}
 			}
-			for _, required := range []string{"**Standards**", "**Artifacts**", "**smell baseline**", "**The documented gate**", "**Artifact integrity**", "`HARD` or `JUDGEMENT`", "Under 500 words.", "### 6. Aggregate", "Do **not** merge or rerank findings"} {
-				if !strings.Contains(instructions, required) {
+			for _, required := range []string{"**Standards**", "**Contracts**", "reference/smells.md", "**Full Gate**", "exact frozen Contract references", "`HARD` or `JUDGEMENT`", "Keep the report under 500 words", "## Aggregate without reranking", "Do not merge findings across axes"} {
+				if !strings.Contains(strings.Join(strings.Fields(instructions), " "), required) {
 					t.Errorf("Audit lost ordinary review instruction %q", required)
 				}
 			}
@@ -2275,104 +2318,107 @@ func TestDeferredResourceCommandsFromParentInstructions(t *testing.T) {
 	if err := os.MkdirAll(hostile, 0700); err != nil {
 		t.Fatal(err)
 	}
-	submissionObligations := []string{"## Summary", "## Verification", "## Audit ledger", "scenario", "Full Gate"}
+	t.Setenv("TMPDIR", hostile)
+	root := sourceRepository(t, "acme", "widgets")
 
 	cases := []struct {
-		name           string
-		state          workflow.State
-		draft          bool
-		submission     bool
-		procedure      string
-		resource       string
-		laterValue     string
-		placeholder    string
-		want           []string
-		absentResource []string
+		name      string
+		phase     string
+		operation string
+		state     ledger.SliceState
+		owner     string
+		resource  string
+		procedure string
+		want      []string
+		absent    []string
 	}{
 		{
-			name: "first implementation", state: workflow.Ready, procedure: "initial",
-			resource:       "reference/submission.md",
-			want:           submissionObligations,
-			absentResource: []string{"## Rework", "resolution commit"},
+			name: "first implementation", phase: ledger.ImplementPhase, operation: "next", owner: "implement",
+			state:    ledger.SliceState{State: ledger.ReadyForImplementation, Title: "Foundation", Branch: "foundation"},
+			resource: "reference/ledger-submission.md", procedure: "initial",
+			want:   []string{"## Summary", "## Verification", "## Audit ledger", "Full Gate", "completion-and-evidence table"},
+			absent: []string{"Preserve every historical"},
 		},
 		{
-			// A preserved draft Submission is not evidence of finding-driven
-			// Rework: the reconciled Workflow State decides the procedure.
-			name: "preserved draft submission", state: workflow.Ready, submission: true, draft: true, procedure: "initial",
-			resource:       "reference/submission.md",
-			want:           submissionObligations,
-			absentResource: []string{"## Rework", "resolution commit"},
+			// The engine's operation and reconciled Workflow State select the
+			// procedure; the bound report resource receives it as typed input.
+			name: "resumed implementation", phase: ledger.ImplementPhase, operation: "resume", owner: "implement",
+			state:    ledger.SliceState{State: ledger.ReadyForImplementation, Title: "Foundation", Branch: "foundation"},
+			resource: "reference/ledger-submission.md", procedure: "resumed",
+			want:   []string{"Identify what was already complete and what this continuation added", "## Summary", "## Audit ledger"},
+			absent: []string{"Preserve every historical"},
 		},
 		{
-			name: "finding-driven rework", state: workflow.Rework, submission: true, procedure: "rework",
-			resource: "reference/submission.md",
-			want:     []string{"## Rework", "resolution commit", "Debt Marker", "## Audit ledger"},
+			name: "finding-driven rework", phase: ledger.ImplementPhase, operation: "next", owner: "implement",
+			state:    ledger.SliceState{State: ledger.Rework, Title: "Foundation", Branch: "foundation"},
+			resource: "reference/ledger-submission.md", procedure: "rework",
+			want:   []string{"Preserve every historical `F<n>` and `W<n>` identity", "## Audit ledger", "## Summary"},
+			absent: []string{"Identify what was already complete"},
 		},
 		{
-			name: "needs human decision", state: workflow.Ready, procedure: "initial",
-			resource: "reference/decision.md", laterValue: "preserve=true", placeholder: "preserve=<true|false>",
-			want: []string{"## Human Decision", "blocking requirement", "current Workflow State"},
+			name: "watchdog invocation", phase: ledger.WatchdogPhase, operation: "next", owner: "watchdog",
+			state:    ledger.SliceState{State: ledger.AwaitingReview, Title: "Foundation", Branch: "foundation"},
+			resource: "reference/ledger-review.md",
+			want: []string{
+				"review round 2", "stable Work-Item-local `W<n>` identities",
+				"`BLOCK`, `HUMAN`, or `NOTE`", "human-owned `M<n>` Manual Verification",
+			},
 		},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			root := proposalRepository(t)
-			prepareSlice(t, root, "widget")
-			head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
-			item := workflow.ImplementationItem{ID: "7", Branch: "widget", State: testCase.state}
-			if testCase.submission {
-				item.Submission = &workflow.Submission{ID: "11", Head: head, Base: "main", Draft: testCase.draft}
-			}
-			backend := &implementationMemory{work: []workflow.ImplementationItem{item}}
-			t.Setenv("TMPDIR", hostile)
-
-			started := implementCLI(t, root, backend, "next")
-			if started.Packet == nil {
-				t.Fatalf("no packet: %#v", started)
-			}
-			facts := started.Packet.Facts.Implementation
-			if string(facts.Procedure) != testCase.procedure {
-				t.Fatalf("procedure = %q, want %q", facts.Procedure, testCase.procedure)
+			packet := activeDeliveryPacket(t, root, testCase.phase, testCase.operation, testCase.state)
+			facts := packet.Facts.Delivery
+			if facts == nil {
+				t.Fatalf("no delivery facts: %#v", packet.Facts)
 			}
 			if !strings.HasPrefix(facts.ResultDirectory, hostile) {
 				t.Fatalf("result directory %q is not the invocation's own private directory", facts.ResultDirectory)
 			}
-			for _, procedural := range []string{"# Submission Result Document", "# Decision Result Document"} {
-				if strings.Contains(started.Packet.Instructions, procedural) {
-					t.Errorf("parent instructions disclosed deferred resource content %q", procedural)
+			for _, progressive := range []string{"# Implementation report result document", "# Watchdog review report"} {
+				if strings.Contains(packet.Instructions, progressive) {
+					t.Errorf("parent instructions disclosed deferred resource content %q", progressive)
 				}
 			}
 
-			command := deferredCommand(t, started.Packet.Instructions, testCase.resource)
+			command := deferredCommand(t, packet.Instructions, testCase.resource)
 			if !strings.Contains(command, "--input result_directory=") || !strings.Contains(command, "result_directory="+skilldist.ShellQuote(facts.ResultDirectory)) {
 				t.Errorf("parent command does not bind the private directory: %s", command)
 			}
-			if testCase.resource == "reference/submission.md" && !strings.Contains(command, "--input procedure="+testCase.procedure) {
+			if testCase.procedure != "" && !strings.Contains(command, "--input procedure="+testCase.procedure) {
 				t.Errorf("parent command does not bind procedure %q: %s", testCase.procedure, command)
 			}
-			if testCase.placeholder == "" {
-				if strings.ContainsAny(command, "<>") {
-					t.Errorf("parent command leaves a settled value as a placeholder: %s", command)
+			if !strings.Contains(packet.Instructions, "`"+facts.PauseCommand+"`") {
+				t.Errorf("packet lost the engine-bound human-decision path %q", facts.PauseCommand)
+			}
+			if testCase.phase == ledger.WatchdogPhase {
+				for _, want := range []string{
+					"result_directory=" + skilldist.ShellQuote(facts.ResultDirectory),
+					"--input round=" + strconv.FormatUint(facts.ReviewNumber, 10),
+					"reviewed_head=" + skilldist.ShellQuote(facts.RequiredHead),
+				} {
+					if !strings.Contains(command, want) {
+						t.Errorf("parent command does not bind %q: %s", want, command)
+					}
 				}
-			} else if !strings.Contains(command, testCase.placeholder) {
-				t.Errorf("parent command does not leave %q for the worker: %s", testCase.placeholder, command)
+				for _, settled := range []string{"<", ">", "--verdict"} {
+					if strings.Contains(command, settled) {
+						t.Errorf("parent command includes %q instead of a settled value: %s", settled, command)
+					}
+				}
 			}
 
-			resolved := command
-			if testCase.placeholder != "" {
-				resolved = strings.Replace(command, testCase.placeholder, testCase.laterValue, 1)
-			}
-			args := shellArgs(t, resolved)
-			if args[0] != "skl" || args[len(args)-1] != "implement" {
+			args := shellArgs(t, command)
+			if len(args) == 0 || args[0] != "skl" || args[len(args)-1] != testCase.owner {
 				t.Fatalf("parent command is not runnable verbatim: %v", args)
 			}
-			instructions := runDeferredCommand(t, command, testCase.placeholder, testCase.laterValue)
+			instructions := runDeferredCommand(t, command, "", "")
 			for _, want := range testCase.want {
 				if !strings.Contains(instructions, want) {
 					t.Errorf("retrieved resource is missing %q:\n%s", want, instructions)
 				}
 			}
-			for _, unwanted := range testCase.absentResource {
+			for _, unwanted := range testCase.absent {
 				if strings.Contains(instructions, unwanted) {
 					t.Errorf("retrieved resource includes %q:\n%s", unwanted, instructions)
 				}
@@ -2382,61 +2428,6 @@ func TestDeferredResourceCommandsFromParentInstructions(t *testing.T) {
 			}
 		})
 	}
-
-	t.Run("watchdog invocation", func(t *testing.T) {
-		root := proposalRepository(t)
-		prepareSlice(t, root, "widget")
-		completeAndRetireSlice(t, root, "widget")
-		head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
-		backend := &implementationMemory{work: []workflow.ImplementationItem{{
-			ID: "7", Branch: "widget", State: workflow.AwaitingReview,
-			Submission: &workflow.Submission{ID: "11", Head: head, Body: "opaque audit"},
-		}}}
-		t.Setenv("TMPDIR", hostile)
-
-		started := watchdogCLI(t, root, backend, "next")
-		if started.Packet == nil {
-			t.Fatalf("no packet: %#v", started)
-		}
-		facts := started.Packet.Facts.Watchdog
-		if !strings.HasPrefix(facts.ResultDirectory, hostile) {
-			t.Fatalf("result directory %q is not the invocation's own private directory", facts.ResultDirectory)
-		}
-		if strings.Contains(started.Packet.Instructions, "# Review Result Documents") {
-			t.Error("parent instructions disclosed the deferred review resource")
-		}
-		command := deferredCommand(t, started.Packet.Instructions, "reference/review.md")
-		for _, want := range []string{
-			"result_directory=" + skilldist.ShellQuote(facts.ResultDirectory),
-			"round=" + strconv.FormatUint(facts.ReviewNumber, 10),
-			"reviewed_head=" + skilldist.ShellQuote(head),
-		} {
-			if !strings.Contains(command, want) {
-				t.Errorf("parent command does not bind %q: %s", want, command)
-			}
-		}
-		for _, settled := range []string{"<", ">", "--verdict"} {
-			if strings.Contains(command, settled) {
-				t.Errorf("parent command includes %q instead of a settled value: %s", settled, command)
-			}
-		}
-		args := shellArgs(t, command)
-		if args[0] != "skl" || args[len(args)-1] != "watchdog" {
-			t.Fatalf("parent command is not runnable verbatim: %v", args)
-		}
-		instructions := runDeferredCommand(t, command, "", "")
-		for _, want := range []string{
-			"`" + facts.ResultDirectory + "/summary.md`",
-			"round " + strconv.FormatUint(facts.ReviewNumber, 10),
-			head,
-			"latest authorized directive wins",
-			"Manual Verification",
-		} {
-			if !strings.Contains(instructions, want) {
-				t.Errorf("retrieved review resource is missing %q:\n%s", want, instructions)
-			}
-		}
-	})
 }
 
 // runDeferredCommand resolves one emitted resource command the way a shell
@@ -2582,10 +2573,13 @@ func TestPrivateSkillModulesAreNotPublicResources(t *testing.T) {
 		}
 	}
 
-	// The embedded module composes into both Implement result documents.
+	// The embedded module composes into every Implement result document,
+	// including the active ledger-submission resource, so the engine never
+	// reads worker prose as a second decision.
 	for resource, inputs := range map[string][]string{
-		"reference/submission.md": {"result_directory=" + t.TempDir(), "procedure=initial"},
-		"reference/decision.md":   {"result_directory=" + t.TempDir(), "preserve=false"},
+		"reference/submission.md":        {"result_directory=" + t.TempDir(), "procedure=initial"},
+		"reference/ledger-submission.md": {"result_directory=" + t.TempDir(), "procedure=initial"},
+		"reference/decision.md":          {"result_directory=" + t.TempDir(), "preserve=false"},
 	} {
 		if instructions := renderResource(t, "implement", resource, inputs...); !strings.Contains(instructions, "never parses, judges, or cross-checks the prose") {
 			t.Errorf("%s did not compose the shared Result Document module:\n%s", resource, instructions)
@@ -2708,17 +2702,17 @@ func TestBundleGuaranteedSupportingSkills(t *testing.T) {
 	if !slices.Equal(packet.IncludedSkills, want) {
 		t.Fatalf("included_skills = %v, want %v", packet.IncludedSkills, want)
 	}
-	if !slices.Equal(packet.Resources, []string{"reference/decision.md", "reference/submission.md"}) {
+	if !slices.Equal(packet.Resources, []string{"reference/decision.md", "reference/ledger-submission.md", "reference/report-schema.md", "reference/submission.md"}) {
 		t.Fatalf("implementation resources changed: %v", packet.Resources)
 	}
 	// Definitions are authored templates, so the rendered outcome is what a
 	// worker reads: every guaranteed definition appears exactly once and the
 	// deferred resource bodies stay out of a no-facts packet.
 	for _, marker := range []struct{ name, text string }{
-		{"implement", "## The scope is already decided"},
-		{"implement", "## When only a human can decide"},
+		{"implement", "## Start the accepted change"},
+		{"implement", "## Audit once"},
 		{"testing", "## Verify observable behavior"},
-		{"audit", "### 6. Aggregate"},
+		{"audit", "## Aggregate without reranking"},
 		{"design", "## Deep vs shallow"},
 		{"domain", "### Offer ADRs sparingly"},
 	} {
@@ -2726,25 +2720,24 @@ func TestBundleGuaranteedSupportingSkills(t *testing.T) {
 			t.Errorf("%s marker %q appears %d times, want once", marker.name, marker.text, count)
 		}
 	}
-	for _, deferred := range []string{"# Submission Result Document", "# Decision Result Document"} {
+	for _, deferred := range []string{"# Submission Result Document", "# Decision Result Document", "# Implementation report result document"} {
 		if strings.Contains(packet.Instructions, deferred) {
 			t.Errorf("no-facts Implement packet disclosed the deferred %q body", deferred)
 		}
 	}
-	// Each bundled definition is the authored one specialized for this
-	// execution: it keeps the shared obligations and replaces the
-	// independent-mode alternatives the invocation already resolved.
-	specialized := map[string][]string{
-		"testing": {"After preparation, read the accepted"},
-		"audit":   {"normal PR-base merge-base of the recorded integrated `main` SHA and the post-integration candidate head"},
+	// Every supporting definition preserves the accepted-change scope when
+	// specialized for an active private-ledger delivery.
+	bundled := map[string][]string{
+		"testing": {"After preparation, read the exact frozen Contract"},
+		"audit":   {"That normal PR-base merge-base is the default fixed point"},
 		"design":  {"does not require a new design exercise"},
 		"domain":  {"outside the accepted change"},
 	}
 	for _, included := range want {
 		section := bundledSection(t, packet.Instructions, included)
-		for _, marker := range specialized[included] {
+		for _, marker := range bundled[included] {
 			if !strings.Contains(section, marker) {
-				t.Errorf("bundled %s lacks the specialized reference %q:\n%s", included, marker, section)
+				t.Errorf("bundled %s lacks the active reference %q:\n%s", included, marker, section)
 			}
 		}
 		for _, forbidden := range []string{"ponytail", "## simplicity"} {

@@ -4,7 +4,7 @@ description: Implement a single claimed change against its accepted behavioral a
 disable-model-invocation: true
 ---
 
-{{if and .Implementation .Implementation.Inspection}}{{template "inspection" .Implementation}}{{else if .Implementation}}Implement Work Item {{.Implementation.WorkItemReference}} in `{{.Implementation.Worktree}}`. This Execution Skill already represents the engine's completed Work Start operation; do not select or claim another Work Item.
+{{if .Delivery}}{{template "ledger-implementation" .Delivery}}{{else}}{{if and .Implementation .Implementation.Inspection}}{{template "inspection" .Implementation}}{{else if .Implementation}}Implement Work Item {{.Implementation.WorkItemReference}} in `{{.Implementation.Worktree}}`. This Execution Skill already represents the engine's completed Work Start operation; do not select or claim another Work Item.
 
 ## Applicable procedure
 
@@ -100,4 +100,5 @@ Choose this later value at the decision point, setting `preserve` to `true` when
 Implement the complete accepted behavioral and architectural contract using suitable verification boundaries and credible grouped evidence. Choose construction order and perform in-scope refactoring as the work requires while preserving explicit frozen obligations, existing work, and relevant regression protection. Never rewrite branch history. Immediately before each submission Audit, observe the selected remote's current `main` once and merge that exact SHA into the work branch; resolve conflicts before normal review, record the integrated SHA, and treat it as the round's cutoff. Later target movement alone does not restart the round. Final integration and merge of the reviewed Submission into `main` remain with the human Merge Authority. Run focused checks during implementation and the Full Gate through Audit. A normal implementation runs Audit once, records every disposition, ticks only permitted automated boxes, commits Artifact Completion, and must "remove the entire `.changes/<slug>/` ledger in a separate subsequent commit before review" before it pushes and submits its opaque Result Document. Never bless the changes — that is the watchdog's job.
 
 Finding-driven Rework reads the retired Implementation Ledger from its historical endpoints; rework must not recreate or revise it. It resolves the supplied findings, keeps the retired ledger absent, and runs one focused Audit per Implement execution. Only the engine's `awaiting_review` outcome completes implementation. Use Needs Human solely for a permitted decision automation cannot make; a pause does not approve or merge work.
+{{end}}
 {{end}}

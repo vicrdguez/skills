@@ -15,7 +15,7 @@ import (
 const resultDirectoryUsage = "Absolute path of the private Result Document directory this invocation created."
 
 // reviewedHeadPattern matches the full commit SHA the engine records.
-var reviewedHeadPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
+var reviewedHeadPattern = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
 
 // checkResultDirectory rejects a private directory that could not name the
 // invocation's own result location.
@@ -37,6 +37,12 @@ type submissionData struct {
 type decisionData struct {
 	ResultDirectory string
 	Preserve        bool
+}
+
+type ledgerReviewData struct {
+	ResultDirectory string
+	Round           uint64
+	ReviewedHead    string
 }
 
 type reviewData struct {
@@ -73,7 +79,7 @@ func (i resourceInput) kind() string {
 	switch i.flag.(type) {
 	case *cli.BoolFlag:
 		return "boolean"
-	case *cli.IntFlag:
+	case *cli.IntFlag, *cli.Uint64Flag:
 		return "integer"
 	default:
 		return "string"
@@ -102,7 +108,7 @@ type resourceSpec struct {
 
 func resourceSpecFor(resource string) resourceSpec {
 	switch resource {
-	case "reference/submission.md":
+	case "reference/submission.md", "reference/ledger-submission.md":
 		data := &submissionData{}
 		return resourceSpec{data: data, inputs: []resourceInput{
 			{flag: &cli.StringFlag{Name: "result_directory", Required: true, Usage: resultDirectoryUsage, Destination: &data.ResultDirectory}},
@@ -116,6 +122,18 @@ func resourceSpecFor(resource string) resourceSpec {
 			{flag: &cli.StringFlag{Name: "result_directory", Required: true, Usage: resultDirectoryUsage, Destination: &data.ResultDirectory}},
 			{flag: &cli.BoolFlag{Name: "preserve", Required: true, Usage: "Whether implementation work exists that a draft Submission must preserve.", Destination: &data.Preserve}},
 		}, validate: func(resource string) error {
+			return checkResultDirectory(resource, data.ResultDirectory)
+		}}
+	case "reference/ledger-review.md":
+		data := &ledgerReviewData{}
+		return resourceSpec{data: data, inputs: []resourceInput{
+			{flag: &cli.StringFlag{Name: "result_directory", Required: true, Usage: resultDirectoryUsage, Destination: &data.ResultDirectory}},
+			{flag: &cli.Uint64Flag{Name: "round", Required: true, Usage: "Next completed Work Item review round.", Destination: &data.Round}},
+			{flag: &cli.StringFlag{Name: "reviewed_head", Required: true, Usage: "Fixed reviewed source commit.", Destination: &data.ReviewedHead}},
+		}, validate: func(resource string) error {
+			if data.Round < 1 || !reviewedHeadPattern.MatchString(data.ReviewedHead) {
+				return fmt.Errorf("resource %s requires a positive round and full reviewed source SHA", resource)
+			}
 			return checkResultDirectory(resource, data.ResultDirectory)
 		}}
 	case "reference/review.md":

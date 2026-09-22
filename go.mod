@@ -2,7 +2,10 @@ module github.com/vicrdguez/skills
 
 go 1.27.0
 
-require github.com/urfave/cli/v2 v2.27.7
+require (
+	github.com/urfave/cli/v2 v2.27.7
+	go.yaml.in/yaml/v3 v3.0.5
+)
 
 require (
 	github.com/cpuguy83/go-md2man/v2 v2.0.7 // indirect

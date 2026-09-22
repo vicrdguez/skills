@@ -4,7 +4,7 @@ description: Adversarial validation in a fresh context, passing review to the hu
 disable-model-invocation: true
 ---
 
-
+{{if .Delivery}}{{template "ledger-watchdog" .Delivery}}{{else}}
 Review and validate one change in a fresh worker session before human approval. The caller must start this skill in a session separate from the one that built the change.
 
 **Direct invocation:** Execute the review in this session. Do not launch `watchdog-runner`. Process this one Work Item and finish with a normal Markdown report.
@@ -163,3 +163,4 @@ Append `--findings {{quote (printf "%s/findings.json" .Watchdog.ResultDirectory)
 ## Confirm every handoff completed
 
 Only a verified `ready_for_merge`, `rework`, or `needs_human` outcome with the Claim released completes review. A `fix_required` outcome retains the Claim: repair only the reported deterministic precondition and retry the same semantic command with the same Result Documents. The engine rereads ambiguous writes before retrying; never mutate projections yourself to clean up a partial handoff. Stop on an error or an unverifiable result and report the outcome in normal Markdown.
+{{end}}

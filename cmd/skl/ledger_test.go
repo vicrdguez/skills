@@ -1373,9 +1373,9 @@ func TestDirtyLedgerRefusalPreservesEdits(t *testing.T) {
 	}
 }
 
-// --- Rule B8: intake is useful before execution is supported ---
+// Accepted work is delivered only through the private ledger authority.
 
-func TestLedgerWorkIsNotDeliveredThroughLegacyPaths(t *testing.T) {
+func TestLedgerWorkUsesPrivateDelivery(t *testing.T) {
 	fixture := newLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	forge := newForgeServer(t)
@@ -1398,20 +1398,17 @@ func TestLedgerWorkIsNotDeliveredThroughLegacyPaths(t *testing.T) {
 				// gate refusal reuses the ledger envelope.
 				t.Fatalf("unexpected outcome shape %q: %v", cli.out.String(), err)
 			}
-			if outcome.Status != "unsupported" || !strings.Contains(outcome.Reason, "run-ledger-delivery") {
-				t.Fatalf("%s next did not explain unsupported delivery: %s", lane, cli.out.String())
+			wanted := "no_work"
+			if lane == "implement" {
+				wanted = "work_available"
 			}
-			if !strings.Contains(outcome.Repair, "skl ledger show") {
-				t.Fatalf("%s next hides readback: %s", lane, cli.out.String())
-			}
-			if strings.Contains(outcome.Repair, "merge") && !strings.Contains(outcome.Repair, "human") {
-				t.Fatalf("%s next directs a worker into a merge: %s", lane, cli.out.String())
+			if outcome.Status != wanted {
+				t.Fatalf("%s next status = %s; want %s", lane, cli.out.String(), wanted)
 			}
 		})
 	}
 
-	// No Claim, packet, branch, or worktree was created, and the forge was
-	// not consulted for selection.
+	// Claim acquisition does not prepare source or consult the forge.
 	if ledgerSnapshot(t, root) != beforeWorktree {
 		t.Fatalf("legacy entry mutated source state:\n%s", ledgerSnapshot(t, root))
 	}
@@ -1421,19 +1418,18 @@ func TestLedgerWorkIsNotDeliveredThroughLegacyPaths(t *testing.T) {
 	if forge.createdCount() != 0 {
 		t.Fatalf("legacy entry published to the forge")
 	}
-	// Markdown conveys the same refusal facts.
+	// Markdown reports claimed work as unavailable, not another execution.
 	cli.out.Reset()
 	if err := cli.app.Run([]string{"skl", "implement", "next", "--repo", root}); err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if !strings.Contains(cli.out.String(), "unsupported") || !strings.Contains(cli.out.String(), "run-ledger-delivery") {
+	if !strings.Contains(cli.out.String(), "no_work") {
 		t.Fatalf("markdown refusal lacks the explanation:\n%s", cli.out.String())
 	}
 }
 
-func TestNonAdoptedWorkKeepsTheLegacyFlow(t *testing.T) {
-	// No ledger configuration exists on this machine for the test (TestMain
-	// isolates XDG_CONFIG_HOME), so the legacy selection path is preserved.
+func TestDeliveryNeverFallsBackToForgeAuthority(t *testing.T) {
+	// No ledger configuration authorizes no forge fallback.
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
 	backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}}
@@ -1442,12 +1438,11 @@ func TestNonAdoptedWorkKeepsTheLegacyFlow(t *testing.T) {
 	if err := app.Run([]string{"skl", "implement", "next", "--repo", root, "--format", "json"}); err != nil {
 		t.Fatalf("legacy selection refused without adoption: %v\n%s", err, output.String())
 	}
-	if !strings.Contains(output.String(), `"packet"`) {
-		t.Fatalf("legacy selection returned no execution packet: %s", output.String())
+	if !strings.Contains(output.String(), `"fix_required"`) || strings.Contains(output.String(), `"packet"`) || backend.work[0].Claimed {
+		t.Fatalf("unconfigured delivery used the forge queue: %s", output.String())
 	}
 
-	// An adopted project does not fall back to forge records either: the
-	// legacy queue still refuses.
+	// Once accepted, the private item is selected instead of the public #7.
 	fixture := newLedgerFixture(t)
 	if outcome := newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", singleSlice("adopted-work"))); outcome.Status != "accepted" {
 		t.Fatalf("adoption acceptance failed: %s", mustJSON(t, outcome))
@@ -1457,10 +1452,10 @@ func TestNonAdoptedWorkKeepsTheLegacyFlow(t *testing.T) {
 	}
 	app2 := newApp(func(repository github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
 	output.Reset()
-	if err := app2.Run([]string{"skl", "implement", "next", "--repo", root}); err != nil {
+	if err := app2.Run([]string{"skl", "implement", "next", "--repo", root, "--format", "json"}); err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if !strings.Contains(output.String(), "unsupported") {
+	if !strings.Contains(output.String(), `"status":"work_available"`) || !strings.Contains(output.String(), "adopted-work/foundation") || backend.work[0].Claimed {
 		t.Fatalf("adopted project fell back to the forge queue: %s", output.String())
 	}
 }

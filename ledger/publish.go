@@ -581,7 +581,7 @@ func (s *Store) recordPublication(project string, declaration *ProposalDeclarati
 			} else if acceptance.PushStatus != nil && acceptance.PushStatus.Status != "" {
 				publication.Push = acceptance.PushStatus
 			}
-			if publication.Push == nil && publication.Issue == nil && publication.Grouping == nil {
+			if publication.Push == nil && publication.Issue == nil && publication.Grouping == nil && publication.Source == nil && publication.Pull == nil && publication.Active == nil {
 				state.Publication = nil
 			} else {
 				state.Publication = &publication
@@ -622,7 +622,7 @@ func samePublication(before, after *PublicationState) bool {
 	if before == nil || after == nil {
 		return before == after
 	}
-	return sameNote(before.Push, after.Push) && sameNote(before.Issue, after.Issue) && sameNote(before.Grouping, after.Grouping)
+	return sameNote(before.Push, after.Push) && sameNote(before.Issue, after.Issue) && sameNote(before.Grouping, after.Grouping) && sameNote(before.Source, after.Source) && sameNote(before.Pull, after.Pull) && sameReference(before.Active, after.Active)
 }
 
 func sameNote(before, after *PublicationNote) bool {
