@@ -41,8 +41,8 @@ dependency as an injected port; tests provide a mock adapter.
 
 ## Testing strategy: replace, don't layer
 
-- Old unit tests on **shallow** modules become waste once tests at the deepened module's interface exist — delete them. This applies specially to *pass-through* shallow modules, not to substantial internal modules that carry their own invariants — those keep their own tests at their own seam.
-- Write new tests at the deepened module's interface. The **interface is the test surface**.
+- Consolidate or remove old checks on **shallow** pass-through modules only while required behavioral and failure-mode protection remains covered at the deepened module's interface. Substantial internal modules that carry their own invariants keep appropriate checks at their own seam.
+- The chosen interface is the test surface when it can expose the promised consequence and distinguish a plausible violation. Deepening does not automatically require another test layer when suitable existing verification already provides that evidence.
 - Tests assert on observable outcomes through the interface, not internal state.
 - Tests should survive internal refactors — they describe behaviour, not implementation. If a test
   has to change when the implementation changes (without behaviour changing), it's testing past the
