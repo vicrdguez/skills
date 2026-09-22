@@ -130,6 +130,10 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 					return err
 				}
 				request.Root, request.Remote = repository.Root, repository.Remote
+				gated, err := gateUnsupportedDelivery(stdout, formatMarkdown, repository.Repository, "propose publish")
+				if gated || err != nil {
+					return err
+				}
 				backend, err := newBackend(repository.Repository)
 				if err != nil {
 					return err
@@ -163,6 +167,10 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 				}
 				repository, err := setup.ResolveRepository(command.Path("repo"), remote)
 				if err != nil {
+					return err
+				}
+				gated, err := gateUnsupportedDelivery(stdout, formatMarkdown, repository.Repository, "propose cleanup")
+				if gated || err != nil {
 					return err
 				}
 				backend, err := newBackend(repository.Repository)
@@ -228,7 +236,7 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 			return err
 		},
 	}}
-	app.Commands = append(app.Commands, statusCommand(newBackend, stdout))
+	app.Commands = append(app.Commands, statusCommand(newBackend, stdout), ledgerCommands(newBackend, stdout))
 	return &stageApp{app}
 }
 

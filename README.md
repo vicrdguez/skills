@@ -69,9 +69,37 @@ skl setup
 
 Use `skl setup --repo <path>` to target another checkout. If that repository has multiple GitHub remotes and no GitHub `origin`, select one with `--remote <name>`. Authentication is read from `GH_TOKEN`, then `GITHUB_TOKEN`, then `gh auth token`; Setup stores no credentials.
 
-### Publish a Proposal
+### Configure the private Workflow Ledger
 
-After Propose has prepared and pushed each slice branch at its complete Artifact Baseline with exact subject prefix `[baseline] <slice-slug>`, remove only safe Merged local state and publish the agent-authored issue bodies:
+The Workflow Ledger is one private local Git clone holding accepted Contracts and Workflow State for every Project on the machine. Configure it once, pointing at an existing clone; `skl` provisions no hosting and invents no default location:
+
+```sh
+git clone <ledger-remote> ~/workflow-ledger
+mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/skl"
+printf '{"ledger": "%s/workflow-ledger"}\n' "$HOME" > "${XDG_CONFIG_HOME:-$HOME/.config}/skl/config.json"
+```
+
+The `ledger` setting must be an absolute path to a usable local Git clone; every other shape is refused with its repair, and `skl` falls back to no forge authority through a broken configuration. The clone's own Git remote and upstream configuration own replication destinations.
+
+### Record a Proposal in the ledger
+
+Propose prepares one intake directory — `proposal.md`, a `proposal.json` declaration (proposal name, optional `parent_title`, one entry per slice with its title, planned branch, and dependencies), and one directory per slice holding the frozen Contract files — plus private temporary descriptive issue bodies. Accept it locally, then read the exact accepted content back:
+
+```sh
+skl ledger accept --repo <path> --proposal-dir <dir> \
+  --issue add-foundation=/tmp/add-foundation.md \
+  --issue add-feature=/tmp/add-feature.md \
+  --parent-body /tmp/proposal.md            # multi-slice only
+skl ledger show --repo <path> --item add-foundation/add-foundation
+```
+
+`accepted` and `existing` freeze the Contracts in one local ledger commit under `projects/<repository>/` in the ADR 0006 layout: the Project is named after the source repository, a different repository with the same name is refused, repeated unchanged acceptance is idempotent, and a changed Contract directs a renewed proposal instead of replacing in place. After acceptance, `skl` attempts the ledger push through the clone's own upstream and publishes the supplied descriptive issue bodies, including a parent grouping issue for multi-slice work; public bodies stay temporary transport and are never persisted in the ledger. An ordinary push or forge failure leaves the acceptance authoritative and the effect visibly pending — repeat the same acceptance to retry it — while competing upstream history is reported as `reconciliation_required` and never merged, rebased, or force-pushed through. Both commands default to Markdown and take `--format json` for equivalent typed transport; `skl ledger show --commit <sha> --path <ledger-path>` returns the exact bytes at one explicit reference and substitutes nothing for a missing one.
+
+Until `run-ledger-delivery` ships, ledger-accepted work is readable but not executable: `skl implement next`, `skl watchdog next`, and `skl propose cleanup` refuse with an unsupported-delivery explanation for a Project that has ledger records, granting no Claim or packet, and never falling back to forge state as an authority. Projects without ledger records keep the legacy flow below unchanged; adopting in-flight work is a human-directed administrative cutover with normal workers stopped.
+
+### Publish a Proposal (legacy source-branch path)
+
+Repositories that have not adopted the Workflow Ledger keep publishing through source-branch artifacts. After Propose has prepared and pushed each slice branch at its complete Artifact Baseline with exact subject prefix `[baseline] <slice-slug>`, remove only safe Merged local state and publish the agent-authored issue bodies:
 
 ```sh
 skl propose cleanup --repo <path>

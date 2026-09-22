@@ -71,34 +71,29 @@ The review checks only whether materialization omits, weakens, strengthens, cont
 
 Correct demonstrable transcription errors against the approved source. An unsettled consequential choice, contradiction in the approved sources, or proposed semantic or architectural change returns to the human for resolution. If resolution changes slice boundaries or Dependencies, return to the approval loop in step 4. Faithful correction and ordinary elaboration require neither routine artifact-by-artifact rereading nor a second semantic approval ceremony.
 
-### 6. Prepare and publish
+### 6. Prepare and accept into the Workflow Ledger
 
-1. Run `skl propose cleanup --repo <root>` before preparing new slices. It removes only safe local Git state for Work Items already observed Merged and reports everything it preserves.
-2. Commit any durable `CONTEXT.md` or ADR changes to the target branch before creating slice branches.
-3. For each slice, choose a short verb-led kebab-case slug, create `.worktrees/<slug>` and its branch from the target, write the fidelity-reviewed drafts to `.changes/<slug>/`, and commit the complete ledger with subject `[baseline] <slug>` (optional explanatory text may follow after a space). Push that exact commit as the publication head.
-4. Write the parent and child issue bodies to private temporary Markdown files. For every child, use the thin-pointer template below. Replace every placeholder with the slice summary, branch slug, and full commit SHA from `git rev-parse HEAD` in that slice worktree; that pushed, marked head is its Artifact Baseline. Keep artifact prose in Git, not in the issue. The files are opaque transport: `skl` neither authors nor interprets them.
-5. Publish the prepared Proposal with `skl propose publish --repo <root> --target <branch> --slice <slug>=<body-file>`. Repeat `--slice` for every child and add `--depends <dependent>:<blocker>` for each Dependency. For a multi-slice Proposal also pass `--parent-title <title> --parent-body <body-file>`.
-
-`skl propose publish` preflights the entire declaration before changing GitHub, creates children in blocker-first order, and applies Ready last. If it returns `fix_required`, make the stated Git repair and repeat the same command. If it returns `needs_human`, stop and present its reason; do not guess which existing record to reuse.
-
-Child thin-pointer template:
-
-```markdown
-<summary>
-
-Branch: `<slug>`
-Artifact Baseline: `<baseline-sha>`
-Implementation Ledger: `.changes/<slug>/` at the Artifact Baseline.
-```
+1. Commit any durable `CONTEXT.md` or ADR changes to the target branch. Durable project knowledge stays in the project repository; the ledger holds workflow records, not project documentation.
+2. Prepare one intake directory for the proposal outside the source tree:
+   - `proposal.md`: the durable approved proposal description.
+   - `proposal.json`: `{"proposal": "<kebab-name>", "parent_title": "<multi-slice only>", "slices": [{"name": "<slug>", "title": "<issue title>", "branch": "<planned source branch>", "depends": ["<sibling slug or proposals/<proposal>/<slice>"]}]}`.
+   - one directory per slice holding its frozen Contract files: `intent.md` and `behavior.md` are required; add `plan.md` and `tasks.md` only when warranted. Nothing else belongs in a slice directory.
+3. Write the descriptive human-facing issue bodies to private temporary Markdown files — one per slice, plus a parent body for multi-slice work. Keep them self-contained descriptions; they are transport, not Contract content, and `skl` neither authors nor persists them in the ledger.
+4. Accept the proposal locally with `skl ledger accept --repo <root> --proposal-dir <dir> --issue <slice>=<body-file>` (repeat `--issue` per slice; add `--parent-body <file>` for multi-slice work). No source branch, worktree, or source artifact commit is prepared at this stage: the planned branch identity is recorded, not created.
+5. Handle the outcome: `accepted` or `existing` records the work; `fix_required` names a concrete repair — fix it and repeat the same command; pending publication effects (ledger push, issue publication) leave the local acceptance authoritative and are retried by repeating the same acceptance. A changed Contract is never replaced in place: direct a renewed proposal instead.
+6. Read accepted content back through the public CLI with `skl ledger show --repo <root> --item <proposal>/<slice>`. Its output carries the exact accepted documents with full ledger commit and path references; cite those references when a document must be identified exactly.
+7. A repository that has not adopted the Workflow Ledger keeps its established publication path until a human-directed administrative cutover with normal workers stopped; `skl` adopts existing work automatically in no case.
 
 ## Writing the change artifacts
 These are the artifacts that each vertical slice will use for implementation:
 
-Publishing them freezes them as the endpoint contract. Artifact Completion may differ from the marked Baseline only by ticking an existing `[ ]` to lowercase `[x]` outside Manual Verification — nothing added, removed, reordered or reworded, and Manual Verification remains unchecked. This is the acceptance baseline: if it can be rewritten mid-flight to match whatever got built, or grown with things discovered during review, it stops being a contract and the change stops converging. Discoveries belong in PR findings or in a new proposal. There is no later addition and no exception.
+Publishing them freezes them as the accepted contract. `skl ledger accept` records their exact bytes, and accepted files stay read-only from then on: progress and completion evidence live in phase reports, never in completion ticks or edits to these documents. This is the acceptance baseline: if it can be rewritten mid-flight to match whatever got built, or grown with things discovered during review, it stops being a contract and the change stops converging. Discoveries belong in PR findings or in a new proposal. There is no later addition and no exception.
 
 So resolve the contradictions now, while you still can — between the artifacts themselves, and between them and the project's own rules. Afterwards nobody downstream can fix them; they can only stop and ask you.
 
 Keep the artifact set compact and authoritative. Preserve approved decisions; do not turn incidental sketches, scenario count, test count, or a preferred construction order into new obligations. Within each artifact, use readable, uniquely referenceable descriptive headings without requiring IDs or a requirements database.
+
+Label independently tracked commitments with descriptive local labels: `B<n>` for binding behavior rules, `A<n>` for architectural commitments, warranted `T<n>` for tasks, and `M<n>` for human-owned Manual Verification. Number independently tracked commitments only — never every paragraph or heading — do not duplicate an identity across documents, and expect no CLI numbering service: the labels are yours to assign and keep stable from acceptance on.
 
 **Always**:
 - `intent.md`: State the desired result, scope, exclusions, Definition of Done, and human-owned Manual Verification without duplicating detailed behavior. Follow the template from `skl skill --resource reference/intent.md propose`.

@@ -34,6 +34,12 @@ func implementationCommands(newBackend backendFactory, stdout io.Writer) []*cli.
 				if err != nil {
 					return implementationSetupFailure(name, command.Int("item"), "repository or remote resolution", err)
 				}
+				if name == "next" || name == "resume" {
+					gated, err := gateUnsupportedDelivery(stdout, format, repository.Repository, "implement "+name)
+					if gated || err != nil {
+						return err
+					}
+				}
 				backend, err := newBackend(repository.Repository)
 				if err != nil {
 					return implementationSetupFailure(name, command.Int("item"), "backend construction", err)
