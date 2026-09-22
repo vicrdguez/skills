@@ -54,6 +54,7 @@ type InvocationFacts struct {
 	Delivery       *DeliveryFacts       `json:"delivery,omitempty"`
 	Watchdog       *WatchdogFacts       `json:"watchdog,omitempty"`
 	Implementation *ImplementationFacts `json:"implementation,omitempty"`
+	Decision       *DecisionFacts       `json:"decision,omitempty"`
 }
 
 type ReviewScope string
@@ -261,6 +262,7 @@ type Packet struct {
 var definitionPaths = map[string]string{
 	"audit":              "skills/dev/audit/SKILL.md",
 	"brainstorm":         "skills/thinking/brainstorm/SKILL.md",
+	"decision":           "skills/dev/decision/SKILL.md",
 	"design":             "skills/dev/design/SKILL.md",
 	"domain":             "skills/dev/domain/SKILL.md",
 	"explore":            "skills/dev/explore/SKILL.md",

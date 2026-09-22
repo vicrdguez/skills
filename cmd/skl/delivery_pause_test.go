@@ -59,24 +59,32 @@ func TestDeliveryCLIPauseSourceBoundary(t *testing.T) {
 				t.Fatalf("pause source: %#v", report.Source)
 			}
 			if !prepared {
-				// Human direction cannot create a fixed reviewed source identity from
-				// a valid headless implementation pause.
-				deliveryRecordHumanDirection(t, fixture.clone, target, ledger.AwaitingReview)
+				// A headless implementation pause has no fixed reviewed source, so the
+				// ledger refuses a Watchdog continuation and the item stays paused.
+				refused := deliveryRecordHumanDirection(t, cli, target, ledger.RouteWatchdog)
+				if refused.Status != ledger.DecisionRefused || refused.Facts == nil || len(refused.Facts.Outcomes) != 1 ||
+					!strings.Contains(refused.Facts.Outcomes[0].Reason, "fixed source head") {
+					t.Fatalf("headless Watchdog direction was not refused: %#v", refused)
+				}
 				review, err := cli.deliveryJSON(t, "skl", "watchdog", "next", "--repo", source, "--format", "json")
-				if err != nil || review.Status != "fix_required" || !strings.Contains(review.Reason, "fixed source head") || deliveryPersistedState(t, fixture.clone).Claim != nil {
-					t.Fatalf("headless review acquired work: %#v %v", review, err)
+				state := deliveryPersistedState(t, fixture.clone)
+				if err != nil || review.Status != "no_work" || state.Claim != nil || state.Decision {
+					t.Fatalf("headless review acquired work after a refused direction: %#v %v", review, err)
 				}
 				return
 			}
 			// A new implementation blocker consumes the old direction rather than
 			// silently authorizing further work with that stale decision.
-			deliveryRecordHumanDirection(t, fixture.clone, target, ledger.ReadyForImplementation)
+			humanDirection := deliveryRecordHumanDirection(t, cli, target, ledger.RouteImplement)
+			if humanDirection.Status != ledger.DecisionApplied {
+				t.Fatalf("record human direction = %#v, want applied", humanDirection)
+			}
 			directed, err := cli.deliveryJSON(t, "skl", "implement", "next", "--repo", source, "--format", "json")
 			if err != nil || directed.Execution == nil {
 				t.Fatalf("directed start: %#v %v", directed, err)
 			}
 			paused, err := cli.deliveryJSON(t, "skl", "implement", "needs-human", "--repo", source, "--item", deliveryTestItem, "--claim", directed.Execution.Claim.Commit, "--head", target, "--target", target, "--body", body, "--format", "json")
-			if err != nil || paused.Status != ledger.NeedsHuman || deliveryPersistedState(t, fixture.clone).Decision != nil {
+			if err != nil || paused.Status != ledger.NeedsHuman || deliveryPersistedState(t, fixture.clone).Decision {
 				t.Fatalf("new blocker retained old authority: %#v %v", paused, err)
 			}
 			recorded, _ := deliveryCommittedReport(t, cli, paused.Result.Report, ledger.ImplementPhase)

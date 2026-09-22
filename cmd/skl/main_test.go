@@ -541,6 +541,7 @@ func TestInstallSupportedSkillStubs(t *testing.T) {
 	wantSkills := map[string]string{
 		"audit":              "skills/dev/audit/SKILL.md",
 		"brainstorm":         "skills/thinking/brainstorm/SKILL.md",
+		"decision":           "skills/dev/decision/SKILL.md",
 		"design":             "skills/dev/design/SKILL.md",
 		"domain":             "skills/dev/domain/SKILL.md",
 		"explore":            "skills/dev/explore/SKILL.md",

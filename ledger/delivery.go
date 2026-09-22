@@ -117,7 +117,7 @@ func HandoffDelivery(s *Store, repository github.RepositoryID, item, phase, clai
 		// that direction available to the reviewer; completing review (or raising
 		// a new implementation blocker) consumes it, never authorizing a later cycle.
 		if phase == WatchdogPhase || outcome == NeedsHuman {
-			state.Decision = nil
+			state.Decision = false
 		}
 		if state.Publication == nil {
 			state.Publication = &PublicationState{}

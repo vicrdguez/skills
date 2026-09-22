@@ -226,7 +226,20 @@ func requiresDecision(e *Execution) bool {
 }
 
 func (s *Store) deliveryInputs(head, directory string, state SliceState) (ClaimInputs, error) {
-	inputs := ClaimInputs{Decision: state.Decision}
+	var inputs ClaimInputs
+	// The active marker means the exact decision document sits at the current
+	// full head. Pin that document; a missing one is a damaged record rather
+	// than a silently directionless continuation.
+	if state.Decision {
+		decisionPath := directory + "/decision.md"
+		if !gitOK(s.Root, "cat-file", "-e", head+":"+decisionPath) {
+			return inputs, refuse(
+				"selected Work Item records an active Human Decision without its decision document",
+				"restore decision.md at the current head or clear the marker with human direction",
+			)
+		}
+		inputs.Decision = &Reference{Commit: head, Path: decisionPath}
+	}
 	names, err := acceptedFileNamesAt(s, head, directory)
 	if err != nil {
 		return inputs, err

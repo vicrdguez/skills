@@ -165,15 +165,22 @@ func ParseReport(phase string, data []byte) (Report, string, error) {
 	return report, string(body), nil
 }
 
-// splitReportFrontmatter separates the leading YAML frontmatter from the
-// opaque body. It scans only as far as the first full-line closing delimiter
-// and never looks for another one.
+// splitReportFrontmatter separates a phase report's leading YAML frontmatter
+// from its opaque body.
 func splitReportFrontmatter(data []byte) ([]byte, []byte, error) {
+	return splitFrontmatter("report", data)
+}
+
+// splitFrontmatter separates a document's leading YAML frontmatter from its
+// opaque body. It scans only as far as the first full-line closing delimiter
+// and never looks for another one. kind names the document for refusals so
+// decision documents and phase reports share one delimiter implementation.
+func splitFrontmatter(kind string, data []byte) ([]byte, []byte, error) {
 	opening := reportDelimiter + "\n"
 	if !bytes.HasPrefix(data, []byte(opening)) {
 		return nil, nil, refuse(
-			"report does not begin with a --- frontmatter delimiter",
-			"persist the report as schema-1 YAML between an opening --- line and a closing --- line followed by the Markdown body",
+			kind+" does not begin with a --- frontmatter delimiter",
+			"persist the "+kind+" as YAML between an opening --- line and a closing --- line followed by the Markdown body",
 		)
 	}
 	rest := data[len(opening):]
@@ -185,7 +192,7 @@ func splitReportFrontmatter(data []byte) ([]byte, []byte, error) {
 				return rest[:offset], rest[len(rest):], nil
 			}
 			return nil, nil, refuse(
-				"report frontmatter has no closing --- delimiter",
+				kind+" frontmatter has no closing --- delimiter",
 				"close the YAML frontmatter with a --- line before the Markdown body",
 			)
 		}
@@ -200,6 +207,12 @@ func splitReportFrontmatter(data []byte) ([]byte, []byte, error) {
 // Verify the persisted scalar tags as well; optional nulls retain their normal
 // absence meaning and required values are checked by validateReport.
 func checkReportScalars(frontmatter []byte) error {
+	return checkScalarTags("report", frontmatter, map[string]bool{"schema": true, "round": true})
+}
+
+// checkScalarTags verifies documented scalar tags. integers names the fields
+// that must carry a YAML integer; every other non-null scalar must be text.
+func checkScalarTags(kind string, frontmatter []byte, integers map[string]bool) error {
 	var document yaml.Node
 	if err := yaml.Unmarshal(frontmatter, &document); err != nil {
 		return err
@@ -211,14 +224,14 @@ func checkReportScalars(frontmatter []byte) error {
 		}
 		if node.Kind == yaml.ScalarNode && node.Tag != "!!null" {
 			wanted := "!!str"
-			if field == "schema" || field == "round" {
+			if integers[field] {
 				wanted = "!!int"
 			}
 			if node.Tag != wanted {
 				if wanted == "!!int" {
-					return refuse("report "+field+" is not a YAML integer", "use the documented integer type")
+					return refuse(kind+" "+field+" is not a YAML integer", "use the documented integer type")
 				}
-				return refuse("report "+field+" is not a YAML string", "quote scalar text in report metadata")
+				return refuse(kind+" "+field+" is not a YAML string", "quote scalar text in "+kind+" metadata")
 			}
 		}
 		if node.Kind == yaml.MappingNode {
