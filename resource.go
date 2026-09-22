@@ -15,7 +15,7 @@ import (
 const resultDirectoryUsage = "Absolute path of the private Result Document directory this invocation created."
 
 // reviewedHeadPattern matches the full commit SHA the engine records.
-var reviewedHeadPattern = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
+var reviewedHeadPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
 // checkResultDirectory rejects a private directory that could not name the
 // invocation's own result location.
@@ -132,7 +132,7 @@ func resourceSpecFor(resource string) resourceSpec {
 			{flag: &cli.StringFlag{Name: "reviewed_head", Required: true, Usage: "Fixed reviewed source commit.", Destination: &data.ReviewedHead}},
 		}, validate: func(resource string) error {
 			if data.Round < 1 || !reviewedHeadPattern.MatchString(data.ReviewedHead) {
-				return fmt.Errorf("resource %s requires a positive round and full reviewed source SHA", resource)
+				return fmt.Errorf("resource %s requires a positive round and full reviewed source SHA (40 lowercase hexadecimal characters for schema 1)", resource)
 			}
 			return checkResultDirectory(resource, data.ResultDirectory)
 		}}

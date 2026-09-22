@@ -370,6 +370,35 @@ func TestDeliverySelectionIsProjectScopedAndLaneOrdered(t *testing.T) {
 	}
 }
 
+// Private accepted age replaces forge timestamps as the within-lane age.
+// Opposite lexical/age order and a tie expose age and stable-identity regressions.
+func TestDeliverySelectionOrdersEachLaneByAcceptedAge(t *testing.T) {
+	for _, state := range []string{ledger.ReadyForImplementation, ledger.Rework} {
+		t.Run(state, func(t *testing.T) {
+			l := newDeliveryLedger(t)
+			l.addProject("widgets", "acme/widgets")
+			for _, entry := range []struct{ name, accepted string }{
+				{"aa-new", "2024-01-01T00:00:00Z"},
+				{"zz-old", "2023-01-01T00:00:00Z"},
+				{"yy-old", "2023-01-01T00:00:00Z"},
+			} {
+				l.addSlice("widgets", entry.name, entry.name, state, nil, entry.accepted)
+				if state == ledger.Rework {
+					item := entry.name + "/" + entry.name
+					l.addFile(deliveryReportPath("widgets", item, ledger.WatchdogPhase), deliveryWatchdogReport("rework", 1, "widgets", item))
+				}
+			}
+			l.commitAll("accept same-lane candidates")
+			store := l.store()
+			for _, want := range []string{"yy-old/yy-old", "zz-old/zz-old", "aa-new/aa-new"} {
+				if got := deliveryStart(t, store, deliveryWidgets(), ledger.ImplementPhase); got.Item != want {
+					t.Fatalf("selection = %s, want %s", got.Item, want)
+				}
+			}
+		})
+	}
+}
+
 type deliveryHelperOutcome struct {
 	Item        string `json:"item,omitempty"`
 	ClaimCommit string `json:"claim_commit,omitempty"`

@@ -190,11 +190,11 @@ func ValidateDeliverySource(root, branch, head, target, reviewed string, allowMa
 	if err != nil {
 		return err
 	}
-	if !deliveryExplicitObjectID(root, head) {
-		return Refuse("final head must be a full exact source object ID")
+	if !deliveryExplicitObjectID(head) {
+		return Refuse("final head must be a full exact source object ID (schema 1 requires 40 lowercase hexadecimal characters)")
 	}
-	if !deliveryExplicitObjectID(root, target) {
-		return Refuse("Integration Target must be a full exact source object ID")
+	if !deliveryExplicitObjectID(target) {
+		return Refuse("Integration Target must be a full exact source object ID (schema 1 requires 40 lowercase hexadecimal characters)")
 	}
 	current, err := git(worktree, "symbolic-ref", "--short", "HEAD")
 	if err != nil || current != branch {
@@ -222,8 +222,8 @@ func ValidateDeliverySource(root, branch, head, target, reviewed string, allowMa
 	if reviewed == "" {
 		return nil
 	}
-	if !deliveryExplicitObjectID(root, reviewed) {
-		return Refuse("reviewed revision must be a full exact source object ID")
+	if !deliveryExplicitObjectID(reviewed) {
+		return Refuse("reviewed revision must be a full exact source object ID (schema 1 requires 40 lowercase hexadecimal characters)")
 	}
 	if deliveryResolveCommit(root, reviewed) != reviewed {
 		return Refuse("reviewed revision " + reviewed + " is unavailable in the selected source repository")
@@ -320,12 +320,9 @@ func deliveryResolveCommit(root, ref string) string {
 	return id
 }
 
-func deliveryExplicitObjectID(root, value string) bool {
-	width := 40
-	if format, err := git(root, "rev-parse", "--show-object-format"); err == nil && format == "sha256" {
-		width = 64
-	}
-	if len(value) != width {
+// Schema 1 uses full SHA-1 identities for both source and ledger references.
+func deliveryExplicitObjectID(value string) bool {
+	if len(value) != 40 {
 		return false
 	}
 	return strings.IndexFunc(value, func(r rune) bool {

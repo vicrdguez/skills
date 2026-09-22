@@ -8,6 +8,25 @@ import (
 	"testing"
 )
 
+func TestDeliverySourceRefusesUnsupportedSchemaObjectFormat(t *testing.T) {
+	root := t.TempDir()
+	runGit(t, root, "init", "-q", "-b", "main", "--object-format=sha256")
+	runGit(t, root, "config", "user.name", "Worker")
+	runGit(t, root, "config", "user.email", "worker@example.com")
+	commitFile(t, root, "source.txt", "local progress\n")
+	head := gitOutput(t, root, "rev-parse", "HEAD")
+	source, err := PrepareDeliverySource(root, "unavailable", "feature-sha256", head, head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateDeliverySource(root, "feature-sha256", source.Head, source.Target, "", false); err == nil {
+		t.Fatal("source validation accepted an identity the schema-1 report cannot record")
+	}
+	if got := gitOutput(t, source.Worktree, "rev-parse", "HEAD"); got != head {
+		t.Fatal("unsupported-format refusal changed source progress")
+	}
+}
+
 func TestDeliverySourcePrepareCreatesInitialBranch(t *testing.T) {
 	root := newGitRepository(t)
 	newBareRemote(t, root)

@@ -2,10 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
-
-	"errors"
-
 	"os"
 	"path/filepath"
 
@@ -14,62 +10,7 @@ import (
 
 	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/setup"
-	"github.com/vicrdguez/skills/workflow"
 )
-
-// contradictoryClaimReadback records the Claim but returns a contradictory
-// observation, so the CLI cannot prove whether acquisition succeeded.
-type contradictoryClaimReadback struct {
-	implementationMemory
-}
-
-func (b *contradictoryClaimReadback) ClaimSelected(ctx context.Context, candidate workflow.QueueCandidate, item workflow.ImplementationItem) (workflow.ImplementationItem, error) {
-	observed, err := b.implementationMemory.ClaimSelected(ctx, candidate, item)
-	if err != nil {
-		return observed, err
-	}
-	if observed.Source != nil {
-		source := *observed.Source
-		source.Claimed = false
-		observed.Source = &source
-	}
-	observed.ID = "8"
-	return workflow.ReconcileImplementation(observed), nil
-}
-
-// fatalQueue fails every queue observation, standing in for a backend that
-// cannot be read at all.
-type fatalQueue struct {
-	implementationMemory
-	claimErr error
-}
-
-func (b *fatalQueue) QueuePage(context.Context, workflow.QueueKind, string) (workflow.QueuePage, error) {
-	return workflow.QueuePage{}, errors.New("backend observation unavailable")
-}
-
-func (b *fatalQueue) ImplementationItems(context.Context) ([]workflow.ImplementationItem, error) {
-	return nil, errors.New("backend observation unavailable")
-}
-
-type rejectingImplementationOutput struct{}
-
-func (rejectingImplementationOutput) Write([]byte) (int, error) {
-	return 0, errors.New("output unavailable")
-}
-
-// failingClaim adds the Claim and then loses the read-back, exactly the
-// condition where the acquisition is neither proven nor disproven.
-type failingClaim struct {
-	implementationMemory
-}
-
-func (b *failingClaim) ClaimSelected(ctx context.Context, candidate workflow.QueueCandidate, item workflow.ImplementationItem) (workflow.ImplementationItem, error) {
-	if _, err := b.implementationMemory.ClaimSelected(ctx, candidate, item); err != nil {
-		return workflow.ImplementationItem{}, err
-	}
-	return workflow.ImplementationItem{}, errors.New("Claim read-back is uncertain; inspect the Work Item and explicitly resume")
-}
 
 // TestB19GenericImplementRetrievalRefusesWithoutWorkflowEffects materializes B19.
 func TestB19GenericImplementRetrievalRefusesWithoutWorkflowEffects(t *testing.T) {
@@ -157,7 +98,7 @@ func TestB20InstallationDisablesOwnedLegacyLoopsWithoutCollateralRemoval(t *test
 			if strings.Contains(installed, "--format json") {
 				t.Error("refresh kept the legacy loop alive with JSON flags")
 			}
-			for _, disabled := range []string{"launches no worker", "claims no Work Item", "one Work Item at a time", "skl implement resume --item"} {
+			for _, disabled := range []string{"launches no worker", "claims no Work Item", "one Work Item at a time", "skl implement resume --item <proposal>/<slice> --claim <acquisition-commit>"} {
 				if testCase.existing == "user-owned queue\n" {
 					break
 				}

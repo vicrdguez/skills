@@ -216,14 +216,17 @@ func TestDeliveryWatchdogReportResource(t *testing.T) {
 		}
 	}
 
-	// The deferred resource must accept every representable engine round
-	// and both full Git object-ID formats accepted by schema 1.
-	for _, head := range []string{reviewed, strings.Repeat("a", 64)} {
-		if _, err := RenderResource("watchdog", "reference/ledger-review.md", []string{
-			"result_directory=/tmp/result", "round=18446744073709551615", "reviewed_head=" + head,
-		}); err != nil {
-			t.Fatalf("valid engine facts were not renderable: %v", err)
-		}
+	// Every representable engine round works, but the resource must not
+	// advertise object identities the documented schema-1 codec refuses.
+	if _, err := RenderResource("watchdog", "reference/ledger-review.md", []string{
+		"result_directory=/tmp/result", "round=18446744073709551615", "reviewed_head=" + reviewed,
+	}); err != nil {
+		t.Fatalf("valid engine facts were not renderable: %v", err)
+	}
+	if _, err := RenderResource("watchdog", "reference/ledger-review.md", []string{
+		"result_directory=/tmp/result", "round=1", "reviewed_head=" + strings.Repeat("a", 64),
+	}); err == nil {
+		t.Fatal("resource advertised a SHA-256 identity unsupported by schema 1")
 	}
 
 	if _, err := RenderResource("watchdog", "reference/ledger-review.md", []string{

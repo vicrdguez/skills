@@ -62,6 +62,10 @@ closing delimiter, every later `---` belongs to the opaque body.
 
 ## Fields
 
+Schema 1 supports SHA-1 repositories: every source and ledger commit identity
+is exactly 40 lowercase hexadecimal characters. SHA-256 repository identities
+are not supported by this schema; resources and handoffs refuse them.
+
 A `Reference` is two strings: `commit` is the full lowercase 40-character
 commit SHA at which `path` is valid, and `path` is a nonempty relative ledger
 path with no `.` or `..` segment. A reference names the exact version read, not
