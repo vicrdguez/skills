@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 )
 
 // DeliverySource is the source-repository state one delivery phase relies on.
@@ -36,17 +37,10 @@ func PrepareDeliverySource(root, remote, branch, requiredHead, recordedTarget st
 	if err != nil {
 		return DeliverySource{}, fmt.Errorf("resolve the primary source worktree: %w", err)
 	}
-	// An ordinary fetch updates remote-tracking refs; it never rewrites local branches.
-	mainErr := deliveryFetch(root, remote, "main")
-	fetchedMain := ""
-	if mainErr == nil {
-		fetchedMain = deliveryResolveCommit(root, "FETCH_HEAD")
-	}
-	branchErr := deliveryFetch(root, remote, branch)
-	fetchedBranch := ""
-	if branchErr == nil {
-		fetchedBranch = deliveryResolveCommit(root, "FETCH_HEAD")
-	}
+	// Each fetch records its own selected identity; a concurrent preparation in
+	// the same checkout must not change which commit this caller observes.
+	fetchedMain, mainErr := deliveryFetch(root, remote, "main")
+	fetchedBranch, branchErr := deliveryFetch(root, remote, branch)
 	status := deliveryFetchStatus(remote, branch, mainErr, branchErr)
 	required := ""
 	if requiredHead != "" {
@@ -282,12 +276,34 @@ func deliveryClean(worktree string) error {
 	return nil
 }
 
-func deliveryFetch(root, remote, ref string) error {
+// deliveryFetch fetches one selected remote ref into a private per-invocation
+// destination ref and returns the exact commit that fetch selected. It never
+// reads the shared FETCH_HEAD, so a concurrent fetch of a different ref cannot
+// substitute its commit for this caller's selected identity.
+func deliveryFetch(root, remote, ref string) (string, error) {
 	if remote == "" {
-		return errors.New("no Git remote is configured")
+		return "", errors.New("no Git remote is configured")
 	}
-	return gitOK(root, "fetch", "--no-tags", remote, ref)
+	destination := deliveryFetchRef(ref)
+	defer func() { _ = gitOK(root, "update-ref", "-d", destination) }()
+	if err := gitOK(root, "fetch", "--no-tags", remote, "+"+ref+":"+destination); err != nil {
+		return "", err
+	}
+	fetched := deliveryResolveCommit(root, destination)
+	if fetched == "" {
+		return "", errors.New("fetched " + deliveryRefName(remote, ref) + " did not resolve to a commit")
+	}
+	return fetched, nil
 }
+
+// deliveryFetchRef names a per-invocation destination ref that no concurrent
+// caller shares, so simultaneous preparations in one checkout cannot collide.
+func deliveryFetchRef(ref string) string {
+	token := atomic.AddUint64(&deliveryFetchSequence, 1)
+	return fmt.Sprintf("refs/skl-delivery/%d-%d/%s", os.Getpid(), token, ref)
+}
+
+var deliveryFetchSequence uint64
 
 func deliveryFetchStatus(remote, branch string, mainErr, branchErr error) string {
 	if remote == "" {
