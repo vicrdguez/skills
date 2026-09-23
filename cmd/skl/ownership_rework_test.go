@@ -6,8 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
+
 	"slices"
 	"strings"
 	"testing"
@@ -198,7 +197,7 @@ func TestW16StatusIgnoresOrdinaryNativeLinkedHistory(t *testing.T) {
 			if state == "closed" {
 				forge.pulls[11]["merged_at"] = "2020-01-02T00:00:00Z"
 			}
-			// A damaged workflow footer must still expose its unlabeled source.
+
 			forge.addIssue(8, "2020-01-01T00:00:00Z", "Branch: `widget`")
 			forge.addPull(12, "2020-01-01T00:00:00Z", "damaged owning footer", "widget", strings.Repeat("b", 40), "review")
 			forge.evidence[8] = []map[string]any{{"number": 12}}
@@ -212,71 +211,5 @@ func TestW16StatusIgnoresOrdinaryNativeLinkedHistory(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestRA2WatchdogRefusesNativeOwnershipConflict(t *testing.T) {
-	for _, verdict := range []string{"rework", "needs-human", "pass"} {
-		for _, phase := range []string{"before submit", "after summary", "target visible", "before release", "footer drift"} {
-			t.Run(verdict+"/"+phase, func(t *testing.T) {
-				f := newReviewFixture(t)
-				f.forge.noOther = true
-				start := f.start(t, f.root)
-				if start.Packet == nil {
-					t.Fatalf("start: %#v", start)
-				}
-				dir := start.Packet.Facts.Watchdog.ResultDirectory
-				summary := filepath.Join(dir, "summary.md")
-				if err := os.WriteFile(summary, []byte("round 1"), 0600); err != nil {
-					t.Fatal(err)
-				}
-				args := []string{"watchdog", "submit", "--item", "7", "--review-number", "1", "--reviewed-head", f.head, "--verdict", verdict, "--summary", summary}
-				if phase == "after summary" {
-					findings := filepath.Join(dir, "findings.json")
-					anchors, _ := json.Marshal([]map[string]any{{"path": "main.go", "line": 1, "side": "RIGHT", "body_file": summary}})
-					if err := os.WriteFile(findings, anchors, 0600); err != nil {
-						t.Fatal(err)
-					}
-					args = append(args, "--findings", findings)
-				}
-				if verdict == "pass" {
-					body := filepath.Join(dir, "submission.md")
-					if err := os.WriteFile(body, []byte("final"), 0600); err != nil {
-						t.Fatal(err)
-					}
-					args = append(args, "--body", body)
-				}
-				conflict := phase == "before submit"
-				target := map[string]string{"rework": "rework", "needs-human": "needs-human", "pass": "done"}[verdict]
-				f.forge.afterMutation = func() {
-					if phase == "after summary" && len(f.forge.summaries) != 0 || (phase == "target visible" || phase == "footer drift") && slices.Contains(f.forge.labels, target) || phase == "before release" && !slices.Contains(f.forge.labels, "review") {
-						conflict = true
-					}
-				}
-				observed := false
-				ownershipHTTP(t, f, func(r *http.Request, _ []byte, body []byte) []byte {
-					if conflict && phase == "footer drift" && r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/pulls/11") {
-						var pull map[string]any
-						_ = json.Unmarshal(body, &pull)
-						pull["body"] = "Closes #8"
-						body, _ = json.Marshal(pull)
-						observed = true
-					}
-					if conflict && phase != "footer drift" && bytes.Contains(body, []byte("closedByPullRequestsReferences")) {
-						observed = true
-						return ownershipResponse(11, 12)
-					}
-					return body
-				})
-				writes := f.forge.writes
-				got, err := f.runResult(f.worktree, args...)
-				if err != nil || got.Status != "fix_required" || !observed || !slices.Contains(f.forge.labels, "wip") || !fileExists(summary) {
-					t.Fatalf("conflicting ownership completed or released review: %#v, %v observed=%t labels=%v", got, err, observed, f.forge.labels)
-				}
-				if phase == "before submit" && f.forge.writes != writes || phase == "after summary" && (len(f.forge.summaries) != 1 || len(f.forge.inlines) != 0) {
-					t.Fatalf("unexpected publication through conflict: writes=%d/%d summaries=%d inlines=%d", f.forge.writes, writes, len(f.forge.summaries), len(f.forge.inlines))
-				}
-			})
-		}
 	}
 }

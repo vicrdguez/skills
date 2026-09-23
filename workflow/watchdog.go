@@ -2,7 +2,9 @@ package workflow
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -33,13 +35,16 @@ func StartWatchdog(ctx context.Context, root, remote string, id WorkItemID, endp
 	}
 	candidate, found, err := selectQueue(ctx, selection, ReviewQueue)
 	if err != nil {
-		return ImplementationOutcome{}, err
+		return ImplementationOutcome{}, fmt.Errorf("review queue observation failed before Claim acquisition; no Claim acquisition was attempted: %w", err)
 	}
 	if !found {
 		return ImplementationOutcome{Status: "no_work"}, nil
 	}
 	item, outcome, err := selectedImplementation(ctx, selection, candidate)
-	if err != nil || outcome.Status != "" {
+	if err != nil {
+		return ImplementationOutcome{}, fmt.Errorf("selected Work Item observation failed before Claim acquisition; no Claim acquisition was attempted: %w", err)
+	}
+	if outcome.Status != "" {
 		return outcome, err
 	}
 	if item.State != AwaitingReview {
@@ -59,7 +64,10 @@ func StartWatchdog(ctx context.Context, root, remote string, id WorkItemID, endp
 		return ImplementationOutcome{}, Refuse("Review Count cannot be incremented; repair the checkpoint explicitly")
 	}
 	observed, outcome, err := claimSelected(ctx, selection, candidate, item)
-	if err != nil || outcome.Status != "" {
+	if err != nil {
+		return ImplementationOutcome{}, fmt.Errorf("Claim acquisition for Work Item %s may have succeeded; Claim state is uncertain. Inspect that Work Item and explicitly resume its identity instead of retrying next: %w", item.ID, err)
+	}
+	if outcome.Status != "" {
 		return outcome, err
 	}
 	return watchdogSelection(ctx, root, remote, observed, endpoints, checkpoint, backend)
@@ -104,10 +112,13 @@ func watchdogPacket(ctx context.Context, root, remote string, item Implementatio
 		return ImplementationOutcome{Status: "fix_required", Reason: "review publication already started under this Claim; replay the original fixed-number watchdog submit command and Result Documents"}, nil
 	}
 	facts := skilldist.WatchdogFacts{
-		Branch: item.Branch, ReviewedHead: item.Submission.Head, AuditBody: item.Submission.Body, Comments: item.Submission.Comments,
-		ReviewCount: checkpoint.Count, ReviewNumber: checkpoint.Count + 1, ReviewScope: skilldist.FullReview,
+		Branch: item.Branch, ReviewedHead: item.Submission.Head, SubmissionBase: item.Submission.Base, SubmissionBodySHA256: fmt.Sprintf("%x", sha256.Sum256([]byte(item.Submission.Body))), AuditBody: item.Submission.Body, Comments: item.Submission.Comments, EvidenceStreams: item.Submission.EvidenceStreams,
+		ReviewCount: checkpoint.Count, ReviewNumber: checkpoint.Count + 1,
 		Remote: remote, Worktree: filepath.Join(main, ".worktrees", item.Branch),
 		SuppliedArtifactBaseline: endpoints.Baseline, SuppliedArtifactCompletion: endpoints.Completion,
+	}
+	if item.Submission.EvidenceComments != nil {
+		facts.Comments = item.Submission.EvidenceComments
 	}
 	if checkpoint.Count > 0 && checkpoint.Head != "" {
 		facts.PreviousReviewedHead = checkpoint.Head
