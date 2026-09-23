@@ -856,10 +856,10 @@ func (s *Store) requireImplementationInputs(head, directory string) error {
 	if err != nil {
 		return err
 	}
-	if report.Source.Head == "" || report.Source.Target == "" {
+	if report.Outcome != AwaitingReview || report.Source.Head == "" || report.Source.Target == "" {
 		return refuse(
-			"continued review requires an implementation report with a fixed source head and target",
-			"route to Implement to establish the reviewed source revisions",
+			"continued review requires a completed implementation report with a fixed source head and target",
+			"route to Implement to establish integrated, reviewable source revisions; a paused implementation is not completion evidence",
 		)
 	}
 	return nil

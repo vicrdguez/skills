@@ -124,6 +124,16 @@ func Accept(ctx context.Context, store *Store, repository github.RepositoryID, d
 		} else if !os.IsNotExist(err) {
 			return err
 		} else {
+			branches := make(map[string]string, len(declaration.Slices))
+			for _, slice := range declaration.Slices {
+				if owner := branches[slice.Branch]; owner != "" {
+					return refuse("planned branch "+slice.Branch+" belongs to both "+owner+" and "+slice.Name, "give each Work Item in the Project its own source branch")
+				}
+				branches[slice.Branch] = slice.Name
+				if err := store.requireBranchOwner(project.Name, declaration.Proposal+"/"+slice.Name, slice.Branch); err != nil {
+					return err
+				}
+			}
 			if err := store.freeze(project, declaration, now()); err != nil {
 				return err
 			}

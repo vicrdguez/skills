@@ -538,13 +538,17 @@ func TestProjectIdentityFollowsRepositoryAcrossCheckouts(t *testing.T) {
 	}
 	runGit(t, second, "init", "-q", "-b", "main")
 	runGit(t, second, "remote", "add", "origin", "https://github.com/acme/widgets.git")
-	if outcome := cli.accept(t, second, writeProposal(t, "", singleSlice("second-proposal"))); outcome.Status != "accepted" {
+	secondSpec := singleSlice("second-proposal")
+	secondSpec.slices[0].branch = "second-foundation"
+	if outcome := cli.accept(t, second, writeProposal(t, "", secondSpec)); outcome.Status != "accepted" {
 		t.Fatalf("renamed checkout did not accept: %s", mustJSON(t, outcome))
 	}
 	// A worktree of the first checkout resolves to the same repository.
 	worktree := filepath.Join(t.TempDir(), "linked-worktree")
 	runGit(t, first, "worktree", "add", "-q", "--detach", worktree, "main")
-	if outcome := cli.accept(t, worktree, writeProposal(t, "", singleSlice("third-proposal"))); outcome.Status != "accepted" {
+	thirdSpec := singleSlice("third-proposal")
+	thirdSpec.slices[0].branch = "third-foundation"
+	if outcome := cli.accept(t, worktree, writeProposal(t, "", thirdSpec)); outcome.Status != "accepted" {
 		t.Fatalf("worktree did not accept: %s", mustJSON(t, outcome))
 	}
 
@@ -557,7 +561,9 @@ func TestProjectIdentityFollowsRepositoryAcrossCheckouts(t *testing.T) {
 			t.Fatalf("proposal %s missing from the shared project: %v", proposal, err)
 		}
 	}
-	if outcome := cli.accept(t, first, writeProposal(t, "", singleSlice("fourth-proposal"))); outcome.Acceptance.Project != "widgets" || outcome.Acceptance.Repository != "acme/widgets" {
+	fourthSpec := singleSlice("fourth-proposal")
+	fourthSpec.slices[0].branch = "fourth-foundation"
+	if outcome := cli.accept(t, first, writeProposal(t, "", fourthSpec)); outcome.Status != "accepted" || outcome.Acceptance.Project != "widgets" || outcome.Acceptance.Repository != "acme/widgets" {
 		t.Fatalf("project identity did not follow the repository: %s", mustJSON(t, outcome))
 	}
 }
@@ -831,6 +837,7 @@ func TestAcceptMultiSliceWithDependencies(t *testing.T) {
 	}
 
 	spec := dualSlice("dependent-work")
+	spec.slices[0].branch = "dependent-foundation"
 	spec.depends = map[string][]string{"feature": {"foundation", "proposals/earlier-work/foundation"}}
 	outcome := cli.accept(t, root, writeProposal(t, "", spec),
 		"--issue=foundation="+writeTemp(t, t, "foundation body\n"),
@@ -906,7 +913,9 @@ func TestLedgerShowReturnsExactAcceptedContent(t *testing.T) {
 
 	// Later activity: another proposal committed, temporary inputs removed,
 	// forge closed, source markers absent.
-	if outcome := cli.accept(t, root, writeProposal(t, "", singleSlice("later-work"))); outcome.Status != "accepted" {
+	later := singleSlice("later-work")
+	later.slices[0].branch = "later-foundation"
+	if outcome := cli.accept(t, root, writeProposal(t, "", later)); outcome.Status != "accepted" {
 		t.Fatalf("later acceptance failed: %s", mustJSON(t, outcome))
 	}
 	os.RemoveAll(directory)
@@ -1241,6 +1250,7 @@ func TestUncertainIssueCreationIsResolvedSafely(t *testing.T) {
 	// unresolved for repair, without claiming success and without creating a
 	// duplicate in the same invocation.
 	dropAll := singleSlice("unresolved-work")
+	dropAll.slices[0].branch = "unresolved-foundation"
 	dropDirectory := writeProposal(t, "", dropAll)
 	forge.mu.Lock()
 	forge.drop = func(method, path string) bool {
@@ -1297,7 +1307,9 @@ func TestCompetingLedgerHistoryRequiresReconciliation(t *testing.T) {
 	runGit(t, competitor, "push", "-q", "origin", "main")
 	upstreamHead := strings.TrimSpace(runGitOutput(t, competitor, "rev-parse", "HEAD"))
 
-	outcome := cli.accept(t, root, writeProposal(t, "", singleSlice("after-divergence")))
+	after := singleSlice("after-divergence")
+	after.slices[0].branch = "after-foundation"
+	outcome := cli.accept(t, root, writeProposal(t, "", after))
 	if outcome.Status != "accepted" {
 		t.Fatalf("competing history refused acceptance: %s", mustJSON(t, outcome))
 	}
@@ -1327,7 +1339,9 @@ func TestCompetingLedgerHistoryRequiresReconciliation(t *testing.T) {
 	}
 	runGit(t, broken, "init", "-q", "-b", "main", "--bare")
 	runGit(t, fixture.clone, "remote", "set-url", "origin", filepath.Join(broken, "missing.git"))
-	pending := cli.accept(t, root, writeProposal(t, "", singleSlice("unreachable-remote")))
+	unreachable := singleSlice("unreachable-remote")
+	unreachable.slices[0].branch = "unreachable-foundation"
+	pending := cli.accept(t, root, writeProposal(t, "", unreachable))
 	if pending.Status != "accepted" || pending.Acceptance.Slices[0].PushStatus.Status != ledger.PushPending {
 		t.Fatalf("unreachable remote not pending: %s", mustJSON(t, pending))
 	}

@@ -175,6 +175,9 @@ func StartDeliveryContext(ctx context.Context, s *Store, repository github.Repos
 		if err != nil {
 			return err
 		}
+		if err := s.requireBranchOwner(repository.Name, candidates[0].item, state.Branch); err != nil {
+			return err
+		}
 		if err := s.requireCleanPaths(directory); err != nil {
 			return err
 		}
@@ -215,6 +218,38 @@ func StartDeliveryContext(ctx context.Context, s *Store, repository github.Repos
 		return nil
 	})
 	return execution, err
+}
+
+// requireBranchOwner keeps source identity unique within a Project, including
+// historical records whose worktrees or branches may still contain progress.
+// Check under the ledger mutation lock at both acceptance and acquisition.
+func (s *Store) requireBranchOwner(project, item, branch string) error {
+	head, err := s.head()
+	if err != nil {
+		return err
+	}
+	prefix := filepath.ToSlash(filepath.Join(projectsRoot, project, "proposals"))
+	paths, err := git(s.Root, "ls-tree", "-r", "--name-only", head, "--", prefix)
+	if err != nil {
+		return err
+	}
+	for _, path := range strings.Split(paths, "\n") {
+		if !strings.HasSuffix(path, "/state.json") {
+			continue
+		}
+		other := strings.TrimSuffix(strings.TrimPrefix(path, prefix+"/"), "/state.json")
+		if other == item {
+			continue
+		}
+		var state SliceState
+		if err := readJSONAt(s, head, path, &state); err != nil {
+			return err
+		}
+		if state.Branch == branch {
+			return refuse("planned branch "+branch+" is already owned by "+other, "give "+item+" a distinct source branch without reusing another Work Item's worktree or progress")
+		}
+	}
+	return nil
 }
 
 func phaseEligible(phase, state string) bool {

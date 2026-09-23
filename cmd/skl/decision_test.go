@@ -754,6 +754,7 @@ func TestDecisionRetirementGuardsPartialDelivery(t *testing.T) {
 	}
 	decisionAccept(t, forge, "acme", "widgets", retiring)
 	dependent := singleSlice("dependent-proposal")
+	dependent.slices[0].branch = "dependent-foundation"
 	dependent.depends = map[string][]string{"foundation": {"proposals/retire-proposal/feature"}}
 	dependentSource := decisionAccept(t, forge, "acme", "widgets", dependent)
 
