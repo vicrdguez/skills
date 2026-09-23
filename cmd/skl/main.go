@@ -236,7 +236,7 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 			return err
 		},
 	}}
-	app.Commands = append(app.Commands, statusCommand(newBackend, stdout), ledgerCommands(newBackend, stdout))
+	app.Commands = append(app.Commands, statusCommand(newBackend, stdout), ledgerCommands(newBackend, stdout), decisionCommands(stdout))
 	return &stageApp{app}
 }
 

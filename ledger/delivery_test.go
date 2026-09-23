@@ -768,7 +768,7 @@ func TestDeliveryCountsCompletedReviewsAndHonorsHumanDirection(t *testing.T) {
 	// than grant more work.
 	state := l.committedState("widgets", "delivery-flow", "foundation")
 	state.State = ledger.Rework
-	state.Decision = nil
+	state.Decision = false
 	l.commitState("widgets", "delivery-flow", "foundation", state)
 	headBeforeRefusal := l.head()
 	if _, err := ledger.StartDelivery(store, deliveryWidgets(), ledger.ImplementPhase); err == nil {
@@ -784,7 +784,7 @@ func TestDeliveryCountsCompletedReviewsAndHonorsHumanDirection(t *testing.T) {
 	deliveryRequeue(t, l, "widgets", item, ledger.Rework, "continue rework within the Contract\n")
 	implementThree := deliveryStart(t, store, deliveryWidgets(), ledger.ImplementPhase)
 	deliveryHandoff(t, store, deliveryWidgets(), item, ledger.ImplementPhase, implementThree.Claim.Commit, source, "awaiting_review", "implementation three\n")
-	if state := l.committedState("widgets", "delivery-flow", "foundation"); state.Decision == nil {
+	if state := l.committedState("widgets", "delivery-flow", "foundation"); !state.Decision {
 		t.Fatal("implementation lost the direction its independent reviewer must consume")
 	}
 	// The recorded continuation reaches independent review without a second
@@ -797,7 +797,7 @@ func TestDeliveryCountsCompletedReviewsAndHonorsHumanDirection(t *testing.T) {
 	if passed.Status != ledger.ReadyForMerge {
 		t.Fatalf("round 3 pass routed to %q", passed.Status)
 	}
-	if passed.State.Decision != nil {
+	if passed.State.Decision {
 		t.Fatal("completed review retained authorization for a later cycle")
 	}
 	report, _ := deliveryReport(t, l, "widgets", item, ledger.WatchdogPhase)
@@ -841,11 +841,11 @@ func deliveryRequeue(t *testing.T, l *deliveryLedger, project, item, state strin
 	if !ok {
 		t.Fatalf("item %q is not a proposal/slice identity", item)
 	}
-	decision := l.recordDecision(project, proposal, slice, direction)
+	l.recordDecision(project, proposal, slice, direction)
 	current := l.committedState(project, proposal, slice)
 	current.State = state
 	current.Claim = nil
-	current.Decision = &ledger.Reference{Commit: decision, Path: deliveryDecisionPath(project, item)}
+	current.Decision = true
 	l.commitState(project, proposal, slice, current)
 }
 

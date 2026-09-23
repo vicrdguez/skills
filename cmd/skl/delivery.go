@@ -201,11 +201,15 @@ func submitDelivery(c *cli.Context, phase, operation string, repository setup.Re
 				return refusal(fmt.Errorf("review cannot replace its fixed Integration Target"))
 			}
 		}
-		if source.Head != "" || source.Target != "" || outcome != ledger.NeedsHuman || phase == ledger.WatchdogPhase {
-			if err := workflow.ValidateDeliverySource(repository.Root, e.State.Branch, source.Head, source.Target, source.Reviewed, outcome == "pass"); err != nil {
+		if phase == ledger.ImplementPhase && outcome == ledger.NeedsHuman {
+			if source.Head == "" && source.Target == "" {
+				if err := workflow.ValidateUnpreparedPause(repository.Root, e.State.Branch); err != nil {
+					return refusal(err)
+				}
+			} else if err := workflow.ValidatePausedDeliverySource(repository.Root, e.State.Branch, source.Head, source.Target); err != nil {
 				return refusal(err)
 			}
-		} else if err := workflow.ValidateUnpreparedPause(repository.Root, e.State.Branch); err != nil {
+		} else if err := workflow.ValidateDeliverySource(repository.Root, e.State.Branch, source.Head, source.Target, source.Reviewed, outcome == "pass"); err != nil {
 			return refusal(err)
 		}
 	} else {

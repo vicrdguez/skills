@@ -164,12 +164,20 @@ func ValidateUnpreparedPause(root, branch string) error {
 	}
 	_, pathErr := os.Lstat(worktree)
 	if pathErr == nil || gitOK(root, "show-ref", "--verify", "--quiet", "refs/heads/"+branch) == nil {
-		return Refuse("source progress exists; a paused implementation must record its clean head and target instead of omitting source evidence")
+		return Refuse("source progress exists; a paused implementation must record its actual branch head and observed target instead of omitting source evidence")
 	}
 	if !os.IsNotExist(pathErr) {
 		return pathErr
 	}
 	return nil
+}
+
+// ValidatePausedDeliverySource records the actual prepared branch and observed
+// target while leaving unresolved integration and uncommitted work untouched.
+// A pause is not evidence that the target was integrated or the work is ready
+// for review.
+func ValidatePausedDeliverySource(root, branch, head, target string) error {
+	return validateSourceIdentity(root, branch, head, target, false)
 }
 
 // ValidateDeliverySource checks deterministic Git identities for a phase
@@ -180,35 +188,8 @@ func ValidateUnpreparedPause(root, branch string) error {
 // function - judges whether the marker comments are permitted. No remote-head
 // equality is required. Dirty files produce an error and are never deleted.
 func ValidateDeliverySource(root, branch, head, target, reviewed string, allowMarkers bool) error {
-	worktree, err := deliveryWorktree(root, branch)
-	if err != nil {
+	if err := validateSourceIdentity(root, branch, head, target, true); err != nil {
 		return err
-	}
-	if !deliveryExplicitObjectID(head) {
-		return Refuse("final head must be a full exact source object ID (schema 1 requires 40 lowercase hexadecimal characters)")
-	}
-	if !deliveryExplicitObjectID(target) {
-		return Refuse("Integration Target must be a full exact source object ID (schema 1 requires 40 lowercase hexadecimal characters)")
-	}
-	current, err := git(worktree, "symbolic-ref", "--short", "HEAD")
-	if err != nil || current != branch {
-		return Refuse("worktree " + worktree + " is not on the planned branch " + branch + "; check out the planned branch without discarding work")
-	}
-	if err := deliveryClean(worktree); err != nil {
-		return err
-	}
-	actual, err := git(worktree, "rev-parse", "HEAD")
-	if err != nil {
-		return fmt.Errorf("resolve branch head in %s: %w", worktree, err)
-	}
-	if actual != head {
-		return Refuse("branch " + branch + " is at " + actual + ", not the required final head " + head + "; preserve that progress and reconcile it explicitly")
-	}
-	if deliveryResolveCommit(root, head) != head {
-		return Refuse("final head " + head + " is unavailable in the selected source repository")
-	}
-	if deliveryResolveCommit(root, target) != target {
-		return Refuse("Integration Target " + target + " is unavailable in the selected source repository")
 	}
 	if gitOK(root, "merge-base", "--is-ancestor", target, head) != nil {
 		return Refuse("Integration Target " + target + " is not an ancestor of final head " + head + "; integrate it before delivery")
@@ -227,6 +208,42 @@ func ValidateDeliverySource(root, branch, head, target, reviewed string, allowMa
 	}
 	if reviewed != head && !allowMarkers {
 		return Refuse("reviewed and final source revisions differ; only permitted non-functional marker comments may add a distinct final head")
+	}
+	return nil
+}
+
+func validateSourceIdentity(root, branch, head, target string, clean bool) error {
+	worktree, err := deliveryWorktree(root, branch)
+	if err != nil {
+		return err
+	}
+	if !deliveryExplicitObjectID(head) {
+		return Refuse("final head must be a full exact source object ID (schema 1 requires 40 lowercase hexadecimal characters)")
+	}
+	if !deliveryExplicitObjectID(target) {
+		return Refuse("Integration Target must be a full exact source object ID (schema 1 requires 40 lowercase hexadecimal characters)")
+	}
+	current, err := git(worktree, "symbolic-ref", "--short", "HEAD")
+	if err != nil || current != branch {
+		return Refuse("worktree " + worktree + " is not on the planned branch " + branch + "; check out the planned branch without discarding work")
+	}
+	if clean {
+		if err := deliveryClean(worktree); err != nil {
+			return err
+		}
+	}
+	actual, err := git(worktree, "rev-parse", "HEAD")
+	if err != nil {
+		return fmt.Errorf("resolve branch head in %s: %w", worktree, err)
+	}
+	if actual != head {
+		return Refuse("branch " + branch + " is at " + actual + ", not the required final head " + head + "; preserve that progress and reconcile it explicitly")
+	}
+	if deliveryResolveCommit(root, head) != head {
+		return Refuse("final head " + head + " is unavailable in the selected source repository")
+	}
+	if deliveryResolveCommit(root, target) != target {
+		return Refuse("Integration Target " + target + " is unavailable in the selected source repository")
 	}
 	return nil
 }

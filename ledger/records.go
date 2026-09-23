@@ -64,7 +64,12 @@ type SliceState struct {
 	Publication  *PublicationState `json:"publication,omitempty"`
 	Claim        *Claim            `json:"claim,omitempty"`
 	Submission   *ForgeAttachment  `json:"submission,omitempty"`
-	Decision     *Reference        `json:"decision,omitempty"`
+	// Decision is the active Human Decision marker. When set, the filled
+	// decision.md committed alongside it records the answered request and route;
+	// the exact document reference is pinned into later Claims. A commit cannot
+	// name its own SHA, so the marker carries the active fact and the document
+	// carries the reference.
+	Decision bool `json:"decision,omitempty"`
 }
 
 // ProposalMeta is the persisted proposal.json: proposal metadata only. The
@@ -74,6 +79,11 @@ type ProposalMeta struct {
 	ParentTitle       string           `json:"parent_title,omitempty"`
 	ParentIssue       *ForgeAttachment `json:"parent_issue,omitempty"`
 	ParentPublication *PublicationNote `json:"parent_publication,omitempty"`
+	// Retired marks explicit human-directed retirement of a fully terminal,
+	// unclaimed proposal. It is an indication only: merged history, frozen
+	// Contracts, dependencies, and source work remain untouched, and it never
+	// asserts that every slice was delivered.
+	Retired bool `json:"retired,omitempty"`
 }
 
 // contractFileNames returns the frozen contract file names of one slice in a

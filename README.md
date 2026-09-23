@@ -161,7 +161,40 @@ On pass, Watchdog may add only permitted non-functional Debt Marker comments. Ru
 
 Public PR bodies are deliberate human-facing summaries; detailed worker exchanges and findings stay private, with no automatic inline review comments. Public material must acknowledge that remaining human verification obligations remain privately accessible through `skl`. Approval never means Merged or promises conflict-free integration. Only a human merges.
 
-Ledger-backed human-decision intake, terminal observation/archival, and final-review packaging are separate work, not implied by these delivery commands. Existing `skl status` and legacy proposal operations do not replace those ledger operations. In-flight forge-authoritative work must finish with its former binary or undergo an explicit administrative cutover with normal workers stopped; current delivery commands never silently adopt it.
+Ledger-backed terminal observation/archival and final-review packaging are separate work, not implied by these delivery commands. Existing `skl status` and legacy proposal operations do not replace those ledger operations. In-flight forge-authoritative work must finish with its former binary or undergo an explicit administrative cutover with normal workers stopped; current delivery commands never silently adopt it.
+
+## Resolve a Human Decision
+
+A Needs Human pause waits for an explicit human answer, never an inferred one. Read the ledger-wide inbox of current requests:
+
+```sh
+skl decision inbox
+skl decision inbox --project beacon
+```
+
+The inbox is resolved from the configured Workflow Ledger, so it works without a source checkout and from inside any Project's repository; a `--project` filter is always explicit, never taken from the working directory. A readable ledger with no current requests is an empty inbox; an unresolvable or unreadable ledger is reported as unavailable, never as an empty inbox. Reading claims no work and changes no Workflow State. Plain `skl skill decision` carries no facts and directs you to `skl decision inbox`.
+
+The returned Execution Skill presents every current request with its Work Item identity, exact blocking Phase Report reference, accepted Contract documents, source context, and the worker's question, evidence, options, consequences, and recommendation. It may group related questions, but each request's identity, references, and differences stay separate; missing detail is clarified, not invented. Only an explicitly scoped human answer authorizes a change; questions, discussion, agent recommendations, and public comments, labels, or PR bodies are not authorization. A clear answer naming the affected request needs no second confirmation, while ambiguous, stale, or coupled direction is clarified before any write.
+
+A request's bound command binds every known argument and leaves only the continuation route and the answer file:
+
+```sh
+skl decision apply --project <project> --item <proposal>/<slice> \
+  --request-commit <full-sha> --request-path <ledger-path> \
+  --route <implement|watchdog|supersede> --answer <human-answer-file>
+```
+
+The route is part of the answer: `implement` requeues for implementation, `watchdog` returns to review at the same code revision, and `supersede` abandons unmerged work. The engine records the answer and route together and atomically, reports every selected item as `applied`, `already_applied`, `refused`, or `unresolved`, and never claims a mixed group succeeded. Several named requests may instead be submitted later from one explicitly scoped `skl decision apply --input <json-file>`.
+
+Explicitly retire the old parent of abandoned work only when at least one slice is Superseded and no active work or Claim remains. All-Merged proposals belong to completion observation, not this operation:
+
+```sh
+skl decision retire --project <project> --proposal <proposal>
+```
+
+Retirement preserves frozen Contracts, reports, exact references, and Merged slices, reports partial delivery rather than all-delivered completion, keeps dependents blocked until their blockers are Merged, and never moves archives, remaps dependencies, observes forge completion, or deletes source. Changed obligations require renewed proposal and re-slicing through `explore` and `propose`, not a recorded decision.
+
+The next selected Implement or Watchdog worker receives the exact recorded answer and its full ledger reference through `skl`, within the frozen Contract. It records the consumed reference in its schema-1 handoff, keeps independent judgment, and never resets the Review Count or the two-review automatic-rework limit. A recorded decision is never reconstructed from ledger files or GitHub comments as directive authority, and a recorded answer never manufactures a pass, waives an obligation, or authorizes new work.
 
 ## Wait for claimable work
 

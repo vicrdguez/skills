@@ -152,28 +152,14 @@ func deliveryCommittedReport(t *testing.T, cli ledgerCLI, reference ledger.Refer
 	return report, body
 }
 
-// deliveryRecordHumanDirection is administrative fixture work only: it records
-// a human decision document and requeues the Work Item into nextState. It
-// deliberately does not add or call a production decision API.
-func deliveryRecordHumanDirection(t *testing.T, clone, head, nextState string) {
+// deliveryRecordHumanDirection records an explicitly scoped Human Decision
+// through the public decision surface: it reads the item's exact current
+// request from the ledger-wide inbox and applies the human's answer with its
+// continuation route. It performs no direct ledger write.
+func deliveryRecordHumanDirection(t *testing.T, cli ledgerCLI, head, route string) decisionOutput {
 	t.Helper()
-	decisionPath := deliveryItemDirectory() + "/decision.md"
-	writeFile(t, filepath.Join(clone, filepath.FromSlash(decisionPath)),
-		"# Human direction\n\nContinue at "+head+" within the frozen Contract.\n")
-	runGit(t, clone, "add", "-A")
-	runGit(t, clone, "commit", "-q", "-m", "record human direction")
-	decisionCommit := deliveryTrimmed(t, clone, "rev-parse", "HEAD")
-
-	state := deliveryPersistedState(t, clone)
-	state.State = nextState
-	state.Decision = &ledger.Reference{Commit: decisionCommit, Path: decisionPath}
-	encoded, err := json.MarshalIndent(state, "", "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, filepath.Join(clone, filepath.FromSlash(deliveryItemStatePath())), string(encoded)+"\n")
-	runGit(t, clone, "add", "-A")
-	runGit(t, clone, "commit", "-q", "-m", "requeue review after human direction")
+	request := decisionRequest(t, cli, "widgets", deliveryTestItem)
+	return decisionApplyAnswer(t, cli, request, route, "# Human direction\n\nContinue at "+head+" within the frozen Contract.\n")
 }
 
 // deliveryCommitState rewrites one committed state.json and commits it.
@@ -504,7 +490,10 @@ func TestDeliveryCLIEndToEnd(t *testing.T) {
 	// Rule B7: recorded human direction authorizes continued implementation;
 	// the same direction carries through the implementation handoff into the
 	// independent review that follows, with no second directive needed.
-	deliveryRecordHumanDirection(t, fixture.clone, head2, ledger.Rework)
+	recorded := deliveryRecordHumanDirection(t, cli, head2, ledger.RouteImplement)
+	if recorded.Status != ledger.DecisionApplied {
+		t.Fatalf("record human direction = %#v, want applied", recorded)
+	}
 	directed, err := cli.deliveryJSON(t, "skl", "implement", "next", "--repo", source, "--format", "json")
 	if err != nil {
 		t.Fatalf("directed implement next: %v", err)
@@ -530,7 +519,7 @@ func TestDeliveryCLIEndToEnd(t *testing.T) {
 	if directedSubmit.Status != ledger.AwaitingReview {
 		t.Fatalf("directed submit = %#v, want awaiting_review", directedSubmit)
 	}
-	if carried := deliveryPersistedState(t, fixture.clone); carried.Decision == nil {
+	if carried := deliveryPersistedState(t, fixture.clone); !carried.Decision {
 		t.Fatal("implementation handoff consumed the direction the following review must consume")
 	}
 
@@ -558,7 +547,7 @@ func TestDeliveryCLIEndToEnd(t *testing.T) {
 	if roundThree.Round != 3 || roundThree.Source.Reviewed != head2 {
 		t.Fatalf("passing review = round %d of %s, want round 3 of the unchanged %s", roundThree.Round, roundThree.Source.Reviewed, head2)
 	}
-	if final := deliveryPersistedState(t, fixture.clone); final.Claim != nil || final.State != ledger.ReadyForMerge || final.Decision != nil {
+	if final := deliveryPersistedState(t, fixture.clone); final.Claim != nil || final.State != ledger.ReadyForMerge || final.Decision {
 		t.Fatalf("final state = %#v, want released Claim ready for merge with the direction consumed", final)
 	}
 

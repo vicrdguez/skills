@@ -175,6 +175,9 @@ func StartDeliveryContext(ctx context.Context, s *Store, repository github.Repos
 		if err != nil {
 			return err
 		}
+		if err := s.requireBranchOwner(repository.Name, candidates[0].item, state.Branch); err != nil {
+			return err
+		}
 		if err := s.requireCleanPaths(directory); err != nil {
 			return err
 		}
@@ -217,6 +220,38 @@ func StartDeliveryContext(ctx context.Context, s *Store, repository github.Repos
 	return execution, err
 }
 
+// requireBranchOwner keeps source identity unique within a Project, including
+// historical records whose worktrees or branches may still contain progress.
+// Check under the ledger mutation lock at both acceptance and acquisition.
+func (s *Store) requireBranchOwner(project, item, branch string) error {
+	head, err := s.head()
+	if err != nil {
+		return err
+	}
+	prefix := filepath.ToSlash(filepath.Join(projectsRoot, project, "proposals"))
+	paths, err := git(s.Root, "ls-tree", "-r", "--name-only", head, "--", prefix)
+	if err != nil {
+		return err
+	}
+	for _, path := range strings.Split(paths, "\n") {
+		if !strings.HasSuffix(path, "/state.json") {
+			continue
+		}
+		other := strings.TrimSuffix(strings.TrimPrefix(path, prefix+"/"), "/state.json")
+		if other == item {
+			continue
+		}
+		var state SliceState
+		if err := readJSONAt(s, head, path, &state); err != nil {
+			return err
+		}
+		if state.Branch == branch {
+			return refuse("planned branch "+branch+" is already owned by "+other, "give "+item+" a distinct source branch without reusing another Work Item's worktree or progress")
+		}
+	}
+	return nil
+}
+
 func phaseEligible(phase, state string) bool {
 	return phase == ImplementPhase && (state == ReadyForImplementation || state == Rework) || phase == WatchdogPhase && state == AwaitingReview
 }
@@ -226,7 +261,20 @@ func requiresDecision(e *Execution) bool {
 }
 
 func (s *Store) deliveryInputs(head, directory string, state SliceState) (ClaimInputs, error) {
-	inputs := ClaimInputs{Decision: state.Decision}
+	var inputs ClaimInputs
+	// The active marker means the exact decision document sits at the current
+	// full head. Pin that document; a missing one is a damaged record rather
+	// than a silently directionless continuation.
+	if state.Decision {
+		decisionPath := directory + "/decision.md"
+		if !gitOK(s.Root, "cat-file", "-e", head+":"+decisionPath) {
+			return inputs, refuse(
+				"selected Work Item records an active Human Decision without its decision document",
+				"restore decision.md at the current head or clear the marker with human direction",
+			)
+		}
+		inputs.Decision = &Reference{Commit: head, Path: decisionPath}
+	}
 	names, err := acceptedFileNamesAt(s, head, directory)
 	if err != nil {
 		return inputs, err
