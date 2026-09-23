@@ -34,6 +34,22 @@ type ForgeAttachment struct {
 	Number     int    `json:"number"`
 }
 
+// IntegrationTarget identifies the exact destination of an owned Submission.
+// It is not a target revision: human integration can advance the branch.
+type IntegrationTarget struct {
+	Repository string `json:"repository"`
+	Branch     string `json:"branch"`
+}
+
+// TerminalEvidence is a confirmed terminal observation, separate from the
+// source revisions in implementation and review reports.
+type TerminalEvidence struct {
+	Submission  ForgeAttachment   `json:"submission"`
+	Target      IntegrationTarget `json:"target"`
+	SourceHead  string            `json:"source_head,omitempty"`
+	MergeCommit string            `json:"merge_commit,omitempty"`
+}
+
 // PublicationNote is one durable pending-publication fact. Successful push
 // needs no record; the clone's own refs show it.
 type PublicationNote struct {
@@ -56,14 +72,16 @@ type PublicationState struct {
 // lifecycle, dependencies, planned source attachment, forge attachments,
 // and pending-publication information; Contract bytes stay frozen.
 type SliceState struct {
-	State        string            `json:"state"`
-	Title        string            `json:"title"`
-	Branch       string            `json:"branch"`
-	Dependencies []string          `json:"dependencies,omitempty"`
-	Issue        *ForgeAttachment  `json:"issue,omitempty"`
-	Publication  *PublicationState `json:"publication,omitempty"`
-	Claim        *Claim            `json:"claim,omitempty"`
-	Submission   *ForgeAttachment  `json:"submission,omitempty"`
+	State        string             `json:"state"`
+	Title        string             `json:"title"`
+	Branch       string             `json:"branch"`
+	Dependencies []string           `json:"dependencies,omitempty"`
+	Issue        *ForgeAttachment   `json:"issue,omitempty"`
+	Publication  *PublicationState  `json:"publication,omitempty"`
+	Claim        *Claim             `json:"claim,omitempty"`
+	Submission   *ForgeAttachment   `json:"submission,omitempty"`
+	Target       *IntegrationTarget `json:"integration_target,omitempty"`
+	Completion   *TerminalEvidence  `json:"completion,omitempty"`
 	// Decision is the active Human Decision marker. When set, the filled
 	// decision.md committed alongside it records the answered request and route;
 	// the exact document reference is pinned into later Claims. A commit cannot

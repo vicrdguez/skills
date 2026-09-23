@@ -131,6 +131,10 @@ func PublishDelivery(ctx context.Context, s *Store, repository github.Repository
 				return refuse("concurrent delivery recorded a different Submission", "preserve both attachments and reconcile with human direction")
 			}
 			state.Submission = attachment
+			// PresentPull only creates/validates main in this repository. Bind
+			// that destination with the exact owned attachment, including when
+			// this is a later publication of an already delivered result.
+			state.Target = &IntegrationTarget{Repository: attachment.Repository, Branch: "main"}
 		}
 		if state.State == result.Status && wanted == current {
 			state.Publication.Source = sourceNote
