@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,16 +29,16 @@ const (
 	publicationKindParent = "parent"
 	publicationKindPull   = "pull"
 
-	publicationPublished        = "published"
-	publicationAlreadySatisfied = "already-satisfied"
-	publicationPending          = "pending"
-	publicationProseNeeded      = "prose-needed"
-	publicationStale            = "stale"
-	publicationAmbiguous        = "ambiguous"
+	publicationPublished        = PublicationPublished
+	publicationAlreadySatisfied = PublicationAlreadySatisfied
+	publicationPending          = PublicationPending
+	publicationProseNeeded      = PublicationProseNeeded
+	publicationStale            = PublicationStale
+	publicationAmbiguous        = PublicationAmbiguous
 
-	findingSatisfied  = "satisfied"
-	findingInvalid    = "invalid"
-	findingUnresolved = "unresolved"
+	findingSatisfied  = FindingSatisfied
+	findingInvalid    = FindingInvalid
+	findingUnresolved = FindingUnresolved
 )
 
 // findingIdentity accepts the Work-Item-local finding labels Watchdog reports
@@ -48,16 +49,17 @@ var findingIdentity = regexp.MustCompile(`^W[0-9]+$`)
 // content-derived facts participate, so an unrelated ledger commit does not
 // change the token even though the resolved references name the current head.
 type publicationInputs struct {
-	Repository string          `json:"repository"`
-	Kind       string          `json:"kind"`
-	Item       string          `json:"item"`
-	Title      string          `json:"title"`
-	Branch     string          `json:"branch,omitempty"`
-	Lifecycle  string          `json:"lifecycle,omitempty"`
-	Phase      string          `json:"phase,omitempty"`
-	Source     SourceRevisions `json:"source,omitempty"`
-	Report     string          `json:"report,omitempty"`
-	Contracts  []string        `json:"contracts,omitempty"`
+	Repository string           `json:"repository"`
+	Kind       string           `json:"kind"`
+	Item       string           `json:"item"`
+	Title      string           `json:"title"`
+	Branch     string           `json:"branch,omitempty"`
+	Lifecycle  string           `json:"lifecycle,omitempty"`
+	Phase      string           `json:"phase,omitempty"`
+	Source     SourceRevisions  `json:"source,omitempty"`
+	Report     string           `json:"report,omitempty"`
+	Contracts  []string         `json:"contracts,omitempty"`
+	Attachment *ForgeAttachment `json:"attachment,omitempty"`
 }
 
 func (in publicationInputs) token() string {
@@ -161,31 +163,54 @@ func RecoverPublication(ctx context.Context, s *Store, repository github.Reposit
 			return result, nil
 		}
 	}
-	if selection.attachment != nil && selection.pending == nil {
+	bodySatisfied := selection.attachment != nil && selection.pending == nil
+	if bodySatisfied && len(request.Findings) == 0 && request.BodyPath == "" {
 		result.Status = publicationAlreadySatisfied
 		result.Detail = "the recorded forge attachment already satisfies this publication"
 		return result, nil
 	}
-	resolved, failure := resolveRecoveryBody(selection, request)
-	if failure != nil {
-		result.Status = failure.Status
-		result.Detail = failure.Detail
-		return result, nil
+	var resolved resolvedBody
+	groupingOnly := selection.kind == publicationKindIssue && selection.attachment != nil && selection.body == nil && selection.state.Publication != nil && selection.state.Publication.Grouping != nil
+	if (!bodySatisfied && !groupingOnly) || request.BodyPath != "" {
+		var failure *publicationFailure
+		resolved, failure = resolveRecoveryBody(selection, request)
+		if failure != nil {
+			result.Status = failure.Status
+			result.Detail = failure.Detail
+			return result, nil
+		}
 	}
 	valid, findingResults, err := selection.validateFindings(request.Findings)
 	if err != nil {
 		return PublicationResult{}, err
 	}
 	result.Findings = findingResults
+	if bodySatisfied && request.BodyPath == "" && len(valid) == 0 {
+		result.Status = publicationAlreadySatisfied
+		return result, nil
+	}
 
-	record := &PublicationBody{Path: resolved.path, SHA256: resolved.digest, View: selection.token}
+	var record *PublicationBody
+	if resolved.path != "" || resolved.digest != "" {
+		record = &PublicationBody{Path: resolved.path, SHA256: resolved.digest, View: selection.token}
+	}
+	originalDigest := resolved.digest
+	if selection.mayHaveCreated() && selection.body != nil {
+		originalDigest = selection.body.SHA256
+		if selection.body.OriginalSHA256 != "" {
+			originalDigest = selection.body.OriginalSHA256
+		}
+		if record != nil {
+			record.OriginalSHA256 = originalDigest
+		}
+	}
 	if err := s.reserveRecovery(selection, record); err != nil {
 		result.Status = publicationPending
 		result.Detail = err.Error()
 		return result, nil
 	}
 	presentationBody := &resolved.contents
-	if resolved.identityOnly {
+	if resolved.identityOnly || record == nil {
 		presentationBody = nil
 	}
 	presentation := RecoveryPresentation{
@@ -196,9 +221,10 @@ func RecoverPublication(ctx context.Context, s *Store, repository github.Reposit
 		Branch:             selection.branch,
 		Head:               selection.source.Head,
 		Reviewed:           selection.source.Reviewed,
+		SourceRoot:         root,
+		Target:             selection.source.Target,
 		Approved:           selection.approved,
-		Identity:           selection.identityEvidence(resolved.digest),
-		OriginalBodySHA256: resolved.digest,
+		OriginalBodySHA256: originalDigest,
 		MayHaveCreated:     selection.mayHaveCreated() || resolved.identityOnly,
 		ObserveOnly:        resolved.identityOnly,
 		Parent:             selection.parent,
@@ -209,8 +235,9 @@ func RecoverPublication(ctx context.Context, s *Store, repository github.Reposit
 	}
 	receipt, err := forge.RecoverPresentation(ctx, presentation)
 	if err != nil {
-		receipt = RecoveryReceipt{Status: publicationPending, Detail: err.Error()}
-		if isUnknownOutcome(err) {
+		uncertain := receipt.Status == publicationAmbiguous || selection.mayHaveCreated() || isUnknownOutcome(err)
+		receipt.Status, receipt.Detail = publicationPending, err.Error()
+		if uncertain && receipt.Number == 0 {
 			receipt.Status = publicationAmbiguous
 		}
 	}
@@ -257,9 +284,6 @@ func RememberDeliveryBody(s *Store, repository github.RepositoryID, result *Deli
 		}
 		publication := publicationStateOf(current.state)
 		publication.PullBody = record
-		if publication.Phase == "" {
-			publication.Phase = phaseForReportPath(result.Report.Path)
-		}
 		current.state.Publication = publication
 		return s.commitRecoveryState(current, "remember public body "+repository.Name+"/"+result.Item)
 	})
@@ -325,6 +349,9 @@ func selectPublication(s *Store, repository github.RepositoryID, item, kind stri
 		if state.Publication != nil {
 			selection.body = state.Publication.IssueBody
 			selection.pending = state.Publication.Issue
+			if selection.pending == nil {
+				selection.pending = state.Publication.Grouping
+			}
 		}
 		refs, digests, err := s.contractDigestsAt(head, directory)
 		if err != nil {
@@ -396,6 +423,17 @@ func selectPublication(s *Store, repository github.RepositoryID, item, kind stri
 			selection.approved = report.Outcome == outcomePass
 		}
 	}
+	attachments := slices.Clone(selection.children)
+	for _, attachment := range []*ForgeAttachment{selection.attachment, selection.parent} {
+		if attachment != nil {
+			attachments = append(attachments, *attachment)
+		}
+	}
+	for _, attachment := range attachments {
+		if attachment.Repository != selection.identity || attachment.Number <= 0 {
+			return nil, refuse("a recorded forge attachment does not belong to the selected repository", "repair the attachment rather than reassigning an object")
+		}
+	}
 	selection.token = selection.computeToken()
 	return selection, nil
 }
@@ -406,6 +444,7 @@ func (sel *publicationSelection) computeToken() string {
 		Kind:       sel.kind,
 		Title:      sel.title,
 		Contracts:  append([]string(nil), sel.contractDigests...),
+		Attachment: sel.attachment,
 	}
 	switch sel.kind {
 	case publicationKindParent:
@@ -427,7 +466,7 @@ func (sel *publicationSelection) view(status, detail string) PublicationView {
 	view := PublicationView{
 		Project: sel.project, Repository: sel.identity, Proposal: sel.proposal, Item: sel.item,
 		Kind: sel.kind, Token: sel.token, Title: sel.title, Branch: sel.branch, State: sel.state.State,
-		Source: sel.source, Report: sel.report, Contracts: sel.contractRefs,
+		Source: sel.source, Phase: sel.phase, Report: sel.report, Contracts: sel.contractRefs,
 		Attachment: sel.attachment, Parent: sel.parent, Children: sel.children,
 		Status: status, Detail: detail,
 	}
@@ -513,16 +552,6 @@ func (sel *publicationSelection) mayHaveCreated() bool {
 		return true
 	}
 	return false
-}
-
-// identityEvidence is the ownership fingerprint handed to the adapter. A known
-// attachment is named by number; an unconfirmed create is named by its exact
-// kind and body digest so the adapter can match only an exact object.
-func (sel *publicationSelection) identityEvidence(bodyDigest string) string {
-	if sel.attachment != nil {
-		return fmt.Sprintf("%s#%d", sel.identity, sel.attachment.Number)
-	}
-	return fmt.Sprintf("%s#%s:%s", sel.identity, sel.kind, bodyDigest)
 }
 
 // resolvedBody is one temporary public body that passed reuse validation.
@@ -656,7 +685,7 @@ func (sel *publicationSelection) hasFindingReceipt(finding SelectedFinding) bool
 	if sel.state.Publication == nil {
 		return false
 	}
-	wanted := findingReceiptOf(finding, findingSatisfied)
+	wanted := findingReceiptOf(finding, findingSatisfied, sel.knownNumber())
 	for _, receipt := range sel.state.Publication.Findings {
 		if receipt == wanted {
 			return true
@@ -665,9 +694,9 @@ func (sel *publicationSelection) hasFindingReceipt(finding SelectedFinding) bool
 	return false
 }
 
-func findingReceiptOf(finding SelectedFinding, status string) FindingReceipt {
+func findingReceiptOf(finding SelectedFinding, status string, submission int) FindingReceipt {
 	return FindingReceipt{
-		ID: finding.ID, Body: digestOf([]byte(finding.Body)), Commit: finding.Commit,
+		ID: finding.ID, Body: digestOf([]byte(finding.Body)), Commit: finding.Commit, Submission: submission,
 		Path: finding.Path, Line: finding.Line, Side: finding.Side, Status: status,
 	}
 }
@@ -684,7 +713,7 @@ func (s *Store) reserveRecovery(sel *publicationSelection, record *PublicationBo
 		if err != nil {
 			return err
 		}
-		if current.token != sel.token {
+		if current.token != sel.token || !samePublicationAssociations(current, sel) {
 			return refuse(
 				"the selected publication view changed before recovery could reserve it",
 				"inspect the current view and resubmit the recovery",
@@ -747,7 +776,7 @@ func (s *Store) settleRecovery(sel *publicationSelection, record *PublicationBod
 		if err != nil {
 			return err
 		}
-		stillCurrent = current.token == sel.token
+		stillCurrent = current.token == sel.token && samePublicationAssociations(current, sel)
 		number := receipt.Number
 		if number == 0 && current.attachment != nil {
 			number = current.attachment.Number
@@ -770,9 +799,14 @@ func (s *Store) settleRecovery(sel *publicationSelection, record *PublicationBod
 					)
 				}
 				current.state.Issue = attachment
+				current.attachment = attachment
+				if stillCurrent && record != nil {
+					record.View = current.computeToken()
+				}
 			}
 			if stillCurrent && isSatisfiedStatus(status) && current.state.Issue != nil {
 				publication.Issue = nil
+				publication.Grouping = nil
 				publication.IssueBody = nil
 			} else {
 				publication.Issue = &PublicationNote{Status: pendingNoteStatus(status), Detail: receipt.Detail}
@@ -796,6 +830,10 @@ func (s *Store) settleRecovery(sel *publicationSelection, record *PublicationBod
 					)
 				}
 				current.meta.ParentIssue = attachment
+				current.attachment = attachment
+				if stillCurrent && record != nil {
+					record.View = current.computeToken()
+				}
 			}
 			if stillCurrent && isSatisfiedStatus(status) && current.meta.ParentIssue != nil {
 				current.meta.ParentPublication = nil
@@ -823,10 +861,15 @@ func (s *Store) settleRecovery(sel *publicationSelection, record *PublicationBod
 					)
 				}
 				current.state.Submission = attachment
+				current.attachment = attachment
+				if stillCurrent && record != nil {
+					record.View = current.computeToken()
+				}
 			}
 			switch {
 			case stillCurrent && isSatisfiedStatus(status) && current.state.Submission != nil:
 				publication.Pull = nil
+				publication.Source = nil
 				publication.PullBody = nil
 				if current.source.Head != "" {
 					publication.PublishedSource = current.source.Head
@@ -835,12 +878,13 @@ func (s *Store) settleRecovery(sel *publicationSelection, record *PublicationBod
 				if publication.Pull == nil {
 					publication.Pull = &PublicationNote{Status: IssuePending, Detail: "a newer selected view still needs presentation"}
 				}
-				publication.PullBody = record
+				// The later handoff owns its body registration, including absence.
+				// Retain the receipt above, not this attempt's superseded prose.
 			default:
 				publication.Pull = &PublicationNote{Status: pendingNoteStatus(status), Detail: receipt.Detail}
 				publication.PullBody = record
 			}
-			publication.Findings = mergeFindingReceipts(publication.Findings, validFindings, receipt.Findings)
+			publication.Findings = mergeFindingReceipts(publication.Findings, validFindings, receipt.Findings, number)
 			current.state.Publication = publication
 			return s.commitRecoveryState(current, "record pull publication recovery "+current.repository.Name+"/"+current.item)
 		}
@@ -869,14 +913,10 @@ func isSatisfiedStatus(status string) bool {
 	return status == publicationPublished || status == publicationAlreadySatisfied
 }
 
-func normalizeReceiptStatus(status string) string {
+func normalizeReceiptStatus(status PublicationStatus) string {
 	switch status {
-	case "", publicationPublished, "ok", "success", "created", "updated":
-		return publicationPublished
-	case publicationAlreadySatisfied, "already_satisfied", "satisfied":
-		return publicationAlreadySatisfied
-	case publicationProseNeeded, publicationStale, publicationAmbiguous, publicationPending:
-		return status
+	case publicationPublished, publicationAlreadySatisfied, publicationProseNeeded, publicationStale, publicationAmbiguous, publicationPending:
+		return string(status)
 	default:
 		return publicationPending
 	}
@@ -889,7 +929,7 @@ func pendingNoteStatus(status string) string {
 	return IssuePending
 }
 
-func mergeFindingReceipts(existing []FindingReceipt, findings []SelectedFinding, results []FindingPublication) []FindingReceipt {
+func mergeFindingReceipts(existing []FindingReceipt, findings []SelectedFinding, results []FindingPublication, submission int) []FindingReceipt {
 	satisfied := make(map[string]bool, len(results))
 	for _, result := range results {
 		if result.Status == findingSatisfied || result.Status == publicationAlreadySatisfied {
@@ -901,7 +941,7 @@ func mergeFindingReceipts(existing []FindingReceipt, findings []SelectedFinding,
 		if !satisfied[finding.ID] {
 			continue
 		}
-		receipt := findingReceiptOf(finding, findingSatisfied)
+		receipt := findingReceiptOf(finding, findingSatisfied, submission)
 		duplicate := false
 		for _, known := range receipts {
 			if known == receipt {
@@ -922,7 +962,7 @@ func (s *Store) recoveryGuard(sel *publicationSelection) error {
 	if err != nil {
 		return err
 	}
-	if current.token != sel.token {
+	if current.token != sel.token || !samePublicationAssociations(current, sel) {
 		return refuse(
 			"the selected publication view changed while recovery was in flight",
 			"preserve the newer local view and recover it separately",
@@ -1010,14 +1050,8 @@ func sameReportContent(s *Store, sel *publicationSelection, reference *Reference
 	return wanted == current
 }
 
-func phaseForReportPath(path string) string {
-	switch {
-	case strings.HasSuffix(path, "/"+WatchdogPhase+"-report.md"):
-		return WatchdogPhase
-	case strings.HasSuffix(path, "/"+ImplementPhase+"-report.md"):
-		return ImplementPhase
-	}
-	return ""
+func samePublicationAssociations(a, b *publicationSelection) bool {
+	return sameAttachment(a.parent, b.parent) && slices.Equal(a.children, b.children)
 }
 
 func publicationStateOf(state SliceState) *PublicationState {

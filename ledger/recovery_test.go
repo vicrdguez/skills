@@ -169,6 +169,32 @@ func TestRecoveryPublicationReusesRegisteredBody(t *testing.T) {
 	}
 }
 
+func TestRecoveryRequiresExplicitSatisfactionAndPreservesPartialReceipt(t *testing.T) {
+	for _, status := range []ledger.PublicationStatus{"", "unexpected", ledger.PublicationPublished} {
+		t.Run(string(status), func(t *testing.T) {
+			l, source, store, result := deliveryPublicationFixture(t)
+			bodyFile := filepath.Join(t.TempDir(), "public.md")
+			deliveryWrite(t, bodyFile, "public material\n")
+			if err := ledger.RememberDeliveryBody(store, deliveryWidgets(), result, bodyFile); err != nil {
+				t.Fatal(err)
+			}
+			forge := &recoveryForgeStub{receipt: ledger.RecoveryReceipt{Number: 42, Status: status}}
+			if status == ledger.PublicationPublished {
+				forge.err = fmt.Errorf("readback failed after creating the attachment")
+			}
+			out, err := ledger.RecoverPublication(context.Background(), store, deliveryWidgets(), source.root, source.remote,
+				ledger.PublicationRequest{Item: deliveryPublicationItem, Kind: "pull"}, forge)
+			if err != nil || out.Status != ledger.PublicationPending {
+				t.Fatalf("unconfirmed receipt: %#v, %v", out, err)
+			}
+			state := l.committedState(deliveryPublicationProject, deliveryPublicationSlice, deliveryPublicationBranch)
+			if state.Submission == nil || state.Submission.Number != 42 || state.Publication.Pull == nil || state.Publication.PullBody == nil {
+				t.Fatalf("lost partial identity or cleared pending material: %#v", state)
+			}
+		})
+	}
+}
+
 // TestRecoveryPublicationLostBodyNeedsProse covers B3: deleting the registered
 // temporary bytes produces a prose-needed result without a forge call and
 // without mutating the ledger.

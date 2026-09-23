@@ -47,22 +47,26 @@ type PublicationNote struct {
 // for. Stored findings reuse that metadata so a repeated recovery can tell a
 // current temporary body from a lost, altered, or superseded one.
 type PublicationBody struct {
-	Path   string `json:"path"`
-	SHA256 string `json:"sha256"`
-	View   string `json:"view,omitempty"`
+	// OriginalSHA256 retains the identity of an unconfirmed create when the
+	// agent supplies replacement prose; it is not a snapshot of that prose.
+	OriginalSHA256 string `json:"original_sha256,omitempty"`
+	Path           string `json:"path"`
+	SHA256         string `json:"sha256"`
+	View           string `json:"view,omitempty"`
 }
 
 // FindingReceipt records one explicitly selected inline finding whose exact
 // effect was observed. It stores the authorized public prose by digest, never
 // the prose itself, together with the reviewed anchor that justified it.
 type FindingReceipt struct {
-	ID     string `json:"id"`
-	Body   string `json:"body_sha256"`
-	Commit string `json:"commit"`
-	Path   string `json:"path"`
-	Line   int    `json:"line"`
-	Side   string `json:"side"`
-	Status string `json:"status"`
+	Submission int    `json:"submission"`
+	ID         string `json:"id"`
+	Body       string `json:"body_sha256"`
+	Commit     string `json:"commit"`
+	Path       string `json:"path"`
+	Line       int    `json:"line"`
+	Side       string `json:"side"`
+	Status     string `json:"status"`
 }
 
 // PublicationState collects the pending-publication facts applicable to one

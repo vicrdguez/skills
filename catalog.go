@@ -439,6 +439,9 @@ func renderDocument(skillDirectory, file string, data any) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if slices.Contains([]string{"skills/dev/propose", "skills/dev/implement", "skills/dev/watchdog"}, skillDirectory) {
+		modules = append(modules, "skills/dev/shared/publication.md")
+	}
 	for _, module := range modules {
 		source, err := fs.ReadFile(embedded, module)
 		if err != nil {

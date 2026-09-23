@@ -8,6 +8,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -37,7 +39,7 @@ type publicationPendingUpdate struct {
 	finalPublicPath string
 }
 
-func newPublicationPendingUpdate(t *testing.T, proposal string) *publicationPendingUpdate {
+func newPublicationPendingUpdate(t *testing.T, proposal string, addDebtMarker ...bool) *publicationPendingUpdate {
 	t.Helper()
 	u := &publicationPendingUpdate{
 		fixture: newLedgerFixture(t), forge: newPublicationForge(t),
@@ -98,8 +100,14 @@ func newPublicationPendingUpdate(t *testing.T, proposal string) *publicationPend
 	if _, err := offline.deliveryJSON(t, "skl", "watchdog", "inspect", "--repo", u.source, "--item", u.item, "--claim", reviewClaim, "--format", "json"); err != nil {
 		t.Fatalf("watchdog inspect: %v", err)
 	}
+	if len(addDebtMarker) > 0 && addDebtMarker[0] {
+		writeFile(t, filepath.Join(worktree, "feature.txt"), "delivered foundation\n# maintenance note\n")
+		runGit(t, worktree, "add", "feature.txt")
+		runGit(t, worktree, "commit", "-q", "-m", "record permitted debt marker")
+		head = strings.TrimSpace(runGitOutput(t, worktree, "rev-parse", "HEAD"))
+	}
 	if _, err := offline.deliveryJSON(t, "skl", "watchdog", "submit", "--repo", u.source, "--item", u.item, "--claim", reviewClaim,
-		"--outcome", "pass", "--body", reportPath, "--public-body", u.finalPublicPath, "--format", "json"); err != nil {
+		"--head", head, "--outcome", "pass", "--body", reportPath, "--public-body", u.finalPublicPath, "--format", "json"); err != nil {
 		t.Fatalf("passing watchdog submit: %v", err)
 	}
 	pending := publicationState(t, u.fixture.clone, proposal, "foundation")
@@ -416,8 +424,14 @@ func TestPublicationCLIStopsOnUnavailableOrDuplicateObservation(t *testing.T) {
 	duplicate.forge.addPull(publicationPull{Branch: "foundation", Base: "main", Body: "other branch occupant"})
 	creates := len(duplicate.forge.pullCreates)
 	cli = newPublicationApp(t, duplicate.forge)
-	conflicting, err := cli.publicationJSON(t, "skl", "publication", "recover", "--repo", duplicate.source,
+	stale, err := cli.publicationJSON(t, "skl", "publication", "recover", "--repo", duplicate.source,
 		"--item", duplicate.item, "--kind", "pull", "--format", "json")
+	if err != nil || stale.Status != "stale" {
+		t.Fatalf("changed attachment must stale the original request: %#v, %v", stale, err)
+	}
+	conflicting, err := cli.publicationJSON(t, "skl", "publication", "recover", "--repo", duplicate.source,
+		"--item", duplicate.item, "--kind", "pull", "--view", stale.Packet.Facts.Publication.View.Token,
+		"--body", duplicate.finalPublicPath, "--format", "json")
 	if err != nil {
 		t.Fatalf("duplicate candidates: %v", err)
 	}
@@ -462,6 +476,18 @@ func TestPublicationCLIPreservesNewerViewDuringInFlightEffect(t *testing.T) {
 	newer := publicationState(t, u.fixture.clone, u.proposal, "foundation")
 	newer.Claim = &ledger.Claim{Phase: ledger.ImplementPhase, Basis: claimBasis}
 	publicationCommitState(t, u.fixture.clone, u.proposal, newer)
+	current, err := publicationNoForgeApp(t, nil).publicationJSON(t, "skl", "publication", "inspect", "--repo", u.source,
+		"--item", u.item, "--kind", "pull", "--format", "json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	newBodyPath := filepath.Join(t.TempDir(), "newer-public.md")
+	newBody := "newer human-facing result\n"
+	writeFile(t, newBodyPath, newBody)
+	newer.Publication.PullBody = &ledger.PublicationBody{
+		Path: newBodyPath, SHA256: fmt.Sprintf("%x", sha256.Sum256([]byte(newBody))), View: current.Packet.Facts.Publication.View.Token,
+	}
+	publicationCommitState(t, u.fixture.clone, u.proposal, newer)
 	close(release)
 
 	raced := <-done
@@ -477,6 +503,9 @@ func TestPublicationCLIPreservesNewerViewDuringInFlightEffect(t *testing.T) {
 	}
 	if state.Submission == nil {
 		t.Fatal("raced recovery lost its observable attachment")
+	}
+	if state.Publication.PullBody == nil || *state.Publication.PullBody != *newer.Publication.PullBody {
+		t.Fatalf("raced recovery replaced the newer public body registration: %#v", state.Publication.PullBody)
 	}
 	report := publicationReport(t, u.fixture.clone, u.proposal, "foundation", ledger.WatchdogPhase)
 	if !strings.Contains(publicationRevisionReads(t, u.fixture.clone, reportPath), "newer reviewed result") || report.Round == 0 {

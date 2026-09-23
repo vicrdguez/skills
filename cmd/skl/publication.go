@@ -233,7 +233,7 @@ func publicationOwner(kind string, view ledger.PublicationView) string {
 	if kind != "pull" {
 		return "propose"
 	}
-	if view.Report != nil && strings.HasSuffix(view.Report.Path, "/"+ledger.WatchdogPhase+"-report.md") {
+	if view.Phase == ledger.WatchdogPhase && view.State == ledger.ReadyForMerge {
 		return "watchdog"
 	}
 	return "implement"
@@ -245,7 +245,7 @@ func publicationOwner(kind string, view ledger.PublicationView) string {
 func publicationReferences(root string, view ledger.PublicationView) []skilldist.PublicationReference {
 	var references []skilldist.PublicationReference
 	if view.Report != nil {
-		references = append(references, publicationReference(root, *view.Report, "selected "+phaseFromReportPath(view.Report.Path)+" report"))
+		references = append(references, publicationReference(root, *view.Report, "selected "+view.Phase+" report"))
 	}
 	for _, contract := range view.Contracts {
 		references = append(references, publicationReference(root, contract, "accepted Contract"))
@@ -259,16 +259,6 @@ func publicationReference(root string, reference ledger.Reference, purpose strin
 		Command: fmt.Sprintf("skl ledger show --repo %s --commit %s --path %s",
 			skilldist.ShellQuote(root), skilldist.ShellQuote(reference.Commit), skilldist.ShellQuote(reference.Path)),
 	}
-}
-
-func phaseFromReportPath(path string) string {
-	switch {
-	case strings.HasSuffix(path, "/"+ledger.WatchdogPhase+"-report.md"):
-		return ledger.WatchdogPhase
-	case strings.HasSuffix(path, "/"+ledger.ImplementPhase+"-report.md"):
-		return ledger.ImplementPhase
-	}
-	return "phase"
 }
 
 func publicationRecoverCommand(repository setup.RepositoryContext, item, kind, token string) string {

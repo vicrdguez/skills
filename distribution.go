@@ -15,6 +15,7 @@ const StubProtocol = "skl.stub/v1"
 var ownedMarker = []byte("<!-- skl-owned: " + StubProtocol + " -->")
 
 //go:embed skills/dev/audit skills/dev/design skills/dev/domain skills/dev/explore skills/dev/implement skills/dev/propose skills/dev/testing skills/dev/watchdog skills/misc/writing-for-agents skills/thinking/brainstorm skills/thinking/shape stubs/common.md
+//go:embed skills/dev/shared
 //go:embed prompts/implement-loop.md prompts/watchdog-loop.md prompts/queue-next.mjs agents/implement-runner.md agents/watchdog-runner.md
 var embedded embed.FS
 

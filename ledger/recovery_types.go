@@ -2,6 +2,22 @@ package ledger
 
 import "context"
 
+// PublicationStatus is the forge receipt protocol. Only these named statuses
+// establish an observed outcome; an empty or unknown status remains pending.
+type PublicationStatus string
+
+const (
+	PublicationPublished        = "published"
+	PublicationAlreadySatisfied = "already-satisfied"
+	PublicationPending          = "pending"
+	PublicationProseNeeded      = "prose-needed"
+	PublicationStale            = "stale"
+	PublicationAmbiguous        = "ambiguous"
+	FindingSatisfied            = "satisfied"
+	FindingInvalid              = "invalid"
+	FindingUnresolved           = "unresolved"
+)
+
 // PublicationView identifies the selected committed presentation without
 // retaining its public prose. Token excludes unrelated ledger changes.
 type PublicationView struct {
@@ -15,6 +31,7 @@ type PublicationView struct {
 	Branch     string            `json:"branch,omitempty"`
 	State      string            `json:"state"`
 	Source     SourceRevisions   `json:"source"`
+	Phase      string            `json:"phase,omitempty"`
 	Report     *Reference        `json:"report,omitempty"`
 	Contracts  []Reference       `json:"contracts"`
 	Attachment *ForgeAttachment  `json:"attachment,omitempty"`
@@ -67,8 +84,9 @@ type RecoveryPresentation struct {
 	Branch             string
 	Head               string
 	Reviewed           string
+	SourceRoot         string
+	Target             string
 	Approved           bool
-	Identity           string
 	OriginalBodySHA256 string
 	MayHaveCreated     bool
 	ObserveOnly        bool
@@ -81,7 +99,7 @@ type RecoveryPresentation struct {
 
 type RecoveryReceipt struct {
 	Number   int
-	Status   string
+	Status   PublicationStatus
 	Detail   string
 	Findings []FindingPublication
 }

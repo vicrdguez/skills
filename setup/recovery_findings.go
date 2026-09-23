@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os/exec"
 	"path"
 	"regexp"
 	"strconv"
@@ -47,13 +48,13 @@ func (b *GitHubBackend) publishSelectedFindings(ctx context.Context, repository 
 			receipts = append(receipts, publication)
 			continue
 		}
-		if finding.Commit == "" || finding.Commit != reviewed || pull.Head.SHA != reviewed {
+		if finding.Commit == "" || finding.Commit != reviewed {
 			publication.Status = recoveryFindingUnresolved
 			publication.Detail = fmt.Sprintf("the selected finding must anchor to the exact reviewed revision %s observable on pull request #%d; no replacement location was guessed", reviewed, pull.Number)
 			receipts = append(receipts, publication)
 			continue
 		}
-		if err := b.validateSelectedFinding(ctx, repository, pull.Number, finding); err != nil {
+		if err := b.validateSelectedFinding(ctx, repository, pull.Number, finding, presentation); err != nil {
 			publication.Status = recoveryFindingUnresolved
 			publication.Detail = "the selected anchor is not part of the reviewed diff: " + err.Error() + "; no replacement location was guessed"
 			receipts = append(receipts, publication)
@@ -79,6 +80,13 @@ func (b *GitHubBackend) publishSelectedFindings(ctx context.Context, repository 
 		}
 		if err := guard(); err != nil {
 			return receipts, err
+		}
+		current, err := b.pullForPresentation(ctx, repository, pull.Number)
+		if err != nil || current.Head.SHA != presentation.Head || recoveryPullMismatch(*current, repository, presentation) != "" {
+			publication.Status = recoveryFindingUnresolved
+			publication.Detail = "the attached Submission changed before inline publication; no replacement location was guessed"
+			receipts = append(receipts, publication)
+			continue
 		}
 		writeErr := b.request(ctx, http.MethodPost, b.repositoryPath(repository)+fmt.Sprintf("/pulls/%d/comments", pull.Number), map[string]any{"body": finding.Body, "commit_id": finding.Commit, "path": finding.Path, "line": finding.Line, "side": finding.Side}, nil)
 		observed, err = b.selectedFindingObserved(ctx, repository, pull.Number, finding)
@@ -123,12 +131,15 @@ func (b *GitHubBackend) selectedFindingObserved(ctx context.Context, repository 
 // validateSelectedFinding checks the supplied path, line, and side against
 // the actual reviewed diff of the pull request at its reviewed head. A path
 // or line that is not anchorable there is unresolved rather than relocated.
-func (b *GitHubBackend) validateSelectedFinding(ctx context.Context, repository github.RepositoryID, number int, finding ledger.SelectedFinding) error {
+func (b *GitHubBackend) validateSelectedFinding(ctx context.Context, repository github.RepositoryID, number int, finding ledger.SelectedFinding, presentation ledger.RecoveryPresentation) error {
 	if finding.Path == "" || path.IsAbs(finding.Path) || path.Clean(finding.Path) != finding.Path || strings.HasPrefix(finding.Path, "../") {
 		return fmt.Errorf("path %q is not a reviewed repository path", finding.Path)
 	}
 	if !b.AnchorSide(finding.Side) {
 		return fmt.Errorf("side %q is not a native review side", finding.Side)
+	}
+	if presentation.Head != finding.Commit {
+		return validateHistoricalFinding(ctx, presentation, finding)
 	}
 	anchors, err := b.reviewedAnchorLines(ctx, repository, number)
 	if err != nil {
@@ -140,6 +151,41 @@ func (b *GitHubBackend) validateSelectedFinding(ctx context.Context, repository 
 	}
 	if !lines[finding.Side][finding.Line] {
 		return fmt.Errorf("line %d is not an anchorable %s line of the reviewed diff", finding.Line, finding.Side)
+	}
+	return nil
+}
+
+// validateHistoricalFinding uses the exact available source objects when a
+// final marker commit advanced the PR beyond the reviewed revision. Current
+// /files lines cannot stand in for that historical diff. The reviewed commit
+// must still belong to the exact final head observed on this Submission.
+func validateHistoricalFinding(ctx context.Context, presentation ledger.RecoveryPresentation, finding ledger.SelectedFinding) error {
+	if presentation.SourceRoot == "" || presentation.Target == "" {
+		return fmt.Errorf("the exact reviewed source and target are unavailable")
+	}
+	git := func(args ...string) ([]byte, error) {
+		return exec.CommandContext(ctx, "git", append([]string{"-C", presentation.SourceRoot, "--literal-pathspecs"}, args...)...).Output()
+	}
+	for _, revision := range []string{presentation.Head, presentation.Target, finding.Commit} {
+		resolved, err := git("rev-parse", "--verify", "--end-of-options", revision+"^{commit}")
+		if err != nil || strings.TrimSpace(string(resolved)) != revision {
+			return fmt.Errorf("exact source revision %s is unavailable", revision)
+		}
+	}
+	if _, err := git("merge-base", "--is-ancestor", finding.Commit, presentation.Head); err != nil {
+		return fmt.Errorf("the reviewed revision is not part of the attached final source")
+	}
+	patch, err := git("diff", "--no-ext-diff", "--no-textconv", "--unified=3", presentation.Target+"..."+finding.Commit, "--", finding.Path)
+	if err != nil {
+		return fmt.Errorf("the exact reviewed diff is unavailable: %w", err)
+	}
+	left, right := patchAnchorLines(string(patch))
+	lines := right
+	if finding.Side == "LEFT" {
+		lines = left
+	}
+	if !lines[finding.Line] {
+		return fmt.Errorf("line %d is not an anchorable %s line at the reviewed revision", finding.Line, finding.Side)
 	}
 	return nil
 }

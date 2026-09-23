@@ -117,6 +117,7 @@ func (b *GitHubBackend) recoverPullPresentation(ctx context.Context, presentatio
 
 	wrote := created
 	var problems []string
+	var previousBody *githubPull
 	if presentation.Body != nil && pull.Body != *presentation.Body {
 		switch {
 		case presentation.ObserveOnly:
@@ -126,11 +127,19 @@ func (b *GitHubBackend) recoverPullPresentation(ctx context.Context, presentatio
 				receipt.Status = recoveryPending
 				return receipt, err
 			}
+			before := *pull
+			previousBody = &before
 			writeErr := b.request(ctx, http.MethodPatch, b.repositoryPath(repository)+fmt.Sprintf("/pulls/%d", pull.Number), map[string]string{"body": *presentation.Body}, nil)
 			observed, readErr := b.pullForPresentation(ctx, repository, pull.Number)
 			switch {
 			case readErr != nil:
 				problems = append(problems, fmt.Sprintf("the body update of pull request #%d could not be confirmed: %v", pull.Number, readErr))
+			case recoveryPullMismatch(*observed, repository, presentation) != "" || observed.Head.SHA != presentation.Head:
+				detail := "the pull request changed during the body update; no readiness was applied"
+				if err := b.restoreRecoveryBody(ctx, repository, before, *observed, *presentation.Body); err != nil {
+					detail += "; body restoration remains unresolved: " + err.Error()
+				}
+				problems = append(problems, detail)
 			case observed.Body != *presentation.Body:
 				if writeErr != nil {
 					problems = append(problems, writeErr.Error())
@@ -144,8 +153,26 @@ func (b *GitHubBackend) recoverPullPresentation(ctx context.Context, presentatio
 		}
 	}
 
+	if len(problems) > 0 {
+		receipt.Status, receipt.Detail = recoveryPending, strings.Join(problems, "; ")
+		return receipt, nil
+	}
 	wantedDraft := !presentation.Approved
 	if pull.Draft != wantedDraft && !presentation.ObserveOnly {
+		fresh, err := b.pullForPresentation(ctx, repository, pull.Number)
+		if err != nil {
+			return receipt, err
+		}
+		if reason := recoveryPullMismatch(*fresh, repository, presentation); reason != "" || fresh.Head.SHA != presentation.Head {
+			receipt.Status, receipt.Detail = recoveryPending, "the pull request changed before readiness; no readiness was applied"
+			if previousBody != nil {
+				if err := b.restoreRecoveryBody(ctx, repository, *previousBody, *fresh, *presentation.Body); err != nil {
+					receipt.Detail += "; body restoration remains unresolved: " + err.Error()
+				}
+			}
+			return receipt, nil
+		}
+		pull = fresh
 		if pull.NodeID == "" {
 			receipt.Status = recoveryPending
 			return receipt, workflow.Refuse(fmt.Sprintf("pull request #%d has no stable node identity for the required %s presentation", pull.Number, presentationReadiness(wantedDraft)))
@@ -167,6 +194,11 @@ func (b *GitHubBackend) recoverPullPresentation(ctx context.Context, presentatio
 			detail := fmt.Sprintf("pull request #%d presents source head %s after the readiness attempt instead of the intended %s", observed.Number, observed.Head.SHA, presentation.Head)
 			if restoreErr != nil {
 				detail += "; draft restoration remains unresolved: " + restoreErr.Error()
+			}
+			if previousBody != nil {
+				if err := b.restoreRecoveryBody(ctx, repository, *previousBody, *observed, *presentation.Body); err != nil {
+					detail += "; body restoration remains unresolved: " + err.Error()
+				}
 			}
 			problems = append(problems, detail)
 		case observed.Draft != wantedDraft:
@@ -196,6 +228,11 @@ func (b *GitHubBackend) recoverPullPresentation(ctx context.Context, presentatio
 			problems = append(problems, recoveryPullMismatch(*final, repository, presentation))
 		case final.Head.SHA != presentation.Head:
 			problems = append(problems, fmt.Sprintf("pull request #%d presents source head %s, not the intended %s", final.Number, final.Head.SHA, presentation.Head))
+			if previousBody != nil {
+				if err := b.restoreRecoveryBody(ctx, repository, *previousBody, *final, *presentation.Body); err != nil {
+					problems = append(problems, "body restoration remains unresolved: "+err.Error())
+				}
+			}
 		case presentation.Body != nil && final.Body != *presentation.Body:
 			problems = append(problems, "the public body is not yet the supplied presentation")
 		case final.Draft != wantedDraft:
@@ -214,6 +251,36 @@ func (b *GitHubBackend) recoverPullPresentation(ctx context.Context, presentatio
 		receipt.Status = recoveryAlreadySatisfied
 	}
 	return receipt, nil
+}
+
+// restoreRecoveryBody retracts only this attempt's still-observable body after
+// source movement. GitHub offers no atomic source/body transaction: re-read
+// before the bounded correction, preserve different (newer) prose, and report
+// unavailable or changed observations rather than guessing a rollback.
+func (b *GitHubBackend) restoreRecoveryBody(ctx context.Context, repository github.RepositoryID, before, observed githubPull, written string) error {
+	if observed.Body != written {
+		return nil
+	}
+	current, err := b.pullForPresentation(ctx, repository, observed.Number)
+	if err != nil {
+		return err
+	}
+	if current.Body != written {
+		return nil
+	}
+	identity := ledger.RecoveryPresentation{Branch: before.Head.Ref}
+	if before.NodeID == "" || current.NodeID != before.NodeID || current.Head.SHA != observed.Head.SHA || recoveryPullMismatch(*current, repository, identity) != "" {
+		return errors.New("the attachment changed again; no body correction was attempted")
+	}
+	writeErr := b.request(ctx, http.MethodPatch, b.repositoryPath(repository)+fmt.Sprintf("/pulls/%d", current.Number), map[string]string{"body": before.Body}, nil)
+	confirmed, err := b.pullForPresentation(ctx, repository, current.Number)
+	if err != nil {
+		return err
+	}
+	if confirmed.NodeID != current.NodeID || confirmed.Head.SHA != current.Head.SHA || confirmed.Body != before.Body {
+		return fmt.Errorf("the prior public body could not be confirmed after correction (write error: %v)", writeErr)
+	}
+	return nil
 }
 
 // restoreRecoveryDraft reverses only a ready presentation this attempt

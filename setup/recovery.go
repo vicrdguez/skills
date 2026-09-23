@@ -17,16 +17,14 @@ import (
 
 var _ ledger.RecoveryForge = (*GitHubBackend)(nil)
 
-// Recovery receipt vocabulary understood by the ledger's publication
-// normalization. The shared recovery types do not export these constants, so
-// the adapter repeats the exact values the ledger recognizes.
+// Local names refer to the shared forge receipt protocol.
 const (
-	recoveryPublished         = "published"
-	recoveryAlreadySatisfied  = "already-satisfied"
-	recoveryPending           = "pending"
-	recoveryAmbiguous         = "ambiguous"
-	recoveryFindingSatisfied  = "satisfied"
-	recoveryFindingUnresolved = "unresolved"
+	recoveryPublished         = ledger.PublicationPublished
+	recoveryAlreadySatisfied  = ledger.PublicationAlreadySatisfied
+	recoveryPending           = ledger.PublicationPending
+	recoveryAmbiguous         = ledger.PublicationAmbiguous
+	recoveryFindingSatisfied  = ledger.FindingSatisfied
+	recoveryFindingUnresolved = ledger.FindingUnresolved
 )
 
 // RecoverPresentation reconciles one pending public presentation against the
@@ -110,7 +108,7 @@ func (b *GitHubBackend) recoverIssuePresentation(ctx context.Context, presentati
 				// definite rejection simply has no attributable match.
 				observed, observeErr := b.observeExactIssue(ctx, presentation.Title, recoveryBodyDigest(*presentation.Body))
 				if observeErr != nil {
-					receipt.Status = recoveryPending
+					receipt.Status = recoveryAmbiguous
 					return receipt, observeErr
 				}
 				if observed == 0 {

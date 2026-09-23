@@ -102,7 +102,7 @@ func TestPublicationCLIInspectIsReadOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("markdown inspect: %v", err)
 	}
-	if !strings.Contains(markdown, "Publication inspection") || !strings.Contains(markdown, "already matches the latest accepted view") {
+	if !strings.Contains(markdown, "Publication inspection") || !strings.Contains(markdown, "selected presentation is already current") {
 		t.Fatalf("markdown inspect = %q", markdown)
 	}
 	if strings.Contains(markdown, "Retrieve the deferred authoring guidance") {
