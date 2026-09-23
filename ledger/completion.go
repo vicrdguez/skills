@@ -84,6 +84,7 @@ func ObserveCompletion(ctx context.Context, s *Store, repository github.Reposito
 		return result, err
 	}
 	var committed string
+	pending := PublicationNote{Status: PushPending, Detail: "terminal ledger commit has not been replicated"}
 	err = s.withMutation(func() error {
 		if err := s.requireReconciled(); err != nil {
 			return err
@@ -118,7 +119,7 @@ func ObserveCompletion(ctx context.Context, s *Store, repository github.Reposito
 		if current.Publication == nil {
 			current.Publication = &PublicationState{}
 		}
-		current.Publication.Push = &PublicationNote{Status: PushPending, Detail: "terminal ledger commit has not been replicated"}
+		current.Publication.Push = &pending
 		if err := writeJSON(filepath.Join(s.Root, path), current); err != nil {
 			return err
 		}
@@ -139,7 +140,7 @@ func ObserveCompletion(ctx context.Context, s *Store, repository github.Reposito
 	if note.Status == PushPushed {
 		_ = s.withMutation(func() error {
 			current, _, _, err := s.deliveryState(repository, item)
-			if err != nil || current.State != terminal || !reflect.DeepEqual(current.Completion, &TerminalEvidence{Submission: *state.Submission, Target: *state.Target, SourceHead: observation.SourceHead, MergeCommit: observation.MergeCommit}) || current.Publication == nil || current.Publication.Push == nil {
+			if err != nil || current.State != terminal || !reflect.DeepEqual(current.Completion, &TerminalEvidence{Submission: *state.Submission, Target: *state.Target, SourceHead: observation.SourceHead, MergeCommit: observation.MergeCommit}) || current.Publication == nil || current.Publication.Push == nil || *current.Publication.Push != pending {
 				return err
 			}
 			path := directory + "/state.json"
