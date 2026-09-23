@@ -36,12 +36,12 @@ Human decisions (#3) and publication recovery (#4) are independent siblings, not
 
 These unchecked acceptance bullets are current publication carrier checkboxes for the `.changes`/baseline endpoint machinery. They do not authorize mutation of the target private Contract; ADR 0006 keeps that Contract frozen and records completion in Phase Reports.
 
-- [ ] B1-B2: Actual owned-Submission merge and unmerged closure become Merged/Superseded bookkeeping; Ready for Merge remains the autonomous delivery endpoint and public presentation never authorizes a transition.
-- [ ] B3, B5: Stored confirmed facts remain usable offline; unknown or failed observations never invent terminal state or satisfy Dependencies, and only Merged blockers permit normal eligibility.
-- [ ] B4: Repetition, interrupted recording, and concurrent selected-record changes cannot release a current/later Claim, overwrite later results, or resurrect terminal work.
-- [ ] B6: Only all children Merged establishes full proposal delivery; mixed terminal outcomes can be recognized as retireable without asserting completion.
-- [ ] B7-B8: Fixed-item reads stay within the selected record and required evidence; historical source and ledger references survive terminal observation unchanged without a source-retention guarantee.
-- [ ] A1-A5: The accepted responsibility boundaries and failure-aware verification are satisfied using the existing public CLI, real Git repositories, and controlled HTTP tools, with many-to-many evidence and no mandatory test-writing order.
+- [x] B1-B2: Actual owned-Submission merge and unmerged closure become Merged/Superseded bookkeeping; Ready for Merge remains the autonomous delivery endpoint and public presentation never authorizes a transition.
+- [x] B3, B5: Stored confirmed facts remain usable offline; unknown or failed observations never invent terminal state or satisfy Dependencies, and only Merged blockers permit normal eligibility.
+- [x] B4: Repetition, interrupted recording, and concurrent selected-record changes cannot release a current/later Claim, overwrite later results, or resurrect terminal work.
+- [x] B6: Only all children Merged establishes full proposal delivery; mixed terminal outcomes can be recognized as retireable without asserting completion.
+- [x] B7-B8: Fixed-item reads stay within the selected record and required evidence; historical source and ledger references survive terminal observation unchanged without a source-retention guarantee.
+- [x] A1-A5: The accepted responsibility boundaries and failure-aware verification are satisfied using the existing public CLI, real Git repositories, and controlled HTTP tools, with many-to-many evidence and no mandatory test-writing order.
 
 ## Manual verification
 
