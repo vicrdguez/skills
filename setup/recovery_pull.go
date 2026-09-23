@@ -116,6 +116,7 @@ func (b *GitHubBackend) recoverPullPresentation(ctx context.Context, presentatio
 	}
 
 	wrote := created
+	readyEstablished := false
 	var problems []string
 	var previousBody *githubPull
 	if presentation.Body != nil && pull.Body != *presentation.Body {
@@ -210,6 +211,7 @@ func (b *GitHubBackend) recoverPullPresentation(ctx context.Context, presentatio
 		default:
 			pull = observed
 			wrote = true
+			readyEstablished = !wantedDraft
 		}
 	}
 
@@ -228,6 +230,11 @@ func (b *GitHubBackend) recoverPullPresentation(ctx context.Context, presentatio
 			problems = append(problems, recoveryPullMismatch(*final, repository, presentation))
 		case final.Head.SHA != presentation.Head:
 			problems = append(problems, fmt.Sprintf("pull request #%d presents source head %s, not the intended %s", final.Number, final.Head.SHA, presentation.Head))
+			if readyEstablished {
+				if err := b.restoreRecoveryDraft(ctx, repository, *final, presentation); err != nil {
+					problems = append(problems, "draft restoration remains unresolved: "+err.Error())
+				}
+			}
 			if previousBody != nil {
 				if err := b.restoreRecoveryBody(ctx, repository, *previousBody, *final, *presentation.Body); err != nil {
 					problems = append(problems, "body restoration remains unresolved: "+err.Error())
@@ -295,7 +302,20 @@ func (b *GitHubBackend) restoreRecoveryDraft(ctx context.Context, repository git
 	if presentation.Body != nil && observed.Body != *presentation.Body {
 		return errors.New("the pull request changed since the readiness attempt; newer content was preserved")
 	}
-	if err := b.setPullPresentation(ctx, observed.NodeID, true); err != nil {
+	current, err := b.pullForPresentation(ctx, repository, observed.Number)
+	if err != nil {
+		return err
+	}
+	if current.NodeID != observed.NodeID || current.Head.SHA != observed.Head.SHA || recoveryPullMismatch(*current, repository, presentation) != "" {
+		return errors.New("the attachment changed again; no draft correction was attempted")
+	}
+	if current.Draft {
+		return nil
+	}
+	if presentation.Body != nil && current.Body != *presentation.Body {
+		return errors.New("newer content was preserved; no draft correction was attempted")
+	}
+	if err := b.setPullPresentation(ctx, current.NodeID, true); err != nil {
 		return err
 	}
 	confirmed, err := b.pullForPresentation(ctx, repository, observed.Number)

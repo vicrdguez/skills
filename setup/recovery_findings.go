@@ -121,7 +121,17 @@ func (b *GitHubBackend) selectedFindingObserved(ctx context.Context, repository 
 		return false, err
 	}
 	for _, comment := range comments {
-		if comment.Body == finding.Body && comment.Commit == finding.Commit && comment.Path == finding.Path && comment.Line == finding.Line && comment.Side == finding.Side {
+		if comment.Body != finding.Body || comment.Path != finding.Path || comment.Side != finding.Side {
+			continue
+		}
+		// GitHub can invalidate the current line while retaining the original
+		// reviewed anchor. When both are present, the original is authoritative:
+		// a moved current line must not conflate two different selections.
+		if comment.OriginalCommit != "" && comment.OriginalLine > 0 {
+			if comment.OriginalCommit == finding.Commit && comment.OriginalLine == finding.Line {
+				return true, nil
+			}
+		} else if comment.Commit == finding.Commit && comment.Line == finding.Line {
 			return true, nil
 		}
 	}

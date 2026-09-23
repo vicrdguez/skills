@@ -272,8 +272,8 @@ func TestRecoveryReservationPreventsSecondWriter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("competing recovery: %v", err)
 	}
-	if blocked.Status != "pending" || !strings.Contains(blocked.Detail, "reserved") {
-		t.Fatalf("competing recovery = %#v, want a reservation refusal", blocked)
+	if blocked.Status != "pending" || !strings.Contains(blocked.Detail, "publication lease unavailable") {
+		t.Fatalf("competing recovery = %#v, want a live-publisher refusal", blocked)
 	}
 	if calls := second.calls(); len(calls) != 0 {
 		t.Fatalf("competing recovery reached the forge: %#v", calls)

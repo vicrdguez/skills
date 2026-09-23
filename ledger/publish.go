@@ -39,6 +39,15 @@ const (
 // failure stays visibly pending; successful attachments are recorded, and
 // no public body is persisted in the ledger.
 func Publish(ctx context.Context, store *Store, project string, declaration *ProposalDeclaration, outcome *Acceptance, forge Forge, acceptedRevision string) error {
+	if forge != nil {
+		lease, err := store.publicationLease()
+		if err != nil {
+			outcome.BookkeepingStatus = &PublicationNote{Status: IssuePending, Detail: err.Error()}
+			forge = nil
+		} else {
+			defer releasePublicationLease(lease)
+		}
+	}
 	reservations := publicationReservations{issues: make(map[string]bool)}
 	if forge == nil {
 		for index := range outcome.Slices {

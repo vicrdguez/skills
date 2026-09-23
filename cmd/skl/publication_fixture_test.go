@@ -56,11 +56,14 @@ type publicationReviewFile struct {
 }
 
 type publicationReviewComment struct {
-	Body   string
-	Commit string
-	Path   string
-	Side   string
-	Line   int
+	Body           string
+	Commit         string
+	Path           string
+	Side           string
+	Line           int
+	OriginalCommit string
+	OriginalLine   int
+	Outdated       bool
 }
 
 // publicationForge is one bounded controlled forge. Fault injection is
@@ -581,9 +584,14 @@ func (f *publicationForge) servePull(w http.ResponseWriter, r *http.Request) {
 	case len(parts) == 2 && parts[1] == "comments" && r.Method == http.MethodGet:
 		values := []map[string]any{}
 		for _, comment := range f.comments {
+			var line any = comment.Line
+			if comment.Outdated {
+				line = nil
+			}
 			values = append(values, map[string]any{
 				"body": comment.Body, "commit_id": comment.Commit, "path": comment.Path,
-				"line": comment.Line, "side": comment.Side, "author_association": "MEMBER",
+				"line": line, "side": comment.Side, "original_commit_id": comment.OriginalCommit,
+				"original_line": comment.OriginalLine, "author_association": "MEMBER",
 				"created_at": "2024-01-01T00:00:00Z", "user": map[string]string{"login": "reviewer"},
 			})
 		}

@@ -29,9 +29,15 @@ func PublishDelivery(ctx context.Context, s *Store, repository github.Repository
 		result.Publication = &PublicationNote{Status: IssuePending, Detail: "separately authored public material or forge access is unavailable; the local handoff is complete"}
 		return
 	}
+	lease, err := s.publicationLease()
+	if err != nil {
+		result.Publication = &PublicationNote{Status: IssuePending, Detail: err.Error()}
+		return
+	}
+	defer releasePublicationLease(lease)
 	var source SourceRevisions
 	reserved := false
-	err := s.withMutation(func() error {
+	err = s.withMutation(func() error {
 		state, directory, head, err := s.deliveryState(repository, result.Item)
 		if err != nil {
 			return err

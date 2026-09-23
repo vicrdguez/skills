@@ -55,6 +55,7 @@ func publicationCommand(operation string, newBackend backendFactory, stdout io.W
 			&cli.StringFlag{Name: "view", Usage: "Exact current view token inspect returned, required with newly authored prose"},
 			&cli.PathFlag{Name: "body", Usage: "Absolute path of the newly authored public body; requires --view"},
 			&cli.PathFlag{Name: "findings", Usage: "Absolute path of a JSON array selecting actionable inline findings"},
+			&cli.BoolFlag{Name: "reconcile-reservation", Usage: "After confirming the former publisher exited, observe its abandoned reservation without forge writes; requires --view"},
 		)
 	}
 	return &cli.Command{
@@ -104,7 +105,7 @@ func runPublication(c *cli.Context, operation string, newBackend backendFactory,
 		return publish(emit, repository, operation, item, kind, c.Path("result-directory"), view, nil)
 	}
 
-	request := ledger.PublicationRequest{Item: item, Kind: kind, View: c.String("view")}
+	request := ledger.PublicationRequest{Item: item, Kind: kind, View: c.String("view"), ReconcileReservation: c.Bool("reconcile-reservation")}
 	if body := c.Path("body"); body != "" {
 		absolute, err := filepath.Abs(body)
 		if err != nil {

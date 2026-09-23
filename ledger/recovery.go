@@ -144,6 +144,20 @@ func RecoverPublication(ctx context.Context, s *Store, repository github.Reposit
 		result.Detail = "the supplied view token does not identify the selected committed view; inspect the current view and resubmit"
 		return result, nil
 	}
+	if request.ReconcileReservation && request.View == "" {
+		return PublicationResult{}, refuse("reservation reconciliation requires the inspected --view token", "inspect the current publication and retry with --view and --reconcile-reservation after the former publisher exits")
+	}
+	// The process-scoped lease excludes live normal publishers and recoveries
+	// without holding the brief ledger mutation lock over network I/O.
+	lease, err := s.publicationLease()
+	if err != nil {
+		result.Status, result.Detail = publicationPending, err.Error()+"; wait for the active publisher to finish and inspect again"
+		return result, nil
+	}
+	defer releasePublicationLease(lease)
+	if request.ReconcileReservation && !selection.hasReservation() {
+		return PublicationResult{}, refuse("the selected publication has no interrupted reservation", "inspect the current view and use ordinary recovery")
+	}
 	if len(request.Findings) > 0 && request.Kind != publicationKindPull {
 		return PublicationResult{}, refuse(
 			"inline findings apply only to pull publication",
@@ -163,7 +177,7 @@ func RecoverPublication(ctx context.Context, s *Store, repository github.Reposit
 			return result, nil
 		}
 	}
-	bodySatisfied := selection.attachment != nil && selection.pending == nil
+	bodySatisfied := selection.attachment != nil && selection.pending == nil && !selection.hasReservation()
 	if bodySatisfied && len(request.Findings) == 0 && request.BodyPath == "" {
 		result.Status = publicationAlreadySatisfied
 		result.Detail = "the recorded forge attachment already satisfies this publication"
@@ -204,7 +218,7 @@ func RecoverPublication(ctx context.Context, s *Store, repository github.Reposit
 			record.OriginalSHA256 = originalDigest
 		}
 	}
-	if err := s.reserveRecovery(selection, record); err != nil {
+	if err := s.reserveRecovery(selection, record, request.ReconcileReservation); err != nil {
 		result.Status = publicationPending
 		result.Detail = err.Error()
 		return result, nil
@@ -226,7 +240,7 @@ func RecoverPublication(ctx context.Context, s *Store, repository github.Reposit
 		Approved:           selection.approved,
 		OriginalBodySHA256: originalDigest,
 		MayHaveCreated:     selection.mayHaveCreated() || resolved.identityOnly,
-		ObserveOnly:        resolved.identityOnly,
+		ObserveOnly:        resolved.identityOnly || request.ReconcileReservation,
 		Parent:             selection.parent,
 		Children:           selection.children,
 		Findings:           valid,
@@ -482,12 +496,15 @@ func (sel *publicationSelection) view(status, detail string) PublicationView {
 // pending presentation with a registered, lost, or superseded body takes
 // precedence over that older attachment.
 func (sel *publicationSelection) localStatus() (string, string) {
+	if sel.kind == publicationKindPull && sel.hasReservation() {
+		return publicationAmbiguous, "an earlier pull publication reserved this presentation without recording its outcome; after confirming the publisher exited, use recover with --reconcile-reservation and this --view token to observe without forge writes"
+	}
 	if sel.pending != nil {
 		switch sel.pending.Status {
 		case IssueUnresolved:
 			return publicationAmbiguous, "an earlier attempt's outcome is unconfirmed: " + sel.pending.Detail
 		case issueReserved:
-			return publicationAmbiguous, "an earlier attempt reserved this publication without recording its outcome: " + sel.pending.Detail
+			return publicationAmbiguous, "an earlier attempt reserved this publication without recording its outcome: " + sel.pending.Detail + "; after confirming the publisher exited, use recover with --reconcile-reservation and this --view token to observe without forge writes"
 		}
 	}
 	if sel.kind == publicationKindPull && sel.phase == "" {
@@ -544,7 +561,13 @@ func (sel *publicationSelection) knownNumber() int {
 // source sync, or a definite refusal before any write) is observable absence
 // and permits an initial create.
 func (sel *publicationSelection) mayHaveCreated() bool {
-	if sel.attachment != nil || sel.pending == nil {
+	if sel.attachment != nil {
+		return false
+	}
+	if sel.kind == publicationKindPull && sel.hasReservation() {
+		return true
+	}
+	if sel.pending == nil {
 		return false
 	}
 	switch sel.pending.Status {
@@ -704,7 +727,14 @@ func findingReceiptOf(finding SelectedFinding, status string, submission int) Fi
 // reserveRecovery holds one provisional local reservation across the network
 // call. A competing writer observes the reservation and never performs the same
 // list-then-create race.
-func (s *Store) reserveRecovery(sel *publicationSelection, record *PublicationBody) error {
+func (sel *publicationSelection) hasReservation() bool {
+	if sel.kind == publicationKindPull {
+		return sel.state.Publication != nil && sel.state.Publication.Active != nil
+	}
+	return sel.pending != nil && sel.pending.Status == issueReserved
+}
+
+func (s *Store) reserveRecovery(sel *publicationSelection, record *PublicationBody, reconcile bool) error {
 	return s.withMutation(func() error {
 		if err := s.requireReconciled(); err != nil {
 			return err
@@ -718,6 +748,24 @@ func (s *Store) reserveRecovery(sel *publicationSelection, record *PublicationBo
 				"the selected publication view changed before recovery could reserve it",
 				"inspect the current view and resubmit the recovery",
 			)
+		}
+		if reconcile {
+			if !current.hasReservation() {
+				return refuse("the interrupted reservation changed before observation", "inspect the current view before continuing")
+			}
+			if sel.kind == publicationKindPull {
+				active := current.state.Publication.Active
+				if active == nil || active.Path != current.report.Path {
+					return refuse("the interrupted presentation references a different report", "inspect the recorded reservation and current view")
+				}
+				bytes, err := showPath(s, active.Commit, active.Path)
+				if err != nil || digestOf([]byte(bytes)) != current.reportDigest {
+					return refuse("the interrupted presentation does not match the latest report", "preserve the newer view and inspect the recorded reservation")
+				}
+			}
+			// Keep its original body identity and reservation intact until the
+			// read-only forge observation is settled under the lease.
+			return nil
 		}
 		switch sel.kind {
 		case publicationKindIssue:
@@ -844,7 +892,7 @@ func (s *Store) settleRecovery(sel *publicationSelection, record *PublicationBod
 			}
 			return s.commitRecoveryProposal(current)
 		default:
-			if current.state.Publication == nil || !sameReference(current.state.Publication.Active, sel.report) {
+			if current.state.Publication == nil || !sameReference(current.state.Publication.Active, sel.reservationReport()) {
 				return refuse(
 					"the presentation reservation changed while the forge effect was in flight",
 					"inspect the current publication record and preserve every observable attachment",
@@ -957,6 +1005,13 @@ func mergeFindingReceipts(existing []FindingReceipt, findings []SelectedFinding,
 }
 
 // recoveryGuard revalidates the reserved view before an adapter-side effect.
+func (sel *publicationSelection) reservationReport() *Reference {
+	if sel.kind == publicationKindPull && sel.state.Publication != nil && sel.state.Publication.Active != nil {
+		return sel.state.Publication.Active
+	}
+	return sel.report
+}
+
 func (s *Store) recoveryGuard(sel *publicationSelection) error {
 	current, err := selectPublication(s, sel.repository, sel.item, sel.kind)
 	if err != nil {
@@ -978,7 +1033,7 @@ func (s *Store) recoveryGuard(sel *publicationSelection) error {
 			return refuse("the parent recovery reservation is no longer held", "inspect the current publication record")
 		}
 	default:
-		if current.state.Publication == nil || !sameReference(current.state.Publication.Active, sel.report) {
+		if current.state.Publication == nil || !sameReference(current.state.Publication.Active, sel.reservationReport()) {
 			return refuse("the presentation reservation is no longer held", "inspect the current publication record")
 		}
 	}

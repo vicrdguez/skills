@@ -60,11 +60,12 @@ type FindingPublication struct {
 }
 
 type PublicationRequest struct {
-	Item     string
-	Kind     string
-	View     string
-	BodyPath string
-	Findings []SelectedFinding
+	Item                 string
+	Kind                 string
+	View                 string
+	BodyPath             string
+	ReconcileReservation bool
+	Findings             []SelectedFinding
 }
 
 type PublicationResult struct {
