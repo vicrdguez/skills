@@ -1,9 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/vicrdguez/skills/ledger"
 )
@@ -140,5 +143,66 @@ func TestPublicationCLIReconcilesAbandonedParentReservation(t *testing.T) {
 	meta = publicationProposalState(t, fixture.clone, "abandoned-parent")
 	if meta.ParentIssue == nil || meta.ParentIssue.Number != number || meta.ParentPublication != nil || forge.issueCount() != 3 {
 		t.Fatalf("parent was not safely grouped: %#v", meta)
+	}
+}
+
+// A slow network call on one issue must not monopolize the shared ledger's
+// other Work Items, even when both use the same repository and forge endpoint.
+func TestPublicationCLIIndependentIssueRecoveryDuringInFlightObservation(t *testing.T) {
+	_ = newLedgerFixture(t)
+	forge := newPublicationForge(t)
+	source := sourceRepository(t, "acme", "widgets")
+	forge.setFail(func(method, path string) int {
+		if method == "POST" && path == "/repos/acme/widgets/issues" {
+			return 503
+		}
+		return 0
+	})
+	cli := newPublicationApp(t, forge)
+	for _, proposal := range []string{"first-observation", "second-observation"} {
+		directory, flags, _ := publicationProposal(t, singleSlice(proposal), map[string]string{"foundation": proposal + " body\n"})
+		if out := cli.accept(t, source, directory, flags...); out.Status != "accepted" {
+			t.Fatal(out.Status)
+		}
+	}
+	forge.setFail(nil)
+	entered, release := make(chan struct{}), make(chan struct{})
+	var enteredOnce, releaseOnce sync.Once
+	releaseFirst := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(releaseFirst)
+	forge.setBefore(func(method, path string) {
+		if method == "POST" && path == "/repos/acme/widgets/issues" {
+			first := false
+			enteredOnce.Do(func() { close(entered); first = true })
+			if first {
+				<-release
+			}
+		}
+	})
+	done := make(chan error, 1)
+	go func() {
+		out, err := cli.publicationJSON(t, "skl", "publication", "recover", "--repo", source,
+			"--item", "first-observation/foundation", "--kind", "issue", "--format", "json")
+		if err == nil && out.Status != "published" && out.Status != "already-satisfied" {
+			err = fmt.Errorf("first status %s", out.Status)
+		}
+		done <- err
+	}()
+	select {
+	case <-entered:
+	case err := <-done:
+		t.Fatalf("first recovery exited before forge observation: %v requests=%v", err, forge.recordedRequests())
+	case <-time.After(5 * time.Second):
+		t.Fatal("first recovery never reached the forge")
+	}
+	second, err := newPublicationApp(t, forge).publicationJSON(t, "skl", "publication", "recover", "--repo", source,
+		"--item", "second-observation/foundation", "--kind", "issue", "--format", "json")
+	if err != nil || (second.Status != "published" && second.Status != "already-satisfied") {
+		t.Fatalf("unrelated issue was blocked by the first: %#v, %v", second, err)
+	}
+	// Close the first request only after the second has independently settled.
+	releaseFirst()
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }

@@ -149,12 +149,16 @@ func RecoverPublication(ctx context.Context, s *Store, repository github.Reposit
 	}
 	// The process-scoped lease excludes live normal publishers and recoveries
 	// without holding the brief ledger mutation lock over network I/O.
-	lease, err := s.publicationLease()
+	leaseSlice := selection.slice
+	if selection.kind == publicationKindParent {
+		leaseSlice = ""
+	}
+	leases, err := s.publicationLeases(publicationLeaseName(selection.identity, selection.proposal, leaseSlice, selection.kind))
 	if err != nil {
 		result.Status, result.Detail = publicationPending, err.Error()+"; wait for the active publisher to finish and inspect again"
 		return result, nil
 	}
-	defer releasePublicationLease(lease)
+	defer releasePublicationLeases(leases)
 	if request.ReconcileReservation && !selection.hasReservation() {
 		return PublicationResult{}, refuse("the selected publication has no interrupted reservation", "inspect the current view and use ordinary recovery")
 	}

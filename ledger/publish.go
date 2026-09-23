@@ -40,12 +40,19 @@ const (
 // no public body is persisted in the ledger.
 func Publish(ctx context.Context, store *Store, project string, declaration *ProposalDeclaration, outcome *Acceptance, forge Forge, acceptedRevision string) error {
 	if forge != nil {
-		lease, err := store.publicationLease()
+		keys := make([]string, 0, len(declaration.Slices)+1)
+		for _, slice := range declaration.Slices {
+			keys = append(keys, publicationLeaseName(outcome.Repository, declaration.Proposal, slice.Name, publicationKindIssue))
+		}
+		if len(declaration.Slices) > 1 {
+			keys = append(keys, publicationLeaseName(outcome.Repository, declaration.Proposal, "", publicationKindParent))
+		}
+		leases, err := store.publicationLeases(keys...)
 		if err != nil {
 			outcome.BookkeepingStatus = &PublicationNote{Status: IssuePending, Detail: err.Error()}
 			forge = nil
 		} else {
-			defer releasePublicationLease(lease)
+			defer releasePublicationLeases(leases)
 		}
 	}
 	reservations := publicationReservations{issues: make(map[string]bool)}
