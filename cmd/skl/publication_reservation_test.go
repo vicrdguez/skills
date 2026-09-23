@@ -206,3 +206,64 @@ func TestPublicationCLIIndependentIssueRecoveryDuringInFlightObservation(t *test
 		t.Fatal(err)
 	}
 }
+
+// A normal acceptor retains its durable reservation while the external create
+// is in flight. Reconciliation must refuse that live writer even though the
+// attempted create may already be visible on the forge.
+func TestPublicationCLIReconciliationExcludesLiveAcceptance(t *testing.T) {
+	fixture := newLedgerFixture(t)
+	forge := newPublicationForge(t)
+	source := sourceRepository(t, "acme", "widgets")
+	directory, flags, _ := publicationProposal(t, singleSlice("live-acceptance"), map[string]string{"foundation": "live issue prose\n"})
+	entered, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	releaseFirst := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(releaseFirst)
+	forge.setBefore(func(method, path string) {
+		if method == "POST" && path == "/repos/acme/widgets/issues" {
+			close(entered)
+			<-release
+		}
+	})
+	done := make(chan string, 1)
+	go func() { done <- newPublicationApp(t, forge).accept(t, source, directory, flags...).Status }()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("normal acceptance did not reach its held forge create")
+	}
+	state := publicationState(t, fixture.clone, "live-acceptance", "foundation")
+	if state.Publication == nil || state.Publication.Issue == nil || state.Publication.Issue.Status != "reserved" {
+		t.Fatalf("normal acceptor did not retain its reservation: %#v", state.Publication)
+	}
+	view, err := publicationNoForgeApp(t, nil).publicationJSON(t, "skl", "publication", "inspect", "--repo", source,
+		"--item", "live-acceptance/foundation", "--kind", "issue", "--format", "json")
+	if err != nil || view.Status != "ambiguous" {
+		t.Fatalf("live reservation inspection = %#v, %v", view, err)
+	}
+	before := len(forge.recordedRequests())
+	blocked, err := newPublicationApp(t, forge).publicationJSON(t, "skl", "publication", "recover", "--repo", source,
+		"--item", "live-acceptance/foundation", "--kind", "issue", "--reconcile-reservation",
+		"--view", view.Packet.Facts.Publication.View.Token, "--format", "json")
+	if err != nil || blocked.Status != "pending" || !strings.Contains(blocked.Packet.Facts.Publication.View.Detail, "publication lease unavailable") {
+		t.Fatalf("live writer was not excluded: %#v, %v", blocked, err)
+	}
+	if len(forge.recordedRequests()) != before {
+		t.Fatalf("reconciliation reached the forge while acceptance was live: %#v", forge.recordedRequests()[before:])
+	}
+	if state = publicationState(t, fixture.clone, "live-acceptance", "foundation"); state.Issue != nil || state.Publication.Issue.Status != "reserved" {
+		t.Fatalf("live reservation was settled by recovery: %#v", state)
+	}
+	releaseFirst()
+	select {
+	case status := <-done:
+		if status != "accepted" {
+			t.Fatalf("normal acceptance = %s", status)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("normal acceptance did not finish after release")
+	}
+	if state = publicationState(t, fixture.clone, "live-acceptance", "foundation"); state.Issue == nil || forge.issueCount() != 1 {
+		t.Fatalf("normal publisher did not settle its own effect: %#v", state)
+	}
+}
