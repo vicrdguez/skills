@@ -33,12 +33,12 @@ The sole direct Dependency is `run-ledger-delivery`. Through its existing Depend
 
 This Proposal uses the current source `.changes` Artifact Baseline carrier based on `main` at `e582110`. The unchecked acceptance bullets below are carrier checkboxes for the current endpoint validator, not mutable target Contracts. The target Workflow keeps Contracts frozen and stores completion in Phase Reports. Detailed obligations are identified once in `behavior.md` and `plan.md`.
 
-- [ ] Operators and agents can inspect and recover pending initial issue and phase PR publication through `skl` without rerunning work or waiting on another slice (B1-B2, A1-A2).
-- [ ] Recovery reuses applicable temporary prose or supplies specialized authoring instructions and exact private references when it is missing or stale; no public-body snapshot or CLI-authored summary is persisted (B2-B3, A2, A4).
-- [ ] Observable ambiguous effects and repeated recovery do not duplicate publication; stale requests and changed attachments cannot overwrite newer work or clear newer pending publication (B4-B5, A2-A3).
-- [ ] GitHub alone owns draft presentation, and recovery never resets local state, reports, Review Count, or Claims or observes completion on behalf of slice 5 (B1, B5-B6, A1-A3).
-- [ ] Public bodies remain descriptive human content, complete Manual Verification remains privately accessible, and only explicitly selected actionable reviewed-code findings are eligible for optional inline publication (B7-B8, A3-A4).
-- [ ] Public CLI checks with real local Git and the existing controlled forge HTTP seam, plus rendered Skill/resource checks, provide many-to-many evidence without new frameworks or a prescribed construction sequence (A5).
+- [x] Operators and agents can inspect and recover pending initial issue and phase PR publication through `skl` without rerunning work or waiting on another slice (B1-B2, A1-A2).
+- [x] Recovery reuses applicable temporary prose or supplies specialized authoring instructions and exact private references when it is missing or stale; no public-body snapshot or CLI-authored summary is persisted (B2-B3, A2, A4).
+- [x] Observable ambiguous effects and repeated recovery do not duplicate publication; stale requests and changed attachments cannot overwrite newer work or clear newer pending publication (B4-B5, A2-A3).
+- [x] GitHub alone owns draft presentation, and recovery never resets local state, reports, Review Count, or Claims or observes completion on behalf of slice 5 (B1, B5-B6, A1-A3).
+- [x] Public bodies remain descriptive human content, complete Manual Verification remains privately accessible, and only explicitly selected actionable reviewed-code findings are eligible for optional inline publication (B7-B8, A3-A4).
+- [x] Public CLI checks with real local Git and the existing controlled forge HTTP seam, plus rendered Skill/resource checks, provide many-to-many evidence without new frameworks or a prescribed construction sequence (A5).
 
 ## Manual verification
 
