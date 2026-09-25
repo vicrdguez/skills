@@ -1,2 +1,6 @@
 [tools]
 herdr = "latest"
+
+[tasks.prose-metrics]
+description = "Print agent-prose metrics for testdata/prose goldens beside the committed baseline"
+run = "go run ./tools/prosemetrics"

@@ -1,0 +1,1 @@
+the implement Skill Definition is not retrievable read-only; run `skl implement next` for one Work Item's complete Execution Skill, or `skl implement resume --item <proposal>/<slice> --claim <acquisition-commit>` to continue a Claim. Its named resources stay retrievable with `skl skill --resource <name> implement`
