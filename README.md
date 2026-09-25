@@ -161,6 +161,15 @@ On pass, Watchdog may add only permitted non-functional Debt Marker comments. Ru
 
 Public PR bodies are deliberate human-facing summaries; detailed worker exchanges and findings stay private, with no automatic inline review comments. Public material must acknowledge that remaining human verification obligations remain privately accessible through `skl`. Approval never means Merged or promises conflict-free integration. Only a human merges.
 
+A pull request is a latest view of the current local result, not a queue of updates to deliver. Each handoff commits locally first and then attempts one bounded presentation; a failed or interrupted attempt leaves no reservation, pending record, or source receipt, and never blocks later work. Present the current result at any time, whether or not earlier attempts failed:
+
+```sh
+skl ledger present --repo <path> --item <proposal>/<slice>
+skl ledger present --repo <path> --item <proposal>/<slice> --public-body <fresh-public-prose.md>
+```
+
+Without `--public-body` it returns the current result, its exact private evidence references for `skl ledger show`, the phase's `reference/pull-presentation.md` authoring guidance, and the bound continuation; author fresh prose rather than restoring an earlier body. With prose it pushes the recorded source revision normally (never forcing), presents it as draft, and marks an approved result ready only while the pull request shows its reviewed final revision. It reruns no phase and changes no lifecycle, report, Claim, or review count; only a newly established pull request association is recorded. Reads and repeatable updates retry immediately within a small bound, further updates stop once a later local result supersedes the selected one, and a creation whose response was lost is reported as `unresolved` rather than retried. Temporarily stale public content is possible and is corrected by presenting the then-current result.
+
 Ledger-backed terminal observation/archival and final-review packaging are separate work, not implied by these delivery commands. Existing `skl status` and legacy proposal operations do not replace those ledger operations. In-flight forge-authoritative work must finish with its former binary or undergo an explicit administrative cutover with normal workers stopped; current delivery commands never silently adopt it.
 
 ## Resolve a Human Decision

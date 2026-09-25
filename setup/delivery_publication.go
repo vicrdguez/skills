@@ -15,6 +15,11 @@ import (
 
 var _ ledger.DeliveryForge = (*GitHubBackend)(nil)
 
+// presentationAttempts bounds the immediate retries of a presentation read or
+// safely repeatable update. Creation is never retried: its effect may already
+// exist.
+const presentationAttempts = 3
+
 // PresentPull presents one explicitly public delivery body on the bound
 // repository's pull request for the exact planned source branch and head.
 // The adapter alone translates Approved into GitHub's native draft/non-draft
@@ -108,14 +113,22 @@ func (b *GitHubBackend) createPresentedPull(ctx context.Context, repository gith
 		// draft, validate the returned source, then apply any approval.
 		"draft": true,
 	}
+	if err := presentationCurrent(presentation); err != nil {
+		return nil, err
+	}
 	var created githubPull
-	writeErr := b.request(ctx, http.MethodPost, b.repositoryPath(repository)+"/pulls", payload, &created)
+	status, writeErr := b.requestStatus(ctx, http.MethodPost, b.repositoryPath(repository)+"/pulls", payload, &created)
 	if writeErr == nil && created.Number > 0 {
 		return &created, nil
 	}
+	var transport *TransportFailure
+	uncertain := writeErr == nil || errors.As(writeErr, &transport) || status >= http.StatusInternalServerError
 	observed, err := b.listPresentedPulls(ctx, repository, presentation)
 	if err != nil {
-		return nil, fmt.Errorf("pull request creation for %s at %s was not confirmed and the exact branch listing was unavailable: %v; the creation outcome remains unknown and no duplicate was created", presentation.Branch, presentation.Head, err)
+		if uncertain {
+			return nil, fmt.Errorf("%w: pull request creation for %s at %s was not confirmed and the exact branch listing was unavailable: %v; it was not retried", ledger.ErrPresentationUncertain, presentation.Branch, presentation.Head, err)
+		}
+		return nil, fmt.Errorf("pull request creation for %s at %s failed: %v", presentation.Branch, presentation.Head, writeErr)
 	}
 	var matches []githubPull
 	for _, pull := range observed {
@@ -130,7 +143,10 @@ func (b *GitHubBackend) createPresentedPull(ctx context.Context, repository gith
 		if writeErr == nil {
 			writeErr = errors.New("pull request creation returned no reliable identity")
 		}
-		return nil, fmt.Errorf("pull request creation for %s at %s is unresolved: %v; no exact matching open pull request is observable and no duplicate was created", presentation.Branch, presentation.Head, writeErr)
+		if !uncertain {
+			return nil, fmt.Errorf("pull request creation for %s at %s failed: %v", presentation.Branch, presentation.Head, writeErr)
+		}
+		return nil, fmt.Errorf("%w: pull request creation for %s at %s is unresolved: %v; no exact matching open pull request is observable and the creation was not retried", ledger.ErrPresentationUncertain, presentation.Branch, presentation.Head, writeErr)
 	default:
 		return nil, workflow.Refuse("multiple open pull requests match the attempted creation for " + presentation.Branch + " at " + presentation.Head + "; preserve them and resolve the duplicates before presenting")
 	}
@@ -164,7 +180,10 @@ func (b *GitHubBackend) applyPresentedPull(ctx context.Context, repository githu
 		pull = *fresh
 	}
 	if pull.Body != presentation.Body {
-		if err := b.request(ctx, http.MethodPatch, b.repositoryPath(repository)+fmt.Sprintf("/pulls/%d", pull.Number), map[string]string{"body": presentation.Body}, nil); err != nil {
+		if err := presentationCurrent(presentation); err != nil {
+			return attempt, err
+		}
+		if err := b.presentationRequest(ctx, http.MethodPatch, b.repositoryPath(repository)+fmt.Sprintf("/pulls/%d", pull.Number), map[string]string{"body": presentation.Body}, nil); err != nil {
 			return attempt, err
 		}
 	}
@@ -172,6 +191,9 @@ func (b *GitHubBackend) applyPresentedPull(ctx context.Context, repository githu
 	if pull.Draft != draft {
 		if pull.NodeID == "" {
 			return attempt, workflow.Refuse(fmt.Sprintf("pull request #%d has no stable node identity for the required %s presentation", pull.Number, presentationReadiness(draft)))
+		}
+		if err := presentationCurrent(presentation); err != nil {
+			return attempt, err
 		}
 		attempt.nodeID = pull.NodeID
 		attempt.ready = !draft
@@ -223,7 +245,7 @@ func (b *GitHubBackend) setPullPresentation(ctx context.Context, nodeID string, 
 			Message string `json:"message"`
 		} `json:"errors"`
 	}
-	err := b.request(ctx, http.MethodPost, "/graphql", map[string]any{"query": "mutation($id:ID!){" + mutation + "(input:{pullRequestId:$id}){pullRequest{id}}}", "variables": map[string]string{"id": nodeID}}, &response)
+	err := b.presentationRequest(ctx, http.MethodPost, "/graphql", map[string]any{"query": "mutation($id:ID!){" + mutation + "(input:{pullRequestId:$id}){pullRequest{id}}}", "variables": map[string]string{"id": nodeID}}, &response)
 	if err != nil {
 		return err
 	}
@@ -262,7 +284,7 @@ func (b *GitHubBackend) refreshPresentedPull(ctx context.Context, repository git
 // not carry the requested stable number.
 func (b *GitHubBackend) pullForPresentation(ctx context.Context, repository github.RepositoryID, number int) (*githubPull, error) {
 	var pull githubPull
-	if err := b.request(ctx, http.MethodGet, b.repositoryPath(repository)+fmt.Sprintf("/pulls/%d", number), nil, &pull); err != nil {
+	if err := b.presentationRequest(ctx, http.MethodGet, b.repositoryPath(repository)+fmt.Sprintf("/pulls/%d", number), nil, &pull); err != nil {
 		return nil, err
 	}
 	if pull.Number != number {
@@ -279,7 +301,7 @@ func (b *GitHubBackend) listPresentedPulls(ctx context.Context, repository githu
 	for page := 1; ; page++ {
 		path := b.repositoryPath(repository) + "/pulls?state=open&base=main&head=" + url.QueryEscape(repository.Owner+":"+presentation.Branch) + fmt.Sprintf("&per_page=100&page=%d", page)
 		var batch []githubPull
-		if err := b.request(ctx, http.MethodGet, path, nil, &batch); err != nil {
+		if err := b.presentationRequest(ctx, http.MethodGet, path, nil, &batch); err != nil {
 			return nil, err
 		}
 		all = append(all, batch...)
@@ -313,4 +335,32 @@ func presentationReadiness(draft bool) string {
 		return "draft"
 	}
 	return "ready for review"
+}
+
+// presentationRequest performs one read or safely repeatable update with
+// bounded immediate retries after a transport failure or server error. It
+// never waits between attempts and leaves no retry obligation behind.
+func (b *GitHubBackend) presentationRequest(ctx context.Context, method, path string, body, destination any) error {
+	var err error
+	for range presentationAttempts {
+		var status int
+		status, err = b.requestStatus(ctx, method, path, body, destination)
+		var transport *TransportFailure
+		if err == nil || ctx.Err() != nil || !errors.As(err, &transport) && status < http.StatusInternalServerError {
+			return err
+		}
+	}
+	return err
+}
+
+// presentationCurrent stops further forge writes once the selected local
+// result is superseded.
+func presentationCurrent(presentation ledger.PullPresentation) error {
+	if presentation.Current == nil {
+		return nil
+	}
+	if err := presentation.Current(); err != nil {
+		return fmt.Errorf("further pull request updates stopped: %w", err)
+	}
+	return nil
 }

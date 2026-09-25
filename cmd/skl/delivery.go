@@ -47,6 +47,8 @@ type deliveryOutput struct {
 	Source    *workflow.DeliverySource `json:"source,omitempty"`
 	Result    *ledger.DeliveryResult   `json:"result,omitempty"`
 	Packet    *skilldist.Packet        `json:"packet,omitempty"`
+	// Present continues an unpresented handoff with the then-current result.
+	Present string `json:"present,omitempty"`
 }
 
 func runDelivery(c *cli.Context, phase, operation string, newBackend backendFactory, stdout io.Writer) error {
@@ -244,7 +246,12 @@ func submitDelivery(c *cli.Context, phase, operation string, repository setup.Re
 	}
 	ledger.PublishDelivery(c.Context, store, repository.Repository, repository.Root, repository.Remote, result, public, forge)
 	ledger.ReplicateDelivery(store, repository.Repository, result)
-	return emit(deliveryOutput{Status: result.Status, Result: result})
+	out := deliveryOutput{Status: result.Status, Result: result}
+	if result.Publication == nil || result.Publication.Status != ledger.PullPresented {
+		q := skilldist.ShellQuote
+		out.Present = fmt.Sprintf("skl ledger present --repo %s --remote %s --item %s", q(repository.Root), q(repository.Remote), q(result.Item))
+	}
+	return emit(out)
 }
 
 func renderDelivery(stdout io.Writer, format implementationFormatKind, phase, operation string, out deliveryOutput) error {
@@ -268,6 +275,9 @@ func renderDelivery(stdout io.Writer, format implementationFormatKind, phase, op
 				if err == nil && note != nil {
 					_, err = fmt.Fprintf(stdout, "%s: %s — %s\n", label, note.Status, note.Detail)
 				}
+			}
+			if err == nil && out.Present != "" {
+				_, err = fmt.Fprintf(stdout, "Present the current view later, without repeating this handoff: `%s`\n", out.Present)
 			}
 		}
 	}

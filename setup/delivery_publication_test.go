@@ -3,6 +3,7 @@ package setup
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -73,6 +74,9 @@ type deliveryForge struct {
 	failReadsAfter int
 	reads          int
 	beforePullRead func(*deliveryPull)
+	// transientReads and transientPatches fail that many pull request reads
+	// or body updates with a server error before serving normally.
+	transientReads, transientPatches int
 }
 
 type deliveryRequest struct{ method, path string }
@@ -230,6 +234,11 @@ func (f *deliveryForge) serveOne(w http.ResponseWriter, r *http.Request) {
 		if f.beforePullRead != nil {
 			f.beforePullRead(pull)
 		}
+		if f.transientReads > 0 {
+			f.transientReads--
+			http.Error(w, "temporarily unavailable", http.StatusBadGateway)
+			return
+		}
 		if f.failReadsAfter > 0 && f.reads > f.failReadsAfter {
 			http.Error(w, "pull request unreadable", http.StatusInternalServerError)
 			return
@@ -239,6 +248,11 @@ func (f *deliveryForge) serveOne(w http.ResponseWriter, r *http.Request) {
 		var payload map[string]any
 		json.NewDecoder(r.Body).Decode(&payload)
 		f.patchPayloads = append(f.patchPayloads, payload)
+		if f.transientPatches > 0 {
+			f.transientPatches--
+			http.Error(w, "temporarily unavailable", http.StatusBadGateway)
+			return
+		}
 		if body, ok := payload["body"].(string); ok {
 			pull.Body = body
 		}
@@ -596,8 +610,8 @@ func TestDeliveryPublicationRefusesUnresolvedLostCreation(t *testing.T) {
 	_, err := deliveryBackend(server).PresentPull(context.Background(), ledger.PullPresentation{
 		Title: "widget delivery", Body: deliveryBody, Branch: "widget", Head: "aaa", Approved: false,
 	})
-	if err == nil || !strings.Contains(err.Error(), "no duplicate was created") {
-		t.Fatalf("unresolved creation = %v", err)
+	if !errors.Is(err, ledger.ErrPresentationUncertain) || !strings.Contains(err.Error(), "not retried") {
+		t.Fatalf("unresolved creation = %v, want reported uncertainty", err)
 	}
 	if pulls := forge.count(http.MethodPost, "/repos/acme/widgets/pulls"); pulls != 1 {
 		t.Fatalf("unresolved creation created %d pull requests", pulls)
@@ -819,5 +833,83 @@ func TestDeliveryPublicationDoesNotReverseReadinessItDidNotEstablish(t *testing.
 	}
 	if pull := forge.pull(5); pull == nil || pull.Draft {
 		t.Fatalf("unrelated ready presentation was reverted: %#v", pull)
+	}
+}
+
+// TestDeliveryPublicationRetriesRepeatableRequestsBoundedly covers B4: reads
+// and body updates are retried immediately after a server error, within a
+// fixed bound, and a persistent outage is reported rather than retried on.
+func TestDeliveryPublicationRetriesRepeatableRequestsBoundedly(t *testing.T) {
+	t.Run("transient failures recover", func(t *testing.T) {
+		forge := newDeliveryForge(t)
+		existing := forge.add(deliveryPull{Body: "old body", Draft: true})
+		forge.transientReads, forge.transientPatches = 2, 2
+		server := forge.server()
+		defer server.Close()
+
+		number, err := deliveryBackend(server).PresentPull(context.Background(), ledger.PullPresentation{
+			Number: existing.Number, Body: deliveryBody, Branch: "widget", Head: "aaa",
+		})
+		if err != nil || number != existing.Number {
+			t.Fatalf("presentation after transient failures = %d, %v", number, err)
+		}
+		if pull := forge.pull(existing.Number); pull.Body != deliveryBody || !pull.Draft {
+			t.Fatalf("presented pull = %#v", pull)
+		}
+		if patches := forge.count(http.MethodPatch, fmt.Sprintf("/repos/acme/widgets/pulls/%d", existing.Number)); patches != 3 {
+			t.Fatalf("body updates = %d, want two failures and one success", patches)
+		}
+	})
+
+	t.Run("persistent failure is bounded", func(t *testing.T) {
+		forge := newDeliveryForge(t)
+		existing := forge.add(deliveryPull{Body: "old body", Draft: true})
+		forge.transientReads = 1000
+		server := forge.server()
+		defer server.Close()
+
+		_, err := deliveryBackend(server).PresentPull(context.Background(), ledger.PullPresentation{
+			Number: existing.Number, Body: deliveryBody, Branch: "widget", Head: "aaa",
+		})
+		if err == nil || !strings.Contains(err.Error(), "502") {
+			t.Fatalf("persistent outage = %v, want the server error", err)
+		}
+		if reads := forge.count(http.MethodGet, fmt.Sprintf("/repos/acme/widgets/pulls/%d", existing.Number)); reads != presentationAttempts {
+			t.Fatalf("reads = %d, want the bound %d", reads, presentationAttempts)
+		}
+		if patches := forge.count(http.MethodPatch, fmt.Sprintf("/repos/acme/widgets/pulls/%d", existing.Number)); patches != 0 {
+			t.Fatalf("an unreadable pull request was updated %d times", patches)
+		}
+	})
+}
+
+// TestDeliveryPublicationStopsUpdatesForSupersededInputs covers B4: once the
+// selected local result is superseded, the adapter makes no further write, so
+// an approval is not applied after its inputs changed.
+func TestDeliveryPublicationStopsUpdatesForSupersededInputs(t *testing.T) {
+	forge := newDeliveryForge(t)
+	existing := forge.add(deliveryPull{Body: "old body", Draft: true})
+	server := forge.server()
+	defer server.Close()
+
+	checks := 0
+	_, err := deliveryBackend(server).PresentPull(context.Background(), ledger.PullPresentation{
+		Number: existing.Number, Body: deliveryBody, Branch: "widget", Head: "aaa", Approved: true,
+		Current: func() error {
+			checks++
+			if checks > 1 {
+				return errors.New("a later local review result supersedes the selected result")
+			}
+			return nil
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "further pull request updates stopped") {
+		t.Fatalf("superseded presentation = %v", err)
+	}
+	if pull := forge.pull(existing.Number); pull.Body != deliveryBody || !pull.Draft {
+		t.Fatalf("pull = %#v, want the first update only and no ready presentation", pull)
+	}
+	if mutations := forge.mutations(); len(mutations) != 0 {
+		t.Fatalf("readiness was changed for superseded inputs: %v", mutations)
 	}
 }

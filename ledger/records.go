@@ -42,14 +42,14 @@ type PublicationNote struct {
 }
 
 // PublicationState collects the pending-publication facts applicable to one
-// slice. An absent field means no pending fact is known for it.
+// slice. An absent field means no pending fact is known for it. Pull request
+// presentation keeps no pending, source, or reservation fact here: it is a
+// latest view derived from the committed result, and records written before
+// that change drop their obsolete fields on their next ordinary write.
 type PublicationState struct {
 	Push     *PublicationNote `json:"push,omitempty"`
 	Issue    *PublicationNote `json:"issue,omitempty"`
 	Grouping *PublicationNote `json:"grouping,omitempty"`
-	Source   *PublicationNote `json:"source,omitempty"`
-	Pull     *PublicationNote `json:"pull,omitempty"`
-	Active   *Reference       `json:"active_delivery,omitempty"`
 }
 
 // SliceState is the persisted state.json of one slice. It owns the current
