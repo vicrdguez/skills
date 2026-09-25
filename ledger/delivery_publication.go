@@ -129,10 +129,10 @@ type Presentation struct {
 // changes no lifecycle, report, Claim, or review count; a selection that a
 // later local result superseded is reported rather than presented.
 func PresentCurrent(ctx context.Context, s *Store, repository github.RepositoryID, root, remote string, selected CurrentResult, publicBody string, forge DeliveryForge) *Presentation {
-	note, attachment, recorded := presentSelected(ctx, s, repository, root, remote, selected, publicBody, forge)
+	note, record, recorded := presentSelected(ctx, s, repository, root, remote, selected, publicBody, forge)
 	presentation := &Presentation{Result: selected, Publication: note}
-	if attachment != nil {
-		presentation.Result.Submission = attachment
+	if record != nil {
+		presentation.Result.Submission = record.Submission
 	}
 	if recorded {
 		if head, err := s.head(); err == nil {
@@ -162,18 +162,19 @@ func PublishDelivery(ctx context.Context, s *Store, repository github.Repository
 		result.Publication = &PublicationNote{Status: IssuePending, Detail: err.Error()}
 		return
 	}
-	note, attachment, _ := presentSelected(ctx, s, repository, root, remote, selected, *publicBody, forge)
+	note, record, _ := presentSelected(ctx, s, repository, root, remote, selected, *publicBody, forge)
 	result.Publication = &note
-	if attachment != nil {
-		result.State.Submission = attachment
+	if record != nil {
+		result.State = *record
 	}
 }
 
 // presentSelected publishes the recorded source through an ordinary push and
 // presents it with the supplied prose. No lock is held across network work;
 // only a newly established association is recorded, in one brief mutation.
-func presentSelected(ctx context.Context, s *Store, repository github.RepositoryID, root, remote string, selected CurrentResult, body string, forge DeliveryForge) (PublicationNote, *ForgeAttachment, bool) {
-	pending := func(detail string) (PublicationNote, *ForgeAttachment, bool) {
+// A successful presentation returns the then-current record carrying it.
+func presentSelected(ctx context.Context, s *Store, repository github.RepositoryID, root, remote string, selected CurrentResult, body string, forge DeliveryForge) (PublicationNote, *SliceState, bool) {
+	pending := func(detail string) (PublicationNote, *SliceState, bool) {
 		return PublicationNote{Status: IssuePending, Detail: detail}, nil, false
 	}
 	if selected.Source.Head == "" {
@@ -204,7 +205,7 @@ func presentSelected(ctx context.Context, s *Store, repository github.Repository
 		return pending("forge returned no valid Submission attachment")
 	}
 	attachment := &ForgeAttachment{Repository: repository.Owner + "/" + repository.Name, Number: presented}
-	recorded, err := s.recordSubmission(repository, selected.Item, attachment)
+	record, recorded, err := s.recordSubmission(repository, selected.Item, attachment)
 	if err != nil {
 		return pending(fmt.Sprintf("pull request #%d presents the %s result, but recording its association is pending: %v", presented, selected.Phase, err))
 	}
@@ -212,17 +213,20 @@ func presentSelected(ctx context.Context, s *Store, repository github.Repository
 	if selected.Approved {
 		readiness = "ready for review"
 	}
-	return PublicationNote{Status: PullPresented, Detail: fmt.Sprintf("pull request #%d presents the %s result at %s as %s", presented, selected.Phase, selected.Source.Head, readiness)}, attachment, recorded
+	return PublicationNote{Status: PullPresented, Detail: fmt.Sprintf("pull request #%d presents the %s result at %s as %s", presented, selected.Phase, selected.Source.Head, readiness)}, &record, recorded
 }
 
 // recordSubmission retains a successfully established association and its
 // integration destination on the then-current record, preserving every later
 // result, Decision, and Claim. A different known association is never
 // reassigned.
-func (s *Store) recordSubmission(repository github.RepositoryID, item string, attachment *ForgeAttachment) (bool, error) {
+func (s *Store) recordSubmission(repository github.RepositoryID, item string, attachment *ForgeAttachment) (SliceState, bool, error) {
+	var state SliceState
 	recorded := false
 	err := s.withMutation(func() error {
-		state, directory, _, err := s.deliveryState(repository, item)
+		var directory string
+		var err error
+		state, directory, _, err = s.deliveryState(repository, item)
 		if err != nil {
 			return err
 		}
@@ -249,7 +253,7 @@ func (s *Store) recordSubmission(repository github.RepositoryID, item string, at
 		recorded = true
 		return nil
 	})
-	return recorded, err
+	return state, recorded, err
 }
 
 func synchronizeSource(root, remote, branch, head string) *PublicationNote {

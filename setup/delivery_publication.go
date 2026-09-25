@@ -121,8 +121,7 @@ func (b *GitHubBackend) createPresentedPull(ctx context.Context, repository gith
 	if writeErr == nil && created.Number > 0 {
 		return &created, nil
 	}
-	var transport *TransportFailure
-	uncertain := writeErr == nil || errors.As(writeErr, &transport) || status >= http.StatusInternalServerError
+	uncertain := writeErr == nil || transientPresentationFailure(status, writeErr)
 	observed, err := b.listPresentedPulls(ctx, repository, presentation)
 	if err != nil {
 		if uncertain {
@@ -269,13 +268,13 @@ func (b *GitHubBackend) refreshPresentedPull(ctx context.Context, repository git
 		// Allow correction of this observed head movement, but not a further
 		// source change between detecting the mismatch and correcting it.
 		attempt.expected.Head = pull.Head.SHA
-		return 0, b.correctPresentedReadiness(ctx, repository, attempt, workflow.Refuse(reason+"; inspect the pull request before retrying the same handoff"))
+		return 0, b.correctPresentedReadiness(ctx, repository, attempt, workflow.Refuse(reason+"; inspect the pull request before presenting the current result again"))
 	}
 	if pull.Body != presentation.Body {
-		return 0, workflow.Refuse(fmt.Sprintf("pull request #%d does not present the supplied public body; inspect the current content before retrying", attempt.number))
+		return 0, workflow.Refuse(fmt.Sprintf("pull request #%d does not present the supplied public body; inspect the current content before presenting the current result again", attempt.number))
 	}
 	if pull.Draft != !presentation.Approved {
-		return 0, b.correctPresentedReadiness(ctx, repository, attempt, workflow.Refuse(fmt.Sprintf("pull request #%d readiness was not observed as %s; inspect it before retrying", attempt.number, presentationReadiness(!presentation.Approved))))
+		return 0, b.correctPresentedReadiness(ctx, repository, attempt, workflow.Refuse(fmt.Sprintf("pull request #%d readiness was not observed as %s; inspect it before presenting the current result again", attempt.number, presentationReadiness(!presentation.Approved))))
 	}
 	return pull.Number, nil
 }
@@ -345,12 +344,18 @@ func (b *GitHubBackend) presentationRequest(ctx context.Context, method, path st
 	for range presentationAttempts {
 		var status int
 		status, err = b.requestStatus(ctx, method, path, body, destination)
-		var transport *TransportFailure
-		if err == nil || ctx.Err() != nil || !errors.As(err, &transport) && status < http.StatusInternalServerError {
+		if err == nil || ctx.Err() != nil || !transientPresentationFailure(status, err) {
 			return err
 		}
 	}
 	return err
+}
+
+// transientPresentationFailure reports a request whose outcome is unknown or
+// whose server failed: a transport failure or a 5xx response.
+func transientPresentationFailure(status int, err error) bool {
+	var transport *TransportFailure
+	return errors.As(err, &transport) || status >= http.StatusInternalServerError
 }
 
 // presentationCurrent stops further forge writes once the selected local

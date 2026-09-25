@@ -343,6 +343,9 @@ func TestDeliveryPublicationPushesSourceAndPresentsOnlyPublicProse(t *testing.T)
 	if state.Target == nil || *state.Target != (ledger.IntegrationTarget{Repository: "acme/widgets", Branch: "main"}) {
 		t.Fatalf("recorded integration target = %#v, want acme/widgets main", state.Target)
 	}
+	if result.State.Target == nil || *result.State.Target != *state.Target {
+		t.Fatalf("result state target = %#v, want the recorded %#v", result.State.Target, state.Target)
+	}
 	deliveryAssertNoPublicationRecords(t, l)
 	if commits := deliveryGitOutput(t, l.root, "rev-list", "--count", handoff+"..HEAD"); commits != "1" {
 		t.Fatalf("presentation wrote %s ledger commits after the handoff, want only the association", commits)
@@ -476,18 +479,11 @@ func TestDeliveryPublicationPublishesSourceLeftBehindByAnOutage(t *testing.T) {
 	})
 }
 
-// TestDeliveryPublicationPresentsLatestReviewAfterInterruptedImplementation
-// is the W3 regression (B1/B2): a faithful persisted interruption leaves the
-// implementation presentation's durable reservation and pending notes in the
-// record; review then completes locally. Presenting the current view with
-// review prose presents only the latest review, ignores the obsolete
-// reservation, and drops it on the one ordinary write, leaving reports,
-// review count, lifecycle, and the later Claim otherwise unchanged.
-func TestDeliveryPublicationPresentsLatestReviewAfterInterruptedImplementation(t *testing.T) {
-	l, source, store, implementation := deliveryPublicationFixture(t)
+// deliveryInterruptPresentation commits the durable reservation and pending
+// notes the prior implementation wrote before its forge call, never settled.
+func deliveryInterruptPresentation(t *testing.T, l *deliveryLedger, implementation *ledger.DeliveryResult) {
+	t.Helper()
 	statePath := deliveryStatePath(deliveryPublicationProject, deliveryPublicationItem)
-	// The prior implementation's reservation, committed before its forge call
-	// and never settled.
 	var record map[string]any
 	if err := json.Unmarshal([]byte(deliveryGitShow(t, l.root, "HEAD", statePath)), &record); err != nil {
 		t.Fatal(err)
@@ -503,7 +499,32 @@ func TestDeliveryPublicationPresentsLatestReviewAfterInterruptedImplementation(t
 	}
 	l.addFile(statePath, string(encoded)+"\n")
 	l.commitAll("reserve delivery presentation (interrupted)")
+}
 
+// TestDeliveryPublicationPresentsLatestReviewAfterInterruptedImplementation
+// is the W3 regression (B1/B2): a faithful persisted interruption leaves the
+// implementation presentation's durable reservation and pending notes in the
+// record. Presenting while the record still carries them is not blocked, and
+// the association write drops them. After review completes locally,
+// presenting the current view with review prose presents only the latest
+// review and leaves reports, review count, lifecycle, and Claims unchanged.
+func TestDeliveryPublicationPresentsLatestReviewAfterInterruptedImplementation(t *testing.T) {
+	t.Run("reservation still recorded", func(t *testing.T) {
+		l, source, store, implementation := deliveryPublicationFixture(t)
+		deliveryInterruptPresentation(t, l, implementation)
+		forge := &deliveryForgeStub{number: 16}
+		presentation := ledger.PresentCurrent(context.Background(), store, deliveryWidgets(), source.root, source.remote, deliverySelect(t, store), "implementation publicly\n", forge)
+		if presentation.Publication.Status != ledger.PullPresented || len(forge.calls()) != 1 {
+			t.Fatalf("presentation over an obsolete reservation = %#v", presentation.Publication)
+		}
+		if changed := deliveryCommitPaths(t, l.root, l.head()); len(changed) != 1 || changed[0] != deliveryStatePath(deliveryPublicationProject, deliveryPublicationItem) {
+			t.Fatalf("association commit changed %v", changed)
+		}
+		deliveryAssertNoPublicationRecords(t, l)
+	})
+
+	l, source, store, implementation := deliveryPublicationFixture(t)
+	deliveryInterruptPresentation(t, l, implementation)
 	review := deliveryReview(t, store, source.head, "pass", "PRIVATE review findings\n")
 	if review.Status != ledger.ReadyForMerge {
 		t.Fatalf("review status = %q", review.Status)

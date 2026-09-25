@@ -72,7 +72,7 @@ func presentCommand(newBackend backendFactory, stdout io.Writer) *cli.Command {
 			}
 			forge, ok := backend.(ledger.DeliveryForge)
 			if !ok {
-				return fmt.Errorf("workflow backend does not support pull request presentation")
+				return renderLedgerRefusal(stdout, format, fmt.Errorf("workflow backend does not support pull request presentation"))
 			}
 			presentation := ledger.PresentCurrent(command.Context, store, repository.Repository, repository.Root, repository.Remote, selected, string(body), forge)
 			outcome := ledgerOutcome{Status: presentation.Publication.Status, Presentation: presentation}
@@ -99,8 +99,14 @@ func presentGuidance(repository setup.RepositoryContext, result ledger.CurrentRe
 		Result:    result,
 		Evidence:  evidence,
 		Authoring: "skl skill --resource reference/pull-presentation.md " + result.Phase,
-		Continue:  fmt.Sprintf("skl ledger present --repo %s --remote %s --item %s --public-body <fresh-public-prose.md>", q(repository.Root), q(repository.Remote), q(result.Item)),
+		Continue:  presentInvocation(repository, result.Item) + " --public-body <fresh-public-prose.md>",
 	}
+}
+
+// presentInvocation binds the explicit current-view presentation command.
+func presentInvocation(repository setup.RepositoryContext, item string) string {
+	q := skilldist.ShellQuote
+	return fmt.Sprintf("skl ledger present --repo %s --remote %s --item %s", q(repository.Root), q(repository.Remote), q(item))
 }
 
 // presentationMarkdown renders the presentation facts the JSON transport

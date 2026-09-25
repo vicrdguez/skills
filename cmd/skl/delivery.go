@@ -248,8 +248,7 @@ func submitDelivery(c *cli.Context, phase, operation string, repository setup.Re
 	ledger.ReplicateDelivery(store, repository.Repository, result)
 	out := deliveryOutput{Status: result.Status, Result: result}
 	if result.Publication == nil || result.Publication.Status != ledger.PullPresented {
-		q := skilldist.ShellQuote
-		out.Present = fmt.Sprintf("skl ledger present --repo %s --remote %s --item %s", q(repository.Root), q(repository.Remote), q(result.Item))
+		out.Present = presentInvocation(repository, result.Item)
 	}
 	return emit(out)
 }

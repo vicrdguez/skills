@@ -235,13 +235,34 @@ func TestLedgerPresentReauthorsTheCurrentResultAfterMissedPhases(t *testing.T) {
 		t.Fatalf("authoring guidance = %q, %v", authoring, err)
 	}
 
+	prose := filepath.Join(t.TempDir(), "fresh.md")
+	writeFile(t, prose, "# Foundation ready for human merge\n\nIndependent review approved the reviewed revision.\n")
+
+	// While source cannot be published, both transports report the concrete
+	// limitation with the same guidance, and nothing is presented or recorded.
+	unreachable := presentForgeApp(t, newPullServer(t, ""))
+	pending := unreachable.ledgerJSON(t, "skl", "ledger", "present", "--repo", source, "--item", deliveryTestItem, "--public-body", prose, "--format", "json")
+	if pending.Status != ledger.IssuePending || pending.Presentation == nil || !strings.Contains(pending.Presentation.Publication.Detail, "source push unavailable") || pending.Guidance == nil {
+		t.Fatalf("present without source publication = %s", mustJSON(t, pending))
+	}
+	pendingMarkdown, err := unreachable.deliveryRun(t, "skl", "ledger", "present", "--repo", source, "--item", deliveryTestItem, "--public-body", prose)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Status: pending", "Public presentation: pending — " + pending.Presentation.Publication.Detail, "Present with fresh prose: `" + pending.Guidance.Continue + "`"} {
+		if !strings.Contains(pendingMarkdown, want) {
+			t.Errorf("Markdown limitation lacks %q:\n%s", want, pendingMarkdown)
+		}
+	}
+	if deliveryTrimmed(t, fixture.clone, "rev-parse", "HEAD") != ledgerHead {
+		t.Fatal("a failed presentation changed the ledger")
+	}
+
 	// Fresh prose presents only the current approved result: the reviewed
 	// revision is pushed normally, created as draft, then marked ready.
 	bare := routeSourcePushes(t)
 	pulls := newPullServer(t, bare)
 	online := presentForgeApp(t, pulls)
-	prose := filepath.Join(t.TempDir(), "fresh.md")
-	writeFile(t, prose, "# Foundation ready for human merge\n\nIndependent review approved the reviewed revision.\n")
 	presented := online.ledgerJSON(t, "skl", "ledger", "present", "--repo", source, "--item", deliveryTestItem, "--public-body", prose, "--format", "json")
 	if presented.Status != ledger.PullPresented || presented.Presentation == nil || presented.Guidance != nil {
 		t.Fatalf("present = %s", mustJSON(t, presented))
@@ -262,6 +283,11 @@ func TestLedgerPresentReauthorsTheCurrentResultAfterMissedPhases(t *testing.T) {
 		if strings.Contains(body, "PRIVATE") || strings.Contains(body, "missed public") {
 			t.Fatalf("the forge received private or missed content: %s", body)
 		}
+	}
+
+	again, err := online.deliveryRun(t, "skl", "ledger", "present", "--repo", source, "--item", deliveryTestItem, "--public-body", prose)
+	if err != nil || !strings.Contains(again, "Status: presented") || !strings.Contains(again, "Public presentation: presented — pull request #21") || !strings.Contains(again, "Submission: acme/widgets#21") || strings.Contains(again, "Present with fresh prose") {
+		t.Fatalf("Markdown presentation = %q, %v", again, err)
 	}
 
 	after := deliveryPersistedState(t, fixture.clone)
