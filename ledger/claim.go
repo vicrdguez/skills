@@ -340,18 +340,21 @@ func ResumeDelivery(s *Store, repository github.RepositoryID, item, phase, claim
 	var execution *Execution
 	err := s.withMutation(func() error {
 		var err error
-		execution, err = s.currentExecution(repository, item, phase, claimCommit)
+		execution, err = s.currentExecution(repository, item, phase, claimCommit, false)
 		return err
 	})
 	return execution, err
 }
 
-func (s *Store) currentExecution(repository github.RepositoryID, item, phase, claimCommit string) (*Execution, error) {
+// Only explicit release may cross an observed terminal lifecycle; resume and
+// handoff still require their original phase-eligible state and fixed inputs.
+func (s *Store) currentExecution(repository github.RepositoryID, item, phase, claimCommit string, allowTerminalRelease bool) (*Execution, error) {
 	state, directory, _, err := s.deliveryState(repository, item)
 	if err != nil {
 		return nil, err
 	}
-	if state.Claim == nil || state.Claim.Phase != phase || !phaseEligible(phase, state.State) {
+	terminalRelease := allowTerminalRelease && (state.State == Merged || state.State == Superseded) && state.Completion != nil
+	if state.Claim == nil || state.Claim.Phase != phase || (!phaseEligible(phase, state.State) && !terminalRelease) {
 		return nil, refuse("no matching active "+phase+" Claim for "+item, "inspect the selected Work Item; do not acquire replacement work or release a later reservation")
 	}
 	ref := Reference{Commit: claimCommit, Path: directory + "/state.json"}
@@ -367,10 +370,15 @@ func (s *Store) currentExecution(repository github.RepositoryID, item, phase, cl
 	if err != nil || parent != state.Claim.Basis {
 		return nil, refuse("Claim reference is not its acquisition commit", "use the exact Claim commit returned by Work Start")
 	}
-	if acquired.State != state.State || acquired.Branch != state.Branch || acquired.Title != state.Title || !reflect.DeepEqual(acquired.Dependencies, state.Dependencies) || !reflect.DeepEqual(acquired.Decision, state.Decision) {
+	if (acquired.State != state.State && !terminalRelease) || acquired.Branch != state.Branch || acquired.Title != state.Title || !reflect.DeepEqual(acquired.Dependencies, state.Dependencies) || !reflect.DeepEqual(acquired.Decision, state.Decision) || (terminalRelease && !phaseEligible(phase, acquired.State)) {
 		return nil, refuse("selected execution inputs changed", "inspect the selected record before proceeding")
 	}
 	e := &Execution{Project: repository.Name, Repository: repository.Owner + "/" + repository.Name, Item: item, State: state, Claim: ref}
+	// Releasing a terminal reservation only needs its exact acquisition identity.
+	// A later report is not an instruction to resume or overwrite terminal work.
+	if terminalRelease {
+		return e, nil
+	}
 	if err := s.hydrateExecution(e); err != nil {
 		return nil, err
 	}
@@ -409,7 +417,7 @@ func (s *Store) currentExecution(repository github.RepositoryID, item, phase, cl
 // source progress, phase reports, or lifecycle eligibility.
 func ReleaseDelivery(s *Store, repository github.RepositoryID, item, phase, claimCommit string) error {
 	return s.withMutation(func() error {
-		e, err := s.currentExecution(repository, item, phase, claimCommit)
+		e, err := s.currentExecution(repository, item, phase, claimCommit, true)
 		if err != nil {
 			return err
 		}
