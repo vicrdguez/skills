@@ -182,12 +182,12 @@ func (s *Store) moveProposal(head, project, proposal string, full bool) (*Archiv
 	// Staging and rollback rewrite the index of both paths, so they run only
 	// from an index matching the committed record: unchanged, or holding
 	// exactly the identified rename. Any other staged content is preserved.
-	staged, err := s.stagedOnlyCommittedRename(head, source, destination)
+	staged, err := s.classifyStagedArchive(head, source, destination)
 	if err != nil {
 		return keep("the ledger index for "+source+" and "+destination+" is unobservable: "+err.Error(), "inspect the ledger index before retrying")
 	}
-	if staged == "distinct" {
-		return keep("the ledger index holds staged changes under "+source+" or "+destination+" that differ from the committed record",
+	if staged == stagedOther {
+		return keep("the ledger index holds staged changes under "+source+" or "+destination+" that are not exactly the committed record renamed to the archive",
 			"commit, move aside, or unstage them; skl overwrites no staged content")
 	}
 	resumed := false
@@ -198,11 +198,12 @@ func (s *Store) moveProposal(head, project, proposal string, full bool) (*Archiv
 			return keep("an uncommitted partial archive of "+proposal+" at "+destination+" does not match its committed record",
 				"inspect "+source+" and "+destination+" and restore one complete copy; skl discards no partial tree")
 		}
-		if staged == "rename" {
+		if staged == stagedCommittedRename {
 			// The staged rename holds only committed bytes, so unstaging it
 			// loses nothing and lets staging and rollback start from head.
-			if _, err := git(s.Root, "reset", "-q", "--", source, destination); err != nil {
-				return keep("cannot unstage the matching staged rename: "+err.Error(), "inspect the ledger index before retrying")
+			arguments := []string{"reset", "-q", "--", source, destination}
+			if _, err := git(s.Root, arguments...); err != nil {
+				return keep("cannot unstage the matching staged rename: "+gitError(s.Root, arguments, err).Error(), "inspect the ledger index before retrying")
 			}
 		}
 		resumed = true
@@ -240,24 +241,35 @@ func (s *Store) moveProposal(head, project, proposal string, full bool) (*Archiv
 	return &ArchivedProposal{Proposal: proposal, FullyDelivered: full, Commit: committed, Resumed: resumed}, nil
 }
 
-// stagedOnlyCommittedRename classifies the index under source and
-// destination against head: "" when unchanged, "rename" when it holds exactly
-// the committed source files at destination, and "distinct" otherwise.
-func (s *Store) stagedOnlyCommittedRename(head, source, destination string) (string, error) {
-	changed, err := git(s.Root, "diff", "--cached", "--name-only", head, "--", source, destination)
+// stagedArchive classifies the index under a Proposal's source and archive
+// destination against the committed head.
+type stagedArchive int
+
+const (
+	stagedNothing         stagedArchive = iota // the index matches head
+	stagedCommittedRename                      // exactly the committed source files at destination
+	stagedOther                                // anything else, which cleanup must preserve
+)
+
+// classifyStagedArchive reports what the index holds under source and
+// destination relative to head.
+func (s *Store) classifyStagedArchive(head, source, destination string) (stagedArchive, error) {
+	arguments := []string{"diff", "--cached", "--name-only", head, "--", source, destination}
+	changed, err := git(s.Root, arguments...)
 	if err != nil {
-		return "", err
+		return stagedOther, gitError(s.Root, arguments, err)
 	}
 	if changed == "" {
-		return "", nil
+		return stagedNothing, nil
 	}
 	committed, err := s.committedEntries(head, source)
 	if err != nil {
-		return "", err
+		return stagedOther, err
 	}
-	listing, err := git(s.Root, "ls-files", "--stage", "--", source, destination)
+	arguments = []string{"ls-files", "--stage", "--", source, destination}
+	listing, err := git(s.Root, arguments...)
 	if err != nil {
-		return "", err
+		return stagedOther, gitError(s.Root, arguments, err)
 	}
 	indexed := 0
 	for _, line := range strings.Split(listing, "\n") {
@@ -265,14 +277,14 @@ func (s *Store) stagedOnlyCommittedRename(head, source, destination string) (str
 		fields := strings.Fields(meta)
 		relative, inDestination := strings.CutPrefix(path, destination+"/")
 		if !found || len(fields) != 3 || fields[2] != "0" || !inDestination || committed[relative] != fields[0]+" "+fields[1] {
-			return "distinct", nil
+			return stagedOther, nil
 		}
 		indexed++
 	}
 	if indexed != len(committed) {
-		return "distinct", nil
+		return stagedOther, nil
 	}
-	return "rename", nil
+	return stagedCommittedRename, nil
 }
 
 // committedEntries maps each file committed under directory at head, by
@@ -395,11 +407,14 @@ func TerminalSourceWork(s *Store, repository github.RepositoryID) ([]SourceWork,
 		seen := make(map[string]bool)
 		for _, path := range strings.Split(paths, "\n") {
 			parts := strings.SplitN(strings.TrimPrefix(path, prefix+"/"), "/", 3)
-			if len(parts) != 3 || seen[parts[0]+"/"+parts[1]] {
+			if len(parts) != 3 {
 				continue
 			}
-			seen[parts[0]+"/"+parts[1]] = true
-			items = append(items, parts[0]+"/"+parts[1])
+			item := parts[0] + "/" + parts[1]
+			if !seen[item] {
+				seen[item] = true
+				items = append(items, item)
+			}
 		}
 		for _, item := range items {
 			var state SliceState

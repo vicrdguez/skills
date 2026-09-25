@@ -344,8 +344,14 @@ func TestCleanupArchiveFailuresKeepOneCompleteProposal(t *testing.T) {
 	if failed.Status != "fix_required" || len(failed.Archive.Archived) != 0 || len(repairs) != 9 || ledgerHead(t, fixture.clone) != original {
 		t.Fatalf("a failed move reported success or committed: %s", mustJSON(t, failed))
 	}
-	if !strings.Contains(repairs["collide"], "committed record") || !strings.Contains(repairs["hooked"], "commit failed") || !strings.Contains(repairs["interrupted"], "commit failed") || !strings.Contains(repairs["partial"], "does not match") || !strings.Contains(repairs["moded"], "does not match") || !strings.Contains(repairs["dirty"], "uncommitted") || !strings.Contains(repairs["staged"], "staged changes") || !strings.Contains(repairs["renamed"], "staged changes") {
-		t.Fatalf("repair reasons: %v", repairs)
+	for name, reason := range map[string]string{
+		"collide": "committed record", "hooked": "commit failed", "interrupted": "commit failed", "matching": "commit failed",
+		"partial": "does not match", "moded": "does not match", "dirty": "uncommitted",
+		"staged": "staged changes", "renamed": "staged changes",
+	} {
+		if !strings.Contains(repairs[name], reason) {
+			t.Fatalf("%s repair reason %q lacks %q", name, repairs[name], reason)
+		}
 	}
 	if got := strings.TrimSpace(runGitOutput(t, fixture.clone, "status", "--porcelain", "--", active("hooked"), archived("hooked"))); got != "" {
 		t.Fatalf("failed commit did not restore the original location: %q", got)
@@ -596,22 +602,25 @@ func TestCleanupDoesNotArchiveFromAStaleSnapshot(t *testing.T) {
 
 func TestUnreadableRecordWithholdsSourceDeletion(t *testing.T) {
 	// A damaged record's owner is unknowable, so it could own safe-only.
-	for name, damage := range map[string]func(t *testing.T, clone, state string){
-		"malformed": func(t *testing.T, clone, state string) {
+	for _, damage := range []struct {
+		kind  string
+		apply func(t *testing.T, clone, state string)
+	}{
+		{"malformed", func(t *testing.T, clone, state string) {
 			writeFile(t, filepath.Join(clone, state), "{not json\n")
 			runGit(t, clone, "commit", "-qam", "damage a record")
-		},
-		"missing": func(t *testing.T, clone, state string) {
+		}},
+		{"missing", func(t *testing.T, clone, state string) {
 			runGit(t, clone, "rm", "-q", state)
 			runGit(t, clone, "commit", "-qm", "lose a record")
-		},
+		}},
 	} {
-		t.Run(name, func(t *testing.T) {
+		t.Run(damage.kind, func(t *testing.T) {
 			fixture := newLedgerFixture(t)
 			root := sourceRepository(t, "acme", "widgets")
 			accepting := newLedgerApp(t, newForgeServer(t))
-			for _, name := range []string{"safe", "damaged"} {
-				accepting.accept(t, root, writeProposal(t, "", cleanupSpec(name, "only")))
+			for _, proposal := range []string{"safe", "damaged"} {
+				accepting.accept(t, root, writeProposal(t, "", cleanupSpec(proposal, "only")))
 			}
 			cleanupWorktree(t, root, "safe-only")
 			worktree := filepath.Join(root, ".worktrees", "safe-only")
@@ -619,7 +628,7 @@ func TestUnreadableRecordWithholdsSourceDeletion(t *testing.T) {
 			runGit(t, worktree, "commit", "-qam", "slice change")
 			head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "safe-only"))
 			statusRecord(t, fixture.clone, "safe", "only", merged(head))
-			damage(t, fixture.clone, "projects/widgets/proposals/damaged/only/state.json")
+			damage.apply(t, fixture.clone, "projects/widgets/proposals/damaged/only/state.json")
 
 			outcome := runCleanup(t, offlineForge(t), root)
 			if outcome.Source == nil || len(outcome.Source.Removed) != 0 || len(outcome.Source.Preserved) != 1 || !strings.Contains(outcome.Source.Preserved[0].Reason, "damaged/only") {
