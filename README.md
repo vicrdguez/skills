@@ -248,7 +248,7 @@ skl propose publish --repo <path> --target main \
   --parent-title "Build the feature" --parent-body /tmp/proposal.md
 ```
 
-Omit parent and repeated slice/dependency flags for a single slice. Ledger-adopted projects refuse legacy cleanup; current Propose uses `skl ledger accept`. New delivery requires ledger acceptance rather than falling back to source artifacts.
+Omit parent and repeated slice/dependency flags for a single slice. For ledger-adopted projects, `skl propose cleanup` instead archives whole terminal, unclaimed Proposals and removes only safe merged local source work from recorded ledger facts; current Propose runs it before `skl ledger accept`. New delivery requires ledger acceptance rather than falling back to source artifacts.
 
 ## Pi entrypoints
 

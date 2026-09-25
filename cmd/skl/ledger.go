@@ -357,39 +357,53 @@ func safeFence(content string) string {
 // rendered refusal, or gated=false when the legacy flow remains the
 // supported path.
 func gateUnsupportedDelivery(stdout io.Writer, format implementationFormatKind, repository github.RepositoryID, operation string) (bool, error) {
-	path, exists, err := ledger.SettingsLocation(os.Getenv)
-	if err != nil || !exists {
-		// An unconfigured machine keeps the legacy flow; configuration is
-		// per machine and adoption is per project.
+	store, failure, err := adoptedLedger(repository)
+	if err != nil || (store == nil && failure == nil) {
 		return false, err
 	}
-	config, err := ledger.LoadConfig(path)
-	if err != nil {
-		return true, renderLedgerOutcome(stdout, format, ledgerOutcome{
-			Status: "fix_required", Reason: err.Error(),
-			Repair: "repair the ledger configuration before selecting work; skl uses no forge fallback while it is unreadable",
-		})
-	}
-	store, err := ledger.Open(config.Ledger)
-	if err != nil {
-		return true, renderLedgerOutcome(stdout, format, ledgerOutcome{
-			Status: "fix_required", Reason: err.Error(),
-			Repair: "repair the configured ledger clone before selecting work; skl uses no forge fallback while it is unusable",
-		})
-	}
-	adopted, err := store.Adopted(repository)
-	if err != nil {
-		return true, renderLedgerOutcome(stdout, format, ledgerOutcome{
-			Status: "fix_required", Reason: "the ledger records of project " + repository.Name + " are unreadable: " + err.Error(),
-			Repair: "repair the ledger records before selecting work; skl uses no forge fallback through unreadable records",
-		})
-	}
-	if !adopted {
-		return false, nil
+	if failure != nil {
+		return true, renderLedgerOutcome(stdout, format, *failure)
 	}
 	return true, renderLedgerOutcome(stdout, format, ledgerOutcome{
 		Status: "unsupported",
 		Reason: operation + " is a legacy source-artifact operation and is unavailable for ledger-accepted work; this refusal grants no Claim and changes no source work",
 		Repair: "read the accepted Contract with `skl ledger show --item <proposal>/<slice>` and use the ledger-backed implement/watchdog commands for delivery; administrative cutover or cleanup requires human direction with normal workers stopped",
 	})
+}
+
+// adoptedLedger returns the configured ledger when this source repository has
+// adopted it. A nil store and failure mean the legacy flow remains supported;
+// an unusable configuration or record is a failure, never a forge fallback.
+func adoptedLedger(repository github.RepositoryID) (*ledger.Store, *ledgerOutcome, error) {
+	path, exists, err := ledger.SettingsLocation(os.Getenv)
+	if err != nil || !exists {
+		// An unconfigured machine keeps the legacy flow; configuration is
+		// per machine and adoption is per project.
+		return nil, nil, err
+	}
+	config, err := ledger.LoadConfig(path)
+	if err != nil {
+		return nil, &ledgerOutcome{
+			Status: "fix_required", Reason: err.Error(),
+			Repair: "repair the ledger configuration before selecting work; skl uses no forge fallback while it is unreadable",
+		}, nil
+	}
+	store, err := ledger.Open(config.Ledger)
+	if err != nil {
+		return nil, &ledgerOutcome{
+			Status: "fix_required", Reason: err.Error(),
+			Repair: "repair the configured ledger clone before selecting work; skl uses no forge fallback while it is unusable",
+		}, nil
+	}
+	adopted, err := store.Adopted(repository)
+	if err != nil {
+		return nil, &ledgerOutcome{
+			Status: "fix_required", Reason: "the ledger records of project " + repository.Name + " are unreadable: " + err.Error(),
+			Repair: "repair the ledger records before selecting work; skl uses no forge fallback through unreadable records",
+		}, nil
+	}
+	if !adopted {
+		return nil, nil, nil
+	}
+	return store, nil, nil
 }

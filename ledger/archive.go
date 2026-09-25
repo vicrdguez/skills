@@ -1,0 +1,354 @@
+package ledger
+
+import (
+	"context"
+	"errors"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	"github.com/vicrdguez/skills/github"
+)
+
+// archiveRoot is the project directory holding retired whole Proposals.
+const archiveRoot = "archive"
+
+// ArchivedProposal is one whole Proposal committed at its archive location.
+// FullyDelivered is true only when every slice is Merged; mixed or wholly
+// Superseded membership is retirement without full delivery.
+type ArchivedProposal struct {
+	Proposal       string `json:"proposal"`
+	FullyDelivered bool   `json:"fully_delivered"`
+	Commit         string `json:"ledger_commit"`
+	// Resumed reports that an interrupted earlier move was identified and
+	// finished rather than moved again.
+	Resumed bool `json:"resumed_interrupted_move,omitempty"`
+}
+
+// KeptProposal is one Proposal left in the active proposals directory,
+// either because it is not archivable yet or because moving it needs repair.
+type KeptProposal struct {
+	Proposal string `json:"proposal"`
+	Reason   string `json:"reason"`
+	Repair   string `json:"repair,omitempty"`
+}
+
+// ArchiveResult separates committed archival from kept Proposals, repairs,
+// and the attempted replication of the local archive commits.
+type ArchiveResult struct {
+	Archived    []ArchivedProposal `json:"archived,omitempty"`
+	Kept        []KeptProposal     `json:"kept,omitempty"`
+	Repairs     []KeptProposal     `json:"repairs,omitempty"`
+	Replication *PublicationNote   `json:"replication,omitempty"`
+}
+
+// ArchiveTerminalProposals moves every whole Proposal of one Project whose
+// slices are all Merged or Superseded and unclaimed from proposals/ to
+// archive/. Eligibility is read inside the serialized mutation, so a Claim or
+// other change to the selected Proposal cannot be overtaken by a stale read.
+// Lifecycle, reports, and embedded references are never rewritten; a path
+// move is ledger organization only.
+func ArchiveTerminalProposals(ctx context.Context, s *Store, repository github.RepositoryID) (*ArchiveResult, error) {
+	s.observeDeliveryUpstream(ctx)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	result := &ArchiveResult{}
+	err := s.withMutation(func() error {
+		if _, err := s.projectIdentity(repository); err != nil {
+			return err
+		}
+		if err := s.requireReconciled(); err != nil {
+			return err
+		}
+		head, err := s.head()
+		if err != nil {
+			return err
+		}
+		proposals, err := s.proposalNames(head, repository.Name)
+		if err != nil {
+			return err
+		}
+		for _, proposal := range proposals {
+			full, reason, err := s.archivable(head, repository.Name, proposal)
+			if err != nil {
+				return err
+			}
+			if reason != "" {
+				result.Kept = append(result.Kept, KeptProposal{Proposal: proposal, Reason: reason})
+				continue
+			}
+			archived, repair := s.moveProposal(head, repository.Name, proposal, full)
+			if repair != nil {
+				result.Repairs = append(result.Repairs, *repair)
+				continue
+			}
+			result.Archived = append(result.Archived, *archived)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(result.Archived) > 0 {
+		note, _ := s.push(result.Archived[len(result.Archived)-1].Commit)
+		result.Replication = &note
+	}
+	return result, nil
+}
+
+// proposalNames lists the committed active Proposals of one Project.
+func (s *Store) proposalNames(head, project string) ([]string, error) {
+	directory := filepath.ToSlash(filepath.Join(projectsRoot, project, "proposals"))
+	if !gitOK(s.Root, "cat-file", "-e", head+":"+directory) {
+		return nil, nil
+	}
+	output, err := git(s.Root, "ls-tree", "-d", "--name-only", head+":"+directory)
+	if err != nil {
+		return nil, gitError(s.Root, []string{"ls-tree", "-d", "--name-only", head + ":" + directory}, err)
+	}
+	names := strings.Fields(output)
+	sort.Strings(names)
+	return names, nil
+}
+
+// archivable decides whole-Proposal eligibility from committed records. A
+// nonempty reason keeps the Proposal active; unreadable or unknown records are
+// never terminal evidence.
+func (s *Store) archivable(head, project, proposal string) (bool, string, error) {
+	directory := filepath.ToSlash(filepath.Join(projectsRoot, project, "proposals", proposal))
+	var meta ProposalMeta
+	if err := readJSONAt(s, head, directory+"/proposal.json", &meta); err != nil {
+		return false, "proposal.json is unreadable, so its membership is unknown", nil
+	}
+	slices, err := git(s.Root, "ls-tree", "-d", "--name-only", head+":"+directory)
+	if err != nil {
+		return false, "", gitError(s.Root, []string{"ls-tree", "-d", "--name-only", head + ":" + directory}, err)
+	}
+	if len(strings.Fields(slices)) == 0 {
+		return false, "records no slices", nil
+	}
+	full := true
+	var active, claimed, unknown []string
+	for _, slice := range strings.Fields(slices) {
+		var state SliceState
+		if err := readJSONAt(s, head, directory+"/"+slice+"/state.json", &state); err != nil {
+			unknown = append(unknown, slice)
+			continue
+		}
+		switch state.State {
+		case Merged:
+		case Superseded:
+			full = false
+		case ReadyForImplementation, AwaitingReview, Rework, NeedsHuman, ReadyForMerge:
+			active = append(active, slice+" ("+state.State+")")
+		default:
+			unknown = append(unknown, slice)
+		}
+		if state.Claim != nil {
+			claimed = append(claimed, slice)
+		}
+	}
+	var reasons []string
+	if len(active) > 0 {
+		reasons = append(reasons, "active slices: "+strings.Join(active, ", "))
+	}
+	if len(claimed) > 0 {
+		reasons = append(reasons, "claimed slices: "+strings.Join(claimed, ", "))
+	}
+	if len(unknown) > 0 {
+		reasons = append(reasons, "slices with unknown state: "+strings.Join(unknown, ", "))
+	}
+	return full, strings.Join(reasons, "; "), nil
+}
+
+// moveProposal moves one eligible Proposal as a whole directory and commits
+// the rename. A committed or uncommitted distinct destination is never
+// overwritten, and an unexplained partial tree is never swept into success.
+// A failed commit restores the original location so the Proposal stays whole.
+func (s *Store) moveProposal(head, project, proposal string, full bool) (*ArchivedProposal, *KeptProposal) {
+	source := filepath.ToSlash(filepath.Join(projectsRoot, project, "proposals", proposal))
+	destination := filepath.ToSlash(filepath.Join(projectsRoot, project, archiveRoot, proposal))
+	keep := func(reason, repair string) (*ArchivedProposal, *KeptProposal) {
+		return nil, &KeptProposal{Proposal: proposal, Reason: reason, Repair: repair}
+	}
+	if gitOK(s.Root, "cat-file", "-e", head+":"+destination) {
+		return keep("archive destination "+destination+" already holds a committed record",
+			"compare both records and resolve the collision with human direction; skl overwrites neither")
+	}
+	sourcePresent, destinationPresent := exists(filepath.Join(s.Root, source)), exists(filepath.Join(s.Root, destination))
+	resumed := false
+	switch {
+	case !sourcePresent && destinationPresent:
+		same, err := s.matchesCommittedTree(head, source, destination)
+		if err != nil || !same {
+			return keep("an uncommitted partial archive of "+proposal+" at "+destination+" does not match its committed record",
+				"inspect "+source+" and "+destination+" and restore one complete copy; skl discards no partial tree")
+		}
+		resumed = true
+	case destinationPresent:
+		return keep("archive destination "+destination+" holds uncommitted content",
+			"inspect and move the uncommitted content aside; skl overwrites no distinct archive")
+	case !sourcePresent:
+		return keep("committed proposal "+source+" is missing from the ledger working tree",
+			"restore it with git checkout before retrying; skl invents no archive from history")
+	default:
+		if err := s.requireCleanPaths(source); err != nil {
+			return keep("proposal "+source+" has uncommitted changes",
+				"commit or restore them before archiving; skl sweeps no uncommitted edits into the archive")
+		}
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(s.Root, destination)), 0o755); err != nil {
+			return keep("cannot prepare the archive directory: "+err.Error(), "repair the ledger working tree and retry")
+		}
+		if err := os.Rename(filepath.Join(s.Root, source), filepath.Join(s.Root, destination)); err != nil {
+			return keep("cannot move "+source+": "+err.Error(), "repair the ledger working tree and retry")
+		}
+	}
+	if err := s.commit("archive proposal "+project+"/"+proposal, source, destination); err != nil {
+		reason := "archive commit failed: " + err.Error()
+		_, _ = git(s.Root, "reset", "-q", "--", source, destination)
+		if restoreErr := os.Rename(filepath.Join(s.Root, destination), filepath.Join(s.Root, source)); restoreErr != nil {
+			return keep(reason+"; the uncommitted move remains at "+destination,
+				"repair the commit failure and retry; cleanup finishes the identified move when it still matches the committed record")
+		}
+		return keep(reason+"; the proposal remains at "+source, "repair the commit failure and retry")
+	}
+	committed, err := s.head()
+	if err != nil {
+		return keep("archive commit is unobservable: "+err.Error(), "inspect the ledger head before retrying")
+	}
+	return &ArchivedProposal{Proposal: proposal, FullyDelivered: full, Commit: committed, Resumed: resumed}, nil
+}
+
+// matchesCommittedTree reports whether the uncommitted directory at
+// destination holds exactly the files and bytes committed at source.
+func (s *Store) matchesCommittedTree(head, source, destination string) (bool, error) {
+	listing, err := git(s.Root, "ls-tree", "-r", head+":"+source)
+	if err != nil {
+		return false, err
+	}
+	committed := make(map[string]string)
+	for _, line := range strings.Split(listing, "\n") {
+		meta, path, found := strings.Cut(line, "\t")
+		fields := strings.Fields(meta)
+		if !found || len(fields) != 3 {
+			return false, errors.New("unexpected ls-tree output")
+		}
+		committed[path] = fields[2]
+	}
+	root := filepath.Join(s.Root, destination)
+	seen := 0
+	err = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		blob, err := git(s.Root, "hash-object", "--", path)
+		if err != nil || committed[filepath.ToSlash(relative)] != blob {
+			return errors.New("differs")
+		}
+		seen++
+		return nil
+	})
+	if err != nil {
+		return false, nil
+	}
+	return seen == len(committed), nil
+}
+
+func exists(path string) bool {
+	_, err := os.Lstat(path)
+	return err == nil
+}
+
+// proposalDirectoryAt resolves a known Proposal to its active or archive
+// location at one committed revision. The identity is looked up directly; no
+// history or unrelated inventory is scanned.
+func (s *Store) proposalDirectoryAt(commit, project, proposal string) string {
+	active := filepath.ToSlash(filepath.Join(projectsRoot, project, "proposals", proposal))
+	if gitOK(s.Root, "cat-file", "-e", commit+":"+active) {
+		return active
+	}
+	archived := filepath.ToSlash(filepath.Join(projectsRoot, project, archiveRoot, proposal))
+	if gitOK(s.Root, "cat-file", "-e", commit+":"+archived) {
+		return archived
+	}
+	return active
+}
+
+// SourceWork is the recorded source-deletion authority of one terminal slice.
+// AcceptedHead is set only for confirmed Merged, unclaimed work whose exact
+// Submission ownership is consistent; Hold explains why deletion is withheld
+// regardless of source Git state.
+type SourceWork struct {
+	Item         string `json:"item"`
+	Branch       string `json:"branch"`
+	State        string `json:"state"`
+	AcceptedHead string `json:"accepted_head,omitempty"`
+	Hold         string `json:"hold,omitempty"`
+}
+
+// TerminalSourceWork reads every Merged or Superseded slice of one Project,
+// active or archived, from committed records. It grants no deletion authority
+// to nonterminal work and never consults forge history or public bodies.
+func TerminalSourceWork(s *Store, repository github.RepositoryID) ([]SourceWork, error) {
+	project, err := s.projectIdentity(repository)
+	if err != nil {
+		return nil, err
+	}
+	head, err := s.head()
+	if err != nil {
+		return nil, err
+	}
+	var records []SourceWork
+	owners := make(map[string]int)
+	for _, location := range []string{"proposals", archiveRoot} {
+		prefix := filepath.ToSlash(filepath.Join(projectsRoot, repository.Name, location))
+		paths, err := git(s.Root, "ls-tree", "-r", "--name-only", head, "--", prefix)
+		if err != nil {
+			return nil, err
+		}
+		for _, path := range strings.Split(paths, "\n") {
+			item, found := strings.CutSuffix(strings.TrimPrefix(path, prefix+"/"), "/state.json")
+			if !found || strings.Count(item, "/") != 1 {
+				continue
+			}
+			var state SliceState
+			if err := readJSONAt(s, head, path, &state); err != nil {
+				continue // unreadable records authorize nothing
+			}
+			owners[state.Branch]++
+			if state.State != Merged && state.State != Superseded {
+				continue
+			}
+			record := SourceWork{Item: item, Branch: state.Branch, State: state.State}
+			switch {
+			case state.State == Superseded:
+				record.Hold = "Superseded work was never merged; its source work is preserved"
+			case state.Claim != nil:
+				record.Hold = "the slice still holds a Claim"
+			case !ValidRecordName(state.Branch):
+				record.Hold = "no valid owned source branch is recorded"
+			case state.Submission == nil || state.Completion == nil || state.Target == nil ||
+				state.Completion.Submission != *state.Submission || state.Completion.Target != *state.Target ||
+				!strings.EqualFold(state.Submission.Repository, project.Repository):
+				record.Hold = "the owned Submission attachment is absent or contradicts the confirmed merge"
+			default:
+				record.AcceptedHead = state.Completion.SourceHead
+			}
+			records = append(records, record)
+		}
+	}
+	for index := range records {
+		if owners[records[index].Branch] > 1 && records[index].Hold == "" {
+			records[index].AcceptedHead = ""
+			records[index].Hold = "more than one Work Item records branch " + records[index].Branch
+		}
+	}
+	return records, nil
+}

@@ -1474,30 +1474,6 @@ func TestDeliveryNeverFallsBackToForgeAuthority(t *testing.T) {
 	}
 }
 
-func TestProposeCleanupRefusedForAdoptedProjects(t *testing.T) {
-	fixture := newLedgerFixture(t)
-	root := sourceRepository(t, "acme", "widgets")
-	cli := newLedgerApp(t, newForgeServer(t))
-	if outcome := cli.accept(t, root, writeProposal(t, "", singleSlice("adopted-cleanup"))); outcome.Status != "accepted" {
-		t.Fatalf("adoption acceptance failed: %s", mustJSON(t, outcome))
-	}
-	if _, err := os.Stat(filepath.Join(fixture.clone, "projects", "widgets", "proposals", "adopted-cleanup")); err != nil {
-		t.Fatalf("adoption not recorded: %v", err)
-	}
-	before := ledgerSnapshot(t, root)
-
-	cli.out.Reset()
-	if err := cli.app.Run([]string{"skl", "propose", "cleanup", "--repo", root}); err != nil {
-		t.Fatalf("run: %v", err)
-	}
-	if !strings.Contains(cli.out.String(), "unsupported") {
-		t.Fatalf("cleanup not gated for an adopted project: %s", cli.out.String())
-	}
-	if ledgerSnapshot(t, root) != before {
-		t.Fatalf("gated cleanup mutated source state:\n%s", ledgerSnapshot(t, root))
-	}
-}
-
 func TestLedgerRefusesSourceStorageOverlap(t *testing.T) {
 	for _, test := range []struct {
 		name       string

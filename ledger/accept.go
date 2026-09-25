@@ -105,6 +105,12 @@ func Accept(ctx context.Context, store *Store, repository github.RepositoryID, d
 			Project: project.Name, Repository: identity, Proposal: declaration.Proposal,
 			ParentTitle: strings.TrimSpace(declaration.ParentTitle),
 		}
+		if exists(filepath.Join(store.Root, projectsRoot, project.Name, archiveRoot, declaration.Proposal)) {
+			return refuse(
+				"proposal "+declaration.Proposal+" is already accepted and archived",
+				"archived records are never re-accepted or copied back; choose a new proposal name for renewed work",
+			)
+		}
 		if _, err := os.Stat(proposalDirectory); err == nil {
 			if !recorded {
 				return refuse(
@@ -330,7 +336,8 @@ func (s *Store) resolveExternalDependencies(project string, declaration *Proposa
 					"reference a declared sibling slice or an existing ledger Work Item as proposals/<proposal>/<slice>",
 				)
 			}
-			if _, err := os.Stat(filepath.Join(s.Root, projectsRoot, project, dependency, "state.json")); err != nil {
+			archived := archiveRoot + "/" + strings.TrimPrefix(dependency, "proposals/")
+			if _, err := os.Stat(filepath.Join(s.Root, projectsRoot, project, dependency, "state.json")); err != nil && !exists(filepath.Join(s.Root, projectsRoot, project, archived, "state.json")) {
 				return refuse(
 					"dependency "+dependency+" of slice "+slice.Name+" is not recorded in project "+project,
 					"accept that Work Item first or correct the reference to a recorded one",

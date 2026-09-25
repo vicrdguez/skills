@@ -154,46 +154,7 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 				}
 				return err
 			},
-		}, {
-			Name: "cleanup",
-			Flags: []cli.Flag{
-				&cli.PathFlag{Name: "repo"},
-				&cli.StringFlag{Name: "remote"},
-			},
-			Action: func(command *cli.Context) error {
-				remote := command.String("remote")
-				if remote == "" {
-					remote = "origin"
-				}
-				repository, err := setup.ResolveRepository(command.Path("repo"), remote)
-				if err != nil {
-					return err
-				}
-				gated, err := gateUnsupportedDelivery(stdout, formatMarkdown, repository.Repository, "propose cleanup")
-				if gated || err != nil {
-					return err
-				}
-				backend, err := newBackend(repository.Repository)
-				if err != nil {
-					return err
-				}
-				proposalBackend, ok := backend.(workflow.Backend)
-				if !ok {
-					return fmt.Errorf("workflow backend does not support proposal cleanup")
-				}
-				outcome, err := workflow.Cleanup(command.Context, repository.Root, proposalBackend)
-				if err != nil {
-					return err
-				}
-				for _, slug := range outcome.Removed {
-					fmt.Fprintln(stdout, "removed", slug)
-				}
-				for _, slug := range outcome.Preserved {
-					fmt.Fprintln(stdout, "preserved", slug)
-				}
-				return nil
-			},
-		}},
+		}, cleanupCommand(newBackend, stdout)},
 	}, {
 		Name:        "implement",
 		Subcommands: deliveryCommands("implement", newBackend, stdout),
