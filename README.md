@@ -90,6 +90,17 @@ Acceptance commits locally before attempting replication and publication of supp
 
 Read exact evidence with `skl ledger show --commit <sha> --path <ledger-path>`; a missing reference is refused, not substituted. Commands default to Markdown; `--format json` gives equivalent typed transport.
 
+### Inspect private phase reports
+
+Optional local inspection starts with the Work Item, independent of its lifecycle or Claim and without forge access:
+
+```sh
+skl ledger show --repo <source-repository> --item <proposal>/<slice>
+skl ledger show --repo <source-repository> --item <proposal>/<slice> --phase watchdog
+```
+
+The first command returns the committed current report references and explicitly marks absent phases. Add `--phase implement` or `--phase watchdog` to retrieve that current report's original document; readback remains available even at Ready for Merge or while a later Claim exists. The report frontmatter retains exact consumed-input references. Follow its ledger references to earlier rounds with `skl ledger show --commit <ledger-commit> --path <ledger-path>`; source SHAs in `source` metadata identify source revisions, not ledger documents. Exact references are never replaced with newer content. Inspection is read-only and is not an approval gate.
+
 ## Implement a Work Item
 
 ```sh
