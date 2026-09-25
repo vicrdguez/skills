@@ -324,14 +324,14 @@ func (*selectionChanged) Error() string { return "the local record changed durin
 
 // checkSelection rereads a selected record before a forge mutation. The
 // selection still applies when the record holds the selected attachment, or
-// when this invocation created that attachment and it awaits recording. A
+// when this invocation created that attachment and it is awaitingRecord. A
 // removed or different recorded attachment supersedes it.
-func checkSelection(recorded func() (*ForgeAttachment, error), selected *ForgeAttachment, created bool) error {
+func checkSelection(recorded func() (*ForgeAttachment, error), selected *ForgeAttachment, awaitingRecord bool) error {
 	current, err := recorded()
 	if err != nil {
 		return fmt.Errorf("the current local record is unreadable: %w", err)
 	}
-	if sameAttachment(current, selected) || current == nil && created {
+	if sameAttachment(current, selected) || current == nil && awaitingRecord {
 		return nil
 	}
 	return &selectionChanged{current: current}

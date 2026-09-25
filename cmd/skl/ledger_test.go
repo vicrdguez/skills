@@ -2212,26 +2212,42 @@ func publishedSlice(t *testing.T, outcome *ledger.Acceptance, name string) *ledg
 
 func TestGroupingRevalidatesSelectedRecords(t *testing.T) {
 	const proposalPath = "projects/widgets/proposals/group-check/"
+	clearIssue := func(slice string, issue any) func(t *testing.T, clone string) string {
+		return func(t *testing.T, clone string) string {
+			path := proposalPath + slice + "/state.json"
+			record := decodeRecord(t, readLedgerFile(t, clone, path))
+			if issue == nil {
+				delete(record, "issue")
+			} else {
+				record["issue"] = issue
+			}
+			commitLedgerRecord(t, clone, path, mustJSON(t, record)+"\n")
+			return path
+		}
+	}
 	for _, tc := range []struct {
 		name string
 		// change is committed by another local writer once the parent
-		// grouping has been observed and before any grouping write.
-		change func(t *testing.T, clone string)
-		status string
+		// grouping has been observed and before any grouping write; it
+		// returns the record it changed.
+		change func(t *testing.T, clone string) string
+		// stopped lists the slices whose grouping write must not be sent,
+		// each reported with status; every other child is grouped.
+		stopped []string
+		status  string
 	}{
-		{"superseded child", func(t *testing.T, clone string) {
-			record := decodeRecord(t, readLedgerFile(t, clone, proposalPath+"feature/state.json"))
-			record["issue"] = map[string]any{"repository": "acme/widgets", "number": 900}
-			commitLedgerRecord(t, clone, proposalPath+"feature/state.json", mustJSON(t, record)+"\n")
-		}, ledger.IssueSuperseded},
-		{"removed parent", func(t *testing.T, clone string) {
+		{"superseded child", clearIssue("feature", map[string]any{"repository": "acme/widgets", "number": 900}), []string{"feature"}, ledger.IssueSuperseded},
+		{"removed child", clearIssue("feature", nil), []string{"feature"}, ledger.IssueSuperseded},
+		{"removed parent", func(t *testing.T, clone string) string {
 			record := decodeRecord(t, readLedgerFile(t, clone, proposalPath+"proposal.json"))
 			delete(record, "parent_issue")
 			commitLedgerRecord(t, clone, proposalPath+"proposal.json", mustJSON(t, record)+"\n")
-		}, ledger.IssueSuperseded},
-		{"unreadable parent", func(t *testing.T, clone string) {
+			return proposalPath + "proposal.json"
+		}, []string{"feature", "foundation"}, ledger.IssueSuperseded},
+		{"unreadable parent", func(t *testing.T, clone string) string {
 			commitLedgerRecord(t, clone, proposalPath+"proposal.json", "{\n")
-		}, ledger.IssueFailed},
+			return proposalPath + "proposal.json"
+		}, []string{"feature", "foundation"}, ledger.IssueFailed},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fixture := newLedgerFixture(t)
@@ -2244,47 +2260,39 @@ func TestGroupingRevalidatesSelectedRecords(t *testing.T) {
 				t.Fatalf("setup acceptance did not publish a parent: %s", mustJSON(t, accepted))
 			}
 			parent := accepted.Acceptance.ParentIssue.Number
+			var wantGrouped []int
+			for _, slice := range accepted.Acceptance.Slices {
+				if !slices.Contains(tc.stopped, slice.Name) {
+					wantGrouped = append(wantGrouped, slice.Issue.Number)
+				}
+			}
+			var changedPath, changedRecord string
 			forge.mu.Lock()
 			forge.children[parent] = nil
-			groupings, changed := 0, false
 			forge.before = func(method, path string) {
-				if method == http.MethodPost && strings.HasSuffix(path, "/sub_issues") {
-					groupings++
-				}
-				if !changed && method == http.MethodGet && strings.HasSuffix(path, "/sub_issues") {
-					changed = true
-					tc.change(t, fixture.clone)
+				if changedPath == "" && method == http.MethodGet && strings.HasSuffix(path, "/sub_issues") {
+					changedPath = tc.change(t, fixture.clone)
+					changedRecord = readLedgerFile(t, fixture.clone, changedPath)
 				}
 			}
 			forge.mu.Unlock()
 
 			outcome, _ := cli.run(t, []string{"skl", "ledger", "publish", "--repo", root, "--proposal", "group-check", "--format", "json"})
 			forge.mu.Lock()
-			defer forge.mu.Unlock()
-			if tc.name == "superseded child" {
-				// Only the unchanged foundation child is grouped.
-				foundation := publishedSlice(t, outcome.Publication, "foundation").Issue.Number
-				if groupings != 1 || !slices.Equal(forge.children[parent], []int{foundation}) {
-					t.Fatalf("grouping writes %d, grouped %v; want only foundation #%d", groupings, forge.children[parent], foundation)
-				}
-				feature := publishedSlice(t, outcome.Publication, "feature")
-				if feature.GroupingStatus == nil || feature.GroupingStatus.Status != tc.status || feature.Issue == nil || feature.Issue.Number != 900 {
-					t.Fatalf("superseded child grouping was not reported: %s", mustJSON(t, feature))
-				}
-				return
+			grouped := append([]int(nil), forge.children[parent]...)
+			forge.mu.Unlock()
+			if !slices.Equal(grouped, wantGrouped) {
+				t.Fatalf("grouped %v, want %v", grouped, wantGrouped)
 			}
-			if groupings != 0 {
-				t.Fatalf("sent %d grouping writes after the parent record changed", groupings)
-			}
-			for _, slice := range outcome.Publication.Slices {
-				if slice.GroupingStatus == nil || slice.GroupingStatus.Status != tc.status {
-					t.Fatalf("stopped grouping was not reported as %s: %s", tc.status, mustJSON(t, outcome))
+			for _, name := range tc.stopped {
+				if slice := publishedSlice(t, outcome.Publication, name); slice.GroupingStatus == nil || slice.GroupingStatus.Status != tc.status {
+					t.Fatalf("stopped grouping of %s was not reported as %s: %s", name, tc.status, mustJSON(t, outcome))
 				}
 			}
-			if tc.name == "removed parent" {
-				if outcome.Publication.ParentIssue != nil || strings.Contains(readLedgerFile(t, fixture.clone, proposalPath+"proposal.json"), "parent_issue") {
-					t.Fatalf("the removed parent attachment was restored or reported: %s", mustJSON(t, outcome))
-				}
+			// The concurrent writer's record is kept: bookkeeping neither
+			// restores a removed attachment nor replaces a newer one.
+			if record := readLedgerFile(t, fixture.clone, changedPath); record != changedRecord {
+				t.Fatalf("publication rewrote the concurrently changed %s:\n%s\nwant\n%s", changedPath, record, changedRecord)
 			}
 		})
 	}
@@ -2358,8 +2366,11 @@ func TestUpdateRetryStopsAfterSupersession(t *testing.T) {
 	}
 	forge.mu.Unlock()
 	outcome, _ := cli.run(t, []string{"skl", "ledger", "publish", "--repo", root, "--proposal", "retry-check", "--format", "json", issueFile(t, "foundation", "current\n")})
-	if patches != 1 || len(forge.updatedIssues()) != 0 {
-		t.Fatalf("sent %d updates although the selection was superseded after the first; updated %v", patches, forge.updatedIssues())
+	forge.mu.Lock()
+	sent := patches
+	forge.mu.Unlock()
+	if sent != 1 || len(forge.updatedIssues()) != 0 {
+		t.Fatalf("sent %d updates although the selection was superseded after the first; updated %v", sent, forge.updatedIssues())
 	}
 	slice := outcome.Publication.Slices[0]
 	if slice.IssueStatus == nil || slice.IssueStatus.Status != ledger.IssueSuperseded || slice.Issue == nil || slice.Issue.Number != 900 {
@@ -2396,8 +2407,11 @@ func TestPublicationRefusesAttachmentsOfAnotherRepository(t *testing.T) {
 
 		outcome, _ := cli.run(t, []string{"skl", "ledger", "publish", "--repo", root, "--proposal", "identity-check", "--format", "json",
 			issueFile(t, "foundation", "current\n"), "--parent-body=" + writeTemp(t, t, "parent\n")})
-		if len(forge.updatedIssues()) != 0 || forge.createdCount() != 2 {
+		if len(forge.updatedIssues()) != 0 {
 			t.Fatalf("publication mutated a same-numbered issue: updated %v", forge.updatedIssues())
+		}
+		if forge.createdCount() != 2 {
+			t.Fatalf("publication created %d issues, want only the two seeded unrelated ones", forge.createdCount())
 		}
 		for _, body := range forge.receivedBodies() {
 			if strings.Contains(body, "sub_issue_id") {
