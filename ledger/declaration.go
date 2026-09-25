@@ -38,8 +38,8 @@ type ProposalDeclaration struct {
 // LoadDeclaration reads and validates the complete intake declaration from
 // directory before anything is accepted. bodies supplies the temporary
 // descriptive issue bodies keyed by slice name, plus the optional parent
-// body; missing bodies are not declaration errors — they leave that
-// publication surface pending.
+// body; missing bodies are not declaration errors — that publication
+// surface is reported as missing input.
 func LoadDeclaration(directory string, bodies map[string][]byte, parentBody []byte) (*ProposalDeclaration, error) {
 	raw, err := os.ReadFile(filepath.Join(directory, "proposal.json"))
 	if err != nil {
@@ -140,9 +140,14 @@ func LoadDeclaration(directory string, bodies map[string][]byte, parentBody []by
 	return &declaration, nil
 }
 
-// ParentBodySupplied reports whether a parent body input was given; it is
-// a publication input for multi-slice work, never a declaration field.
-func (d *ProposalDeclaration) ParentBodySupplied() bool { return d.ParentBody != nil }
+// SliceNames returns the declared slice names in declaration order.
+func (d *ProposalDeclaration) SliceNames() []string {
+	names := make([]string, len(d.Slices))
+	for index := range d.Slices {
+		names[index] = d.Slices[index].Name
+	}
+	return names
+}
 
 // Cycle returns one slice name on a dependency cycle, or "" when the
 // declared sibling graph is acyclic.
