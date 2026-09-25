@@ -215,9 +215,10 @@ func presentSelected(ctx context.Context, s *Store, repository github.Repository
 	return PublicationNote{Status: PullPresented, Detail: fmt.Sprintf("pull request #%d presents the %s result at %s as %s", presented, selected.Phase, selected.Source.Head, readiness)}, attachment, recorded
 }
 
-// recordSubmission retains a successfully established association on the
-// then-current record, preserving every later result, Decision, and Claim.
-// A different known association is never reassigned.
+// recordSubmission retains a successfully established association and its
+// integration destination on the then-current record, preserving every later
+// result, Decision, and Claim. A different known association is never
+// reassigned.
 func (s *Store) recordSubmission(repository github.RepositoryID, item string, attachment *ForgeAttachment) (bool, error) {
 	recorded := false
 	err := s.withMutation(func() error {
@@ -225,16 +226,20 @@ func (s *Store) recordSubmission(repository github.RepositoryID, item string, at
 		if err != nil {
 			return err
 		}
-		if state.Submission != nil {
-			if sameAttachment(state.Submission, attachment) {
-				return nil
-			}
+		// PresentPull only creates/validates main in this repository. Bind that
+		// destination with the exact owned attachment, including when this is a
+		// later presentation of an already attached result.
+		target := &IntegrationTarget{Repository: attachment.Repository, Branch: "main"}
+		if state.Submission != nil && !sameAttachment(state.Submission, attachment) {
 			return refuse(fmt.Sprintf("Work Item %s already records Submission %s#%d", item, state.Submission.Repository, state.Submission.Number), "preserve both attachments and reconcile with human direction")
+		}
+		if state.Submission != nil && state.Target != nil && *state.Target == *target {
+			return nil
 		}
 		if err := s.requireCleanPaths(directory + "/state.json"); err != nil {
 			return err
 		}
-		state.Submission = attachment
+		state.Submission, state.Target = attachment, target
 		if err := writeJSON(filepath.Join(s.Root, directory, "state.json"), state); err != nil {
 			return err
 		}

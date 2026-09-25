@@ -340,6 +340,9 @@ func TestDeliveryPublicationPushesSourceAndPresentsOnlyPublicProse(t *testing.T)
 	if result.State.Submission == nil || *result.State.Submission != *wantAttachment {
 		t.Fatalf("result state submission = %#v, want %#v", result.State.Submission, wantAttachment)
 	}
+	if state.Target == nil || *state.Target != (ledger.IntegrationTarget{Repository: "acme/widgets", Branch: "main"}) {
+		t.Fatalf("recorded integration target = %#v, want acme/widgets main", state.Target)
+	}
 	deliveryAssertNoPublicationRecords(t, l)
 	if commits := deliveryGitOutput(t, l.root, "rev-list", "--count", handoff+"..HEAD"); commits != "1" {
 		t.Fatalf("presentation wrote %s ledger commits after the handoff, want only the association", commits)
