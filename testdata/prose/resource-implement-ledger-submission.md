@@ -1,0 +1,32 @@
+# Implementation report result document
+
+Write the report body at `/tmp/skl-implement-result/implement-report.md`. The engine adds the schema-1 frontmatter and every ledger reference; write only the Markdown body, and never hand-author `schema`, `outcome`, `source`, `ledger`, or `round`. This file is the invocation's Result Document, written at the destination named below. The engine publishes it unchanged and never parses, judges, or cross-checks the prose against the semantic command that carries the decision, so the document must stand on its own: state the evidence you established, the alternatives you weighed, and the outcome you recommend. Do not restate settled invocation facts as if you had re-derived them, do not claim work you did not do, and do not encode the decision as machine-readable fields for the engine to read back.
+
+## Summary
+
+State the implemented change, its scope, and the procedure this report closes.
+
+
+## Verification
+
+Write the full current completion-and-evidence table for the reported code revision, not a delta:
+
+- Label Agent-owned rows with their Contract identity: `B<n>` for behavior, `A<n>` for architecture, and `T<n>` for warranted tasks.
+- Declare each row `complete` or `incomplete`. `complete` means the required outcome and applicable verification succeeded for this revision.
+- Group many-to-many evidence: one evidence item may support several rows, and one row may need several checks. Reference concrete tests, commands, or appropriate inspection evidence with results and material limitations.
+- List separately the human-owned `M<n>` checks and declare their current state without marking a human check complete on the human's behalf.
+- Omitted entries are never complete and never imply completion. Recording an evidence gap does not make it acceptable, and prose assurance alone is not evidence for ordinary executable behavior.
+
+Include the full source head and the integrated target SHA actually observed and merged, the single Full Gate result over the final functional state, and any material limitations.
+
+## Audit ledger
+
+Record every Audit finding as `F<n>` with its axis (`Standards` or `Contracts`), the severity Audit assigned, and its disposition (`fixed`, `declined`, or `debt`) with one line of reasoning and its evidence. Preserve the fixed point and the audited head you actually audited. 
+
+## Paused decision (blocker step only)
+
+When a permitted human decision blocks progress, include the question, the evidence, the options with their consequences, and your recommendation, and record the current incomplete status of the affected rows. Pause with the typed `needs_human` outcome rather than prose, and do not approve, merge, or manually release the Claim; the engine releases it atomically with the paused report.
+
+## Public result document
+
+Separately author `/tmp/skl-implement-result/public.md` as the deliberately public, human-facing body. Never use this private report or the worker exchange as the public body, and never publish by default. Public text may omit private operational detail but must acknowledge that the remaining human verification obligations stay accessible privately through `skl`; it may not remove those obligations from human review. If the handoff reports its public presentation pending, the local result still stands; run `skl ledger present --item <proposal>/<slice>` later for the then-current result's evidence and authoring guidance instead of retrying the handoff or restoring this body.

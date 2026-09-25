@@ -1,0 +1,1 @@
+the Watchdog Execution Skill requires selected work; run `skl watchdog next` for one Work Item or `skl watchdog resume --item <proposal>/<slice> --claim <acquisition-commit>` for an interrupted Claim. Named resources remain available with --resource
