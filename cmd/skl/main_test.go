@@ -2706,7 +2706,7 @@ func TestBundleGuaranteedSupportingSkills(t *testing.T) {
 	if !slices.Equal(packet.IncludedSkills, want) {
 		t.Fatalf("included_skills = %v, want %v", packet.IncludedSkills, want)
 	}
-	if !slices.Equal(packet.Resources, []string{"reference/decision.md", "reference/ledger-submission.md", "reference/report-schema.md", "reference/submission.md"}) {
+	if !slices.Equal(packet.Resources, []string{"reference/decision.md", "reference/ledger-submission.md", "reference/pull-presentation.md", "reference/report-schema.md", "reference/submission.md"}) {
 		t.Fatalf("implementation resources changed: %v", packet.Resources)
 	}
 	// Definitions are authored templates, so the rendered outcome is what a

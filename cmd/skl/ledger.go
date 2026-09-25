@@ -30,6 +30,9 @@ type ledgerOutcome struct {
 	Readback        *ledger.Readback         `json:"readback,omitempty"`
 	Document        *ledger.ContractDocument `json:"document,omitempty"`
 	ReadbackCommand string                   `json:"readback_command,omitempty"`
+	// Presentation and Guidance carry one current-view pull request attempt.
+	Presentation *ledger.Presentation  `json:"presentation,omitempty"`
+	Guidance     *presentationGuidance `json:"guidance,omitempty"`
 }
 
 // proseAuthoring tells the caller how to author fresh public prose when a
@@ -232,7 +235,7 @@ func ledgerCommands(newBackend backendFactory, stdout io.Writer) *cli.Command {
 				}
 				return renderLedgerOutcome(stdout, format, ledgerOutcome{Status: "shown", Document: &document})
 			},
-		}},
+		}, presentCommand(newBackend, stdout)},
 	}
 }
 
@@ -392,6 +395,9 @@ func ledgerMarkdown(outcome ledgerOutcome) string {
 			line("")
 			line("%s", strings.TrimRight(safeFence(document.Contents)+"\n"+document.Contents+"\n"+safeFence(document.Contents), "\n"))
 		}
+	}
+	if outcome.Presentation != nil || outcome.Guidance != nil {
+		pullPresentationMarkdown(line, outcome.Presentation, outcome.Guidance)
 	}
 	if document := outcome.Document; document != nil {
 		fmt.Fprintf(&report, "Document: %s at %s\n\n", document.Path, document.Commit)

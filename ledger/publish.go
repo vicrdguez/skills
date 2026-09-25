@@ -571,7 +571,7 @@ func (s *Store) recordPublication(outcome *Acceptance, pushed bool) (string, err
 			} else if acceptance.PushStatus != nil && acceptance.PushStatus.Status != "" {
 				publication.Push = acceptance.PushStatus
 			}
-			if publication.Push == nil && publication.Source == nil && publication.Pull == nil && publication.Active == nil {
+			if publication.Push == nil {
 				state.Publication = nil
 			} else {
 				state.Publication = &publication
@@ -630,7 +630,7 @@ func samePublication(before, after *PublicationState) bool {
 	if before == nil || after == nil {
 		return before == after
 	}
-	return sameNote(before.Push, after.Push) && sameNote(before.Source, after.Source) && sameNote(before.Pull, after.Pull) && sameReference(before.Active, after.Active)
+	return sameNote(before.Push, after.Push)
 }
 
 func sameNote(before, after *PublicationNote) bool {

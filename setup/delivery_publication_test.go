@@ -3,12 +3,14 @@ package setup
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/vicrdguez/skills/github"
@@ -73,6 +75,15 @@ type deliveryForge struct {
 	failReadsAfter int
 	reads          int
 	beforePullRead func(*deliveryPull)
+	// transientReads and transientPatches fail that many pull request reads
+	// or body updates with a server error before serving normally.
+	transientReads, transientPatches int
+	// transientReady fails that many non-draft readiness mutations with a
+	// server error before serving normally.
+	transientReady int
+	// onWrite observes each body update or readiness mutation as it arrives,
+	// so a test can record newer local work while that request is in flight.
+	onWrite func()
 }
 
 type deliveryRequest struct{ method, path string }
@@ -230,6 +241,11 @@ func (f *deliveryForge) serveOne(w http.ResponseWriter, r *http.Request) {
 		if f.beforePullRead != nil {
 			f.beforePullRead(pull)
 		}
+		if f.transientReads > 0 {
+			f.transientReads--
+			http.Error(w, "temporarily unavailable", http.StatusBadGateway)
+			return
+		}
 		if f.failReadsAfter > 0 && f.reads > f.failReadsAfter {
 			http.Error(w, "pull request unreadable", http.StatusInternalServerError)
 			return
@@ -239,6 +255,14 @@ func (f *deliveryForge) serveOne(w http.ResponseWriter, r *http.Request) {
 		var payload map[string]any
 		json.NewDecoder(r.Body).Decode(&payload)
 		f.patchPayloads = append(f.patchPayloads, payload)
+		if f.onWrite != nil {
+			f.onWrite()
+		}
+		if f.transientPatches > 0 {
+			f.transientPatches--
+			http.Error(w, "temporarily unavailable", http.StatusBadGateway)
+			return
+		}
 		if body, ok := payload["body"].(string); ok {
 			pull.Body = body
 		}
@@ -260,7 +284,14 @@ func (f *deliveryForge) serveGraphQL(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	f.draftQueries = append(f.draftQueries, payload.Query)
 	ready := strings.Contains(payload.Query, "markPullRequestReadyForReview")
+	if f.onWrite != nil {
+		f.onWrite()
+	}
 	status := f.graphqlStatus
+	if status == 0 && ready && f.transientReady > 0 {
+		f.transientReady--
+		status = http.StatusBadGateway
+	}
 	if status == 0 && !ready {
 		status = f.graphqlDraftStatus
 	}
@@ -596,8 +627,8 @@ func TestDeliveryPublicationRefusesUnresolvedLostCreation(t *testing.T) {
 	_, err := deliveryBackend(server).PresentPull(context.Background(), ledger.PullPresentation{
 		Title: "widget delivery", Body: deliveryBody, Branch: "widget", Head: "aaa", Approved: false,
 	})
-	if err == nil || !strings.Contains(err.Error(), "no duplicate was created") {
-		t.Fatalf("unresolved creation = %v", err)
+	if !errors.Is(err, ledger.ErrPresentationUncertain) || !strings.Contains(err.Error(), "not retried") {
+		t.Fatalf("unresolved creation = %v, want reported uncertainty", err)
 	}
 	if pulls := forge.count(http.MethodPost, "/repos/acme/widgets/pulls"); pulls != 1 {
 		t.Fatalf("unresolved creation created %d pull requests", pulls)
@@ -819,5 +850,167 @@ func TestDeliveryPublicationDoesNotReverseReadinessItDidNotEstablish(t *testing.
 	}
 	if pull := forge.pull(5); pull == nil || pull.Draft {
 		t.Fatalf("unrelated ready presentation was reverted: %#v", pull)
+	}
+}
+
+// TestDeliveryPublicationRetriesRepeatableRequestsBoundedly covers B4: reads
+// and body updates are retried immediately after a server error, within a
+// fixed bound, and a persistent outage is reported rather than retried on.
+func TestDeliveryPublicationRetriesRepeatableRequestsBoundedly(t *testing.T) {
+	t.Run("transient failures recover", func(t *testing.T) {
+		forge := newDeliveryForge(t)
+		existing := forge.add(deliveryPull{Body: "old body", Draft: true})
+		forge.transientReads, forge.transientPatches = 2, 2
+		server := forge.server()
+		defer server.Close()
+
+		checks := 0
+		number, err := deliveryBackend(server).PresentPull(context.Background(), ledger.PullPresentation{
+			Number: existing.Number, Body: deliveryBody, Branch: "widget", Head: "aaa",
+			Current: func() error { checks++; return nil },
+		})
+		if err != nil || number != existing.Number {
+			t.Fatalf("presentation after transient failures = %d, %v", number, err)
+		}
+		if checks != 3 {
+			t.Fatalf("current-input checks = %d, want one before each body update attempt", checks)
+		}
+		if pull := forge.pull(existing.Number); pull.Body != deliveryBody || !pull.Draft {
+			t.Fatalf("presented pull = %#v", pull)
+		}
+		if patches := forge.count(http.MethodPatch, fmt.Sprintf("/repos/acme/widgets/pulls/%d", existing.Number)); patches != 3 {
+			t.Fatalf("body updates = %d, want two failures and one success", patches)
+		}
+	})
+
+	t.Run("persistent failure is bounded", func(t *testing.T) {
+		forge := newDeliveryForge(t)
+		existing := forge.add(deliveryPull{Body: "old body", Draft: true})
+		forge.transientReads = 1000
+		server := forge.server()
+		defer server.Close()
+
+		_, err := deliveryBackend(server).PresentPull(context.Background(), ledger.PullPresentation{
+			Number: existing.Number, Body: deliveryBody, Branch: "widget", Head: "aaa",
+		})
+		if err == nil || !strings.Contains(err.Error(), "502") {
+			t.Fatalf("persistent outage = %v, want the server error", err)
+		}
+		if reads := forge.count(http.MethodGet, fmt.Sprintf("/repos/acme/widgets/pulls/%d", existing.Number)); reads != presentationAttempts {
+			t.Fatalf("reads = %d, want the bound %d", reads, presentationAttempts)
+		}
+		if patches := forge.count(http.MethodPatch, fmt.Sprintf("/repos/acme/widgets/pulls/%d", existing.Number)); patches != 0 {
+			t.Fatalf("an unreadable pull request was updated %d times", patches)
+		}
+	})
+}
+
+// TestDeliveryPublicationStopsUpdatesForSupersededInputs covers B4: once the
+// selected local result is superseded, the adapter makes no further write, so
+// an approval is not applied after its inputs changed.
+func TestDeliveryPublicationStopsUpdatesForSupersededInputs(t *testing.T) {
+	forge := newDeliveryForge(t)
+	existing := forge.add(deliveryPull{Body: "old body", Draft: true})
+	server := forge.server()
+	defer server.Close()
+
+	checks := 0
+	_, err := deliveryBackend(server).PresentPull(context.Background(), ledger.PullPresentation{
+		Number: existing.Number, Body: deliveryBody, Branch: "widget", Head: "aaa", Approved: true,
+		Current: func() error {
+			checks++
+			if checks > 1 {
+				return errors.New("a later local review result supersedes the selected result")
+			}
+			return nil
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "further pull request updates stopped") {
+		t.Fatalf("superseded presentation = %v", err)
+	}
+	if pull := forge.pull(existing.Number); pull.Body != deliveryBody || !pull.Draft {
+		t.Fatalf("pull = %#v, want the first update only and no ready presentation", pull)
+	}
+	if mutations := forge.mutations(); len(mutations) != 0 {
+		t.Fatalf("readiness was changed for superseded inputs: %v", mutations)
+	}
+}
+
+// TestDeliveryPublicationStopsWritesSupersededInFlight covers B4 when newer
+// local work is recorded while a write is in flight: neither a retry of that
+// write nor a retained draft correction is dispatched for the superseded
+// selection, and the supersession is reported instead of success.
+func TestDeliveryPublicationStopsWritesSupersededInFlight(t *testing.T) {
+	for _, scenario := range []struct {
+		name    string
+		pull    deliveryPull
+		arrange func(*deliveryForge)
+		// patches and mutations count the writes the old selection dispatched:
+		// only the one in flight when it was superseded.
+		patches, mutations int
+		report             string
+		draft              bool
+	}{
+		{
+			name:    "failed body update is not retried",
+			pull:    deliveryPull{Body: "old body", Draft: true},
+			arrange: func(f *deliveryForge) { f.transientPatches = 1 },
+			patches: 1, report: "further pull request updates stopped", draft: true,
+		},
+		{
+			name:      "failed ready mutation is not retried",
+			pull:      deliveryPull{Body: deliveryBody, Draft: true},
+			arrange:   func(f *deliveryForge) { f.transientReady = 1 },
+			mutations: 1, report: "further pull request updates stopped", draft: true,
+		},
+		{
+			name: "unconfirmed ready mutation is not corrected",
+			pull: deliveryPull{Body: deliveryBody, Draft: true},
+			arrange: func(f *deliveryForge) {
+				// Reads before the ready mutation succeed; the final
+				// confirmation's bounded reads after it fail; the correction's
+				// inspection read succeeds.
+				failed := 0
+				f.beforePullRead = func(*deliveryPull) {
+					if len(f.draftQueries) > 0 && failed < presentationAttempts {
+						failed++
+						f.transientReads = 1
+					}
+				}
+			},
+			mutations: 1, report: "draft correction was not dispatched because further pull request updates stopped",
+		},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			forge := newDeliveryForge(t)
+			existing := forge.add(scenario.pull)
+			scenario.arrange(forge)
+			var newer atomic.Bool
+			forge.onWrite = func() { newer.Store(true) }
+			server := forge.server()
+			defer server.Close()
+
+			number, err := deliveryBackend(server).PresentPull(context.Background(), ledger.PullPresentation{
+				Number: existing.Number, Body: deliveryBody, Branch: "widget", Head: "aaa", Approved: true,
+				Current: func() error {
+					if newer.Load() {
+						return errors.New("a later local review result supersedes the selected result")
+					}
+					return nil
+				},
+			})
+			if err == nil || number != 0 || !strings.Contains(err.Error(), scenario.report) || !strings.Contains(err.Error(), "supersedes the selected result") {
+				t.Fatalf("superseded presentation = %d, %v; want the supersession reported", number, err)
+			}
+			if patches := forge.count(http.MethodPatch, fmt.Sprintf("/repos/acme/widgets/pulls/%d", existing.Number)); patches != scenario.patches {
+				t.Fatalf("body updates = %d, want %d", patches, scenario.patches)
+			}
+			if mutations := forge.mutations(); len(mutations) != scenario.mutations {
+				t.Fatalf("readiness mutations = %v, want %d", mutations, scenario.mutations)
+			}
+			if pull := forge.pull(existing.Number); pull.Draft != scenario.draft {
+				t.Fatalf("pull = %#v, want draft=%t", pull, scenario.draft)
+			}
+		})
 	}
 }

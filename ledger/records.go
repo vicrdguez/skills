@@ -61,13 +61,12 @@ type PublicationNote struct {
 
 // PublicationState collects the pending-publication facts applicable to one
 // slice. An absent field means no pending fact is known for it. Descriptive
-// issue and parent grouping publication keep no pending facts: only their
-// established attachments are durable.
+// issue and parent grouping publication and pull request presentation keep no
+// pending facts: only their established attachments are durable. Records
+// written before those changes drop their obsolete fields on their next
+// ordinary write.
 type PublicationState struct {
-	Push   *PublicationNote `json:"push,omitempty"`
-	Source *PublicationNote `json:"source,omitempty"`
-	Pull   *PublicationNote `json:"pull,omitempty"`
-	Active *Reference       `json:"active_delivery,omitempty"`
+	Push *PublicationNote `json:"push,omitempty"`
 }
 
 // SliceState is the persisted state.json of one slice. It owns the current
