@@ -299,7 +299,9 @@ func groupChildren(ctx context.Context, store *Store, outcome *Acceptance, forge
 		if slices.Contains(linked, child.Issue.Number) {
 			continue
 		}
-		recordedChild := func() (*ForgeAttachment, error) { return store.recordedIssue(outcome.Project, outcome.Proposal, child.Name) }
+		recordedChild := func() (*ForgeAttachment, error) {
+			return store.recordedIssue(outcome.Project, outcome.Proposal, child.Name)
+		}
 		if err := checkSelection(recordedParent, outcome.ParentIssue, created(outcome.ParentNote)); err != nil {
 			_, child.GroupingStatus = selectionOutcome(err, nil, "group under the current parent")
 			continue
