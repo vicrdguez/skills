@@ -83,7 +83,8 @@ func ShowItem(store *Store, repository github.RepositoryID, item string) (*Readb
 			"choose the correct source repository or repair the ledger Project with human direction",
 		)
 	}
-	directory := filepath.Join(projectsRoot, projectName, "proposals", proposal, slice)
+	proposalDirectory := store.proposalDirectoryAt(head, projectName, proposal)
+	directory := filepath.Join(proposalDirectory, slice)
 	var state SliceState
 	if err := readJSONAt(store, head, filepath.Join(directory, "state.json"), &state); err != nil {
 		return nil, refuse(
@@ -92,9 +93,9 @@ func ShowItem(store *Store, repository github.RepositoryID, item string) (*Readb
 		)
 	}
 	var meta ProposalMeta
-	if err := readJSONAt(store, head, filepath.Join(projectsRoot, projectName, "proposals", proposal, "proposal.json"), &meta); err != nil {
+	if err := readJSONAt(store, head, filepath.Join(proposalDirectory, "proposal.json"), &meta); err != nil {
 		return nil, refuse(
-			"committed record proposals/"+proposal+" has no readable proposal.json at ledger head "+head,
+			"committed record "+proposalDirectory+" has no readable proposal.json at ledger head "+head,
 			"repair or restore the damaged record with human direction",
 		)
 	}
@@ -298,7 +299,8 @@ func acceptedFileNamesAt(store *Store, commit, directory string) ([]string, erro
 }
 
 // readStateByReferenceAt reads a dependency state from the same committed
-// ledger revision as the surrounding readback.
+// ledger revision as the surrounding readback. An archived blocker keeps its
+// identity and recorded lifecycle.
 func (s *Store) readStateByReferenceAt(commit, project, reference string) (string, error) {
 	trimmed := strings.TrimPrefix(reference, "proposals/")
 	proposal, slice, found := strings.Cut(trimmed, "/")
@@ -306,7 +308,7 @@ func (s *Store) readStateByReferenceAt(commit, project, reference string) (strin
 		return "", fmt.Errorf("reference %s is not a Work Item reference", reference)
 	}
 	var state SliceState
-	if err := readJSONAt(s, commit, filepath.Join(projectsRoot, project, "proposals", proposal, slice, "state.json"), &state); err != nil {
+	if err := readJSONAt(s, commit, filepath.Join(s.proposalDirectoryAt(commit, project, proposal), slice, "state.json"), &state); err != nil {
 		return "", err
 	}
 	return state.State, nil

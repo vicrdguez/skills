@@ -228,8 +228,9 @@ func (s *Store) requireBranchOwner(project, item, branch string) error {
 	if err != nil {
 		return err
 	}
-	prefix := filepath.ToSlash(filepath.Join(projectsRoot, project, "proposals"))
-	paths, err := git(s.Root, "ls-tree", "-r", "--name-only", head, "--", prefix)
+	active := filepath.ToSlash(filepath.Join(projectsRoot, project, "proposals"))
+	archived := filepath.ToSlash(filepath.Join(projectsRoot, project, archiveRoot))
+	paths, err := git(s.Root, "ls-tree", "-r", "--name-only", head, "--", active, archived)
 	if err != nil {
 		return err
 	}
@@ -237,8 +238,8 @@ func (s *Store) requireBranchOwner(project, item, branch string) error {
 		if !strings.HasSuffix(path, "/state.json") {
 			continue
 		}
-		other := strings.TrimSuffix(strings.TrimPrefix(path, prefix+"/"), "/state.json")
-		if other == item {
+		other := strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(path, active+"/"), archived+"/"), "/state.json")
+		if strings.HasPrefix(path, active+"/") && other == item {
 			continue
 		}
 		var state SliceState

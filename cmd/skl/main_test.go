@@ -1200,7 +1200,6 @@ func TestProposePacketGuidesLedgerIntake(t *testing.T) {
 		"git rev-parse HEAD",
 		"[baseline]",
 		"skl propose publish",
-		"skl propose cleanup",
 		"create `.worktrees/",
 		"worktree add",
 		"skl implement cleanup",
@@ -1208,6 +1207,10 @@ func TestProposePacketGuidesLedgerIntake(t *testing.T) {
 		if strings.Contains(packet, forbidden) {
 			t.Fatalf("packet retains the retired source-preparation guidance %q", forbidden)
 		}
+	}
+	cleanup, prepare := strings.Index(packet, "skl propose cleanup"), strings.Index(packet, "Prepare one intake directory")
+	if cleanup < 0 || prepare < 0 || cleanup > prepare {
+		t.Fatal("packet does not run cleanup before preparing and accepting new slices")
 	}
 	// Labels are authored locally; no CLI numbering service or mandatory tasks
 	// file exists.
