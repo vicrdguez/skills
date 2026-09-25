@@ -270,6 +270,142 @@ func TestLedgerStatusStaleSelectedClaimAndReportsRefusedWithoutRequeue(t *testin
 	}
 }
 
+// An externally completed item can retain a real acquisition Claim. Release is
+// explicit recovery, not another phase handoff or a return to worker selection.
+func TestLedgerStatusTerminalClaimExplicitRelease(t *testing.T) {
+	for _, tc := range []struct {
+		name, merged, terminal string
+		fullyDelivered         bool
+	}{
+		{"merged", "true", ledger.Merged, true},
+		{"closed unmerged", "false", ledger.Superseded, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := newLedgerFixture(t)
+			root := sourceRepository(t, "acme", "widgets")
+			if accepted := newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", dualSlice("terminal-release"))); accepted.Status != "accepted" {
+				t.Fatalf("accept: %+v", accepted)
+			}
+			item := "terminal-release/foundation"
+			directory := filepath.Join("projects", "widgets", "proposals", "terminal-release", "foundation")
+			statePath := filepath.ToSlash(filepath.Join(directory, "state.json"))
+			reportPath := filepath.ToSlash(filepath.Join(directory, "implement-report.md"))
+			initial := strings.TrimSpace(runGitOutput(t, fixture.clone, "rev-parse", "HEAD"))
+			sourceHead := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "HEAD"))
+			report, err := ledger.FormatReport(ledger.ImplementPhase, ledger.Report{
+				Schema: 1, Outcome: ledger.AwaitingReview,
+				Source: ledger.SourceRevisions{Head: sourceHead, Target: sourceHead},
+				Ledger: ledger.ReportInputs{
+					Claim:    ledger.Reference{Commit: initial, Path: statePath},
+					Contract: []ledger.Reference{{Commit: initial, Path: filepath.ToSlash(filepath.Join(directory, "intent.md"))}},
+				},
+			}, "# Prior implementation\n")
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, filepath.Join(fixture.clone, reportPath), string(report))
+			runGit(t, fixture.clone, "add", reportPath)
+			runGit(t, fixture.clone, "commit", "-q", "-m", "prior report")
+			statusRecord(t, fixture.clone, "terminal-release", "feature", func(state *ledger.SliceState) {
+				state.State = ledger.Merged
+				state.Completion = &ledger.TerminalEvidence{
+					Submission: ledger.ForgeAttachment{Repository: "acme/widgets", Number: 22},
+					Target:     ledger.IntegrationTarget{Repository: "acme/widgets", Branch: "main"},
+				}
+			})
+			store, err := ledger.Open(fixture.clone)
+			if err != nil {
+				t.Fatal(err)
+			}
+			repository := github.RepositoryID{Owner: "acme", Name: "widgets"}
+			execution, err := ledger.StartDeliveryContext(t.Context(), store, repository, ledger.ImplementPhase)
+			if err != nil || execution == nil || execution.Item != item {
+				t.Fatalf("acquire implement Claim: %+v, %v", execution, err)
+			}
+			claim := execution.Claim.Commit
+			older := strings.TrimSpace(runGitOutput(t, fixture.clone, "rev-parse", claim+"^"))
+			attachFixture(t, fixture.clone, "terminal-release")
+			// A later selected phase result may outlive the acquisition. Releasing
+			// a terminal Claim must not need to resume its now-stale phase inputs.
+			latestReport := string(report) + "\nLater evidence remains in place.\n"
+			writeFile(t, filepath.Join(fixture.clone, reportPath), latestReport)
+			runGit(t, fixture.clone, "add", reportPath)
+			runGit(t, fixture.clone, "commit", "-q", "-m", "later report")
+			writeFile(t, filepath.Join(root, "uncommitted-source-progress"), "do not touch\n")
+			sourceBefore := ledgerSnapshot(t, root)
+			calls := 0
+			app, output := completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				if r.Method != http.MethodGet || r.URL.Path != "/repos/acme/widgets/pulls/21" {
+					t.Errorf("unexpected forge request: %s %s", r.Method, r.URL.Path)
+				}
+				_, _ = fmt.Fprint(w, fixturePull("closed", tc.merged, "accepted-head", "merge-head", "acme/widgets", "acme/widgets", "main"))
+			})
+			observed := runCompletionStatus(t, app, output, root)
+			if calls != 1 || len(observed.Proposals) != 1 || len(observed.Items) != 2 || observed.Proposals[0].Retireable || observed.Proposals[0].FullyDelivered != tc.fullyDelivered ||
+				observed.Items[1].Item != item || observed.Items[1].State != tc.terminal || !observed.Items[1].Claimed {
+				t.Fatalf("terminal evidence or retained Claim/parent account: %+v; forge calls %d", observed, calls)
+			}
+			completion := observed.Items[1].Completion
+			if completion == nil || completion.SourceHead != "accepted-head" || (tc.terminal == ledger.Merged && completion.MergeCommit != "merge-head") {
+				t.Fatalf("missing completion evidence: %+v", completion)
+			}
+			cli := newLedgerApp(t, newForgeServer(t))
+			runRelease := func(command, reference string) deliveryOutput {
+				t.Helper()
+				cli.out.Reset()
+				if err := cli.app.Run([]string{"skl", "implement", command, "--repo", root, "--item", item, "--claim", reference, "--format", "json"}); err != nil {
+					t.Fatalf("%s: %v", command, err)
+				}
+				var result deliveryOutput
+				if err := json.Unmarshal(cli.out.Bytes(), &result); err != nil {
+					t.Fatalf("%s response %q: %v", command, cli.out.String(), err)
+				}
+				return result
+			}
+			beforeRefusal := strings.TrimSpace(runGitOutput(t, fixture.clone, "rev-parse", "HEAD"))
+			if result := runRelease("release", older); result.Status != "fix_required" {
+				t.Fatalf("older reference released current Claim: %+v", result)
+			}
+			if result := runRelease("resume", claim); result.Status != "fix_required" {
+				t.Fatalf("terminal work resumed: %+v", result)
+			}
+			if result, err := ledger.HandoffDelivery(store, repository, item, ledger.ImplementPhase, claim,
+				ledger.SourceRevisions{Head: sourceHead, Target: sourceHead}, ledger.AwaitingReview, "stale handoff"); err == nil {
+				t.Fatalf("terminal work accepted a stale handoff: %+v", result)
+			}
+			if got := strings.TrimSpace(runGitOutput(t, fixture.clone, "rev-parse", "HEAD")); got != beforeRefusal {
+				t.Fatal("refused operations mutated the ledger")
+			}
+			if result := runRelease("release", claim); result.Status != "released" {
+				t.Fatalf("exact terminal reservation was not released: %+v", result)
+			}
+			after := runCompletionStatus(t, app, output, root)
+			if len(after.Proposals) != 1 || len(after.Items) != 2 || !after.Proposals[0].Retireable || after.Proposals[0].FullyDelivered != tc.fullyDelivered ||
+				after.Items[1].Item != item || after.Items[1].State != tc.terminal || after.Items[1].Claimed || after.Items[1].Completion == nil || *after.Items[1].Completion != *completion || calls != 1 {
+				t.Fatalf("release changed terminal evidence or parent account: %+v; forge calls %d", after, calls)
+			}
+			if got := readLedgerFile(t, fixture.clone, reportPath); got != latestReport {
+				t.Fatalf("release changed later phase report: %q", got)
+			}
+			if ledgerSnapshot(t, root) != sourceBefore {
+				t.Fatal("release changed source progress")
+			}
+			if result := runRelease("release", claim); result.Status != "fix_required" {
+				t.Fatalf("old Claim released twice: %+v", result)
+			}
+			if result := runRelease("resume", claim); result.Status != "fix_required" {
+				t.Fatalf("released terminal work resumed: %+v", result)
+			}
+			selection := newLedgerApp(t, newForgeServer(t))
+			selection.out.Reset()
+			if err := selection.app.Run([]string{"skl", "implement", "next", "--repo", root, "--format", "json"}); err != nil || !strings.Contains(selection.out.String(), `"no_work"`) {
+				t.Fatalf("terminal work returned to queue: %v %s", err, selection.out.String())
+			}
+		})
+	}
+}
+
 func TestLedgerStatusUnrelatedCommitAndReplicationFailure(t *testing.T) {
 	fixture := newLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
