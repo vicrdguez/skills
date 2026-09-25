@@ -26,10 +26,10 @@ Expose current and historical implementation/Watchdog reports through `skl`, wit
 
 Source-carrier checkboxes below are endpoint verification only, not changes to accepted target Contracts or report contents.
 
-- [ ] Humans and agents can discover and retrieve current implementation/review reports for a selected Work Item, independently of Claim, lifecycle, and forge availability (B1, A1).
-- [ ] Earlier rounds and exact historical versions remain accessible through existing Git/reference evidence, with honest errors and no silent substitution (B2, A2).
-- [ ] Read operations preserve authored report bytes and all workflow/ledger state without a parallel report/finding store or new mandatory review gate (B3, A1-A2).
-- [ ] Existing Go/public-CLI/real-Git tests establish current/history selection, privacy, immutability, and failure behavior; the Full Gate passes (A3).
+- [x] Humans and agents can discover and retrieve current implementation/review reports for a selected Work Item, independently of Claim, lifecycle, and forge availability (B1, A1).
+- [x] Earlier rounds and exact historical versions remain accessible through existing Git/reference evidence, with honest errors and no silent substitution (B2, A2).
+- [x] Read operations preserve authored report bytes and all workflow/ledger state without a parallel report/finding store or new mandatory review gate (B3, A1-A2).
+- [x] Existing Go/public-CLI/real-Git tests establish current/history selection, privacy, immutability, and failure behavior; the Full Gate passes (A3).
 
 ## Manual verification
 
