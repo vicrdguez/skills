@@ -67,6 +67,9 @@ func cleanupCommand(newBackend backendFactory, stdout io.Writer) *cli.Command {
 			if err != nil {
 				return err
 			}
+			if format == formatJSON {
+				return renderCleanup(stdout, format, cleanupOutcome{Status: cleanupStatus(false, len(outcome.Removed) > 0), Source: &outcome})
+			}
 			for _, slug := range outcome.Removed {
 				fmt.Fprintln(stdout, "removed", slug)
 			}
@@ -103,16 +106,22 @@ func ledgerCleanup(command *cli.Context, store *ledger.Store, repository setup.R
 	if err != nil {
 		outcome.SourceRepair = cleanupRepair(err)
 	}
-	switch {
-	case outcome.ArchiveRepair != nil || outcome.SourceRepair != nil ||
-		archive != nil && len(archive.Repairs) > 0 || outcome.Source != nil && len(outcome.Source.Failed) > 0:
-		outcome.Status = "fix_required"
-	case archive != nil && len(archive.Archived) > 0 || outcome.Source != nil && len(outcome.Source.Removed) > 0:
-		outcome.Status = "completed"
-	default:
-		outcome.Status = "no_work"
-	}
+	needsRepair := outcome.ArchiveRepair != nil || outcome.SourceRepair != nil ||
+		(archive != nil && len(archive.Repairs) > 0) || (outcome.Source != nil && len(outcome.Source.Failed) > 0)
+	archived := archive != nil && len(archive.Archived) > 0
+	outcome.Status = cleanupStatus(needsRepair, archived || (outcome.Source != nil && len(outcome.Source.Removed) > 0))
 	return outcome
+}
+
+// cleanupStatus never lets completed work hide a repair or failed removal.
+func cleanupStatus(needsRepair, didWork bool) string {
+	switch {
+	case needsRepair:
+		return "fix_required"
+	case didWork:
+		return "completed"
+	}
+	return "no_work"
 }
 
 func cleanupRepair(err error) *ledgerOutcome {

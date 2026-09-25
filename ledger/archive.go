@@ -27,9 +27,9 @@ type ArchivedProposal struct {
 	Resumed bool `json:"resumed_interrupted_move,omitempty"`
 }
 
-// KeptProposal is one Proposal left in the active proposals directory,
-// either because it is not archivable yet or because moving it needs repair.
-type KeptProposal struct {
+// ProposalOutcome explains why one Proposal stays in the active proposals
+// directory: it is not archivable yet (Kept) or moving it needs repair.
+type ProposalOutcome struct {
 	Proposal string `json:"proposal"`
 	Reason   string `json:"reason"`
 	Repair   string `json:"repair,omitempty"`
@@ -39,8 +39,8 @@ type KeptProposal struct {
 // and the attempted replication of the local archive commits.
 type ArchiveResult struct {
 	Archived    []ArchivedProposal `json:"archived,omitempty"`
-	Kept        []KeptProposal     `json:"kept,omitempty"`
-	Repairs     []KeptProposal     `json:"repairs,omitempty"`
+	Kept        []ProposalOutcome  `json:"kept,omitempty"`
+	Repairs     []ProposalOutcome  `json:"repairs,omitempty"`
 	Replication *PublicationNote   `json:"replication,omitempty"`
 }
 
@@ -77,7 +77,7 @@ func ArchiveTerminalProposals(ctx context.Context, s *Store, repository github.R
 				return err
 			}
 			if reason != "" {
-				result.Kept = append(result.Kept, KeptProposal{Proposal: proposal, Reason: reason})
+				result.Kept = append(result.Kept, ProposalOutcome{Proposal: proposal, Reason: reason})
 				continue
 			}
 			archived, repair := s.moveProposal(head, repository.Name, proposal, full)
@@ -168,11 +168,11 @@ func (s *Store) archivable(head, project, proposal string) (bool, string, error)
 // the rename. A committed or uncommitted distinct destination is never
 // overwritten, and an unexplained partial tree is never swept into success.
 // A failed commit restores the original location so the Proposal stays whole.
-func (s *Store) moveProposal(head, project, proposal string, full bool) (*ArchivedProposal, *KeptProposal) {
+func (s *Store) moveProposal(head, project, proposal string, full bool) (*ArchivedProposal, *ProposalOutcome) {
 	source := filepath.ToSlash(filepath.Join(projectsRoot, project, "proposals", proposal))
 	destination := filepath.ToSlash(filepath.Join(projectsRoot, project, archiveRoot, proposal))
-	keep := func(reason, repair string) (*ArchivedProposal, *KeptProposal) {
-		return nil, &KeptProposal{Proposal: proposal, Reason: reason, Repair: repair}
+	keep := func(reason, repair string) (*ArchivedProposal, *ProposalOutcome) {
+		return nil, &ProposalOutcome{Proposal: proposal, Reason: reason, Repair: repair}
 	}
 	if gitOK(s.Root, "cat-file", "-e", head+":"+destination) {
 		return keep("archive destination "+destination+" already holds a committed record",
@@ -236,7 +236,7 @@ func (s *Store) matchesCommittedTree(head, source, destination string) (bool, er
 		if !found || len(fields) != 3 {
 			return false, errors.New("unexpected ls-tree output")
 		}
-		committed[path] = fields[2]
+		committed[path] = fields[0] + " " + fields[2]
 	}
 	root := filepath.Join(s.Root, destination)
 	seen := 0
@@ -244,12 +244,24 @@ func (s *Store) matchesCommittedTree(head, source, destination string) (bool, er
 		if err != nil || entry.IsDir() {
 			return err
 		}
+		// Only regular files can match; a symlink or mode change is a different record.
+		if !entry.Type().IsRegular() {
+			return errors.New("differs")
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		mode := "100644"
+		if info.Mode()&0o111 != 0 {
+			mode = "100755"
+		}
 		relative, err := filepath.Rel(root, path)
 		if err != nil {
 			return err
 		}
 		blob, err := git(s.Root, "hash-object", "--", path)
-		if err != nil || committed[filepath.ToSlash(relative)] != blob {
+		if err != nil || committed[filepath.ToSlash(relative)] != mode+" "+blob {
 			return errors.New("differs")
 		}
 		seen++
@@ -307,6 +319,7 @@ func TerminalSourceWork(s *Store, repository github.RepositoryID) ([]SourceWork,
 	}
 	var records []SourceWork
 	owners := make(map[string]int)
+	unreadable := false
 	for _, location := range []string{"proposals", archiveRoot} {
 		prefix := filepath.ToSlash(filepath.Join(projectsRoot, repository.Name, location))
 		paths, err := git(s.Root, "ls-tree", "-r", "--name-only", head, "--", prefix)
@@ -320,7 +333,9 @@ func TerminalSourceWork(s *Store, repository github.RepositoryID) ([]SourceWork,
 			}
 			var state SliceState
 			if err := readJSONAt(s, head, path, &state); err != nil {
-				continue // unreadable records authorize nothing
+				// An unreadable record authorizes nothing and may own any branch.
+				unreadable = true
+				continue
 			}
 			owners[state.Branch]++
 			if state.State != Merged && state.State != Superseded {
@@ -345,10 +360,18 @@ func TerminalSourceWork(s *Store, repository github.RepositoryID) ([]SourceWork,
 		}
 	}
 	for index := range records {
-		if owners[records[index].Branch] > 1 && records[index].Hold == "" {
-			records[index].AcceptedHead = ""
-			records[index].Hold = "more than one Work Item records branch " + records[index].Branch
+		if records[index].Hold != "" {
+			continue
 		}
+		switch {
+		case unreadable:
+			records[index].Hold = "an unreadable Work Item record could own branch " + records[index].Branch
+		case owners[records[index].Branch] > 1:
+			records[index].Hold = "more than one Work Item records branch " + records[index].Branch
+		default:
+			continue
+		}
+		records[index].AcceptedHead = ""
 	}
 	return records, nil
 }

@@ -1208,8 +1208,8 @@ func TestProposePacketGuidesLedgerIntake(t *testing.T) {
 			t.Fatalf("packet retains the retired source-preparation guidance %q", forbidden)
 		}
 	}
-	cleanup, accept := strings.Index(packet, "skl propose cleanup"), strings.Index(packet, "skl ledger accept")
-	if cleanup < 0 || cleanup > accept {
+	cleanup, prepare := strings.Index(packet, "skl propose cleanup"), strings.Index(packet, "Prepare one intake directory")
+	if cleanup < 0 || prepare < 0 || cleanup > prepare {
 		t.Fatal("packet does not run cleanup before preparing and accepting new slices")
 	}
 	// Labels are authored locally; no CLI numbering service or mandatory tasks

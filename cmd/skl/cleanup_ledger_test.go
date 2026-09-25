@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/vicrdguez/skills/ledger"
 )
@@ -268,7 +270,7 @@ func TestCleanupArchiveFailuresKeepOneCompleteProposal(t *testing.T) {
 	fixture := newLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	accepting := newLedgerApp(t, newForgeServer(t))
-	for _, name := range []string{"collide", "hooked", "interrupted", "partial", "dirty"} {
+	for _, name := range []string{"collide", "hooked", "interrupted", "partial", "moded", "dirty"} {
 		if outcome := accepting.accept(t, root, writeProposal(t, "", cleanupSpec(name, "only"))); outcome.Status != "accepted" {
 			t.Fatalf("accept %s: %s", name, mustJSON(t, outcome))
 		}
@@ -282,7 +284,7 @@ func TestCleanupArchiveFailuresKeepOneCompleteProposal(t *testing.T) {
 	runGit(t, fixture.clone, "commit", "-q", "-m", "distinct archive")
 	original := ledgerHead(t, fixture.clone)
 	trees := map[string]string{}
-	for _, name := range []string{"collide", "hooked", "interrupted", "partial", "dirty"} {
+	for _, name := range []string{"collide", "hooked", "interrupted", "partial", "moded", "dirty"} {
 		trees[name] = ledgerTree(t, fixture.clone, original, active(name))
 	}
 	// An interrupted run moved a directory without committing it.
@@ -294,6 +296,11 @@ func TestCleanupArchiveFailuresKeepOneCompleteProposal(t *testing.T) {
 	}
 	// This partial tree no longer matches its committed record.
 	interrupt("partial")
+	// Same bytes, but a changed mode is not the committed record either.
+	interrupt("moded")
+	if err := os.Chmod(filepath.Join(fixture.clone, archived("moded"), "only", "intent.md"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Remove(filepath.Join(fixture.clone, archived("partial"), "only", "intent.md")); err != nil {
 		t.Fatal(err)
 	}
@@ -311,10 +318,10 @@ func TestCleanupArchiveFailuresKeepOneCompleteProposal(t *testing.T) {
 	for _, repair := range failed.Archive.Repairs {
 		repairs[repair.Proposal] = repair.Reason
 	}
-	if failed.Status != "fix_required" || len(failed.Archive.Archived) != 0 || len(repairs) != 5 || ledgerHead(t, fixture.clone) != original {
+	if failed.Status != "fix_required" || len(failed.Archive.Archived) != 0 || len(repairs) != 6 || ledgerHead(t, fixture.clone) != original {
 		t.Fatalf("a failed move reported success or committed: %s", mustJSON(t, failed))
 	}
-	if !strings.Contains(repairs["collide"], "committed record") || !strings.Contains(repairs["hooked"], "commit failed") || !strings.Contains(repairs["interrupted"], "commit failed") || !strings.Contains(repairs["partial"], "does not match") || !strings.Contains(repairs["dirty"], "uncommitted") {
+	if !strings.Contains(repairs["collide"], "committed record") || !strings.Contains(repairs["hooked"], "commit failed") || !strings.Contains(repairs["interrupted"], "commit failed") || !strings.Contains(repairs["partial"], "does not match") || !strings.Contains(repairs["moded"], "does not match") || !strings.Contains(repairs["dirty"], "uncommitted") {
 		t.Fatalf("repair reasons: %v", repairs)
 	}
 	if got := strings.TrimSpace(runGitOutput(t, fixture.clone, "status", "--porcelain", "--", active("hooked"), archived("hooked"))); got != "" {
@@ -457,9 +464,25 @@ func TestLedgerCleanupRemovesOnlySafeMergedSourceWork(t *testing.T) {
 	// Releasing the terminal Claim makes the proposal archivable even though
 	// its dirty worktree stays preserved and a removal still fails.
 	statusRecord(t, fixture.clone, "done", "claimed", func(state *ledger.SliceState) { state.Claim = nil })
-	second := runCleanup(t, cli, root)
-	if len(second.Archive.Archived) != 1 || second.Archive.Archived[0].FullyDelivered || len(second.Source.Failed) != 1 || second.Status != "fix_required" {
-		t.Fatalf("archival not independent of source outcomes: %s", mustJSON(t, second))
+	// The default Markdown transport, which Propose reads, keeps every
+	// outcome visible and distinct.
+	cli.out.Reset()
+	if err := cli.app.Run([]string{"skl", "propose", "cleanup", "--repo", root}); err != nil {
+		t.Fatal(err)
+	}
+	second := cli.out.String()
+	for _, want := range []string{
+		"Status: fix_required\n",
+		"Archived proposal: done (retired without full delivery) at ",
+		"Ledger replication: pushed\n",
+		"Kept active proposal: active: active slices: pending (ready_for_merge)\n",
+		"Removed local source work: done-claimed\n",
+		"Preserved local source work: done-dirty: ",
+		"Source removal failed: done-locked: worktree removal failed",
+	} {
+		if !strings.Contains(second, want) {
+			t.Fatalf("Markdown cleanup lacks %q:\n%s", want, second)
+		}
 	}
 	if !exists(t, fixture.clone, "projects/widgets/archive/done/locked/state.json") || !exists(t, root, ".worktrees/done-dirty/local.txt") {
 		t.Fatal("archive or preserved source missing")
@@ -488,5 +511,72 @@ func TestCompletionObservationDoesNotArchive(t *testing.T) {
 	}
 	if !exists(t, fixture.clone, "projects/widgets/proposals/observed/foundation/state.json") || exists(t, fixture.clone, "projects/widgets/archive") {
 		t.Fatal("completion observation archived the proposal without explicit cleanup")
+	}
+}
+
+func TestCleanupDoesNotArchiveFromAStaleSnapshot(t *testing.T) {
+	fixture := newLedgerFixture(t)
+	root := sourceRepository(t, "acme", "widgets")
+	newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", cleanupSpec("raced", "only")))
+	statusRecord(t, fixture.clone, "raced", "only", merged(""))
+	// Hold the ledger mutation lock so cleanup must wait for it, then record a
+	// Claim a stale pre-lock read could not have seen.
+	gitDirectory := strings.TrimSpace(runGitOutput(t, fixture.clone, "rev-parse", "--absolute-git-dir"))
+	lock, err := os.OpenFile(filepath.Join(gitDirectory, "skl-ledger.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+	cli := offlineForge(t)
+	done := make(chan error, 1)
+	go func() { done <- cli.app.Run([]string{"skl", "propose", "cleanup", "--repo", root, "--format", "json"}) }()
+	time.Sleep(500 * time.Millisecond)
+	select {
+	case err := <-done:
+		t.Fatalf("cleanup finished without waiting for the ledger lock: %v %s", err, cli.out.String())
+	default:
+	}
+	statusRecord(t, fixture.clone, "raced", "only", func(state *ledger.SliceState) {
+		state.Claim = &ledger.Claim{Phase: ledger.ImplementPhase, Basis: cleanupMergeCommit}
+	})
+	claimed := ledgerHead(t, fixture.clone)
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	var outcome cleanupOutcome
+	if err := json.Unmarshal(cli.out.Bytes(), &outcome); err != nil {
+		t.Fatalf("cleanup response %q: %v", cli.out.String(), err)
+	}
+	if len(outcome.Archive.Archived) != 0 || len(outcome.Archive.Kept) != 1 || !strings.Contains(outcome.Archive.Kept[0].Reason, "claimed") || ledgerHead(t, fixture.clone) != claimed || exists(t, fixture.clone, "projects/widgets/archive") {
+		t.Fatalf("cleanup archived from a stale snapshot: %s", mustJSON(t, outcome))
+	}
+}
+
+func TestUnreadableRecordWithholdsSourceDeletion(t *testing.T) {
+	fixture := newLedgerFixture(t)
+	root := sourceRepository(t, "acme", "widgets")
+	accepting := newLedgerApp(t, newForgeServer(t))
+	for _, name := range []string{"safe", "damaged"} {
+		accepting.accept(t, root, writeProposal(t, "", cleanupSpec(name, "only")))
+	}
+	head := cleanupWorktree(t, root, "safe-only")
+	statusRecord(t, fixture.clone, "safe", "only", merged(head))
+	// The damaged record's owner is unknowable, so it could own safe-only.
+	damaged := "projects/widgets/proposals/damaged/only/state.json"
+	writeFile(t, filepath.Join(fixture.clone, damaged), "{not json\n")
+	runGit(t, fixture.clone, "commit", "-qam", "damage a record")
+
+	outcome := runCleanup(t, offlineForge(t), root)
+	if outcome.Source == nil || len(outcome.Source.Removed) != 0 || len(outcome.Source.Preserved) != 1 || !strings.Contains(outcome.Source.Preserved[0].Reason, "unreadable") {
+		t.Fatalf("an unreadable record did not withhold deletion: %s", mustJSON(t, outcome))
+	}
+	if !gitRefExists(root, "refs/heads/safe-only") || !exists(t, root, ".worktrees/safe-only") {
+		t.Fatal("source work removed despite unknown ownership")
 	}
 }
