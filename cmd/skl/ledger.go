@@ -21,14 +21,15 @@ import (
 // established status, an actionable reason for refusals, and the typed
 // payload. Markdown and JSON convey the same facts.
 type ledgerOutcome struct {
-	Status      string                   `json:"status"`
-	Reason      string                   `json:"reason,omitempty"`
-	Repair      string                   `json:"repair,omitempty"`
-	Acceptance  *ledger.Acceptance       `json:"acceptance,omitempty"`
-	Publication *ledger.Acceptance       `json:"publication,omitempty"`
-	Authoring   *proseAuthoring          `json:"authoring,omitempty"`
-	Readback    *ledger.Readback         `json:"readback,omitempty"`
-	Document    *ledger.ContractDocument `json:"document,omitempty"`
+	Status          string                   `json:"status"`
+	Reason          string                   `json:"reason,omitempty"`
+	Repair          string                   `json:"repair,omitempty"`
+	Acceptance      *ledger.Acceptance       `json:"acceptance,omitempty"`
+	Publication     *ledger.Acceptance       `json:"publication,omitempty"`
+	Authoring       *proseAuthoring          `json:"authoring,omitempty"`
+	Readback        *ledger.Readback         `json:"readback,omitempty"`
+	Document        *ledger.ContractDocument `json:"document,omitempty"`
+	ReadbackCommand string                   `json:"readback_command,omitempty"`
 }
 
 // proseAuthoring tells the caller how to author fresh public prose when a
@@ -167,13 +168,14 @@ func ledgerCommands(newBackend backendFactory, stdout io.Writer) *cli.Command {
 			},
 		}, {
 			Name:  "show",
-			Usage: "Read back accepted Contracts from the local Workflow Ledger",
+			Usage: "Read accepted Contracts or inspect current and exact historical phase reports",
 			Flags: []cli.Flag{
-				&cli.PathFlag{Name: "repo", Value: "."},
+				&cli.PathFlag{Name: "repo", Value: ".", Usage: "Source repository whose Work Item to read"},
 				&cli.StringFlag{Name: "remote"},
-				&cli.StringFlag{Name: "item"},
-				&cli.StringFlag{Name: "commit"},
-				&cli.StringFlag{Name: "path"},
+				&cli.StringFlag{Name: "item", Usage: "Accepted Work Item identity (<proposal>/<slice>)"},
+				&cli.StringFlag{Name: "phase", Usage: "Current report phase (implement or watchdog); requires --item"},
+				&cli.StringFlag{Name: "commit", Usage: "Full ledger commit for exact document retrieval"},
+				&cli.StringFlag{Name: "path", Usage: "Ledger-relative document path at --commit"},
 				implementationFormatFlag(),
 			},
 			Action: func(command *cli.Context) error {
@@ -184,10 +186,16 @@ func ledgerCommands(newBackend backendFactory, stdout io.Writer) *cli.Command {
 				if command.NArg() != 0 {
 					return fmt.Errorf("ledger show takes flags, not arguments")
 				}
-				item, commit, path := command.String("item"), command.String("commit"), command.String("path")
+				item, phase, commit, path := command.String("item"), command.String("phase"), command.String("commit"), command.String("path")
 				explicit := commit != "" || path != ""
 				if item != "" && explicit {
-					return renderLedgerRefusal(stdout, format, errors.New("ledger show takes either --item or an exact --commit with --path, not both; choose one identity source"))
+					return renderLedgerRefusal(stdout, format, errors.New("ledger show takes either --item or an exact --commit with --path, not both; current --phase selection is available only with --item"))
+				}
+				if phase != "" && (item == "" || explicit) {
+					return renderLedgerRefusal(stdout, format, errors.New("ledger show --phase is available only alongside --item; use --commit with --path to retrieve an exact historical document"))
+				}
+				if phase != "" && phase != ledger.ImplementPhase && phase != ledger.WatchdogPhase {
+					return renderLedgerRefusal(stdout, format, errors.New("ledger show --phase must be implement or watchdog; omit --phase to inspect availability, or use --commit with --path for an exact historical document"))
 				}
 				if item == "" && (!explicit || commit == "" || path == "") {
 					return renderLedgerRefusal(stdout, format, errors.New("ledger show requires --item <proposal>/<slice> or an exact --commit with --path; use the identity and readback command the acceptance reported"))
@@ -201,11 +209,22 @@ func ledgerCommands(newBackend backendFactory, stdout io.Writer) *cli.Command {
 					if err != nil {
 						return renderLedgerRefusal(stdout, format, err)
 					}
+					if phase != "" {
+						document, err := ledger.ShowReport(store, repository.Repository, item, phase)
+						if err != nil {
+							return renderLedgerRefusal(stdout, format, err)
+						}
+						return renderLedgerOutcome(stdout, format, ledgerOutcome{Status: "shown", Document: &document})
+					}
 					readback, err := ledger.ShowItem(store, repository.Repository, item)
 					if err != nil {
 						return renderLedgerRefusal(stdout, format, err)
 					}
-					return renderLedgerOutcome(stdout, format, ledgerOutcome{Status: "shown", Readback: readback})
+					return renderLedgerOutcome(stdout, format, ledgerOutcome{
+						Status: "shown", Readback: readback,
+						ReadbackCommand: fmt.Sprintf("skl ledger show --repo %s --remote %s --item %s",
+							skilldist.ShellQuote(repository.Root), skilldist.ShellQuote(repository.Remote), skilldist.ShellQuote(item)),
+					})
 				}
 				document, err := ledger.ShowReference(store, commit, path)
 				if err != nil {
@@ -353,6 +372,20 @@ func ledgerMarkdown(outcome ledgerOutcome) string {
 				line("Pending push: %s: %s", pending.Push.Status, pending.Push.Detail)
 			}
 		}
+		if len(readback.Reports) != 0 {
+			line("Reports:")
+			for _, availability := range readback.Reports {
+				if availability.Reference == nil {
+					line("- %s: absent", availability.Phase)
+					continue
+				}
+				reference := availability.Reference
+				line("- %s: available at %s:%s", availability.Phase, reference.Commit, reference.Path)
+				line("  Current retrieval: %s --phase %s", outcome.ReadbackCommand, availability.Phase)
+				line("  Exact retrieval: skl ledger show --commit %s --path %s", reference.Commit, reference.Path)
+			}
+			line("To inspect earlier rounds, follow ledger input references in the report's original frontmatter and retrieve each exact document with skl ledger show --commit <ledger-commit> --path <ledger-path>. Source references identify source revisions, not ledger documents.")
+		}
 		for _, document := range readback.Documents {
 			line("")
 			line("## %s at %s", document.Path, document.Commit)
@@ -361,9 +394,8 @@ func ledgerMarkdown(outcome ledgerOutcome) string {
 		}
 	}
 	if document := outcome.Document; document != nil {
-		line("Document: %s at %s", document.Path, document.Commit)
-		line("")
-		line("%s", strings.TrimRight(document.Contents, "\n"))
+		fmt.Fprintf(&report, "Document: %s at %s\n\n", document.Path, document.Commit)
+		report.WriteString(document.Contents)
 	}
 	return report.String()
 }

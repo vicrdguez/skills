@@ -23,19 +23,27 @@ type ContractDocument struct {
 // Readback is the complete readback of one accepted slice: its recorded
 // facts and the exact bytes of every accepted document.
 type Readback struct {
-	Project      string             `json:"project"`
-	Repository   string             `json:"repository"`
-	Proposal     string             `json:"proposal"`
-	Slice        string             `json:"slice"`
-	Item         string             `json:"item"`
-	State        string             `json:"state"`
-	Title        string             `json:"title"`
-	Branch       string             `json:"branch"`
-	Dependencies []DependencyState  `json:"dependencies"`
-	Issue        *ForgeAttachment   `json:"issue,omitempty"`
-	ParentIssue  *ForgeAttachment   `json:"parent_issue,omitempty"`
-	Pending      *PublicationState  `json:"pending_publication,omitempty"`
-	Documents    []ContractDocument `json:"documents"`
+	Project      string               `json:"project"`
+	Repository   string               `json:"repository"`
+	Proposal     string               `json:"proposal"`
+	Slice        string               `json:"slice"`
+	Item         string               `json:"item"`
+	State        string               `json:"state"`
+	Title        string               `json:"title"`
+	Branch       string               `json:"branch"`
+	Dependencies []DependencyState    `json:"dependencies"`
+	Issue        *ForgeAttachment     `json:"issue,omitempty"`
+	ParentIssue  *ForgeAttachment     `json:"parent_issue,omitempty"`
+	Pending      *PublicationState    `json:"pending_publication,omitempty"`
+	Documents    []ContractDocument   `json:"documents"`
+	Reports      []ReportAvailability `json:"reports"`
+}
+
+// ReportAvailability identifies one phase's current committed report. A nil
+// Reference means the report file is absent from the selected ledger head.
+type ReportAvailability struct {
+	Phase     string     `json:"phase"`
+	Reference *Reference `json:"reference,omitempty"`
 }
 
 // DependencyState is one recorded dependency with the blocker's currently
@@ -137,6 +145,10 @@ func ShowItem(store *Store, repository github.RepositoryID, item string) (*Readb
 			"repair or restore the complete accepted record with human direction",
 		)
 	}
+	readback.Reports, err = currentReportAvailabilityAt(store, head, directory)
+	if err != nil {
+		return nil, err
+	}
 	return readback, nil
 }
 
@@ -171,6 +183,72 @@ func ShowReference(store *Store, commit, path string) (ContractDocument, error) 
 		)
 	}
 	return ContractDocument{Path: path, Commit: commit, Contents: contents}, nil
+}
+
+// ShowReport returns the complete current phase report from the committed
+// ledger head, without parsing its contents or requiring a Claim or lifecycle
+// state. The returned identity is the exact commit/path read.
+func ShowReport(store *Store, repository github.RepositoryID, item, phase string) (ContractDocument, error) {
+	if err := validatePhase(phase); err != nil {
+		return ContractDocument{}, err
+	}
+	_, directory, head, err := store.deliveryState(repository, item)
+	if err != nil {
+		return ContractDocument{}, err
+	}
+	path := filepath.ToSlash(filepath.Join(directory, phase+"-report.md"))
+	present, err := committedPathAt(store, head, path)
+	if err != nil {
+		return ContractDocument{}, refuse(
+			"cannot determine whether report reference "+head+":"+path+" is committed: "+err.Error(),
+			"repair or restore the selected ledger record before inspecting its reports",
+		)
+	}
+	if !present {
+		return ContractDocument{}, refuse(
+			"no committed "+phase+" report exists at "+head+":"+path,
+			"restore that report or supply an exact historical reference with `skl ledger show --commit <ledger-commit> --path <ledger-path>`",
+		)
+	}
+	return ShowReference(store, head, path)
+}
+
+// currentReportAvailabilityAt resolves both phase paths against one pinned
+// ledger head. A failed tree lookup is an error, not evidence of absence.
+func currentReportAvailabilityAt(store *Store, head, directory string) ([]ReportAvailability, error) {
+	reports := make([]ReportAvailability, 0, 2)
+	for _, phase := range []string{ImplementPhase, WatchdogPhase} {
+		path := filepath.ToSlash(filepath.Join(directory, phase+"-report.md"))
+		present, err := committedPathAt(store, head, path)
+		if err != nil {
+			return nil, refuse(
+				"cannot determine whether report reference "+head+":"+path+" is committed: "+err.Error(),
+				"repair or restore the selected ledger record before inspecting its reports",
+			)
+		}
+		availability := ReportAvailability{Phase: phase}
+		if present {
+			availability.Reference = &Reference{Commit: head, Path: path}
+		}
+		reports = append(reports, availability)
+	}
+	return reports, nil
+}
+
+// committedPathAt checks one path against a committed tree. An empty ls-tree
+// result means absent; Git errors remain errors rather than being collapsed
+// into absence.
+func committedPathAt(store *Store, commit, path string) (bool, error) {
+	contents, err := git(store.Root, "ls-tree", "-r", "--full-tree", "--name-only", commit, "--", path)
+	if err != nil {
+		return false, gitError(store.Root, []string{"ls-tree", "-r", "--full-tree", "--name-only", commit, "--", path}, err)
+	}
+	for _, candidate := range strings.Split(contents, "\n") {
+		if candidate == path {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // showPath reads one path at one exact revision, preserving bytes and
