@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/workflow"
@@ -595,5 +596,34 @@ func TestGitHubIssuePublicationRetriesOnlyRepeatableRequests(t *testing.T) {
 	var unknown interface{ UnknownOutcome() bool }
 	if !errors.As(err, &unknown) || !unknown.UnknownOutcome() || attempts["POST /repos/acme/widgets/issues"] != 2 {
 		t.Fatalf("uncertain create was not reported once as an unknown outcome: %v %v", err, attempts)
+	}
+}
+
+func TestGitHubIssuePublicationBoundsUnansweredRequests(t *testing.T) {
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	defer server.Close()
+	defer close(release)
+	backend := boundGitHubBackend(NewGitHubBackend(server.URL, "secret", server.Client()))
+	backend.timeout, backend.retryDelay = 50*time.Millisecond, 0
+	ctx := context.Background()
+
+	started := time.Now()
+	_, err := backend.CreateIssue(ctx, "Title", "prose\n")
+	var unknown interface{ UnknownOutcome() bool }
+	if !errors.As(err, &unknown) || !unknown.UnknownOutcome() {
+		t.Fatalf("unanswered create was not an unknown outcome: %v", err)
+	}
+	if err := backend.UpdateIssue(ctx, 8, "Title", "prose\n"); err == nil {
+		t.Fatal("unanswered update reported success")
+	}
+	// One create plus a bounded number of update attempts, each timing out.
+	if elapsed := time.Since(started); elapsed > time.Duration(1+requestAttempts)*50*time.Millisecond+2*time.Second {
+		t.Fatalf("unanswered requests were not bounded: %v", elapsed)
 	}
 }

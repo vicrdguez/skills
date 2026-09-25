@@ -314,7 +314,7 @@ func ledgerMarkdown(outcome ledgerOutcome) string {
 	}
 	if publication := outcome.Publication; publication != nil {
 		presentationMarkdown(line, publication)
-		line("The local records are authoritative and unchanged by this attempt; a later `skl ledger publish` presents the then-current view.")
+		line("The local records are authoritative: this attempt recorded only established attachments and ledger replication facts, and a later `skl ledger publish` presents the then-current view.")
 	}
 	if authoring := outcome.Authoring; authoring != nil {
 		line("Author fresh public prose from current private evidence:")

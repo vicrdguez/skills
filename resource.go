@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/urfave/cli/v2"
+	"github.com/vicrdguez/skills/ledger"
 )
 
 const resultDirectoryUsage = "Absolute path of the private Result Document directory this invocation created."
@@ -147,7 +148,7 @@ func resourceSpecFor(resource string) resourceSpec {
 			{flag: &cli.StringFlag{Name: "proposal", Required: true, Usage: "Accepted proposal whose issue presentation is published.", Destination: &data.Proposal}},
 			{flag: &cli.StringFlag{Name: "repo", Required: true, Usage: "Absolute path of the source repository root.", Destination: &data.Repo}},
 		}, validate: func(resource string) error {
-			if strings.TrimSpace(data.Proposal) == "" || strings.ContainsAny(data.Proposal, "/ \t\n") {
+			if !ledger.ValidRecordName(data.Proposal) {
 				return fmt.Errorf("invalid input %q for resource %q: want the accepted proposal name", "proposal", resource)
 			}
 			if !filepath.IsAbs(data.Repo) {

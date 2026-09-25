@@ -84,7 +84,7 @@ func Publish(ctx context.Context, store *Store, outcome *Acceptance, prose Issue
 	if err != nil {
 		outcome.BookkeepingStatus = &PublicationNote{
 			Status: IssueFailed,
-			Detail: "publication bookkeeping was not written: " + err.Error() + "; established forge objects stay unrecorded until a later publication records an observed attachment",
+			Detail: "publication bookkeeping was not written: " + err.Error() + "; any forge object this invocation created stays unrecorded, and a later publication may create a duplicate",
 		}
 		return
 	}
@@ -215,7 +215,7 @@ func publishIssues(ctx context.Context, store *Store, outcome *Acceptance, prose
 			outcome.ParentNote = &PublicationNote{Status: IssueMissingInput, Detail: "no current parent issue prose was supplied"}
 		}
 	} else if outcome.ParentIssue == nil && !anyAttached(outcome.Slices) {
-		outcome.ParentNote = &PublicationNote{Status: IssueMissingInput, Detail: "no child issue is attached yet to group under a parent"}
+		outcome.ParentNote = &PublicationNote{Status: IssueFailed, Detail: "not attempted: no child issue is attached yet to group under a parent"}
 	} else {
 		outcome.ParentIssue, outcome.ParentNote = presentIssue(ctx, forge, outcome.Repository, outcome.ParentIssue, outcome.ParentTitle, string(prose.Parent), func() (*ForgeAttachment, error) {
 			return store.recordedParent(outcome.Project, outcome.Proposal)
@@ -286,9 +286,9 @@ func groupChildren(ctx context.Context, store *Store, outcome *Acceptance, forge
 	}
 }
 
-func anyAttached(slices []SliceAcceptance) bool {
-	for index := range slices {
-		if slices[index].Issue != nil {
+func anyAttached(outcomes []SliceAcceptance) bool {
+	for index := range outcomes {
+		if outcomes[index].Issue != nil {
 			return true
 		}
 	}

@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 
 	"github.com/vicrdguez/skills/github"
@@ -2009,6 +2010,23 @@ func TestProposePublishRefusedForAdoptedProjects(t *testing.T) {
 	}
 }
 
+// requireLedgerUnlocked fails when the ledger mutation lock is held, which
+// would mean forge I/O happens inside a local mutation.
+func requireLedgerUnlocked(t *testing.T, clone string) {
+	t.Helper()
+	lock, err := os.OpenFile(filepath.Join(clone, ".git", "skl-ledger.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Errorf("open the ledger mutation lock: %v", err)
+		return
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Errorf("forge I/O ran while the ledger mutation lock was held: %v", err)
+		return
+	}
+	_ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+}
+
 // commitLedgerRecord overwrites one ledger record and commits it as another
 // local writer would.
 func commitLedgerRecord(t *testing.T, clone, path, contents string) {
@@ -2061,6 +2079,11 @@ func TestExplicitPublicationAfterInterruptedAttemptAndLocalProgress(t *testing.T
 	}
 	head := strings.TrimSpace(runGitOutput(t, fixture.clone, "rev-parse", "HEAD"))
 
+	requests := 0
+	forge.before = func(string, string) {
+		requests++
+		requireLedgerUnlocked(t, fixture.clone)
+	}
 	publication, _ := cli.run(t, []string{"skl", "ledger", "publish", "--repo", root, "--proposal", "interrupted-work", "--format", "json",
 		"--issue=foundation=" + writeTemp(t, t, "current foundation prose\n"),
 		"--issue=feature=" + writeTemp(t, t, "current feature prose\n"),
@@ -2075,6 +2098,9 @@ func TestExplicitPublicationAfterInterruptedAttemptAndLocalProgress(t *testing.T
 	}
 	if forge.createdCount() != 3 {
 		t.Fatalf("publication created %d issues, want the current children and parent", forge.createdCount())
+	}
+	if requests == 0 {
+		t.Fatal("no forge request probed the ledger mutation lock")
 	}
 
 	// Publication changed only established identities: Claims, lifecycle,

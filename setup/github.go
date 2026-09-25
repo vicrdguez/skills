@@ -31,6 +31,7 @@ type GitHubBackend struct {
 	tokenSource func() (string, error)
 	client      *http.Client
 	retryDelay  time.Duration
+	timeout     time.Duration
 	issueIDs    map[int]int64
 	issueBodies map[int]string
 }
@@ -59,7 +60,7 @@ func githubIssueNumber(id workflow.WorkItemID) (int, error) {
 }
 
 func NewGitHubBackend(baseURL, token string, client *http.Client) *GitHubBackend {
-	return &GitHubBackend{baseURL: strings.TrimRight(baseURL, "/"), token: token, client: client, retryDelay: 100 * time.Millisecond, issueIDs: make(map[int]int64), issueBodies: make(map[int]string)}
+	return &GitHubBackend{baseURL: strings.TrimRight(baseURL, "/"), token: token, client: client, retryDelay: requestRetryDelay, timeout: requestTimeout, issueIDs: make(map[int]int64), issueBodies: make(map[int]string)}
 }
 
 func NewGitHubBackendFromEnv(repository github.RepositoryID) (Backend, error) {
@@ -74,7 +75,7 @@ func NewGitHubBackendFromEnv(repository github.RepositoryID) (Backend, error) {
 }
 
 func newGitHubBackend(baseURL string, client *http.Client, tokenSource func() (string, error)) *GitHubBackend {
-	return &GitHubBackend{baseURL: strings.TrimRight(baseURL, "/"), tokenSource: tokenSource, client: client, retryDelay: 100 * time.Millisecond, issueIDs: make(map[int]int64), issueBodies: make(map[int]string)}
+	return &GitHubBackend{baseURL: strings.TrimRight(baseURL, "/"), tokenSource: tokenSource, client: client, retryDelay: requestRetryDelay, timeout: requestTimeout, issueIDs: make(map[int]int64), issueBodies: make(map[int]string)}
 }
 
 type githubIssue struct {
@@ -604,7 +605,10 @@ const requestTimeout = 30 * time.Second
 // Ledger issue publication retries reads and safely repeatable updates a
 // bounded number of times. Creates are sent once, so an unknown outcome is
 // never resolved by sending the request again.
-const requestAttempts = 3
+const (
+	requestAttempts   = 3
+	requestRetryDelay = 100 * time.Millisecond
+)
 
 // requestRetrying sends one read or safely repeatable update, retrying
 // transport failures, rate limits, and server errors a bounded number of
@@ -647,7 +651,7 @@ func (b *GitHubBackend) requestStatus(ctx context.Context, method, path string, 
 		}
 		encoded = bytes.NewReader(payload)
 	}
-	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	ctx, cancel := context.WithTimeout(ctx, b.timeout)
 	defer cancel()
 	request, err := http.NewRequestWithContext(ctx, method, b.baseURL+path, encoded)
 	if err != nil {
