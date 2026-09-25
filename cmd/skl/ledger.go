@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/urfave/cli/v2"
+	skilldist "github.com/vicrdguez/skills"
 	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/ledger"
 	"github.com/vicrdguez/skills/setup"
@@ -20,12 +21,13 @@ import (
 // established status, an actionable reason for refusals, and the typed
 // payload. Markdown and JSON convey the same facts.
 type ledgerOutcome struct {
-	Status     string                   `json:"status"`
-	Reason     string                   `json:"reason,omitempty"`
-	Repair     string                   `json:"repair,omitempty"`
-	Acceptance *ledger.Acceptance       `json:"acceptance,omitempty"`
-	Readback   *ledger.Readback         `json:"readback,omitempty"`
-	Document   *ledger.ContractDocument `json:"document,omitempty"`
+	Status          string                   `json:"status"`
+	Reason          string                   `json:"reason,omitempty"`
+	Repair          string                   `json:"repair,omitempty"`
+	Acceptance      *ledger.Acceptance       `json:"acceptance,omitempty"`
+	Readback        *ledger.Readback         `json:"readback,omitempty"`
+	Document        *ledger.ContractDocument `json:"document,omitempty"`
+	ReadbackCommand string                   `json:"readback_command,omitempty"`
 }
 
 func ledgerCommands(newBackend backendFactory, stdout io.Writer) *cli.Command {
@@ -126,12 +128,6 @@ func ledgerCommands(newBackend backendFactory, stdout io.Writer) *cli.Command {
 					if phase != "" {
 						document, err := ledger.ShowReport(store, repository.Repository, item, phase)
 						if err != nil {
-							var refusal *ledger.Refusal
-							if errors.As(err, &refusal) {
-								copy := *refusal
-								copy.Repair = strings.Replace(copy.Repair, "ShowReference", "`skl ledger show --commit <ledger-commit> --path <ledger-path>`", 1)
-								err = &copy
-							}
 							return renderLedgerRefusal(stdout, format, err)
 						}
 						return renderLedgerOutcome(stdout, format, ledgerOutcome{Status: "shown", Document: &document})
@@ -140,7 +136,11 @@ func ledgerCommands(newBackend backendFactory, stdout io.Writer) *cli.Command {
 					if err != nil {
 						return renderLedgerRefusal(stdout, format, err)
 					}
-					return renderLedgerOutcome(stdout, format, ledgerOutcome{Status: "shown", Readback: readback})
+					return renderLedgerOutcome(stdout, format, ledgerOutcome{
+						Status: "shown", Readback: readback,
+						ReadbackCommand: fmt.Sprintf("skl ledger show --repo %s --remote %s --item %s",
+							skilldist.ShellQuote(repository.Root), skilldist.ShellQuote(repository.Remote), skilldist.ShellQuote(item)),
+					})
 				}
 				document, err := ledger.ShowReference(store, commit, path)
 				if err != nil {
@@ -323,7 +323,7 @@ func ledgerMarkdown(outcome ledgerOutcome) string {
 				}
 				reference := availability.Reference
 				line("- %s: available at %s:%s", availability.Phase, reference.Commit, reference.Path)
-				line("  Current retrieval: skl ledger show --item %s --phase %s", readback.Item, availability.Phase)
+				line("  Current retrieval: %s --phase %s", outcome.ReadbackCommand, availability.Phase)
 				line("  Exact retrieval: skl ledger show --commit %s --path %s", reference.Commit, reference.Path)
 			}
 			line("To inspect earlier rounds, follow ledger input references in the report's original frontmatter and retrieve each exact document with skl ledger show --commit <ledger-commit> --path <ledger-path>. Source references identify source revisions, not ledger documents.")

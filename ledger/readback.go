@@ -208,7 +208,7 @@ func ShowReport(store *Store, repository github.RepositoryID, item, phase string
 	if !present {
 		return ContractDocument{}, refuse(
 			"no committed "+phase+" report exists at "+head+":"+path,
-			"restore that report or supply an exact historical commit/path reference to ShowReference",
+			"restore that report or supply an exact historical reference with `skl ledger show --commit <ledger-commit> --path <ledger-path>`",
 		)
 	}
 	return ShowReference(store, head, path)

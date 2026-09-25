@@ -188,7 +188,7 @@ func TestLedgerShowReportsTraversesExactLocalHistoryReadOnly(t *testing.T) {
 	for _, expected := range []string{
 		"implement: available at " + committedHead + ":" + implementRef.Path,
 		"watchdog: available at " + committedHead + ":" + watchdogOne.Report.Path,
-		"skl ledger show --item " + deliveryTestItem + " --phase implement",
+		current.ReadbackCommand + " --phase implement",
 		"skl ledger show --commit " + committedHead + " --path " + watchdogOne.Report.Path,
 		"Source references identify source revisions, not ledger documents.",
 	} {
@@ -286,6 +286,45 @@ func TestLedgerShowReportsTraversesExactLocalHistoryReadOnly(t *testing.T) {
 	}
 	if forge.createdCount() != 0 {
 		t.Fatalf("read operations contacted/published to the forge: %d issues", forge.createdCount())
+	}
+}
+
+func TestLedgerShowReportCommandsPreserveRepositorySelection(t *testing.T) {
+	newLedgerFixture(t)
+	source, target := deliverySourceRepo(t)
+	deliveryAcceptFixture(t, newForgeServer(t), source)
+	cli := decisionReadOnlyApp(t)
+	result, _, _, _ := submitReportImplementation(t, cli, source, target, "one", "private report\n")
+
+	// Inspect from outside the selected checkout, using a non-default remote
+	// and a path that requires shell quoting. The default remote is different.
+	selected := filepath.Join(t.TempDir(), "selected checkout's space")
+	runGit(t, t.TempDir(), "clone", "-q", source, selected)
+	runGit(t, selected, "remote", "set-url", "origin", "git@github.com:other/widgets.git")
+	runGit(t, selected, "remote", "add", "reports", "git@github.com:acme/widgets.git")
+	t.Chdir(t.TempDir())
+	markdown, err := reportCLIText(t, cli, "skl", "ledger", "show", "--repo", selected, "--remote", "reports", "--item", deliveryTestItem)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var command string
+	for _, line := range strings.Split(markdown, "\n") {
+		if strings.HasPrefix(line, "  Current retrieval: ") {
+			command = strings.TrimPrefix(line, "  Current retrieval: ")
+			break
+		}
+	}
+	if command == "" {
+		t.Fatalf("report discovery supplies no current retrieval command:\n%s", markdown)
+	}
+	readback := cli.ledgerJSON(t, "skl", "ledger", "show", "--repo", selected, "--remote", "reports", "--item", deliveryTestItem, "--format", "json")
+	if readback.ReadbackCommand == "" || command != readback.ReadbackCommand+" --phase implement" {
+		t.Fatalf("Markdown and JSON lost equivalent bound selection: %q, %s", command, mustJSON(t, readback))
+	}
+	args := append(shellArgs(t, command), "--format", "json")
+	shown := cli.ledgerJSON(t, args...)
+	if shown.Status != "shown" || shown.Document == nil || shown.Document.Path != result.Report.Path {
+		t.Fatalf("bound report command lost selected repository/remote: %s\n%s", command, mustJSON(t, shown))
 	}
 }
 
