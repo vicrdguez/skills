@@ -8,7 +8,6 @@ import (
 	"path"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"text/template"
 
@@ -51,89 +50,9 @@ type DeliveryFacts struct {
 }
 
 type InvocationFacts struct {
-	Delivery       *DeliveryFacts       `json:"delivery,omitempty"`
-	Watchdog       *WatchdogFacts       `json:"watchdog,omitempty"`
-	Implementation *ImplementationFacts `json:"implementation,omitempty"`
-	Decision       *DecisionFacts       `json:"decision,omitempty"`
+	Delivery *DeliveryFacts `json:"delivery,omitempty"`
+	Decision *DecisionFacts `json:"decision,omitempty"`
 }
-
-type ReviewScope string
-
-const (
-	FullReview        ReviewScope = "full"
-	IncrementalReview ReviewScope = "incremental"
-)
-
-type WatchdogFacts struct {
-	Repository                 string           `json:"repository,omitempty"`
-	EvidenceStreams            []EvidenceStream `json:"evidence_streams,omitempty"`
-	EvidenceInstructions       string           `json:"evidence_instructions,omitempty"`
-	Remote                     string           `json:"remote"`
-	Worktree                   string           `json:"worktree"`
-	FetchCommand               string           `json:"fetch_command"`
-	WorktreeCommand            string           `json:"worktree_command"`
-	InspectCommand             string           `json:"inspect_command"`
-	ResultDirectory            string           `json:"result_directory"`
-	SubmitCommand              string           `json:"submit_command"`
-	ResumeCommand              string           `json:"resume_command"`
-	ReviewCount                uint64           `json:"review_count"`
-	ReviewNumber               uint64           `json:"review_number"`
-	ReviewScope                ReviewScope      `json:"review_scope"`
-	PreviousReviewedHead       string           `json:"previous_reviewed_head,omitempty"`
-	WorkItem                   int              `json:"work_item"`
-	Submission                 int              `json:"submission"`
-	Branch                     string           `json:"branch"`
-	ReviewedHead               string           `json:"reviewed_head"`
-	SubmissionBase             string           `json:"submission_base"`
-	SubmissionBodySHA256       string           `json:"submission_body_sha256"`
-	ArtifactBaseline           string           `json:"artifact_baseline"`
-	ArtifactCompletion         string           `json:"artifact_completion"`
-	SuppliedArtifactBaseline   string           `json:"supplied_artifact_baseline,omitempty"`
-	SuppliedArtifactCompletion string           `json:"supplied_artifact_completion,omitempty"`
-	AuditBody                  string           `json:"audit_body"`
-	Comments                   []ReviewComment  `json:"comments,omitempty"`
-}
-
-type ImplementationFacts struct {
-	WorkItemReference          string              `json:"-"`
-	Repository                 string              `json:"repository,omitempty"`
-	Remote                     string              `json:"remote"`
-	FetchCommand               string              `json:"fetch_command"`
-	WorktreeCommand            string              `json:"worktree_command"`
-	PushCommand                string              `json:"push_command"`
-	InspectCommand             string              `json:"inspect_command"`
-	NeedsHumanCommand          string              `json:"needs_human_command"`
-	ResultDirectory            string              `json:"result_directory"`
-	SubmitCommand              string              `json:"submit_command"`
-	Procedure                  ImplementProcedure  `json:"procedure,omitempty"`
-	Submission                 int                 `json:"submission,omitempty"`
-	SubmissionBody             *SubmissionEvidence `json:"submission_body,omitempty"`
-	EvidenceStreams            []EvidenceStream    `json:"evidence_streams,omitempty"`
-	Comments                   []ReviewComment     `json:"comments,omitempty"`
-	WorkItem                   int                 `json:"work_item"`
-	Branch                     string              `json:"branch"`
-	Worktree                   string              `json:"worktree"`
-	ArtifactBaseline           string              `json:"artifact_baseline,omitempty"`
-	ArtifactCompletion         string              `json:"artifact_completion,omitempty"`
-	SuppliedArtifactBaseline   string              `json:"supplied_artifact_baseline,omitempty"`
-	SuppliedArtifactCompletion string              `json:"supplied_artifact_completion,omitempty"`
-	ResumeCommand              string              `json:"resume_command"`
-	Inspection                 *InspectionFacts    `json:"inspection,omitempty"`
-	Capability                 ExecutionCapability `json:"capability,omitempty"`
-}
-
-// InspectionProgress is the observed artifact-ledger progress of one prepared
-// worktree. It comes from the read-only inspection, never from a lifecycle
-// label, a branch name, or an attached Submission.
-type InspectionProgress string
-
-const (
-	BaselineOnly      InspectionProgress = "baseline-only"
-	ProvisionalLedger InspectionProgress = "provisional"
-	CompletionPresent InspectionProgress = "completion-present"
-	RetiredLedger     InspectionProgress = "retired"
-	LedgerViolations  InspectionProgress = "violations"
-)
 
 // ExecutionCapability is the adapter capability an invocation established. It
 // selects supported helper recipes for optional implementation/testing delegation
@@ -148,25 +67,6 @@ const (
 	UnknownCapability ExecutionCapability = ""
 )
 
-// InspectionFacts narrows one read-only inspection to the applicable
-// continuation. It is not a second full Execution Skill.
-type InspectionFacts struct {
-	Progress   InspectionProgress `json:"progress"`
-	Violations []string           `json:"violations,omitempty"`
-}
-
-// ImplementProcedure is the engine-established submission procedure for one
-// Implement invocation, decided from authoritative Workflow State rather than
-// inferred from an attached Submission, branch name, feedback contents, or any
-// unobserved artifact phase.
-type ImplementProcedure string
-
-const (
-	InitialSubmission   ImplementProcedure = "initial"
-	ResumedSubmission   ImplementProcedure = "resumed"
-	FindingDrivenRework ImplementProcedure = "rework"
-)
-
 // EvidenceSource is a canonical repository-bound identity for one observed or
 // required evidence stream.
 type EvidenceSource string
@@ -176,24 +76,8 @@ func RepositoryEvidenceSource(repository, apiPath string) EvidenceSource {
 	return EvidenceSource("repos/" + strings.Trim(repository, "/") + "/" + strings.TrimPrefix(apiPath, "/"))
 }
 
-func IssueCommentsEvidenceSource(repository string, number int) EvidenceSource {
-	return RepositoryEvidenceSource(repository, fmt.Sprintf("issues/%d/comments", number))
-}
-
-func PullEvidenceSource(repository string, number int) EvidenceSource {
-	return RepositoryEvidenceSource(repository, fmt.Sprintf("pulls/%d", number))
-}
-
-func PullDiscussionEvidenceSource(repository string, number int) EvidenceSource {
-	return RepositoryEvidenceSource(repository, fmt.Sprintf("issues/%d/comments", number))
-}
-
 func PullReviewsEvidenceSource(repository string, number int) EvidenceSource {
 	return RepositoryEvidenceSource(repository, fmt.Sprintf("pulls/%d/reviews", number))
-}
-
-func PullCommentsEvidenceSource(repository string, number int) EvidenceSource {
-	return RepositoryEvidenceSource(repository, fmt.Sprintf("pulls/%d/comments", number))
 }
 
 type ReviewComment struct {
@@ -225,29 +109,6 @@ type ReviewComment struct {
 	// Source is the observed repository-bound stream this body came from. It is
 	// part of the labeled evidence, never a rendering input.
 	Source EvidenceSource `json:"source,omitempty"`
-}
-
-// EvidenceStream is one required repository-bound evidence source. Bodies is how
-// many source bodies the invocation actually observed on it; Command is the
-// retrieval command the worker still has to run when it was never observed.
-// `fetched empty` (observed, zero bodies), `pending` (Command set), and
-// `retrieval failure` (an error rather than a rendered state) are different.
-type EvidenceStream struct {
-	Path    string         `json:"path,omitempty"`
-	State   string         `json:"state,omitempty"`
-	Source  EvidenceSource `json:"source,omitempty"`
-	Bodies  int            `json:"bodies,omitempty"`
-	Command string         `json:"command,omitempty"`
-}
-
-// SubmissionEvidence is the attached Submission's own source body, preserved
-// whole and labeled as data.
-type SubmissionEvidence struct {
-	Source      EvidenceSource `json:"source"`
-	Author      string         `json:"author,omitempty"`
-	Association string         `json:"association,omitempty"`
-	CreatedAt   string         `json:"created_at,omitempty"`
-	Body        string         `json:"body"`
 }
 
 type Packet struct {
@@ -301,7 +162,7 @@ func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
 	// A read-only inspection returns a narrow continuation, not another copy of
 	// every bundled definition.
 	included := dependencies[name]
-	if facts.Implementation != nil && facts.Implementation.Inspection != nil || facts.Delivery != nil && (facts.Delivery.Operation == "inspect" || facts.Delivery.Operation == "prepare") {
+	if facts.Delivery != nil && (facts.Delivery.Operation == "inspect" || facts.Delivery.Operation == "prepare") {
 		included = nil
 	}
 	for _, bundled := range included {
@@ -328,16 +189,7 @@ func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
 // templateFuncs is the deliberately small helper set authored templates share.
 var templateFuncs = template.FuncMap{
 	"quote":    ShellQuote,
-	"fence":    markdownFence,
 	"evidence": evidenceBlock,
-	"anchor":   anchorValue,
-}
-
-func anchorValue(line *int) string {
-	if line == nil {
-		return "null"
-	}
-	return strconv.Itoa(*line)
 }
 
 // evidenceBlock chooses a fence that cannot be closed by opaque Markdown data.

@@ -44,8 +44,8 @@ func TestB19GenericImplementRetrievalRefusesWithoutWorkflowEffects(t *testing.T)
 	for _, retrieval := range [][]string{
 		{"skl", "skill", "testing"},
 		{"skl", "skill", "--format", "json", "design"},
-		{"skl", "skill", "--resource", "reference/submission.md", "--input", "result_directory=" + t.TempDir(), "--input", "procedure=initial", "implement"},
-		{"skl", "skill", "--resource", "reference/decision.md", "--describe-inputs", "implement"},
+		{"skl", "skill", "--resource", "reference/ledger-submission.md", "--input", "result_directory=" + t.TempDir(), "--input", "procedure=initial", "implement"},
+		{"skl", "skill", "--resource", "reference/ledger-submission.md", "--describe-inputs", "implement"},
 	} {
 		output.Reset()
 		if err := app.Run(retrieval); err != nil || output.Len() == 0 {

@@ -102,7 +102,7 @@ Good interfaces make testing natural:
 - An **Adapter** sits at a **Seam** and satisfies the **Interface**.
 - **Depth** produces **Leverage** for callers and **Locality** for maintainers.
 
-{{if or .Implementation .Delivery}}The accepted change does not require a new design exercise. Use this vocabulary to judge and deepen the code the accepted task actually touches; do not restructure untouched modules, invent abstractions the accepted scope does not need, or widen the change because the vocabulary exists.
+{{if .Delivery}}The accepted change does not require a new design exercise. Use this vocabulary to judge and deepen the code the accepted task actually touches; do not restructure untouched modules, invent abstractions the accepted scope does not need, or widen the change because the vocabulary exists.
 
 {{end}}## Rejected framings
 
