@@ -93,7 +93,7 @@ func archivedNames(outcome cleanupOutcome) map[string]bool {
 func TestCleanupArchivesWholeTerminalProposals(t *testing.T) {
 	fixture := newLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	// Issue publication stays pending: archival needs no public forge state.
+	// Issue publication fails: archival needs no public forge state.
 	unavailable := newForgeServer(t)
 	unavailable.fail = func(string, string) int { return http.StatusServiceUnavailable }
 	accepting := newLedgerApp(t, unavailable)
@@ -133,7 +133,11 @@ func TestCleanupArchivesWholeTerminalProposals(t *testing.T) {
 
 	// widget: both slices Merged. Its implementation report changes after a
 	// Watchdog report cited the earlier version by exact commit and path.
-	statusRecord(t, fixture.clone, "widget", "core", merged(""))
+	// A pending replication fact is an ordinary record the archive retains.
+	statusRecord(t, fixture.clone, "widget", "core", func(state *ledger.SliceState) {
+		merged("")(state)
+		state.Publication = &ledger.PublicationState{Push: &ledger.PublicationNote{Status: "pending", Detail: "ledger remote unavailable"}}
+	})
 	statusRecord(t, fixture.clone, "widget", "extra", merged(""))
 	reportPath := "projects/widgets/proposals/widget/core/implement-report.md"
 	writeFile(t, filepath.Join(fixture.clone, reportPath), "# Implementation v1\n")
@@ -181,8 +185,8 @@ func TestCleanupArchivesWholeTerminalProposals(t *testing.T) {
 		}
 	}
 	var pending ledger.SliceState
-	if err := json.Unmarshal([]byte(readLedgerFile(t, fixture.clone, "projects/widgets/archive/widget/core/state.json")), &pending); err != nil || pending.Publication == nil || pending.Publication.Issue == nil {
-		t.Fatalf("pending issue publication not retained: %+v %v", pending, err)
+	if err := json.Unmarshal([]byte(readLedgerFile(t, fixture.clone, "projects/widgets/archive/widget/core/state.json")), &pending); err != nil || pending.Publication == nil || pending.Publication.Push == nil || pending.Publication.Push.Status != "pending" {
+		t.Fatalf("pending publication not retained: %+v %v", pending, err)
 	}
 	kept := map[string]string{}
 	for _, entry := range first.Archive.Kept {
