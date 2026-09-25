@@ -26,11 +26,11 @@ Publish current descriptive child and parent issues through `skl`, both after lo
 
 This uses the current source Artifact Baseline carrier. These checkboxes are endpoint-verification markers, not permission to mutate accepted target Contracts or store publication progress in them.
 
-- [ ] Normal acceptance and explicit invocation publish current issue/parent presentations and associations without a publication-success gate (B1, B3, A1).
-- [ ] Established issue/parent identities are retained without in-scope durable publication coordination, pending-attempt records, or prose registration (B2, A2).
-- [ ] Bounded requests, safe retries, uncertain creates, and later explicit attempts obey the accepted best-effort semantics while preserving authoritative local records (B3-B4, A1-A2).
-- [ ] Agent-authored prose and useful private evidence/guidance are available through existing CLI/resource seams without automatically exporting private reports or generating prose (B5, A3).
-- [ ] Existing Go tooling, real temporary Git, controlled HTTP, and rendered guidance provide credible grouped evidence, including regression sensitivity and the Full Gate (A4).
+- [x] Normal acceptance and explicit invocation publish current issue/parent presentations and associations without a publication-success gate (B1, B3, A1).
+- [x] Established issue/parent identities are retained without in-scope durable publication coordination, pending-attempt records, or prose registration (B2, A2).
+- [x] Bounded requests, safe retries, uncertain creates, and later explicit attempts obey the accepted best-effort semantics while preserving authoritative local records (B3-B4, A1-A2).
+- [x] Agent-authored prose and useful private evidence/guidance are available through existing CLI/resource seams without automatically exporting private reports or generating prose (B5, A3).
+- [x] Existing Go tooling, real temporary Git, controlled HTTP, and rendered guidance provide credible grouped evidence, including regression sensitivity and the Full Gate (A4).
 
 ## Manual verification
 
