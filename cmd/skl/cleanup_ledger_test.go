@@ -270,7 +270,8 @@ func TestCleanupArchiveFailuresKeepOneCompleteProposal(t *testing.T) {
 	fixture := newLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	accepting := newLedgerApp(t, newForgeServer(t))
-	for _, name := range []string{"collide", "hooked", "interrupted", "partial", "moded", "dirty"} {
+	names := []string{"collide", "hooked", "interrupted", "partial", "moded", "dirty", "staged", "renamed", "matching"}
+	for _, name := range names {
 		if outcome := accepting.accept(t, root, writeProposal(t, "", cleanupSpec(name, "only"))); outcome.Status != "accepted" {
 			t.Fatalf("accept %s: %s", name, mustJSON(t, outcome))
 		}
@@ -284,7 +285,7 @@ func TestCleanupArchiveFailuresKeepOneCompleteProposal(t *testing.T) {
 	runGit(t, fixture.clone, "commit", "-q", "-m", "distinct archive")
 	original := ledgerHead(t, fixture.clone)
 	trees := map[string]string{}
-	for _, name := range []string{"collide", "hooked", "interrupted", "partial", "moded", "dirty"} {
+	for _, name := range names {
 		trees[name] = ledgerTree(t, fixture.clone, original, active(name))
 	}
 	// An interrupted run moved a directory without committing it.
@@ -305,6 +306,24 @@ func TestCleanupArchiveFailuresKeepOneCompleteProposal(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(fixture.clone, active("dirty"), "only", "notes.md"), "uncommitted\n")
+	// A complete move whose working tree matches the committed record but
+	// whose index holds a distinct version, staged at the destination only
+	// or as the whole rename.
+	const unique = "unique staged content that must survive\n"
+	stageDistinct := func(name string, paths ...string) {
+		t.Helper()
+		interrupt(name)
+		intent := filepath.Join(fixture.clone, archived(name), "only", "intent.md")
+		writeFile(t, intent, unique)
+		runGit(t, fixture.clone, append([]string{"add", "-A", "--"}, paths...)...)
+		writeFile(t, intent, "# only intent\n")
+	}
+	stageDistinct("staged", archived("staged"))
+	stageDistinct("renamed", active("renamed"), archived("renamed"))
+	stagedIntent := func(name string) string {
+		t.Helper()
+		return runGitOutput(t, fixture.clone, "show", ":"+archived(name)+"/only/intent.md")
+	}
 	// Every commit fails while the hook exists.
 	hook := filepath.Join(fixture.clone, ".git", "hooks", "pre-commit")
 	writeFile(t, hook, "#!/bin/sh\nexit 1\n")
@@ -318,10 +337,10 @@ func TestCleanupArchiveFailuresKeepOneCompleteProposal(t *testing.T) {
 	for _, repair := range failed.Archive.Repairs {
 		repairs[repair.Proposal] = repair.Reason
 	}
-	if failed.Status != "fix_required" || len(failed.Archive.Archived) != 0 || len(repairs) != 6 || ledgerHead(t, fixture.clone) != original {
+	if failed.Status != "fix_required" || len(failed.Archive.Archived) != 0 || len(repairs) != 9 || ledgerHead(t, fixture.clone) != original {
 		t.Fatalf("a failed move reported success or committed: %s", mustJSON(t, failed))
 	}
-	if !strings.Contains(repairs["collide"], "committed record") || !strings.Contains(repairs["hooked"], "commit failed") || !strings.Contains(repairs["interrupted"], "commit failed") || !strings.Contains(repairs["partial"], "does not match") || !strings.Contains(repairs["moded"], "does not match") || !strings.Contains(repairs["dirty"], "uncommitted") {
+	if !strings.Contains(repairs["collide"], "committed record") || !strings.Contains(repairs["hooked"], "commit failed") || !strings.Contains(repairs["interrupted"], "commit failed") || !strings.Contains(repairs["partial"], "does not match") || !strings.Contains(repairs["moded"], "does not match") || !strings.Contains(repairs["dirty"], "uncommitted") || !strings.Contains(repairs["staged"], "staged changes") || !strings.Contains(repairs["renamed"], "staged changes") {
 		t.Fatalf("repair reasons: %v", repairs)
 	}
 	if got := strings.TrimSpace(runGitOutput(t, fixture.clone, "status", "--porcelain", "--", active("hooked"), archived("hooked"))); got != "" {
@@ -333,10 +352,18 @@ func TestCleanupArchiveFailuresKeepOneCompleteProposal(t *testing.T) {
 	if exists(t, fixture.clone, active("partial")) || !exists(t, fixture.clone, archived("partial")+"/only/behavior.md") || readLedgerFile(t, fixture.clone, active("dirty")+"/only/notes.md") != "uncommitted\n" {
 		t.Fatal("repair discarded a partial tree or uncommitted edit")
 	}
+	for _, name := range []string{"staged", "renamed"} {
+		if stagedIntent(name) != unique {
+			t.Fatalf("%s lost its distinct staged content", name)
+		}
+	}
 
 	// The failed commit left "interrupted" whole at its original location; now
 	// an interruption leaves a complete but uncommitted move.
 	interrupt("interrupted")
+	// A staged rename holding exactly the committed record is still resumable.
+	interrupt("matching")
+	runGit(t, fixture.clone, "add", "-A", "--", active("matching"), archived("matching"))
 	if err := os.Remove(hook); err != nil {
 		t.Fatal(err)
 	}
@@ -346,16 +373,21 @@ func TestCleanupArchiveFailuresKeepOneCompleteProposal(t *testing.T) {
 	for _, archive := range retried.Archive.Archived {
 		resumed[archive.Proposal] = archive.Resumed
 	}
-	if len(resumed) != 2 || resumed["hooked"] || !resumed["interrupted"] {
+	if len(resumed) != 3 || resumed["hooked"] || !resumed["interrupted"] || !resumed["matching"] {
 		t.Fatalf("retry did not finish the identified move and archive the repaired one: %s", mustJSON(t, retried))
 	}
-	for _, name := range []string{"hooked", "interrupted"} {
+	for _, name := range []string{"hooked", "interrupted", "matching"} {
 		if ledgerTree(t, fixture.clone, head, archived(name)) != trees[name] || exists(t, fixture.clone, active(name)) {
 			t.Fatalf("%s not archived whole", name)
 		}
 	}
 	if ledgerTree(t, fixture.clone, head, active("partial")) != trees["partial"] {
 		t.Fatal("the committed record of the ambiguous partial move changed")
+	}
+	for _, name := range []string{"staged", "renamed"} {
+		if ledgerTree(t, fixture.clone, head, active(name)) != trees[name] || stagedIntent(name) != unique {
+			t.Fatalf("retry changed %s or its distinct staged content", name)
+		}
 	}
 }
 
@@ -559,24 +591,45 @@ func TestCleanupDoesNotArchiveFromAStaleSnapshot(t *testing.T) {
 }
 
 func TestUnreadableRecordWithholdsSourceDeletion(t *testing.T) {
-	fixture := newLedgerFixture(t)
-	root := sourceRepository(t, "acme", "widgets")
-	accepting := newLedgerApp(t, newForgeServer(t))
-	for _, name := range []string{"safe", "damaged"} {
-		accepting.accept(t, root, writeProposal(t, "", cleanupSpec(name, "only")))
-	}
-	head := cleanupWorktree(t, root, "safe-only")
-	statusRecord(t, fixture.clone, "safe", "only", merged(head))
-	// The damaged record's owner is unknowable, so it could own safe-only.
-	damaged := "projects/widgets/proposals/damaged/only/state.json"
-	writeFile(t, filepath.Join(fixture.clone, damaged), "{not json\n")
-	runGit(t, fixture.clone, "commit", "-qam", "damage a record")
+	// A damaged record's owner is unknowable, so it could own safe-only.
+	for name, damage := range map[string]func(t *testing.T, clone, state string){
+		"malformed": func(t *testing.T, clone, state string) {
+			writeFile(t, filepath.Join(clone, state), "{not json\n")
+			runGit(t, clone, "commit", "-qam", "damage a record")
+		},
+		"missing": func(t *testing.T, clone, state string) {
+			runGit(t, clone, "rm", "-q", state)
+			runGit(t, clone, "commit", "-qm", "lose a record")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fixture := newLedgerFixture(t)
+			root := sourceRepository(t, "acme", "widgets")
+			accepting := newLedgerApp(t, newForgeServer(t))
+			for _, name := range []string{"safe", "damaged"} {
+				accepting.accept(t, root, writeProposal(t, "", cleanupSpec(name, "only")))
+			}
+			cleanupWorktree(t, root, "safe-only")
+			worktree := filepath.Join(root, ".worktrees", "safe-only")
+			writeFile(t, filepath.Join(worktree, "README.md"), "committed work\n")
+			runGit(t, worktree, "commit", "-qam", "slice change")
+			head := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "safe-only"))
+			statusRecord(t, fixture.clone, "safe", "only", merged(head))
+			damage(t, fixture.clone, "projects/widgets/proposals/damaged/only/state.json")
 
-	outcome := runCleanup(t, offlineForge(t), root)
-	if outcome.Source == nil || len(outcome.Source.Removed) != 0 || len(outcome.Source.Preserved) != 1 || !strings.Contains(outcome.Source.Preserved[0].Reason, "unreadable") {
-		t.Fatalf("an unreadable record did not withhold deletion: %s", mustJSON(t, outcome))
-	}
-	if !gitRefExists(root, "refs/heads/safe-only") || !exists(t, root, ".worktrees/safe-only") {
-		t.Fatal("source work removed despite unknown ownership")
+			outcome := runCleanup(t, offlineForge(t), root)
+			if outcome.Source == nil || len(outcome.Source.Removed) != 0 || len(outcome.Source.Preserved) != 1 || !strings.Contains(outcome.Source.Preserved[0].Reason, "damaged/only") {
+				t.Fatalf("damaged state did not withhold deletion: %s", mustJSON(t, outcome))
+			}
+			if !gitRefExists(root, "refs/heads/safe-only") || strings.TrimSpace(runGitOutput(t, root, "rev-parse", "safe-only")) != head ||
+				readFileString(t, filepath.Join(worktree, "README.md")) != "committed work\n" {
+				t.Fatal("source work removed or changed despite unknown ownership")
+			}
+			// Archival stays independent: the terminal proposal moves while the
+			// damaged one is kept for its unknown state.
+			if !archivedNames(outcome)["safe"] || len(outcome.Archive.Kept) != 1 || !strings.Contains(outcome.Archive.Kept[0].Reason, "unknown state") {
+				t.Fatalf("archive outcomes were not independent: %s", mustJSON(t, outcome))
+			}
+		})
 	}
 }

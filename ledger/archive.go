@@ -179,6 +179,17 @@ func (s *Store) moveProposal(head, project, proposal string, full bool) (*Archiv
 			"compare both records and resolve the collision with human direction; skl overwrites neither")
 	}
 	sourcePresent, destinationPresent := exists(filepath.Join(s.Root, source)), exists(filepath.Join(s.Root, destination))
+	// Staging and rollback rewrite the index of both paths, so they run only
+	// from an index matching the committed record: unchanged, or holding
+	// exactly the identified rename. Any other staged content is preserved.
+	staged, err := s.stagedOnlyCommittedRename(head, source, destination)
+	if err != nil {
+		return keep("the ledger index for "+source+" and "+destination+" is unobservable: "+err.Error(), "inspect the ledger index before retrying")
+	}
+	if staged == "distinct" {
+		return keep("the ledger index holds staged changes under "+source+" or "+destination+" that differ from the committed record",
+			"commit, move aside, or unstage them; skl overwrites no staged content")
+	}
 	resumed := false
 	switch {
 	case !sourcePresent && destinationPresent:
@@ -186,6 +197,13 @@ func (s *Store) moveProposal(head, project, proposal string, full bool) (*Archiv
 		if err != nil || !same {
 			return keep("an uncommitted partial archive of "+proposal+" at "+destination+" does not match its committed record",
 				"inspect "+source+" and "+destination+" and restore one complete copy; skl discards no partial tree")
+		}
+		if staged == "rename" {
+			// The staged rename holds only committed bytes, so unstaging it
+			// loses nothing and lets staging and rollback start from head.
+			if _, err := git(s.Root, "reset", "-q", "--", source, destination); err != nil {
+				return keep("cannot unstage the matching staged rename: "+err.Error(), "inspect the ledger index before retrying")
+			}
 		}
 		resumed = true
 	case destinationPresent:
@@ -222,21 +240,66 @@ func (s *Store) moveProposal(head, project, proposal string, full bool) (*Archiv
 	return &ArchivedProposal{Proposal: proposal, FullyDelivered: full, Commit: committed, Resumed: resumed}, nil
 }
 
-// matchesCommittedTree reports whether the uncommitted directory at
-// destination holds exactly the files and bytes committed at source.
-func (s *Store) matchesCommittedTree(head, source, destination string) (bool, error) {
-	listing, err := git(s.Root, "ls-tree", "-r", head+":"+source)
+// stagedOnlyCommittedRename classifies the index under source and
+// destination against head: "" when unchanged, "rename" when it holds exactly
+// the committed source files at destination, and "distinct" otherwise.
+func (s *Store) stagedOnlyCommittedRename(head, source, destination string) (string, error) {
+	changed, err := git(s.Root, "diff", "--cached", "--name-only", head, "--", source, destination)
 	if err != nil {
-		return false, err
+		return "", err
+	}
+	if changed == "" {
+		return "", nil
+	}
+	committed, err := s.committedEntries(head, source)
+	if err != nil {
+		return "", err
+	}
+	listing, err := git(s.Root, "ls-files", "--stage", "--", source, destination)
+	if err != nil {
+		return "", err
+	}
+	indexed := 0
+	for _, line := range strings.Split(listing, "\n") {
+		meta, path, found := strings.Cut(line, "\t")
+		fields := strings.Fields(meta)
+		relative, inDestination := strings.CutPrefix(path, destination+"/")
+		if !found || len(fields) != 3 || fields[2] != "0" || !inDestination || committed[relative] != fields[0]+" "+fields[1] {
+			return "distinct", nil
+		}
+		indexed++
+	}
+	if indexed != len(committed) {
+		return "distinct", nil
+	}
+	return "rename", nil
+}
+
+// committedEntries maps each file committed under directory at head, by
+// relative path, to its "mode blob".
+func (s *Store) committedEntries(head, directory string) (map[string]string, error) {
+	listing, err := git(s.Root, "ls-tree", "-r", head+":"+directory)
+	if err != nil {
+		return nil, err
 	}
 	committed := make(map[string]string)
 	for _, line := range strings.Split(listing, "\n") {
 		meta, path, found := strings.Cut(line, "\t")
 		fields := strings.Fields(meta)
 		if !found || len(fields) != 3 {
-			return false, errors.New("unexpected ls-tree output")
+			return nil, errors.New("unexpected ls-tree output")
 		}
 		committed[path] = fields[0] + " " + fields[2]
+	}
+	return committed, nil
+}
+
+// matchesCommittedTree reports whether the uncommitted directory at
+// destination holds exactly the files and bytes committed at source.
+func (s *Store) matchesCommittedTree(head, source, destination string) (bool, error) {
+	committed, err := s.committedEntries(head, source)
+	if err != nil {
+		return false, err
 	}
 	root := filepath.Join(s.Root, destination)
 	seen := 0
@@ -319,22 +382,30 @@ func TerminalSourceWork(s *Store, repository github.RepositoryID) ([]SourceWork,
 	}
 	var records []SourceWork
 	owners := make(map[string]int)
-	unreadable := false
+	var unreadable []string
 	for _, location := range []string{"proposals", archiveRoot} {
 		prefix := filepath.ToSlash(filepath.Join(projectsRoot, repository.Name, location))
 		paths, err := git(s.Root, "ls-tree", "-r", "--name-only", head, "--", prefix)
 		if err != nil {
 			return nil, err
 		}
+		// Every slice directory is a member whose state must be read, so a
+		// missing state.json is as unknown as a malformed one.
+		var items []string
+		seen := make(map[string]bool)
 		for _, path := range strings.Split(paths, "\n") {
-			item, found := strings.CutSuffix(strings.TrimPrefix(path, prefix+"/"), "/state.json")
-			if !found || strings.Count(item, "/") != 1 {
+			parts := strings.SplitN(strings.TrimPrefix(path, prefix+"/"), "/", 3)
+			if len(parts) != 3 || seen[parts[0]+"/"+parts[1]] {
 				continue
 			}
+			seen[parts[0]+"/"+parts[1]] = true
+			items = append(items, parts[0]+"/"+parts[1])
+		}
+		for _, item := range items {
 			var state SliceState
-			if err := readJSONAt(s, head, path, &state); err != nil {
+			if err := readJSONAt(s, head, prefix+"/"+item+"/state.json", &state); err != nil {
 				// An unreadable record authorizes nothing and may own any branch.
-				unreadable = true
+				unreadable = append(unreadable, item)
 				continue
 			}
 			owners[state.Branch]++
@@ -364,8 +435,8 @@ func TerminalSourceWork(s *Store, repository github.RepositoryID) ([]SourceWork,
 			continue
 		}
 		switch {
-		case unreadable:
-			records[index].Hold = "an unreadable Work Item record could own branch " + records[index].Branch
+		case len(unreadable) > 0:
+			records[index].Hold = "missing or unreadable Work Item state (" + strings.Join(unreadable, ", ") + ") could own branch " + records[index].Branch
 		case owners[records[index].Branch] > 1:
 			records[index].Hold = "more than one Work Item records branch " + records[index].Branch
 		default:
