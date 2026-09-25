@@ -23,20 +23,19 @@ type ContractDocument struct {
 // Readback is the complete readback of one accepted slice: its recorded
 // facts and the exact bytes of every accepted document.
 type Readback struct {
-	Project       string             `json:"project"`
-	Repository    string             `json:"repository"`
-	Proposal      string             `json:"proposal"`
-	Slice         string             `json:"slice"`
-	Item          string             `json:"item"`
-	State         string             `json:"state"`
-	Title         string             `json:"title"`
-	Branch        string             `json:"branch"`
-	Dependencies  []DependencyState  `json:"dependencies"`
-	Issue         *ForgeAttachment   `json:"issue,omitempty"`
-	ParentIssue   *ForgeAttachment   `json:"parent_issue,omitempty"`
-	ParentPending *PublicationNote   `json:"parent_pending_publication,omitempty"`
-	Pending       *PublicationState  `json:"pending_publication,omitempty"`
-	Documents     []ContractDocument `json:"documents"`
+	Project      string             `json:"project"`
+	Repository   string             `json:"repository"`
+	Proposal     string             `json:"proposal"`
+	Slice        string             `json:"slice"`
+	Item         string             `json:"item"`
+	State        string             `json:"state"`
+	Title        string             `json:"title"`
+	Branch       string             `json:"branch"`
+	Dependencies []DependencyState  `json:"dependencies"`
+	Issue        *ForgeAttachment   `json:"issue,omitempty"`
+	ParentIssue  *ForgeAttachment   `json:"parent_issue,omitempty"`
+	Pending      *PublicationState  `json:"pending_publication,omitempty"`
+	Documents    []ContractDocument `json:"documents"`
 }
 
 // DependencyState is one recorded dependency with the blocker's currently
@@ -95,7 +94,7 @@ func ShowItem(store *Store, repository github.RepositoryID, item string) (*Readb
 		Project: projectName, Repository: project.Repository,
 		Proposal: proposal, Slice: slice, Item: item,
 		State: state.State, Title: state.Title, Branch: state.Branch,
-		Issue: state.Issue, ParentIssue: meta.ParentIssue, ParentPending: meta.ParentPublication, Pending: state.Publication,
+		Issue: state.Issue, ParentIssue: meta.ParentIssue, Pending: state.Publication,
 	}
 	for _, dependency := range state.Dependencies {
 		dependencyState := DependencyState{Item: dependency}

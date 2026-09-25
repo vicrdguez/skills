@@ -45,6 +45,11 @@ type ledgerReviewData struct {
 	ReviewedHead    string
 }
 
+type issuePublicationData struct {
+	Proposal string
+	Repo     string
+}
+
 type reviewData struct {
 	ResultDirectory string
 	PR              int
@@ -135,6 +140,20 @@ func resourceSpecFor(resource string) resourceSpec {
 				return fmt.Errorf("resource %s requires a positive round and full reviewed source SHA (40 lowercase hexadecimal characters for schema 1)", resource)
 			}
 			return checkResultDirectory(resource, data.ResultDirectory)
+		}}
+	case "reference/issue-publication.md":
+		data := &issuePublicationData{}
+		return resourceSpec{data: data, inputs: []resourceInput{
+			{flag: &cli.StringFlag{Name: "proposal", Required: true, Usage: "Accepted proposal whose issue presentation is published.", Destination: &data.Proposal}},
+			{flag: &cli.StringFlag{Name: "repo", Required: true, Usage: "Absolute path of the source repository root.", Destination: &data.Repo}},
+		}, validate: func(resource string) error {
+			if strings.TrimSpace(data.Proposal) == "" || strings.ContainsAny(data.Proposal, "/ \t\n") {
+				return fmt.Errorf("invalid input %q for resource %q: want the accepted proposal name", "proposal", resource)
+			}
+			if !filepath.IsAbs(data.Repo) {
+				return fmt.Errorf("invalid input %q for resource %q: want the absolute path of the source repository root", "repo", resource)
+			}
+			return nil
 		}}
 	case "reference/review.md":
 		data := &reviewData{}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/urfave/cli/v2"
+	skilldist "github.com/vicrdguez/skills"
 	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/ledger"
 	"github.com/vicrdguez/skills/setup"
@@ -20,12 +21,49 @@ import (
 // established status, an actionable reason for refusals, and the typed
 // payload. Markdown and JSON convey the same facts.
 type ledgerOutcome struct {
-	Status     string                   `json:"status"`
-	Reason     string                   `json:"reason,omitempty"`
-	Repair     string                   `json:"repair,omitempty"`
-	Acceptance *ledger.Acceptance       `json:"acceptance,omitempty"`
-	Readback   *ledger.Readback         `json:"readback,omitempty"`
-	Document   *ledger.ContractDocument `json:"document,omitempty"`
+	Status      string                   `json:"status"`
+	Reason      string                   `json:"reason,omitempty"`
+	Repair      string                   `json:"repair,omitempty"`
+	Acceptance  *ledger.Acceptance       `json:"acceptance,omitempty"`
+	Publication *ledger.Acceptance       `json:"publication,omitempty"`
+	Authoring   *proseAuthoring          `json:"authoring,omitempty"`
+	Readback    *ledger.Readback         `json:"readback,omitempty"`
+	Document    *ledger.ContractDocument `json:"document,omitempty"`
+}
+
+// proseAuthoring tells the caller how to author fresh public prose when a
+// publication surface lacked it: the private readback commands, the
+// specialized authoring guidance, and the continuation command, each with
+// its known arguments bound. skl authors no prose itself.
+type proseAuthoring struct {
+	Readback     []string `json:"readback"`
+	Guidance     string   `json:"guidance"`
+	Continuation string   `json:"continuation"`
+}
+
+// authoringFor returns the prose authoring pointers when any surface of the
+// outcome reported missing prose, and nil otherwise.
+func authoringFor(root string, outcome *ledger.Acceptance) *proseAuthoring {
+	missing := outcome.ParentNote != nil && outcome.ParentNote.Status == ledger.IssueMissingInput
+	for _, slice := range outcome.Slices {
+		missing = missing || slice.IssueStatus != nil && slice.IssueStatus.Status == ledger.IssueMissingInput
+	}
+	if !missing {
+		return nil
+	}
+	repo := skilldist.ShellQuote(root)
+	authoring := &proseAuthoring{
+		Guidance:     "skl skill --resource reference/issue-publication.md --input " + skilldist.ShellQuote("proposal="+outcome.Proposal) + " --input " + skilldist.ShellQuote("repo="+root) + " propose",
+		Continuation: "skl ledger publish --repo " + repo + " --proposal " + skilldist.ShellQuote(outcome.Proposal),
+	}
+	for _, slice := range outcome.Slices {
+		authoring.Readback = append(authoring.Readback, "skl ledger show --repo "+repo+" --item "+skilldist.ShellQuote(outcome.Proposal+"/"+slice.Name))
+		authoring.Continuation += " --issue " + skilldist.ShellQuote(slice.Name+"=") + "<body-file>"
+	}
+	if len(outcome.Slices) > 1 {
+		authoring.Continuation += " --parent-body <parent-body-file>"
+	}
+	return authoring
 }
 
 func ledgerCommands(newBackend backendFactory, stdout io.Writer) *cli.Command {
@@ -78,7 +116,52 @@ func ledgerCommands(newBackend backendFactory, stdout io.Writer) *cli.Command {
 				if err != nil {
 					return renderLedgerRefusal(stdout, format, err)
 				}
-				return renderLedgerOutcome(stdout, format, ledgerOutcome{Status: acceptance.Status, Acceptance: acceptance})
+				return renderLedgerOutcome(stdout, format, ledgerOutcome{Status: acceptance.Status, Acceptance: acceptance, Authoring: authoringFor(repository.Root, acceptance)})
+			},
+		}, {
+			Name:  "publish",
+			Usage: "Publish the current descriptive issue and parent presentation of one accepted proposal",
+			Flags: []cli.Flag{
+				&cli.PathFlag{Name: "repo", Value: "."},
+				&cli.StringFlag{Name: "remote"},
+				&cli.StringFlag{Name: "proposal", Required: true},
+				newIssueBodyFlag(),
+				&cli.PathFlag{Name: "parent-body"},
+				implementationFormatFlag(),
+			},
+			Action: func(command *cli.Context) error {
+				format, err := implementationFormat(command.String("format"))
+				if err != nil {
+					return err
+				}
+				bodies, parentBody, err := issueBodyInputs(command)
+				if err != nil {
+					return err
+				}
+				repository, err := setup.ResolveRepository(command.Path("repo"), command.String("remote"))
+				if err != nil {
+					return renderLedgerOutcome(stdout, format, ledgerOutcome{Status: "fix_required", Reason: "repository or remote resolution failed: " + err.Error(), Repair: "run publication inside the source repository, or pass --repo and --remote explicitly"})
+				}
+				store, failure := openConfiguredLedger()
+				if failure != nil {
+					return renderLedgerRefusal(stdout, format, failure)
+				}
+				if err := store.RefuseSourceOverlap(repository.Root); err != nil {
+					return renderLedgerRefusal(stdout, format, err)
+				}
+				backend, err := newBackend(repository.Repository)
+				if err != nil {
+					return renderLedgerRefusal(stdout, format, err)
+				}
+				forge, ok := backend.(ledger.Forge)
+				if !ok {
+					return fmt.Errorf("workflow backend does not support ledger issue publication")
+				}
+				publication, err := ledger.PublishCurrent(command.Context, store, repository.Repository, command.String("proposal"), ledger.IssueProse{Bodies: bodies, Parent: parentBody}, forge)
+				if err != nil {
+					return renderLedgerRefusal(stdout, format, err)
+				}
+				return renderLedgerOutcome(stdout, format, ledgerOutcome{Status: publication.Status, Publication: publication, Authoring: authoringFor(repository.Root, publication)})
 			},
 		}, {
 			Name:  "show",
@@ -157,7 +240,7 @@ type issueBodyFlag struct {
 func newIssueBodyFlag() *issueBodyFlag {
 	return &issueBodyFlag{GenericFlag: cli.GenericFlag{
 		Name:  "issue",
-		Usage: "Repeatable `slice=path` path to the temporary descriptive issue body for one slice",
+		Usage: "Repeatable `slice=path` path to current agent-authored descriptive issue prose for one slice",
 	}}
 }
 
@@ -166,8 +249,8 @@ func (f *issueBodyFlag) Apply(set *flag.FlagSet) error {
 	return f.GenericFlag.Apply(set)
 }
 
-// issueBodyInputs reads the temporary issue bodies and parent body. They
-// are transport inputs, never persisted ledger content.
+// issueBodyInputs reads the current issue prose and parent body. They are
+// transport inputs, never persisted or registered ledger content.
 func issueBodyInputs(command *cli.Context) (map[string][]byte, []byte, error) {
 	values, _ := command.Generic("issue").(*rawInputs)
 	bodies := make(map[string][]byte)
@@ -226,37 +309,20 @@ func ledgerMarkdown(outcome ledgerOutcome) string {
 		line("Repair: %s", outcome.Repair)
 	}
 	if acceptance := outcome.Acceptance; acceptance != nil {
-		line("Project: %s (%s)", acceptance.Project, acceptance.Repository)
-		line("Proposal: %s", acceptance.Proposal)
-		line("Ledger commit: %s (%s)", acceptance.Commit, acceptance.HeadRef)
-		line("Ledger push: %s%s", pushWord(acceptance), pushDetail(acceptance))
-		if acceptance.ParentTitle != "" {
-			line("Parent issue: %s", attachmentWord(acceptance.ParentIssue, acceptance.ParentNote))
-			if acceptance.ParentIssue != nil && acceptance.ParentNote != nil {
-				line("Parent publication: %s: %s", acceptance.ParentNote.Status, acceptance.ParentNote.Detail)
-			}
+		presentationMarkdown(line, acceptance)
+		line("The local acceptance is authoritative; issue publication is best-effort and never gates local work. Publish the current issue view later with `skl ledger publish`, not by repeating acceptance.")
+	}
+	if publication := outcome.Publication; publication != nil {
+		presentationMarkdown(line, publication)
+		line("The local records are authoritative and unchanged by this attempt; a later `skl ledger publish` presents the then-current view.")
+	}
+	if authoring := outcome.Authoring; authoring != nil {
+		line("Author fresh public prose from current private evidence:")
+		for _, command := range authoring.Readback {
+			line("  Read: %s", command)
 		}
-		if acceptance.BookkeepingStatus != nil {
-			line("Publication bookkeeping: %s: %s", acceptance.BookkeepingStatus.Status, acceptance.BookkeepingStatus.Detail)
-		}
-		for _, slice := range acceptance.Slices {
-			line("Slice %s: %s (branch %s)", slice.Name, slice.Title, slice.Branch)
-			if len(slice.Dependencies) == 0 {
-				line("  Dependencies: none")
-			}
-			for _, dependency := range slice.Dependencies {
-				line("  Depends on: %s", dependency)
-			}
-			line("  Issue: %s", attachmentWord(slice.Issue, slice.IssueStatus))
-			if slice.Issue != nil && slice.IssueStatus != nil {
-				line("  Issue publication: %s: %s", slice.IssueStatus.Status, slice.IssueStatus.Detail)
-			}
-			if slice.GroupingStatus != nil {
-				line("  Parent grouping: %s: %s", slice.GroupingStatus.Status, slice.GroupingStatus.Detail)
-			}
-			line("  Readback: skl ledger show --item %s/%s", acceptance.Proposal, slice.Name)
-		}
-		line("The local acceptance is authoritative; pending publication effects stay readable and can be retried by repeating this acceptance.")
+		line("  Guidance: %s", authoring.Guidance)
+		line("  Then publish: %s", authoring.Continuation)
 	}
 	if readback := outcome.Readback; readback != nil {
 		line("Project: %s (%s)", readback.Project, readback.Repository)
@@ -280,18 +346,9 @@ func ledgerMarkdown(outcome ledgerOutcome) string {
 		if readback.ParentIssue != nil {
 			line("Parent issue: %s#%d", readback.ParentIssue.Repository, readback.ParentIssue.Number)
 		}
-		if readback.ParentPending != nil {
-			line("Pending parent issue: %s: %s", readback.ParentPending.Status, readback.ParentPending.Detail)
-		}
 		if pending := readback.Pending; pending != nil {
 			if pending.Push != nil {
 				line("Pending push: %s: %s", pending.Push.Status, pending.Push.Detail)
-			}
-			if pending.Issue != nil {
-				line("Pending issue: %s: %s", pending.Issue.Status, pending.Issue.Detail)
-			}
-			if pending.Grouping != nil {
-				line("Pending parent grouping: %s: %s", pending.Grouping.Status, pending.Grouping.Detail)
 			}
 		}
 		for _, document := range readback.Documents {
@@ -307,6 +364,48 @@ func ledgerMarkdown(outcome ledgerOutcome) string {
 		line("%s", strings.TrimRight(document.Contents, "\n"))
 	}
 	return report.String()
+}
+
+// presentationMarkdown renders the facts of one acceptance or publication
+// outcome: ledger replication and each surface's immediate issue outcome.
+func presentationMarkdown(line func(string, ...any), acceptance *ledger.Acceptance) {
+	line("Project: %s (%s)", acceptance.Project, acceptance.Repository)
+	line("Proposal: %s", acceptance.Proposal)
+	line("Ledger commit: %s (%s)", acceptance.Commit, acceptance.HeadRef)
+	line("Ledger push: %s%s", pushWord(acceptance), pushDetail(acceptance))
+	if acceptance.ParentTitle != "" {
+		line("Parent issue: %s", attachmentWord(acceptance.ParentIssue, acceptance.ParentNote))
+		if acceptance.ParentIssue != nil && acceptance.ParentNote != nil {
+			line("Parent publication: %s", noteWord(acceptance.ParentNote))
+		}
+	}
+	if acceptance.BookkeepingStatus != nil {
+		line("Publication bookkeeping: %s", noteWord(acceptance.BookkeepingStatus))
+	}
+	for _, slice := range acceptance.Slices {
+		line("Slice %s: %s (branch %s)", slice.Name, slice.Title, slice.Branch)
+		if len(slice.Dependencies) == 0 {
+			line("  Dependencies: none")
+		}
+		for _, dependency := range slice.Dependencies {
+			line("  Depends on: %s", dependency)
+		}
+		line("  Issue: %s", attachmentWord(slice.Issue, slice.IssueStatus))
+		if slice.Issue != nil && slice.IssueStatus != nil {
+			line("  Issue publication: %s", noteWord(slice.IssueStatus))
+		}
+		if slice.GroupingStatus != nil {
+			line("  Parent grouping: %s", noteWord(slice.GroupingStatus))
+		}
+		line("  Readback: skl ledger show --item %s/%s", acceptance.Proposal, slice.Name)
+	}
+}
+
+func noteWord(note *ledger.PublicationNote) string {
+	if note.Detail == "" {
+		return note.Status
+	}
+	return note.Status + ": " + note.Detail
 }
 
 func pushWord(acceptance *ledger.Acceptance) string {
@@ -331,7 +430,7 @@ func attachmentWord(attachment *ledger.ForgeAttachment, note *ledger.Publication
 		return "attached " + attachment.Repository + "#" + fmt.Sprint(attachment.Number)
 	}
 	if note != nil && note.Status != "" {
-		return note.Status + ": " + note.Detail
+		return noteWord(note)
 	}
 	return "none"
 }
