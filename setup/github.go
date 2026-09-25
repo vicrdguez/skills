@@ -522,15 +522,17 @@ func (b *GitHubBackend) CreateIssue(ctx context.Context, title, body string) (in
 
 // UpdateIssue presents current prose on one established descriptive issue.
 // The update is safely repeatable, so it is retried a bounded number of
-// times.
-func (b *GitHubBackend) UpdateIssue(ctx context.Context, number int, title, body string) error {
+// times. proceed is consulted before every attempt, so an update whose local
+// selection was superseded between attempts is not sent again; its error is
+// returned as is.
+func (b *GitHubBackend) UpdateIssue(ctx context.Context, number int, title, body string, proceed func() error) error {
 	if err := b.requireRepository(); err != nil {
 		return err
 	}
 	if number <= 0 {
 		return fmt.Errorf("invalid GitHub issue number %d", number)
 	}
-	if err := b.requestRetrying(ctx, http.MethodPatch, b.repositoryPath(b.repository)+fmt.Sprintf("/issues/%d", number), map[string]string{"title": title, "body": body}, nil); err != nil {
+	if err := b.requestRetrying(ctx, http.MethodPatch, b.repositoryPath(b.repository)+fmt.Sprintf("/issues/%d", number), map[string]string{"title": title, "body": body}, nil, proceed); err != nil {
 		return err
 	}
 	b.issueBodies[number] = body
@@ -546,7 +548,7 @@ func (b *GitHubBackend) ListChildren(ctx context.Context, parent int) ([]int, er
 		Number int `json:"number"`
 	}
 	path := b.repositoryPath(b.repository) + fmt.Sprintf("/issues/%d/sub_issues?per_page=100&page=1", parent)
-	if err := b.requestRetrying(ctx, http.MethodGet, path, nil, &children); err != nil {
+	if err := b.requestRetrying(ctx, http.MethodGet, path, nil, &children, nil); err != nil {
 		return nil, err
 	}
 	numbers := make([]int, 0, len(children))
@@ -574,7 +576,7 @@ func (b *GitHubBackend) issueID(ctx context.Context, number int) (int64, error) 
 	}
 	var issue githubIssue
 	path := b.repositoryPath(b.repository) + fmt.Sprintf("/issues/%d", number)
-	if err := b.requestRetrying(ctx, http.MethodGet, path, nil, &issue); err != nil {
+	if err := b.requestRetrying(ctx, http.MethodGet, path, nil, &issue, nil); err != nil {
 		return 0, fmt.Errorf("resolve GitHub issue id for #%d: %w", number, err)
 	}
 	if issue.Number != number || issue.ID == 0 {
@@ -612,12 +614,18 @@ const (
 
 // requestRetrying sends one read or safely repeatable update, retrying
 // transport failures, rate limits, and server errors a bounded number of
-// times.
-func (b *GitHubBackend) requestRetrying(ctx context.Context, method, path string, body, destination any) error {
+// times. A non-nil proceed is consulted before every attempt; its error
+// stops the request unsent.
+func (b *GitHubBackend) requestRetrying(ctx context.Context, method, path string, body, destination any, proceed func() error) error {
 	if method != http.MethodGet && method != http.MethodPatch {
 		return fmt.Errorf("GitHub %s %s is not safely repeatable", method, path)
 	}
 	for attempt := 1; ; attempt++ {
+		if proceed != nil {
+			if err := proceed(); err != nil {
+				return err
+			}
+		}
 		status, err := b.requestStatus(ctx, method, path, body, destination)
 		var transport *TransportFailure
 		transient := errors.As(err, &transport) || status == http.StatusTooManyRequests || status >= http.StatusInternalServerError

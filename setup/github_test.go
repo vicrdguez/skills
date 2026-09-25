@@ -582,11 +582,24 @@ func TestGitHubIssuePublicationRetriesOnlyRepeatableRequests(t *testing.T) {
 	if err != nil || !slices.Equal(children, []int{8}) || attempts["GET /repos/acme/widgets/issues/7/sub_issues"] != 3 {
 		t.Fatalf("read was not retried to success: %v %v %v", children, err, attempts)
 	}
-	if err := backend.UpdateIssue(ctx, 8, "Current title", "current prose\n"); err != nil || attempts["PATCH /repos/acme/widgets/issues/8"] != 3 {
+	if err := backend.UpdateIssue(ctx, 8, "Current title", "current prose\n", nil); err != nil || attempts["PATCH /repos/acme/widgets/issues/8"] != 3 {
 		t.Fatalf("repeatable update was not retried after transport failures: %v %v", err, attempts)
 	}
-	if err := backend.UpdateIssue(ctx, 9, "Title", "prose\n"); err == nil || attempts["PATCH /repos/acme/widgets/issues/9"] != requestAttempts {
+	if err := backend.UpdateIssue(ctx, 9, "Title", "prose\n", nil); err == nil || attempts["PATCH /repos/acme/widgets/issues/9"] != requestAttempts {
 		t.Fatalf("update retries were not bounded: %v %v", err, attempts)
+	}
+	// A selection superseded after the first failed attempt stops the retries
+	// before another update is sent, and its reason reaches the caller.
+	superseded := errors.New("selection superseded")
+	checks := 0
+	proceed := func() error {
+		if checks++; checks > 1 {
+			return superseded
+		}
+		return nil
+	}
+	if err := backend.UpdateIssue(ctx, 9, "Title", "prose\n", proceed); !errors.Is(err, superseded) || attempts["PATCH /repos/acme/widgets/issues/9"] != requestAttempts+1 {
+		t.Fatalf("update was retried after its selection was superseded: %v %v", err, attempts)
 	}
 	if _, err := backend.CreateIssue(ctx, "Title", "prose\n"); err == nil || attempts["POST /repos/acme/widgets/issues"] != 1 {
 		t.Fatalf("create was retried: %v %v", err, attempts)
@@ -619,7 +632,7 @@ func TestGitHubIssuePublicationBoundsUnansweredRequests(t *testing.T) {
 	if !errors.As(err, &unknown) || !unknown.UnknownOutcome() {
 		t.Fatalf("unanswered create was not an unknown outcome: %v", err)
 	}
-	if err := backend.UpdateIssue(ctx, 8, "Title", "prose\n"); err == nil {
+	if err := backend.UpdateIssue(ctx, 8, "Title", "prose\n", nil); err == nil {
 		t.Fatal("unanswered update reported success")
 	}
 	// One create plus a bounded number of update attempts, each timing out.

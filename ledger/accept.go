@@ -20,8 +20,10 @@ type Forge interface {
 	// CreateIssue publishes one descriptive issue and returns its number. A
 	// failure whose outcome is unknown is never retried automatically.
 	CreateIssue(ctx context.Context, title, body string) (int, error)
-	// UpdateIssue presents current prose on one established issue.
-	UpdateIssue(ctx context.Context, number int, title, body string) error
+	// UpdateIssue presents current prose on one established issue. proceed
+	// is consulted before every attempt, including retries; its error stops
+	// the update unsent and is returned as is.
+	UpdateIssue(ctx context.Context, number int, title, body string, proceed func() error) error
 	// ListChildren lists the issue numbers grouped under one parent issue.
 	ListChildren(ctx context.Context, parent int) ([]int, error)
 	// AttachChild groups one child issue under its parent issue.

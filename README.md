@@ -93,7 +93,7 @@ skl ledger publish --repo <path> --proposal add-foundation \
   --issue add-foundation=/tmp/add-foundation.md
 ```
 
-Established issues are updated in place and missing ones created; only established attachments are recorded. Reads and updates retry briefly, but a create whose outcome is unknown is never retried, so a later publication may duplicate it. Without prose, the outcome names the private readback and guidance from `skl skill --resource reference/issue-publication.md --input proposal=add-foundation --input repo=/abs/path propose` to author it. Known competing upstream history requires explicit reconciliation, never automatic merge, rebase, or force-push. Public bodies are not retained as private workflow history.
+Established issues are updated in place and missing ones created; only established attachments are recorded. Reads and updates retry briefly, but a create whose outcome is unknown is never retried, so a later publication may duplicate it. Without prose, the outcome names the private readback and guidance from `skl skill --resource reference/issue-publication.md --input proposal=add-foundation --input repo=/abs/path --input remote=origin propose` to author it. Known competing upstream history requires explicit reconciliation, never automatic merge, rebase, or force-push. Public bodies are not retained as private workflow history.
 
 Read exact evidence with `skl ledger show --commit <sha> --path <ledger-path>`; a missing reference is refused, not substituted. Commands default to Markdown; `--format json` gives equivalent typed transport.
 

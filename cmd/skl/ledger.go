@@ -42,8 +42,10 @@ type proseAuthoring struct {
 }
 
 // authoringFor returns the prose authoring pointers when any surface of the
-// outcome reported missing prose, and nil otherwise.
-func authoringFor(root string, outcome *ledger.Acceptance) *proseAuthoring {
+// outcome reported missing prose, and nil otherwise. Every pointer binds the
+// selected repository root and remote, so it reads and publishes the same
+// Project as the operation that produced it.
+func authoringFor(repository setup.RepositoryContext, outcome *ledger.Acceptance) *proseAuthoring {
 	missing := outcome.ParentNote != nil && outcome.ParentNote.Status == ledger.IssueMissingInput
 	for _, slice := range outcome.Slices {
 		missing = missing || slice.IssueStatus != nil && slice.IssueStatus.Status == ledger.IssueMissingInput
@@ -51,13 +53,13 @@ func authoringFor(root string, outcome *ledger.Acceptance) *proseAuthoring {
 	if !missing {
 		return nil
 	}
-	repo := skilldist.ShellQuote(root)
+	selection := "--repo " + skilldist.ShellQuote(repository.Root) + " --remote " + skilldist.ShellQuote(repository.Remote)
 	authoring := &proseAuthoring{
-		Guidance:     "skl skill --resource reference/issue-publication.md --input " + skilldist.ShellQuote("proposal="+outcome.Proposal) + " --input " + skilldist.ShellQuote("repo="+root) + " propose",
-		Continuation: "skl ledger publish --repo " + repo + " --proposal " + skilldist.ShellQuote(outcome.Proposal),
+		Guidance:     "skl skill --resource reference/issue-publication.md --input " + skilldist.ShellQuote("proposal="+outcome.Proposal) + " --input " + skilldist.ShellQuote("repo="+repository.Root) + " --input " + skilldist.ShellQuote("remote="+repository.Remote) + " propose",
+		Continuation: "skl ledger publish " + selection + " --proposal " + skilldist.ShellQuote(outcome.Proposal),
 	}
 	for _, slice := range outcome.Slices {
-		authoring.Readback = append(authoring.Readback, "skl ledger show --repo "+repo+" --item "+skilldist.ShellQuote(outcome.Proposal+"/"+slice.Name))
+		authoring.Readback = append(authoring.Readback, "skl ledger show "+selection+" --item "+skilldist.ShellQuote(outcome.Proposal+"/"+slice.Name))
 		authoring.Continuation += " --issue " + skilldist.ShellQuote(slice.Name+"=") + "<body-file>"
 	}
 	if len(outcome.Slices) > 1 {
@@ -116,7 +118,7 @@ func ledgerCommands(newBackend backendFactory, stdout io.Writer) *cli.Command {
 				if err != nil {
 					return renderLedgerRefusal(stdout, format, err)
 				}
-				return renderLedgerOutcome(stdout, format, ledgerOutcome{Status: acceptance.Status, Acceptance: acceptance, Authoring: authoringFor(repository.Root, acceptance)})
+				return renderLedgerOutcome(stdout, format, ledgerOutcome{Status: acceptance.Status, Acceptance: acceptance, Authoring: authoringFor(repository, acceptance)})
 			},
 		}, {
 			Name:  "publish",
@@ -161,7 +163,7 @@ func ledgerCommands(newBackend backendFactory, stdout io.Writer) *cli.Command {
 				if err != nil {
 					return renderLedgerRefusal(stdout, format, err)
 				}
-				return renderLedgerOutcome(stdout, format, ledgerOutcome{Status: publication.Status, Publication: publication, Authoring: authoringFor(repository.Root, publication)})
+				return renderLedgerOutcome(stdout, format, ledgerOutcome{Status: publication.Status, Publication: publication, Authoring: authoringFor(repository, publication)})
 			},
 		}, {
 			Name:  "show",

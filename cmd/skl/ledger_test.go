@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -2197,12 +2198,263 @@ func TestPublicationReportsSupersededAndConflictingAttachments(t *testing.T) {
 	})
 }
 
-func TestMissingProseGuidesFreshAuthoring(t *testing.T) {
+// publishedSlice returns the named slice outcome of a publication.
+func publishedSlice(t *testing.T, outcome *ledger.Acceptance, name string) *ledger.SliceAcceptance {
+	t.Helper()
+	for index := range outcome.Slices {
+		if outcome.Slices[index].Name == name {
+			return &outcome.Slices[index]
+		}
+	}
+	t.Fatalf("publication lacks slice %s: %s", name, mustJSON(t, outcome))
+	return nil
+}
+
+func TestGroupingRevalidatesSelectedRecords(t *testing.T) {
+	const proposalPath = "projects/widgets/proposals/group-check/"
+	for _, tc := range []struct {
+		name string
+		// change is committed by another local writer once the parent
+		// grouping has been observed and before any grouping write.
+		change func(t *testing.T, clone string)
+		status string
+	}{
+		{"superseded child", func(t *testing.T, clone string) {
+			record := decodeRecord(t, readLedgerFile(t, clone, proposalPath+"feature/state.json"))
+			record["issue"] = map[string]any{"repository": "acme/widgets", "number": 900}
+			commitLedgerRecord(t, clone, proposalPath+"feature/state.json", mustJSON(t, record)+"\n")
+		}, ledger.IssueSuperseded},
+		{"removed parent", func(t *testing.T, clone string) {
+			record := decodeRecord(t, readLedgerFile(t, clone, proposalPath+"proposal.json"))
+			delete(record, "parent_issue")
+			commitLedgerRecord(t, clone, proposalPath+"proposal.json", mustJSON(t, record)+"\n")
+		}, ledger.IssueSuperseded},
+		{"unreadable parent", func(t *testing.T, clone string) {
+			commitLedgerRecord(t, clone, proposalPath+"proposal.json", "{\n")
+		}, ledger.IssueFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := newLedgerFixture(t)
+			root := sourceRepository(t, "acme", "widgets")
+			forge := newForgeServer(t)
+			cli := newLedgerApp(t, forge)
+			accepted := cli.accept(t, root, writeProposal(t, "", dualSlice("group-check")),
+				issueFile(t, "feature", "feature\n"), issueFile(t, "foundation", "foundation\n"), "--parent-body="+writeTemp(t, t, "parent\n"))
+			if accepted.Acceptance == nil || accepted.Acceptance.ParentIssue == nil {
+				t.Fatalf("setup acceptance did not publish a parent: %s", mustJSON(t, accepted))
+			}
+			parent := accepted.Acceptance.ParentIssue.Number
+			forge.mu.Lock()
+			forge.children[parent] = nil
+			groupings, changed := 0, false
+			forge.before = func(method, path string) {
+				if method == http.MethodPost && strings.HasSuffix(path, "/sub_issues") {
+					groupings++
+				}
+				if !changed && method == http.MethodGet && strings.HasSuffix(path, "/sub_issues") {
+					changed = true
+					tc.change(t, fixture.clone)
+				}
+			}
+			forge.mu.Unlock()
+
+			outcome, _ := cli.run(t, []string{"skl", "ledger", "publish", "--repo", root, "--proposal", "group-check", "--format", "json"})
+			forge.mu.Lock()
+			defer forge.mu.Unlock()
+			if tc.name == "superseded child" {
+				// Only the unchanged foundation child is grouped.
+				foundation := publishedSlice(t, outcome.Publication, "foundation").Issue.Number
+				if groupings != 1 || !slices.Equal(forge.children[parent], []int{foundation}) {
+					t.Fatalf("grouping writes %d, grouped %v; want only foundation #%d", groupings, forge.children[parent], foundation)
+				}
+				feature := publishedSlice(t, outcome.Publication, "feature")
+				if feature.GroupingStatus == nil || feature.GroupingStatus.Status != tc.status || feature.Issue == nil || feature.Issue.Number != 900 {
+					t.Fatalf("superseded child grouping was not reported: %s", mustJSON(t, feature))
+				}
+				return
+			}
+			if groupings != 0 {
+				t.Fatalf("sent %d grouping writes after the parent record changed", groupings)
+			}
+			for _, slice := range outcome.Publication.Slices {
+				if slice.GroupingStatus == nil || slice.GroupingStatus.Status != tc.status {
+					t.Fatalf("stopped grouping was not reported as %s: %s", tc.status, mustJSON(t, outcome))
+				}
+			}
+			if tc.name == "removed parent" {
+				if outcome.Publication.ParentIssue != nil || strings.Contains(readLedgerFile(t, fixture.clone, proposalPath+"proposal.json"), "parent_issue") {
+					t.Fatalf("the removed parent attachment was restored or reported: %s", mustJSON(t, outcome))
+				}
+			}
+		})
+	}
+
+	t.Run("new child superseded before grouping", func(t *testing.T) {
+		fixture := newLedgerFixture(t)
+		root := sourceRepository(t, "acme", "widgets")
+		forge := newForgeServer(t)
+		cli := newLedgerApp(t, forge)
+		accepted := cli.accept(t, root, writeProposal(t, "", dualSlice("new-child-check")),
+			issueFile(t, "foundation", "foundation\n"), "--parent-body="+writeTemp(t, t, "parent\n"))
+		if accepted.Acceptance == nil || accepted.Acceptance.ParentIssue == nil {
+			t.Fatalf("setup acceptance did not publish a parent: %s", mustJSON(t, accepted))
+		}
+		parent := accepted.Acceptance.ParentIssue.Number
+		statePath := "projects/widgets/proposals/new-child-check/feature/state.json"
+		// While this invocation creates the missing child, another local
+		// writer establishes a different one.
+		forge.mu.Lock()
+		forge.before = func(method, path string) {
+			if method != http.MethodPost || path != "/repos/acme/widgets/issues" {
+				return
+			}
+			record := decodeRecord(t, readLedgerFile(t, fixture.clone, statePath))
+			record["issue"] = map[string]any{"repository": "acme/widgets", "number": 900}
+			commitLedgerRecord(t, fixture.clone, statePath, mustJSON(t, record)+"\n")
+		}
+		forge.mu.Unlock()
+		outcome, _ := cli.run(t, []string{"skl", "ledger", "publish", "--repo", root, "--proposal", "new-child-check", "--format", "json", issueFile(t, "feature", "feature\n")})
+		forge.mu.Lock()
+		grouped := append([]int(nil), forge.children[parent]...)
+		forge.mu.Unlock()
+		if len(grouped) != 1 || grouped[0] != publishedSlice(t, outcome.Publication, "foundation").Issue.Number {
+			t.Fatalf("grouped %v; the new child must not be grouped after a different attachment was recorded", grouped)
+		}
+		feature := publishedSlice(t, outcome.Publication, "feature")
+		if feature.GroupingStatus == nil || feature.GroupingStatus.Status != ledger.IssueSuperseded || feature.IssueStatus == nil || feature.IssueStatus.Status != ledger.IssueConflict || feature.Issue.Number != 900 {
+			t.Fatalf("new child supersession was not reported: %s", mustJSON(t, feature))
+		}
+		if state := readLedgerFile(t, fixture.clone, statePath); mustJSON(t, decodeRecord(t, state)["issue"]) != `{"number":900,"repository":"acme/widgets"}` {
+			t.Fatalf("the concurrently recorded attachment was replaced: %s", state)
+		}
+	})
+}
+
+func TestUpdateRetryStopsAfterSupersession(t *testing.T) {
 	fixture := newLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	forge := newForgeServer(t)
 	cli := newLedgerApp(t, forge)
-	outcome := cli.accept(t, root, writeProposal(t, "", dualSlice("lost-prose")))
+	accepted := cli.accept(t, root, writeProposal(t, "", singleSlice("retry-check")), issueFile(t, "foundation", "original\n"))
+	if accepted.Acceptance == nil || accepted.Acceptance.Slices[0].Issue == nil {
+		t.Fatalf("setup acceptance did not attach an issue: %s", mustJSON(t, accepted))
+	}
+	statePath := "projects/widgets/proposals/retry-check/foundation/state.json"
+	// The first update fails transiently, and another local writer records a
+	// different attachment before the adapter would retry it.
+	patches := 0
+	forge.mu.Lock()
+	forge.fail = func(method, path string) int {
+		if method != http.MethodPatch {
+			return 0
+		}
+		if patches++; patches > 1 {
+			return 0
+		}
+		record := decodeRecord(t, readLedgerFile(t, fixture.clone, statePath))
+		record["issue"] = map[string]any{"repository": "acme/widgets", "number": 900}
+		commitLedgerRecord(t, fixture.clone, statePath, mustJSON(t, record)+"\n")
+		return http.StatusServiceUnavailable
+	}
+	forge.mu.Unlock()
+	outcome, _ := cli.run(t, []string{"skl", "ledger", "publish", "--repo", root, "--proposal", "retry-check", "--format", "json", issueFile(t, "foundation", "current\n")})
+	if patches != 1 || len(forge.updatedIssues()) != 0 {
+		t.Fatalf("sent %d updates although the selection was superseded after the first; updated %v", patches, forge.updatedIssues())
+	}
+	slice := outcome.Publication.Slices[0]
+	if slice.IssueStatus == nil || slice.IssueStatus.Status != ledger.IssueSuperseded || slice.Issue == nil || slice.Issue.Number != 900 {
+		t.Fatalf("stopped update was not reported as superseded: %s", mustJSON(t, slice))
+	}
+	if state := readLedgerFile(t, fixture.clone, statePath); mustJSON(t, decodeRecord(t, state)["issue"]) != `{"number":900,"repository":"acme/widgets"}` {
+		t.Fatalf("the newer local attachment was overwritten: %s", state)
+	}
+}
+
+func TestPublicationRefusesAttachmentsOfAnotherRepository(t *testing.T) {
+	foreignIssue := map[string]any{"repository": "other/repository", "number": 777}
+	t.Run("issue and parent", func(t *testing.T) {
+		fixture := newLedgerFixture(t)
+		root := sourceRepository(t, "acme", "widgets")
+		forge := newForgeServer(t)
+		cli := newLedgerApp(t, forge)
+		cli.accept(t, root, writeProposal(t, "", dualSlice("identity-check")))
+		proposalPath := "projects/widgets/proposals/identity-check/"
+		record := decodeRecord(t, readLedgerFile(t, fixture.clone, proposalPath+"foundation/state.json"))
+		record["issue"] = foreignIssue
+		commitLedgerRecord(t, fixture.clone, proposalPath+"foundation/state.json", mustJSON(t, record)+"\n")
+		meta := decodeRecord(t, readLedgerFile(t, fixture.clone, proposalPath+"proposal.json"))
+		meta["parent_issue"] = map[string]any{"repository": "other/repository", "number": 778}
+		commitLedgerRecord(t, fixture.clone, proposalPath+"proposal.json", mustJSON(t, meta)+"\n")
+		// Unrelated same-numbered issues exist in the selected repository.
+		forge.mu.Lock()
+		for _, number := range []int{777, 778} {
+			forge.issues = append(forge.issues, map[string]any{"id": number + 1000, "number": number, "title": "Unrelated", "body": "Do not overwrite"})
+		}
+		forge.list = append(forge.list, forge.issues...)
+		forge.mu.Unlock()
+		head := strings.TrimSpace(runGitOutput(t, fixture.clone, "rev-parse", "HEAD"))
+
+		outcome, _ := cli.run(t, []string{"skl", "ledger", "publish", "--repo", root, "--proposal", "identity-check", "--format", "json",
+			issueFile(t, "foundation", "current\n"), "--parent-body=" + writeTemp(t, t, "parent\n")})
+		if len(forge.updatedIssues()) != 0 || forge.createdCount() != 2 {
+			t.Fatalf("publication mutated a same-numbered issue: updated %v", forge.updatedIssues())
+		}
+		for _, body := range forge.receivedBodies() {
+			if strings.Contains(body, "sub_issue_id") {
+				t.Fatalf("grouping was sent under a parent of another repository: %s", body)
+			}
+		}
+		foundation := publishedSlice(t, outcome.Publication, "foundation")
+		if foundation.IssueStatus == nil || foundation.IssueStatus.Status != ledger.IssueConflict || !strings.Contains(foundation.IssueStatus.Detail, "other/repository#777") || mustJSON(t, foundation.Issue) != `{"repository":"other/repository","number":777}` {
+			t.Fatalf("foreign issue attachment was not refused: %s", mustJSON(t, foundation))
+		}
+		if foundation.GroupingStatus == nil || foundation.GroupingStatus.Status != ledger.IssueConflict || outcome.Publication.ParentNote == nil || outcome.Publication.ParentNote.Status != ledger.IssueConflict {
+			t.Fatalf("foreign parent attachment was not refused: %s", mustJSON(t, outcome))
+		}
+		if changed := runGitOutput(t, fixture.clone, "diff", head, "HEAD", "--", proposalPath+"foundation/state.json", proposalPath+"proposal.json"); strings.Contains(changed, "other/repository") {
+			t.Fatalf("the recorded associations changed:\n%s", changed)
+		}
+	})
+
+	t.Run("grouped child", func(t *testing.T) {
+		fixture := newLedgerFixture(t)
+		root := sourceRepository(t, "acme", "widgets")
+		forge := newForgeServer(t)
+		cli := newLedgerApp(t, forge)
+		accepted := cli.accept(t, root, writeProposal(t, "", dualSlice("child-identity")),
+			issueFile(t, "feature", "feature\n"), issueFile(t, "foundation", "foundation\n"), "--parent-body="+writeTemp(t, t, "parent\n"))
+		parent := accepted.Acceptance.ParentIssue.Number
+		statePath := "projects/widgets/proposals/child-identity/foundation/state.json"
+		record := decodeRecord(t, readLedgerFile(t, fixture.clone, statePath))
+		record["issue"] = foreignIssue
+		commitLedgerRecord(t, fixture.clone, statePath, mustJSON(t, record)+"\n")
+		forge.mu.Lock()
+		forge.children[parent] = nil
+		forge.mu.Unlock()
+
+		outcome, _ := cli.run(t, []string{"skl", "ledger", "publish", "--repo", root, "--proposal", "child-identity", "--format", "json"})
+		forge.mu.Lock()
+		grouped := append([]int(nil), forge.children[parent]...)
+		forge.mu.Unlock()
+		if feature := publishedSlice(t, outcome.Publication, "feature").Issue.Number; !slices.Equal(grouped, []int{feature}) {
+			t.Fatalf("grouped %v; want only the in-repository child #%d", grouped, feature)
+		}
+		if foundation := publishedSlice(t, outcome.Publication, "foundation"); foundation.GroupingStatus == nil || foundation.GroupingStatus.Status != ledger.IssueConflict {
+			t.Fatalf("foreign child grouping was not refused: %s", mustJSON(t, foundation))
+		}
+	})
+}
+
+func TestMissingProseGuidesFreshAuthoring(t *testing.T) {
+	fixture := newLedgerFixture(t)
+	// A fork checkout selects the upstream Project explicitly; every pointer
+	// must keep that selection rather than fall back to origin.
+	root := sourceRepository(t, "acme", "widgets")
+	runGit(t, root, "remote", "rename", "origin", "upstream")
+	runGit(t, root, "remote", "add", "origin", "git@github.com:other/widgets.git")
+	forge := newForgeServer(t)
+	cli := newLedgerApp(t, forge)
+	outcome := cli.accept(t, root, writeProposal(t, "", dualSlice("lost-prose")), "--remote", "upstream")
 	if outcome.Status != "accepted" || forge.createdCount() != 0 {
 		t.Fatalf("acceptance without prose published or failed: %s", mustJSON(t, outcome))
 	}
@@ -2212,26 +2464,32 @@ func TestMissingProseGuidesFreshAuthoring(t *testing.T) {
 		}
 	}
 	root = strings.TrimSpace(runGitOutput(t, root, "rev-parse", "--show-toplevel"))
-	quotedRoot := "'" + root + "'"
+	selection := "--repo '" + root + "' --remote 'upstream'"
 	want := &proseAuthoring{
 		Readback: []string{
-			"skl ledger show --repo " + quotedRoot + " --item 'lost-prose/feature'",
-			"skl ledger show --repo " + quotedRoot + " --item 'lost-prose/foundation'",
+			"skl ledger show " + selection + " --item 'lost-prose/feature'",
+			"skl ledger show " + selection + " --item 'lost-prose/foundation'",
 		},
-		Guidance:     "skl skill --resource reference/issue-publication.md --input 'proposal=lost-prose' --input 'repo=" + root + "' propose",
-		Continuation: "skl ledger publish --repo " + quotedRoot + " --proposal 'lost-prose' --issue 'feature='<body-file> --issue 'foundation='<body-file> --parent-body <parent-body-file>",
+		Guidance:     "skl skill --resource reference/issue-publication.md --input 'proposal=lost-prose' --input 'repo=" + root + "' --input 'remote=upstream' propose",
+		Continuation: "skl ledger publish " + selection + " --proposal 'lost-prose' --issue 'feature='<body-file> --issue 'foundation='<body-file> --parent-body <parent-body-file>",
 	}
 	if mustJSON(t, outcome.Authoring) != mustJSON(t, want) {
 		t.Fatalf("authoring pointers = %s\nwant %s", mustJSON(t, outcome.Authoring), mustJSON(t, want))
 	}
+	// The readback pointer, run with exactly its bound arguments, reads the
+	// selected upstream Project.
+	readback, _ := cli.run(t, []string{"skl", "ledger", "show", "--repo", root, "--remote", "upstream", "--item", "lost-prose/feature", "--format", "json"})
+	if readback.Status != "shown" {
+		t.Fatalf("authoring readback cannot read the selected Project: %s", mustJSON(t, readback))
+	}
 	// The guidance renders with the continuation arguments bound.
 	cli.out.Reset()
-	if err := cli.app.Run([]string{"skl", "skill", "--resource", "reference/issue-publication.md", "--input", "proposal=lost-prose", "--input", "repo=" + root, "propose"}); err != nil {
+	if err := cli.app.Run([]string{"skl", "skill", "--resource", "reference/issue-publication.md", "--input", "proposal=lost-prose", "--input", "repo=" + root, "--input", "remote=upstream", "propose"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, wanted := range []string{
-		"skl ledger show --repo " + quotedRoot + " --item 'lost-prose/<slice>'",
-		"skl ledger publish --repo " + quotedRoot + " --proposal 'lost-prose'",
+		"skl ledger show " + selection + " --item 'lost-prose/<slice>'",
+		"skl ledger publish " + selection + " --proposal 'lost-prose'",
 		"Never publish with `gh`",
 		"Manual Verification",
 	} {
@@ -2240,7 +2498,7 @@ func TestMissingProseGuidesFreshAuthoring(t *testing.T) {
 		}
 	}
 	cli.out.Reset()
-	if err := cli.app.Run([]string{"skl", "ledger", "publish", "--repo", root, "--proposal", "lost-prose"}); err != nil {
+	if err := cli.app.Run([]string{"skl", "ledger", "publish", "--repo", root, "--remote", "upstream", "--proposal", "lost-prose"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, wanted := range []string{"Issue: missing_input", "  Guidance: " + want.Guidance, "  Then publish: " + want.Continuation} {
@@ -2252,7 +2510,7 @@ func TestMissingProseGuidesFreshAuthoring(t *testing.T) {
 	// Freshly authored prose is published verbatim: no accepted document,
 	// report, or other private evidence is appended, and nothing is stored.
 	prose := map[string]string{"feature": "Fresh feature prose.\n", "foundation": "Fresh foundation prose.\n", "parent": "Fresh parent prose.\n"}
-	published, _ := cli.run(t, []string{"skl", "ledger", "publish", "--repo", root, "--proposal", "lost-prose", "--format", "json",
+	published, _ := cli.run(t, []string{"skl", "ledger", "publish", "--repo", root, "--remote", "upstream", "--proposal", "lost-prose", "--format", "json",
 		"--issue=feature=" + writeTemp(t, t, prose["feature"]),
 		"--issue=foundation=" + writeTemp(t, t, prose["foundation"]),
 		"--parent-body=" + writeTemp(t, t, prose["parent"])})

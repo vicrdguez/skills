@@ -4,7 +4,7 @@ Author the current human-facing descriptions of accepted proposal `{{.Proposal}}
 
 ## Read the current private evidence
 
-Read every slice's accepted record with `skl ledger show --repo {{quote .Repo}} --item {{quote (print .Proposal "/<slice>")}}`, using the slice names the publication outcome lists. Its output carries the frozen Contract documents, current state, dependencies, and established issue attachments. That evidence stays private.
+Read every slice's accepted record with `skl ledger show --repo {{quote .Repo}} --remote {{quote .Remote}} --item {{quote (print .Proposal "/<slice>")}}`, using the slice names the publication outcome lists. Its output carries the frozen Contract documents, current state, dependencies, and established issue attachments. That evidence stays private.
 
 ## Write the public prose
 
@@ -18,7 +18,7 @@ Write one self-contained Markdown file per slice, plus one parent body when the 
 ## Publish through skl
 
 ```
-skl ledger publish --repo {{quote .Repo}} --proposal {{quote .Proposal}} --issue <slice>=<body-file> [--issue <slice>=<body-file> ...] [--parent-body <parent-body-file>]
+skl ledger publish --repo {{quote .Repo}} --remote {{quote .Remote}} --proposal {{quote .Proposal}} --issue <slice>=<body-file> [--issue <slice>=<body-file> ...] [--parent-body <parent-body-file>]
 ```
 
 Repeat `--issue` for each slice whose presentation should be current. `skl` updates an issue it has already recorded and creates a missing one. It groups attached children under the parent. It records only attachments that it has established. Never publish with `gh` and never edit ledger records by hand.
