@@ -63,32 +63,40 @@ A runtime such as Pi, Codex, or Claude Code that hosts an **Agent Worker**. Chan
 _Avoid_: Workflow backend
 
 **Harness Adapter**:
-A thin, harness-specific entry point that connects an **Agent Harness** to the **Workflow Engine** without defining workflow semantics.
-_Avoid_: Workflow implementation
+A thin, harness-specific entry point, such as the Implement or Watchdog entry point, that connects an **Agent Harness** to the **Workflow Engine** without defining workflow semantics. It may pass invocation choices only the harness understands, such as subagent model or thinking level.
+_Avoid_: Workflow implementation, skill stub
 
-**Skill Definition**:
-The authoritative, harness-independent description of an **Agent Worker** behavior. It may be specialized only with facts and deterministic conditions.
-_Avoid_: Harness skill, generated prompt
+**Procedure**:
+The authored, harness-independent script for one workflow operation or user-invoked activity: its ordered steps, completion criteria, and commands. The **Workflow Engine** specializes it only with invocation facts and deterministic conditions.
+_Avoid_: Skill definition, template
 
-**Skill Module**:
-A coherent authored unit of instructions used to compose a **Skill Definition**. It is source material, not a separately activated skill.
-_Avoid_: Execution skill, skill stub
+**Craft**:
+Authored judgment guidance, such as testing, review, or design vocabulary, independent of any harness or invocation. It is written once and composed into the **Procedures** that need it.
+_Avoid_: Skill module, included skill, workflow policy
 
 **Execution Skill**:
-A **Skill Definition** specialized for one invocation and its known situation, supplying task facts and actions without requiring the **Agent Worker** to understand workflow storage or bookkeeping. It is the delivered instruction content, distinct from its authored **Skill Modules** and any transport metadata.
+The instruction content delivered for one invocation: one **Procedure** with its facts bound, composed with the **Craft** it needs. It contains only what the **Agent Worker** acts on in that invocation.
 _Avoid_: Rendered skill, instruction packet
 
+**Outcome Instruction**:
+The worker-directed prose in a **Workflow Engine** response, stating what the operation established and what the worker does next.
+_Avoid_: Status code, bare refusal
+
 **Skill Stub**:
-A discoverable filesystem representative of one **Skill Definition**, installed in each supported harness's user skill directory. It delegates instruction retrieval without duplicating behavior or requiring a harness plugin package.
-_Avoid_: Skill definition, harness adapter
+A discoverable skill file installed in a harness's user skill directory that retrieves one **Craft** or user-invoked **Procedure** through the **Workflow Engine** without duplicating it.
+_Avoid_: Harness adapter, procedure
 
 **Skill Resource**:
-Named supporting material belonging to a **Skill Definition** and retrieved only when that behavior requires it.
+Named supporting material belonging to a **Procedure** or **Craft**, retrieved only at the step that needs it.
 _Avoid_: Inline prompt context
 
+**Document Template**:
+A **Skill Resource** that guides the **Agent Worker** in writing one **Result Document**.
+_Avoid_: Result document, report schema
+
 **Instruction Packet**:
-The structured delivery representation of a skill invocation's instructions, facts, and inclusion manifest, distinct from the **Execution Skill** it carries.
-_Avoid_: Execution skill, skill definition, model-generated prompt
+The structured representation of one invocation's **Execution Skill** and facts for programmatic callers.
+_Avoid_: Execution skill, procedure, model-generated prompt
 
 **Result Document**:
 Ephemeral, agent-authored material prepared for a phase handoff or human-facing publication. It is distinct from a durable **Phase Report**; a public body may be reconstructed from recorded evidence rather than retained as workflow history.
@@ -233,6 +241,7 @@ _Avoid_: Local Git helper, GitHub cache
 ## Flagged ambiguities
 
 - **Contract** names a Work Item's accepted obligations; **Workflow Ledger** names the private cross-project record. They are not interchangeable concepts.
+- "Skill" alone names what a harness discovers and activates, a **Skill Stub**. Authored workflow content is a **Procedure** or **Craft**, delivered as an **Execution Skill**.
 
 ## Example dialogue
 
@@ -248,13 +257,17 @@ _Avoid_: Local Git helper, GitHub cache
 >
 > **Domain expert:** Only one may hold its Claim. Workers may act concurrently on different Work Items, but interrupted reservations require explicit recovery rather than automatic expiry.
 >
-> **Developer:** Does the Claude Skill Stub define different behavior from the Pi one?
+> **Developer:** Does the Claude Code Implement adapter define different behavior from the Pi one?
 >
-> **Domain expert:** No. Both expose the same Skill Definition. Their Execution Skills preserve the same Workflow Mechanics while reflecting the worker's known execution capabilities.
+> **Domain expert:** No. Both reach the same Procedure. An adapter may choose a subagent model or thinking level, but the Execution Skill preserves the same Workflow Mechanics.
 >
-> **Developer:** Does the Agent Worker assemble the Skill Modules for its task?
+> **Developer:** Does the Agent Worker assemble the Craft it needs for its task?
 >
-> **Domain expert:** No. The Workflow Engine selects and composes them into the Execution Skill for that invocation.
+> **Domain expert:** No. The Workflow Engine composes the Procedure with the Craft it needs into the Execution Skill for that invocation.
+>
+> **Developer:** Should the Execution Skill explain why the engine keeps Phase Reports private?
+>
+> **Domain expert:** No. That reasoning belongs in an ADR. The Execution Skill states only what the worker does, and an Outcome Instruction tells it what happened when a command returns.
 >
 > **Developer:** GitHub shows the `done` label. Is the Work Item Merged?
 >
