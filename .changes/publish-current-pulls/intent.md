@@ -26,11 +26,11 @@ Publish the current local phase result through ordinary handoffs and explicit `s
 
 The source carrier's checkboxes are endpoint verification only; target accepted Contracts remain frozen and ordinary reports carry completion evidence.
 
-- [ ] Both normal handoff and explicit publication present current local results without replaying phases or gating local progress (B1, A1).
-- [ ] PR associations are retained without in-scope durable coordination, pending-publication/source records, phase selectors, or prose registration; obsolete reservations cannot block current work (B2, A2).
-- [ ] Ordinary non-force source publication and draft/ready effects obey recorded source identity and bounded best-effort semantics while preserving later local results and Claims (B3-B4, A1-A2).
-- [ ] Current prose and private-evidence guidance are available without CLI-authored summaries, durable bodies, or automatic private-review export (B5, A3).
-- [ ] Grouped public CLI/Git/HTTP and rendered-resource evidence covers the obligations, regression sensitivity, and Full Gate without a new framework or stronger guarantees (A4).
+- [x] Both normal handoff and explicit publication present current local results without replaying phases or gating local progress (B1, A1).
+- [x] PR associations are retained without in-scope durable coordination, pending-publication/source records, phase selectors, or prose registration; obsolete reservations cannot block current work (B2, A2).
+- [x] Ordinary non-force source publication and draft/ready effects obey recorded source identity and bounded best-effort semantics while preserving later local results and Claims (B3-B4, A1-A2).
+- [x] Current prose and private-evidence guidance are available without CLI-authored summaries, durable bodies, or automatic private-review export (B5, A3).
+- [x] Grouped public CLI/Git/HTTP and rendered-resource evidence covers the obligations, regression sensitivity, and Full Gate without a new framework or stronger guarantees (A4).
 
 ## Manual verification
 
