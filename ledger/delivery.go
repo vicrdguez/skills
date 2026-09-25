@@ -193,6 +193,8 @@ func ReplicateDelivery(s *Store, repository github.RepositoryID, result *Deliver
 		} else {
 			state.Publication.Push = &note
 		}
+		// No pending fact is recorded as an absent publication, as in
+		// recordPublication, never as an empty object.
 		if *state.Publication == (PublicationState{}) {
 			state.Publication = nil
 		}

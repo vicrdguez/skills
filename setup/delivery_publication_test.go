@@ -967,11 +967,13 @@ func TestDeliveryPublicationStopsWritesSupersededInFlight(t *testing.T) {
 			name: "unconfirmed ready mutation is not corrected",
 			pull: deliveryPull{Body: deliveryBody, Draft: true},
 			arrange: func(f *deliveryForge) {
-				// The attachment and approval preflight reads succeed; the final
-				// confirmation's bounded reads fail; the correction's inspection
-				// read succeeds.
+				// Reads before the ready mutation succeed; the final
+				// confirmation's bounded reads after it fail; the correction's
+				// inspection read succeeds.
+				failed := 0
 				f.beforePullRead = func(*deliveryPull) {
-					if f.reads > 2 && f.reads <= 2+presentationAttempts {
+					if len(f.draftQueries) > 0 && failed < presentationAttempts {
+						failed++
 						f.transientReads = 1
 					}
 				}
