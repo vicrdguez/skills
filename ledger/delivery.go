@@ -193,6 +193,9 @@ func ReplicateDelivery(s *Store, repository github.RepositoryID, result *Deliver
 		} else {
 			state.Publication.Push = &note
 		}
+		if *state.Publication == (PublicationState{}) {
+			state.Publication = nil
+		}
 		if reflect.DeepEqual(state.Publication, result.State.Publication) {
 			return nil
 		}

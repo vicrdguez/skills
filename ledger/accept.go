@@ -13,29 +13,26 @@ import (
 	"github.com/vicrdguez/skills/github"
 )
 
-// ForgeIssue is one open descriptive forge issue observed during safe
-// resolution of an uncertain publication.
-type ForgeIssue struct {
-	Number int
-	Title  string
-	Body   string
-}
-
 // Forge publishes descriptive human-facing issues through the existing
 // forge adapter. It is a transport, never an authority: skl does not author
 // prose, mine labels or comments, or read state from it.
 type Forge interface {
-	// CreateIssue publishes one descriptive issue and returns its number.
+	// CreateIssue publishes one descriptive issue and returns its number. A
+	// failure whose outcome is unknown is never retried automatically.
 	CreateIssue(ctx context.Context, title, body string) (int, error)
-	// ListOpenIssues lists open non-merge-request issues for safe resolution.
-	ListOpenIssues(ctx context.Context) ([]ForgeIssue, error)
+	// UpdateIssue presents current prose on one established issue. proceed
+	// is consulted before every attempt, including retries; its error stops
+	// the update unsent and is returned as is.
+	UpdateIssue(ctx context.Context, number int, title, body string, proceed func() error) error
 	// ListChildren lists the issue numbers grouped under one parent issue.
 	ListChildren(ctx context.Context, parent int) ([]int, error)
 	// AttachChild groups one child issue under its parent issue.
 	AttachChild(ctx context.Context, parent, child int) error
 }
 
-// SliceAcceptance is the acceptance outcome of one slice.
+// SliceAcceptance is the acceptance or publication outcome of one slice.
+// IssueStatus and GroupingStatus report this invocation's immediate issue
+// publication results; they are never persisted.
 type SliceAcceptance struct {
 	Name           string           `json:"name"`
 	Title          string           `json:"title"`
@@ -46,14 +43,14 @@ type SliceAcceptance struct {
 	IssueStatus    *PublicationNote `json:"issue_status,omitempty"`
 	GroupingStatus *PublicationNote `json:"grouping_status,omitempty"`
 	PushStatus     *PublicationNote `json:"push_status,omitempty"`
-
-	ownsIssueReservation bool
 }
 
-// Acceptance is the complete outcome of one acceptance invocation.
+// Acceptance is the complete outcome of one acceptance or explicit
+// publication invocation.
 type Acceptance struct {
-	// Status is "accepted" for a new local acceptance and "existing" when
-	// the unchanged proposal was already accepted.
+	// Status is "accepted" for a new local acceptance, "existing" when the
+	// unchanged proposal was already accepted, and "attempted" for an
+	// explicit current-view publication.
 	Status            string           `json:"status"`
 	Project           string           `json:"project"`
 	Repository        string           `json:"repository"`
@@ -62,8 +59,6 @@ type Acceptance struct {
 	ParentIssue       *ForgeAttachment `json:"parent_issue,omitempty"`
 	ParentNote        *PublicationNote `json:"parent_note,omitempty"`
 	BookkeepingStatus *PublicationNote `json:"bookkeeping_status,omitempty"`
-
-	ownsParentReservation bool
 	// Commit is the full ledger commit that carries the accepted records
 	// after this invocation's local writes.
 	Commit  string            `json:"commit"`
@@ -73,8 +68,8 @@ type Acceptance struct {
 
 // Accept validates and freezes one proposal into the local ledger, then
 // attempts initial publication. The local commit is authoritative; push and
-// issue publication are best-effort surfaces whose failures stay visibly
-// pending without undoing acceptance.
+// issue publication are best-effort surfaces whose failures are reported
+// without undoing acceptance.
 func Accept(ctx context.Context, store *Store, repository github.RepositoryID, declaration *ProposalDeclaration, forge Forge, now func() time.Time) (*Acceptance, error) {
 	var project Project
 	var outcome *Acceptance
@@ -117,8 +112,7 @@ func Accept(ctx context.Context, store *Store, repository github.RepositoryID, d
 			}
 			outcome.Status = "existing"
 			outcome.ParentIssue = meta.ParentIssue
-			outcome.ParentNote = meta.ParentPublication
-			if err := store.loadAcceptedStates(project.Name, declaration, outcome); err != nil {
+			if err := store.loadAcceptedStates(project.Name, declaration.Proposal, declaration.SliceNames(), outcome); err != nil {
 				return err
 			}
 		} else if !os.IsNotExist(err) {
@@ -138,7 +132,7 @@ func Accept(ctx context.Context, store *Store, repository github.RepositoryID, d
 				return err
 			}
 			outcome.Status = "accepted"
-			if err := store.loadAcceptedStates(project.Name, declaration, outcome); err != nil {
+			if err := store.loadAcceptedStates(project.Name, declaration.Proposal, declaration.SliceNames(), outcome); err != nil {
 				return err
 			}
 		}
@@ -150,9 +144,7 @@ func Accept(ctx context.Context, store *Store, repository github.RepositoryID, d
 	}
 	outcome.Commit = acceptedRevision
 	outcome.HeadRef = fmt.Sprintf("%s/%s", projectsRoot, project.Name)
-	if err := Publish(ctx, store, project.Name, declaration, outcome, forge, acceptedRevision); err != nil {
-		return nil, err
-	}
+	Publish(ctx, store, outcome, IssueProse{Bodies: declaration.IssueBodies, Parent: declaration.ParentBody}, forge, acceptedRevision)
 	return outcome, nil
 }
 
@@ -199,32 +191,23 @@ func (s *Store) freeze(project Project, declaration *ProposalDeclaration, accept
 	return s.commit("accept "+project.Name+"/"+declaration.Proposal, paths...)
 }
 
-// loadAcceptedStates reads the just-written or existing slice states into
-// the acceptance outcome.
-func (s *Store) loadAcceptedStates(project string, declaration *ProposalDeclaration, outcome *Acceptance) error {
-	for index := range declaration.Slices {
-		slice := declaration.Slices[index]
-		state, found, err := s.readSliceState(project, declaration.Proposal, slice.Name)
+// loadAcceptedStates reads the named just-written or existing slice states
+// into the outcome.
+func (s *Store) loadAcceptedStates(project, proposal string, names []string, outcome *Acceptance) error {
+	for _, name := range names {
+		state, found, err := s.readSliceState(project, proposal, name)
 		if err != nil || !found {
 			if err == nil {
-				return fmt.Errorf("accepted record of slice %s is missing its state.json", slice.Name)
+				return fmt.Errorf("accepted record of slice %s is missing its state.json", name)
 			}
 			return err
 		}
 		acceptance := SliceAcceptance{
-			Name: slice.Name, Title: state.Title, Branch: state.Branch,
+			Name: name, Title: state.Title, Branch: state.Branch,
 			Dependencies: state.Dependencies, State: state.State, Issue: state.Issue,
 		}
-		if state.Publication != nil {
-			if state.Publication.Issue != nil {
-				acceptance.IssueStatus = state.Publication.Issue
-			}
-			if state.Publication.Grouping != nil {
-				acceptance.GroupingStatus = state.Publication.Grouping
-			}
-			if state.Publication.Push != nil {
-				acceptance.PushStatus = state.Publication.Push
-			}
+		if state.Publication != nil && state.Publication.Push != nil {
+			acceptance.PushStatus = state.Publication.Push
 		}
 		outcome.Slices = append(outcome.Slices, acceptance)
 	}

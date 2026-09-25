@@ -109,9 +109,9 @@ func presentInvocation(repository setup.RepositoryContext, item string) string {
 	return fmt.Sprintf("skl ledger present --repo %s --remote %s --item %s", q(repository.Root), q(repository.Remote), q(item))
 }
 
-// presentationMarkdown renders the presentation facts the JSON transport
+// pullPresentationMarkdown renders the presentation facts the JSON transport
 // carries.
-func presentationMarkdown(line func(string, ...any), presentation *ledger.Presentation, guidance *presentationGuidance) {
+func pullPresentationMarkdown(line func(string, ...any), presentation *ledger.Presentation, guidance *presentationGuidance) {
 	var result *ledger.CurrentResult
 	if presentation != nil {
 		result = &presentation.Result

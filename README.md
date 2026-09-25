@@ -86,7 +86,14 @@ skl ledger show --repo <path> --item add-foundation/add-foundation
 
 Parent flags are for multi-slice proposals. `accepted` and `existing` freeze Contracts under `projects/<repository>/` in the ADR 0006 layout. A Project names exactly one source repository; a different repository with the same name is refused. Unchanged acceptance is idempotent; changed obligations require a renewed proposal.
 
-Acceptance commits locally before attempting replication and publication of supplied public bodies. Network failure leaves local acceptance authoritative and its remote effects pending; repeat the same acceptance to retry. Known competing upstream history requires explicit reconciliation, never automatic merge, rebase, or force-push. Public bodies are not retained as private workflow history.
+Acceptance commits locally before attempting replication and publication of supplied public bodies. Network failure leaves local acceptance authoritative; a pending ledger push stays recorded, while issue publication failures, uncertain creates, and missing prose are reported for that invocation only. Publish the current issue and parent view at any later time with freshly authored prose, without repeating acceptance:
+
+```sh
+skl ledger publish --repo <path> --proposal add-foundation \
+  --issue add-foundation=/tmp/add-foundation.md
+```
+
+Established issues are updated in place and missing ones created; only established attachments are recorded. Reads and updates retry briefly, but a create whose outcome is unknown is never retried, so a later publication may duplicate it. Without prose, the outcome names the private readback and guidance from `skl skill --resource reference/issue-publication.md --input proposal=add-foundation --input repo=/abs/path --input remote=origin propose` to author it. Known competing upstream history requires explicit reconciliation, never automatic merge, rebase, or force-push. Public bodies are not retained as private workflow history.
 
 Read exact evidence with `skl ledger show --commit <sha> --path <ledger-path>`; a missing reference is refused, not substituted. Commands default to Markdown; `--format json` gives equivalent typed transport.
 
@@ -168,7 +175,7 @@ skl ledger present --repo <path> --item <proposal>/<slice>
 skl ledger present --repo <path> --item <proposal>/<slice> --public-body <fresh-public-prose.md>
 ```
 
-Without `--public-body` it returns the current result, its exact private evidence references for `skl ledger show`, the phase's `reference/pull-presentation.md` authoring guidance, and the bound continuation; author fresh prose rather than restoring an earlier body. With prose it pushes the recorded source revision normally (never forcing), presents it as draft, and marks an approved result ready only while the pull request shows its reviewed final revision. It reruns no phase and changes no lifecycle, report, Claim, or review count; only a newly established pull request association is recorded. Reads and repeatable updates retry immediately within a small bound, further updates stop once a later local result supersedes the selected one, and a creation whose response was lost is reported as `unresolved` rather than retried. Temporarily stale public content is possible and is corrected by presenting the then-current result.
+Without `--public-body` it returns the current result, its exact private evidence references for `skl ledger show`, the phase's `reference/pull-presentation.md` authoring guidance, and the bound continuation; author fresh prose rather than restoring an earlier body. With prose it pushes the recorded source revision normally (never forcing), presents it as draft, and marks an approved result ready only while the pull request shows its reviewed final revision. It reruns no phase and changes no lifecycle, report, Claim, or review count; only a newly established pull request association is recorded. Reads and repeatable updates retry immediately within a small bound, further updates stop once a later local result supersedes the selected one, and a creation whose response was lost is reported as `uncertain` rather than retried. Temporarily stale public content is possible and is corrected by presenting the then-current result.
 
 Ledger-backed terminal observation/archival and final-review packaging are separate work, not implied by these delivery commands. Existing `skl status` and legacy proposal operations do not replace those ledger operations. In-flight forge-authoritative work must finish with its former binary or undergo an explicit administrative cutover with normal workers stopped; current delivery commands never silently adopt it.
 

@@ -50,22 +50,23 @@ type TerminalEvidence struct {
 	MergeCommit string            `json:"merge_commit,omitempty"`
 }
 
-// PublicationNote is one durable pending-publication fact. Successful push
-// needs no record; the clone's own refs show it.
+// PublicationNote is one publication fact: a durable pending replication
+// or phase-presentation fact, or an immediate issue publication outcome that
+// is reported but never persisted. Successful push needs no record; the
+// clone's own refs show it.
 type PublicationNote struct {
 	Status string `json:"status"`
 	Detail string `json:"detail,omitempty"`
 }
 
 // PublicationState collects the pending-publication facts applicable to one
-// slice. An absent field means no pending fact is known for it. Pull request
-// presentation keeps no pending, source, or reservation fact here: it is a
-// latest view derived from the committed result, and records written before
-// that change drop their obsolete fields on their next ordinary write.
+// slice. An absent field means no pending fact is known for it. Descriptive
+// issue and parent grouping publication and pull request presentation keep no
+// pending facts: only their established attachments are durable. Records
+// written before those changes drop their obsolete fields on their next
+// ordinary write.
 type PublicationState struct {
-	Push     *PublicationNote `json:"push,omitempty"`
-	Issue    *PublicationNote `json:"issue,omitempty"`
-	Grouping *PublicationNote `json:"grouping,omitempty"`
+	Push *PublicationNote `json:"push,omitempty"`
 }
 
 // SliceState is the persisted state.json of one slice. It owns the current
@@ -93,10 +94,9 @@ type SliceState struct {
 // ProposalMeta is the persisted proposal.json: proposal metadata only. The
 // directory membership defines the slices; no child inventory is stored.
 type ProposalMeta struct {
-	Accepted          string           `json:"accepted"`
-	ParentTitle       string           `json:"parent_title,omitempty"`
-	ParentIssue       *ForgeAttachment `json:"parent_issue,omitempty"`
-	ParentPublication *PublicationNote `json:"parent_publication,omitempty"`
+	Accepted    string           `json:"accepted"`
+	ParentTitle string           `json:"parent_title,omitempty"`
+	ParentIssue *ForgeAttachment `json:"parent_issue,omitempty"`
 	// Retired marks explicit human-directed retirement of a fully terminal,
 	// unclaimed proposal. It is an indication only: merged history, frozen
 	// Contracts, dependencies, and source work remain untouched, and it never

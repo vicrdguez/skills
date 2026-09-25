@@ -999,7 +999,7 @@ func TestRetrieveConcreteProposeInstructions(t *testing.T) {
 			"Correct demonstrable transcription errors", "returns to the human for resolution",
 			"neither routine artifact-by-artifact rereading nor a second semantic approval ceremony",
 		},
-		"ledger intake": {"skl ledger accept", "skl ledger show", "No source branch, worktree, or source artifact commit is prepared", "pending publication effects", "human-directed administrative cutover with normal workers stopped", "renewed proposal"},
+		"ledger intake": {"skl ledger accept", "skl ledger show", "No source branch, worktree, or source artifact commit is prepared", "skl ledger publish --repo <root> --proposal <proposal>", "rather than repeating acceptance", "Never publish with `gh` directly", "human-directed administrative cutover with normal workers stopped", "renewed proposal"},
 		"independent delivery": {
 			"Prefer separate Work Items for behaviors that deliver safe, useful results independently",
 			"after declared Dependencies are Merged, without requiring later Work Items",
@@ -1067,7 +1067,7 @@ func TestRetrieveApprovedContractGuidance(t *testing.T) {
 		},
 		{
 			name: "propose", included: []string{"design", "testing"},
-			resources: []string{"reference/behavior.md", "reference/intent.md", "reference/plan.md", "reference/tasks.md"},
+			resources: []string{"reference/behavior.md", "reference/intent.md", "reference/issue-publication.md", "reference/plan.md", "reference/tasks.md"},
 			markers: []string{
 				"one bounded review in a fresh context across the complete proposed slice set", "the exact user-confirmed Explore recap",
 				"every referenced decision or ADR", "omits, weakens, strengthens, contradicts, or invents obligations",

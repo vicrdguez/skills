@@ -623,15 +623,15 @@ func TestDeliveryPublicationPausedWithoutSourceIsPending(t *testing.T) {
 }
 
 // TestDeliveryPublicationUncertainCreateIsReportedOnce covers B4 create
-// response loss: the uncertainty is reported as unresolved after one
+// response loss: the uncertainty is reported as uncertain after one
 // presentation, with no durable attempt record, association, or local change.
 func TestDeliveryPublicationUncertainCreateIsReportedOnce(t *testing.T) {
 	l, source, store, _ := deliveryPublicationFixture(t)
 	head := l.head()
 	forge := &deliveryForgeStub{err: fmt.Errorf("%w: creation response lost", ledger.ErrPresentationUncertain)}
 	presentation := ledger.PresentCurrent(context.Background(), store, deliveryWidgets(), source.root, source.remote, deliverySelect(t, store), "public\n", forge)
-	if presentation.Publication.Status != ledger.IssueUnresolved || !strings.Contains(presentation.Publication.Detail, "response lost") {
-		t.Fatalf("presentation = %#v, want unresolved uncertainty", presentation.Publication)
+	if presentation.Publication.Status != ledger.IssueUncertain || !strings.Contains(presentation.Publication.Detail, "response lost") {
+		t.Fatalf("presentation = %#v, want reported uncertainty", presentation.Publication)
 	}
 	if calls := forge.calls(); len(calls) != 1 {
 		t.Fatalf("uncertain creation was presented %d times, want 1", len(calls))

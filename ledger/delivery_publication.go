@@ -12,7 +12,7 @@ import (
 
 // PullPresented reports a pull request that presents the selected current
 // result. Failed or uncertain presentation reuses IssuePending and
-// IssueUnresolved; none of these outcomes is persisted.
+// IssueUncertain; none of these outcomes is persisted.
 const PullPresented = "presented"
 
 // ErrPresentationUncertain marks a forge effect, such as a pull request
@@ -197,7 +197,7 @@ func presentSelected(ctx context.Context, s *Store, repository github.Repository
 	presented, err := forge.PresentPull(ctx, PullPresentation{Number: number, Title: selected.title, Body: body, Branch: selected.Branch, Head: selected.Source.Head, Approved: selected.Approved, Current: current})
 	if err != nil {
 		if errors.Is(err, ErrPresentationUncertain) {
-			return PublicationNote{Status: IssueUnresolved, Detail: err.Error()}, nil, false
+			return PublicationNote{Status: IssueUncertain, Detail: err.Error()}, nil, false
 		}
 		return pending(err.Error())
 	}
