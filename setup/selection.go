@@ -247,9 +247,6 @@ func (b *GitHubBackend) implementationReviews(ctx context.Context, number int) (
 				Verdict:      verdict,
 				ReviewNumber: reviewNumber,
 			}
-			if body != review.Body {
-				comment.RawBody = review.Body
-			}
 			comments = append(comments, comment)
 		}
 		if len(reviews) < 100 {

@@ -2394,12 +2394,8 @@ func TestPrivateSkillModulesAreNotPublicResources(t *testing.T) {
 
 	// The embedded module composes into the Implement result document, so the
 	// engine never reads worker prose as a second decision.
-	for resource, inputs := range map[string][]string{
-		"reference/ledger-submission.md": {"result_directory=" + t.TempDir(), "procedure=initial"},
-	} {
-		if instructions := renderResource(t, "implement", resource, inputs...); !strings.Contains(instructions, "never parses, judges, or cross-checks the prose") {
-			t.Errorf("%s did not compose the shared Result Document module:\n%s", resource, instructions)
-		}
+	if instructions := renderResource(t, "implement", "reference/ledger-submission.md", "result_directory="+t.TempDir(), "procedure=initial"); !strings.Contains(instructions, "never parses, judges, or cross-checks the prose") {
+		t.Errorf("reference/ledger-submission.md did not compose the shared Result Document module:\n%s", instructions)
 	}
 }
 
@@ -2540,10 +2536,8 @@ func TestBundleGuaranteedSupportingSkills(t *testing.T) {
 			t.Errorf("%s marker %q appears %d times, want once", marker.name, marker.text, count)
 		}
 	}
-	for _, deferred := range []string{"# Implementation report result document"} {
-		if strings.Contains(packet.Instructions, deferred) {
-			t.Errorf("no-facts Implement packet disclosed the deferred %q body", deferred)
-		}
+	if strings.Contains(packet.Instructions, "# Implementation report result document") {
+		t.Error("Implement packet disclosed the deferred report body")
 	}
 	// Every supporting definition preserves the accepted-change scope when
 	// specialized for an active private-ledger delivery.

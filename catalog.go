@@ -81,7 +81,6 @@ func PullReviewsEvidenceSource(repository string, number int) EvidenceSource {
 }
 
 type ReviewComment struct {
-	RawBody         string `json:"-"`
 	Line            int    `json:"line,omitempty"`
 	Side            string `json:"side,omitempty"`
 	Body            string `json:"body"`
@@ -95,8 +94,8 @@ type ReviewComment struct {
 	ReviewNumber    uint64 `json:"review_number,omitempty"`
 	ClaimAcquiredAt string `json:"claim_acquired_at,omitempty"`
 
-	// Line is the publication/deduplication anchor. CurrentLine also preserves
-	// an observed null for outdated inline comments; original anchors never replace it.
+	// CurrentLine preserves an observed null for outdated inline comments;
+	// original anchors never replace it.
 	CurrentLine       *int   `json:"current_line"`
 	OriginalLine      int    `json:"original_line,omitempty"`
 	StartLine         *int   `json:"start_line"`

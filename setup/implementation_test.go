@@ -56,6 +56,21 @@ func TestGitHubImplementationNormalizesPaginatedWork(t *testing.T) {
 	}
 }
 
+func TestSubmissionOwnerAcceptsOnlyOneLocalClosingFooter(t *testing.T) {
+	for body, want := range map[string]string{
+		"opening\n\nCloses #7\n":              "",
+		"unowned body":                        "no explicit owning issue",
+		"opening\n\nCloses #7\nCloses #8\n":   "multiple conflicting owning issues",
+		"opening\n\nCloses acme/other#7\n":    "ownership reference outside the supported repository attachment",
+		"opening\n\nCloses #7\n\nCloses #8\n": "multiple conflicting owning issues",
+	} {
+		owner, problem := submissionOwner(body)
+		if problem != want || want == "" && owner != 7 || want != "" && owner != 0 {
+			t.Errorf("submissionOwner(%q) = %d, %q; want problem %q", body, owner, problem, want)
+		}
+	}
+}
+
 func TestGitHubLifecycleRejectsInvalidIdentitiesBeforeTransport(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
