@@ -86,7 +86,14 @@ skl ledger show --repo <path> --item add-foundation/add-foundation
 
 Parent flags are for multi-slice proposals. `accepted` and `existing` freeze Contracts under `projects/<repository>/` in the ADR 0006 layout. A Project names exactly one source repository; a different repository with the same name is refused. Unchanged acceptance is idempotent; changed obligations require a renewed proposal.
 
-Acceptance commits locally before attempting replication and publication of supplied public bodies. Network failure leaves local acceptance authoritative and its remote effects pending; repeat the same acceptance to retry. Known competing upstream history requires explicit reconciliation, never automatic merge, rebase, or force-push. Public bodies are not retained as private workflow history.
+Acceptance commits locally before attempting replication and publication of supplied public bodies. Network failure leaves local acceptance authoritative; a pending ledger push stays recorded, while issue publication failures, uncertain creates, and missing prose are reported for that invocation only. Publish the current issue and parent view at any later time with freshly authored prose, without repeating acceptance:
+
+```sh
+skl ledger publish --repo <path> --proposal add-foundation \
+  --issue add-foundation=/tmp/add-foundation.md
+```
+
+Established issues are updated in place and missing ones created; only established attachments are recorded. Reads and updates retry briefly, but a create whose outcome is unknown is never retried, so a later publication may duplicate it. Without prose, the outcome names the private readback and guidance from `skl skill --resource reference/issue-publication.md --input proposal=add-foundation --input repo=/abs/path --input remote=origin propose` to author it. Known competing upstream history requires explicit reconciliation, never automatic merge, rebase, or force-push. Public bodies are not retained as private workflow history.
 
 Read exact evidence with `skl ledger show --commit <sha> --path <ledger-path>`; a missing reference is refused, not substituted. Commands default to Markdown; `--format json` gives equivalent typed transport.
 

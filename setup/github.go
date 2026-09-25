@@ -14,11 +14,15 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/ledger"
 	"github.com/vicrdguez/skills/workflow"
 )
+
+// GitHubBackend is also the transport of ledger issue publication.
+var _ ledger.Forge = (*GitHubBackend)(nil)
 
 type GitHubBackend struct {
 	repository  github.RepositoryID
@@ -26,6 +30,8 @@ type GitHubBackend struct {
 	token       string
 	tokenSource func() (string, error)
 	client      *http.Client
+	retryDelay  time.Duration
+	timeout     time.Duration
 	issueIDs    map[int]int64
 	issueBodies map[int]string
 }
@@ -54,7 +60,7 @@ func githubIssueNumber(id workflow.WorkItemID) (int, error) {
 }
 
 func NewGitHubBackend(baseURL, token string, client *http.Client) *GitHubBackend {
-	return &GitHubBackend{baseURL: strings.TrimRight(baseURL, "/"), token: token, client: client, issueIDs: make(map[int]int64), issueBodies: make(map[int]string)}
+	return &GitHubBackend{baseURL: strings.TrimRight(baseURL, "/"), token: token, client: client, retryDelay: requestRetryDelay, timeout: requestTimeout, issueIDs: make(map[int]int64), issueBodies: make(map[int]string)}
 }
 
 func NewGitHubBackendFromEnv(repository github.RepositoryID) (Backend, error) {
@@ -69,7 +75,7 @@ func NewGitHubBackendFromEnv(repository github.RepositoryID) (Backend, error) {
 }
 
 func newGitHubBackend(baseURL string, client *http.Client, tokenSource func() (string, error)) *GitHubBackend {
-	return &GitHubBackend{baseURL: strings.TrimRight(baseURL, "/"), tokenSource: tokenSource, client: client, issueIDs: make(map[int]int64), issueBodies: make(map[int]string)}
+	return &GitHubBackend{baseURL: strings.TrimRight(baseURL, "/"), tokenSource: tokenSource, client: client, retryDelay: requestRetryDelay, timeout: requestTimeout, issueIDs: make(map[int]int64), issueBodies: make(map[int]string)}
 }
 
 type githubIssue struct {
@@ -496,7 +502,8 @@ func (t *TransportFailure) UnknownOutcome() bool { return true }
 
 // CreateIssue publishes one descriptive human-facing issue and returns its
 // number. It adds no workflow label and writes no state: the body is opaque
-// temporary transport authored outside skl.
+// temporary transport authored outside skl. A create is never retried: an
+// unknown outcome is returned as a TransportFailure for the caller to report.
 func (b *GitHubBackend) CreateIssue(ctx context.Context, title, body string) (int, error) {
 	if err := b.requireRepository(); err != nil {
 		return 0, err
@@ -513,23 +520,23 @@ func (b *GitHubBackend) CreateIssue(ctx context.Context, title, body string) (in
 	return issue.Number, nil
 }
 
-// ListOpenIssues lists open non-pull-request issues of the bound
-// repository for safe resolution of uncertain publications.
-func (b *GitHubBackend) ListOpenIssues(ctx context.Context) ([]ledger.ForgeIssue, error) {
+// UpdateIssue presents current prose on one established descriptive issue.
+// The update is safely repeatable, so it is retried a bounded number of
+// times. proceed is consulted before every attempt, so an update whose local
+// selection was superseded between attempts is not sent again; its error is
+// returned as is.
+func (b *GitHubBackend) UpdateIssue(ctx context.Context, number int, title, body string, proceed func() error) error {
 	if err := b.requireRepository(); err != nil {
-		return nil, err
+		return err
 	}
-	issues, err := b.listIssues(ctx, b.repository)
-	if err != nil {
-		return nil, err
+	if number <= 0 {
+		return fmt.Errorf("invalid GitHub issue number %d", number)
 	}
-	var open []ledger.ForgeIssue
-	for _, issue := range issues {
-		if issue.State == "open" && len(issue.PullRequest) == 0 {
-			open = append(open, ledger.ForgeIssue{Number: issue.Number, Title: issue.Title, Body: issue.Body})
-		}
+	if err := b.requestRetrying(ctx, http.MethodPatch, b.repositoryPath(b.repository)+fmt.Sprintf("/issues/%d", number), map[string]string{"title": title, "body": body}, nil, proceed); err != nil {
+		return err
 	}
-	return open, nil
+	b.issueBodies[number] = body
+	return nil
 }
 
 // ListChildren lists the issue numbers grouped under one parent issue.
@@ -541,7 +548,7 @@ func (b *GitHubBackend) ListChildren(ctx context.Context, parent int) ([]int, er
 		Number int `json:"number"`
 	}
 	path := b.repositoryPath(b.repository) + fmt.Sprintf("/issues/%d/sub_issues?per_page=100&page=1", parent)
-	if err := b.request(ctx, http.MethodGet, path, nil, &children); err != nil {
+	if err := b.requestRetrying(ctx, http.MethodGet, path, nil, &children, nil); err != nil {
 		return nil, err
 	}
 	numbers := make([]int, 0, len(children))
@@ -569,7 +576,7 @@ func (b *GitHubBackend) issueID(ctx context.Context, number int) (int64, error) 
 	}
 	var issue githubIssue
 	path := b.repositoryPath(b.repository) + fmt.Sprintf("/issues/%d", number)
-	if err := b.request(ctx, http.MethodGet, path, nil, &issue); err != nil {
+	if err := b.requestRetrying(ctx, http.MethodGet, path, nil, &issue, nil); err != nil {
 		return 0, fmt.Errorf("resolve GitHub issue id for #%d: %w", number, err)
 	}
 	if issue.Number != number || issue.ID == 0 {
@@ -593,6 +600,46 @@ func (b *GitHubBackend) requestOptional(ctx context.Context, method, path string
 	return err == nil, err
 }
 
+// requestTimeout bounds every GitHub request, so a command waits for a
+// response or a timeout, never indefinitely.
+const requestTimeout = 30 * time.Second
+
+// Ledger issue publication retries reads and safely repeatable updates a
+// bounded number of times. Creates are sent once, so an unknown outcome is
+// never resolved by sending the request again.
+const (
+	requestAttempts   = 3
+	requestRetryDelay = 100 * time.Millisecond
+)
+
+// requestRetrying sends one read or safely repeatable update, retrying
+// transport failures, rate limits, and server errors a bounded number of
+// times. A non-nil proceed is consulted before every attempt; its error
+// stops the request unsent.
+func (b *GitHubBackend) requestRetrying(ctx context.Context, method, path string, body, destination any, proceed func() error) error {
+	if method != http.MethodGet && method != http.MethodPatch {
+		return fmt.Errorf("GitHub %s %s is not safely repeatable", method, path)
+	}
+	for attempt := 1; ; attempt++ {
+		if proceed != nil {
+			if err := proceed(); err != nil {
+				return err
+			}
+		}
+		status, err := b.requestStatus(ctx, method, path, body, destination)
+		var transport *TransportFailure
+		transient := errors.As(err, &transport) || status == http.StatusTooManyRequests || status >= http.StatusInternalServerError
+		if err == nil || !transient || attempt == requestAttempts {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(b.retryDelay * time.Duration(attempt)):
+		}
+	}
+}
+
 func (b *GitHubBackend) requestStatus(ctx context.Context, method, path string, body, destination any) (int, error) {
 	if b.token == "" {
 		if b.tokenSource == nil {
@@ -612,6 +659,8 @@ func (b *GitHubBackend) requestStatus(ctx context.Context, method, path string, 
 		}
 		encoded = bytes.NewReader(payload)
 	}
+	ctx, cancel := context.WithTimeout(ctx, b.timeout)
+	defer cancel()
 	request, err := http.NewRequestWithContext(ctx, method, b.baseURL+path, encoded)
 	if err != nil {
 		return 0, err
