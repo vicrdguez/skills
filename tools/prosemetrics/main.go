@@ -95,6 +95,21 @@ func measure(text string, fixtures []string) counts {
 	return c
 }
 
+// partialFixture returns the heading of a fixture whose heading survives the
+// removal of every whole fixture: that document was embedded altered.
+func partialFixture(text string, fixtures []string) string {
+	for _, fixture := range fixtures {
+		text = strings.ReplaceAll(text, fixture, "")
+	}
+	for _, fixture := range fixtures {
+		heading, _, _ := strings.Cut(fixture, "\n")
+		if strings.Contains(text, heading+"\n") {
+			return heading
+		}
+	}
+	return ""
+}
+
 type row struct {
 	Name     string
 	Current  *counts
@@ -125,6 +140,9 @@ func measureDirectory(dir string) (map[string]counts, error) {
 		if err != nil {
 			return nil, err
 		}
+		if fixture := partialFixture(string(contents), excluded); fixture != "" {
+			return nil, fmt.Errorf("%s embeds fixture %q altered, so its words would count as authored prose", path, fixture)
+		}
 		measured[strings.TrimSuffix(filepath.Base(path), ".md")] = measure(string(contents), excluded)
 	}
 	var total counts
@@ -141,9 +159,6 @@ func measureDirectory(dir string) (map[string]counts, error) {
 
 func readBaseline(path string) (map[string]counts, error) {
 	file, err := os.Open(path)
-	if os.IsNotExist(err) {
-		return map[string]counts{}, nil
-	}
 	if err != nil {
 		return nil, err
 	}

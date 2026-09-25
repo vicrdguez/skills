@@ -22,12 +22,15 @@ outcome-ledger-accept-accepted	62	3	0
 outcome-ledger-accept-existing	62	3	0
 outcome-ledger-accept-fix-required	21	0	0
 outcome-ledger-present	69	1	0
+outcome-ledger-present-public	80	0	0
+outcome-ledger-present-watchdog	83	1	0
 outcome-ledger-publish	59	1	0
 outcome-ledger-show	73	2	0
 outcome-propose-cleanup	10	0	0
 outcome-skill-implement	42	1	0
 outcome-skill-watchdog	33	0	0
 outcome-watchdog-next-no-work	2	0	0
+outcome-watchdog-release	14	0	2
 outcome-watchdog-submit-needs-human	68	1	0
 outcome-watchdog-submit-pass	68	1	0
 outcome-watchdog-submit-rework	68	1	0
@@ -48,6 +51,7 @@ resource-propose-tasks	162	3	1
 resource-testing-mocking	234	2	4
 resource-testing-tests	455	10	7
 resource-watchdog-ledger-review	397	12	9
+resource-watchdog-pull-presentation	255	11	2
 resource-writing-for-agents-SKILL-MECHANICS	436	10	0
 setup-agents-block	322	5	4
 skill-audit	835	18	10
@@ -79,5 +83,6 @@ watchdog-prepare	190	5	1
 watchdog-repeat	1370	35	17
 watchdog-repeat-full	1363	36	17
 watchdog-repeat-incremental	1382	36	17
+watchdog-resume	1309	35	17
 watchdog-start	1309	35	17
 journey: implement → watchdog	8908	201	110

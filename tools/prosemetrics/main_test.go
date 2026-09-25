@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -56,22 +57,80 @@ func rowNamed(t *testing.T, rows []row, name string) row {
 	return row{}
 }
 
+// TestUnchangedTreeMatchesBaseline measures the tree the committed baseline
+// was recorded from: the goldens and fixtures of the commit that last changed
+// baseline.tsv. Later goldens may diverge from the baseline on purpose.
 func TestUnchangedTreeMatchesBaseline(t *testing.T) {
-	dir := copyGoldens(t)
-	if _, err := report(dir, true); err != nil {
+	root := filepath.Join("..", "..")
+	commit := gitOutput(t, root, "log", "-1", "--format=%H", "--", "testdata/prose/baseline.tsv")
+	if commit == "" {
+		t.Skip("baseline.tsv is not committed yet")
+	}
+	if gitOutput(t, root, "status", "--porcelain", "--", "testdata/prose/baseline.tsv") != "" {
+		t.Skip("baseline.tsv has uncommitted changes")
+	}
+	dir := t.TempDir()
+	archive := exec.Command("git", "-C", root, "archive", "--format=tar", commit, "testdata/prose")
+	extract := exec.Command("tar", "-x", "-C", dir)
+	var err error
+	if extract.Stdin, err = archive.StdoutPipe(); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := report(dir, false)
+	if err := extract.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if err := archive.Run(); err != nil {
+		t.Fatal(err)
+	}
+	if err := extract.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := report(filepath.Join(dir, "testdata", "prose"), false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, r := range rows {
 		if r.Current == nil || r.Baseline == nil || *r.Current != *r.Baseline {
-			t.Errorf("row %s: current %+v, baseline %+v", r.Name, r.Current, r.Baseline)
+			t.Errorf("row %s at %s: current %+v, baseline %+v", r.Name, commit, r.Current, r.Baseline)
 		}
 	}
 	if journey := rowNamed(t, rows, journeyRow); journey.Current.Words <= rowNamed(t, rows, "implement-start").Current.Words {
 		t.Errorf("journey total %d does not exceed the Implement start rendering it includes", journey.Current.Words)
+	}
+}
+
+func gitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	output, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
+	if err != nil {
+		t.Fatalf("git %v: %v", args, err)
+	}
+	return strings.TrimSpace(string(output))
+}
+
+func TestMissingBaselineIsAnError(t *testing.T) {
+	dir := copyGoldens(t)
+	if _, err := report(dir, false); err == nil {
+		t.Fatal("report without baseline.tsv succeeded")
+	}
+}
+
+func TestAlteredFixtureIsAnError(t *testing.T) {
+	dir := copyGoldens(t)
+	path := filepath.Join(dir, "implement-start.md")
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	altered := strings.Replace(string(contents), "the widget is listed as unhealthy", "the widget is listed", 1)
+	if altered == string(contents) {
+		t.Fatal("implement-start no longer embeds the behavior fixture")
+	}
+	if err := os.WriteFile(path, []byte(altered), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := report(dir, true); err == nil || !strings.Contains(err.Error(), "Dashboard foundation behavior") {
+		t.Fatalf("altered fixture: err = %v, want a refusal naming the fixture", err)
 	}
 }
 

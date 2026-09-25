@@ -287,10 +287,15 @@ func TestAgentProseGoldens(t *testing.T) {
 		}
 		g.check(name, packet.Instructions)
 	}
-	reviewClaim, reviewResult := review("watchdog-start")
+	releasedReview, _ := review("watchdog-start")
+	g.capture("outcome-watchdog-release", worker, "watchdog", "release", "--repo", source, "--item", proseItem, "--claim", releasedReview)
+	reviewClaim, reviewResult := review("")
 	g.capture("watchdog-prepare", worker, append([]string{"watchdog", "prepare"}, reviewIdentity(reviewClaim, reviewResult)...)...)
 	g.capture("watchdog-inspect", worker, append([]string{"watchdog", "inspect"}, reviewIdentity(reviewClaim, reviewResult)...)...)
+	g.capture("watchdog-resume", worker, append([]string{"watchdog", "resume"}, reviewIdentity(reviewClaim, reviewResult)...)...)
 	verdict("outcome-watchdog-submit-rework", reviewClaim, "rework", ledger.Rework)
+	g.capture("outcome-ledger-present-watchdog", worker, "ledger", "present", "--repo", source, "--item", proseItem)
+	g.capture("outcome-ledger-present-public", worker, "ledger", "present", "--repo", source, "--item", proseItem, "--public-body", public)
 
 	// Rework, then a repeat review of a descendant head is incremental and
 	// routes the Work Item to Needs Human.
@@ -351,6 +356,7 @@ func TestAgentProseGoldens(t *testing.T) {
 		"propose":            {"reference/behavior.md", "reference/intent.md", "reference/plan.md", "reference/tasks.md"},
 		"implement":          {"reference/pull-presentation.md"},
 		"testing":            {"reference/mocking.md", "reference/tests.md"},
+		"watchdog":           {"reference/pull-presentation.md"},
 		"writing-for-agents": {"SKILL-MECHANICS.md"},
 	}
 	for skill, names := range resources {

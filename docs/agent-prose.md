@@ -47,7 +47,7 @@ The reorganization slice sets the final paths. Until then, the table records whe
 | Negations per 1,000 words | *no*, *not*, *never*, *without*, *cannot*, other negation words and every *n't* contraction. | Naming a forbidden behavior makes that behavior more available to the model. A Procedure that states what to do needs few negations. |
 | Abstract-term density | Terms per 1,000 words that name a policy property instead of an action or object, such as *authority*, *obligation*, *invariant*, *provenance*. | Prose written for humans in a decision record is dense in these terms. A high density shows policy that leaked into agent-visible prose. |
 
-The journey members and both word lists live in `tools/prosemetrics/main.go`.
+The journey counts the Skill Resources every such run retrieves: Audit's smells and acceptance criteria and the Implement report instructions, then the acceptance criteria again and the Watchdog report instructions. Resources a Procedure only points to, such as the testing references, are left out. The journey members and both word lists live in `tools/prosemetrics/main.go`.
 
 ## Goldens
 
@@ -59,6 +59,8 @@ The journey members and both word lists live in `tools/prosemetrics/main.go`.
 - every CLI outcome on the ledger path;
 - the installed stubs and runner files;
 - the `AGENTS.md` block that setup writes.
+
+The CLI renders a Watchdog review before inspection resolves its scope, so its incremental and full sections never reach a worker through `skl`. `watchdog-repeat-incremental` and `watchdog-repeat-full` render those sections from the same Claim's facts with the scope inspection reported; every other golden is CLI output.
 
 The test fails if a golden has no rendering, or if a rendering names a Skill Resource without a golden. Run-specific values are replaced with stable placeholders: temporary paths, commit identities (numbered by first appearance), the forge URL and timestamps.
 
