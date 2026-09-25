@@ -37,11 +37,11 @@ Human decisions (#3) and publication recovery (#4) remain independent siblings, 
 
 These unchecked acceptance bullets are current publication carrier checkboxes for the `.changes`/baseline endpoint machinery. They are not permission to mutate the target private Contract, whose accepted obligations remain frozen under ADR 0006.
 
-- [ ] B1-B2: Explicit cleanup moves only whole terminal/unclaimed proposals to the archive, preserves full-delivery versus Superseded meaning, and retains every proposal document and exact earlier commit/path reference.
-- [ ] B3-B4: Source deletion still requires actual confirmed merge, exact accepted head, clean worktree, and expected owned location; all unsafe source work and remote branches are preserved, independently of archive success.
-- [ ] B5: Repetition and interrupted moves cannot overwrite a distinct archive, lose individual files, clear a later Claim, or silently claim success on an ambiguous partial result.
-- [ ] B6: Cleanup works independently and in Propose before new slices, never as a merge hook, with predecessor local-ledger/push behavior and no publication-success or sibling-UI precondition.
-- [ ] A1-A5: Existing CLI, Workflow, private-ledger, and Git cleanup responsibilities satisfy the accepted architecture and failure-aware many-to-many verification without new test infrastructure or mandated TDD order.
+- [x] B1-B2: Explicit cleanup moves only whole terminal/unclaimed proposals to the archive, preserves full-delivery versus Superseded meaning, and retains every proposal document and exact earlier commit/path reference.
+- [x] B3-B4: Source deletion still requires actual confirmed merge, exact accepted head, clean worktree, and expected owned location; all unsafe source work and remote branches are preserved, independently of archive success.
+- [x] B5: Repetition and interrupted moves cannot overwrite a distinct archive, lose individual files, clear a later Claim, or silently claim success on an ambiguous partial result.
+- [x] B6: Cleanup works independently and in Propose before new slices, never as a merge hook, with predecessor local-ledger/push behavior and no publication-success or sibling-UI precondition.
+- [x] A1-A5: Existing CLI, Workflow, private-ledger, and Git cleanup responsibilities satisfy the accepted architecture and failure-aware many-to-many verification without new test infrastructure or mandated TDD order.
 
 ## Manual verification
 
