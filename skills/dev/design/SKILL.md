@@ -102,7 +102,9 @@ Good interfaces make testing natural:
 - An **Adapter** sits at a **Seam** and satisfies the **Interface**.
 - **Depth** produces **Leverage** for callers and **Locality** for maintainers.
 
-## Rejected framings
+{{if or .Implementation .Delivery}}The accepted change does not require a new design exercise. Use this vocabulary to judge and deepen the code the accepted task actually touches; do not restructure untouched modules, invent abstractions the accepted scope does not need, or widen the change because the vocabulary exists.
+
+{{end}}## Rejected framings
 
 - **Depth as ratio of implementation-lines to interface-lines** (Ousterhout): rewards padding the implementation. We use depth-as-leverage instead.
 - **"Interface" as the TypeScript `interface` keyword or a class's public methods**: too narrow — interface here includes every fact a caller must know.

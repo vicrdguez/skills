@@ -293,10 +293,13 @@ func (b *GitHubBackend) selectedReady(ctx context.Context, id workflow.WorkItemI
 	if len(owners) != 0 {
 		problem = "another active Submission already owns the Work Item; inspect its attachment instead of reassigning it"
 	}
-	comments, err := b.implementationComments(ctx, b.repository, fmt.Sprintf("/issues/%d/comments", issue.Number))
+	stream := fmt.Sprintf("/issues/%d/comments", issue.Number)
+	comments, err := b.implementationComments(ctx, b.repository, stream)
 	if err != nil {
 		return workflow.ImplementationItem{}, err
 	}
+	repository := b.repository.Owner + "/" + b.repository.Name
+	item.EvidenceSources = append(item.EvidenceSources, skilldist.RepositoryEvidenceSource(repository, stream))
 	for _, comment := range comments {
 		if strings.HasPrefix(comment.Body, "<!-- skl.implement/v1\n") {
 			continue
@@ -334,6 +337,7 @@ func (b *GitHubBackend) submissionItem(ctx context.Context, pull githubPull) (wo
 		Source: implementationLifecycle(issue),
 		Submission: &workflow.Submission{
 			ID: workflow.SubmissionID(strconv.Itoa(pull.Number)), Head: pull.Head.SHA, Base: pull.Base.Ref, Draft: pull.Draft, Body: pull.Body,
+			Author: pull.User.Login, Association: pull.AuthorAssociation,
 			CreatedAt: pull.CreatedAt, Lifecycle: implementationLifecycle(pull.githubIssue),
 		},
 	}
@@ -342,29 +346,66 @@ func (b *GitHubBackend) submissionItem(ctx context.Context, pull githubPull) (wo
 		item.Synchronization = item.Synchronization || label.Name == "sync"
 	}
 	item = workflow.ReconcileImplementation(item)
-	comments, err := b.implementationComments(ctx, b.repository, fmt.Sprintf("/issues/%d/comments", owner))
+	recordEvidence := func(stream string, count int) {
+		state := "fetched"
+		if count == 0 {
+			state = "fetched_empty"
+		}
+		item.Submission.EvidenceStreams = append(item.Submission.EvidenceStreams, skilldist.EvidenceStream{Path: b.repositoryPath(b.repository) + stream, State: state})
+	}
+	streams := selectedWatchdogStreams(owner, pull.Number)
+	sourceStream := streams.source
+	comments, err := b.implementationComments(ctx, b.repository, sourceStream)
 	if err != nil {
 		return workflow.ImplementationItem{}, "", err
 	}
+	recordEvidence(sourceStream, len(comments))
 	for _, comment := range comments {
+		item.Submission.EvidenceComments = append(item.Submission.EvidenceComments, comment)
 		if strings.HasPrefix(comment.Body, "<!-- skl.implement/v1\n") {
 			continue
 		}
 		item.Feedback = append(item.Feedback, comment)
 		item.Submission.Comments = append(item.Submission.Comments, comment)
 	}
-	for _, stream := range []string{fmt.Sprintf("/issues/%d/comments", pull.Number), fmt.Sprintf("/pulls/%d/comments", pull.Number)} {
-		comments, err := b.implementationComments(ctx, b.repository, stream)
+	repository := b.repository.Owner + "/" + b.repository.Name
+	item.Submission.EvidenceSources = []skilldist.EvidenceSource{
+		skilldist.PullEvidenceSource(repository, pull.Number),
+		skilldist.IssueCommentsEvidenceSource(repository, owner),
+	}
+	for _, stream := range []struct {
+		path   string
+		source skilldist.EvidenceSource
+	}{
+		{streams.discussion, skilldist.PullDiscussionEvidenceSource(repository, pull.Number)},
+		{streams.inline, skilldist.PullCommentsEvidenceSource(repository, pull.Number)},
+	} {
+		comments, err := b.implementationComments(ctx, b.repository, stream.path)
 		if err != nil {
 			return workflow.ImplementationItem{}, "", err
 		}
+		item.Submission.EvidenceSources = append(item.Submission.EvidenceSources, stream.source)
+		recordEvidence(stream.path, len(comments))
 		item.Submission.Comments = append(item.Submission.Comments, comments...)
+		item.Submission.EvidenceComments = append(item.Submission.EvidenceComments, comments...)
 	}
 	reviews, err := b.implementationReviews(ctx, pull.Number)
 	if err != nil {
 		return workflow.ImplementationItem{}, "", err
 	}
+	item.Submission.EvidenceSources = append(
+		item.Submission.EvidenceSources,
+		skilldist.PullReviewsEvidenceSource(repository, pull.Number),
+	)
+	recordEvidence(streams.summaries, len(reviews))
 	item.Submission.Comments = append(item.Submission.Comments, reviews...)
+	for _, review := range reviews {
+		if review.RawBody != "" {
+			review.Body = review.RawBody
+		}
+		review.RawBody = ""
+		item.Submission.EvidenceComments = append(item.Submission.EvidenceComments, review)
+	}
 	return workflow.ReconcileImplementation(item), problem, nil
 }
 
@@ -735,7 +776,8 @@ func (b *GitHubBackend) implementationReviews(ctx context.Context, number int) (
 			} `json:"user"`
 		}
 		if err := b.request(ctx, http.MethodGet, b.repositoryPath(b.repository)+fmt.Sprintf("/pulls/%d/reviews?per_page=100&page=%d", number, page), nil, &reviews); err != nil {
-			return nil, err
+			path := strings.TrimPrefix(b.repositoryPath(b.repository)+fmt.Sprintf("/pulls/%d/reviews", number), "/")
+			return nil, fmt.Errorf("selected review summary stream %s page %d was not read completely: %w; retry the selected request or retrieve every page with `gh api --paginate %s` before judgment", path, page, err, skilldist.ShellQuote(path))
 		}
 		for _, review := range reviews {
 			verdict := map[string]string{"CHANGES_REQUESTED": "rework", "APPROVED": "pass", "COMMENTED": "needs-human"}[review.State]
@@ -751,7 +793,21 @@ func (b *GitHubBackend) implementationReviews(ctx context.Context, number int) (
 					finalHead = metadata.FinalHead
 				}
 			}
-			comments = append(comments, skilldist.ReviewComment{Body: body, Author: review.User.Login, Association: review.Association, Commit: review.Commit, FinalHead: finalHead, CreatedAt: review.SubmittedAt, Verdict: verdict, ReviewNumber: reviewNumber})
+			comment := skilldist.ReviewComment{
+				Source:       skilldist.PullReviewsEvidenceSource(b.repository.Owner+"/"+b.repository.Name, number),
+				Body:         body,
+				Author:       review.User.Login,
+				Association:  review.Association,
+				Commit:       review.Commit,
+				FinalHead:    finalHead,
+				CreatedAt:    review.SubmittedAt,
+				Verdict:      verdict,
+				ReviewNumber: reviewNumber,
+			}
+			if body != review.Body {
+				comment.RawBody = review.Body
+			}
+			comments = append(comments, comment)
 		}
 		if len(reviews) < 100 {
 			return comments, nil

@@ -1,37 +1,47 @@
 ---
 name: audit
-description: Review the changes since a fixed point (commit, branch, tag or merge-base) along two axes - Standards (does the code follow this repo documented coding standards) and change Artifacts (does the code match what the originating change asked for?) Runs both reviews in parallel subagents and reports them side by side. Use when the user wants to review a branch, a PR, work-in-progress changes or asks to "review since X"
+description: Review a branch, PR, or changes since a fixed point along independent Standards and Contracts axes; run both reviews in fresh contexts and report them side by side.
 ---
 
+{{if or .Delivery (not .Implementation)}}{{template "ledger-audit" .}}{{else}}
 Two-axis review of the diff between `HEAD` and a fixed point the user supplies:
 
 - **Standards** — does the code conform to this repo's documented coding standards? This includes any documented standard in the repo but also make use of project/repo specific skills to aid here. E.g. the repo has a specific skill to review a module or a layer present in the project
-- **Artifacts** — does the code faithfully implement the originating intent, behaviors, plan and tasks?
+{{if and .Implementation (eq .Implementation.Procedure "rework")}}- **Artifacts** — do the supplied Watchdog findings remain resolved, and did the Rework delta regress the frozen Contract, introduce unnecessary behavior, or leave inadequate regression coverage at accepted seams? This focused axis does not reopen unrelated unchanged code or whole-change omissions.{{else}}- **Artifacts** — does the code faithfully implement the originating intent, behaviors, plan and tasks?
   1. The Workflow Engine's endpoint inspection reports identical paths, regular non-executable blobs, and exact bytes except permitted lowercase completion ticks, with Manual Verification unchecked; normal submission also requires completed automated boxes and later ledger retirement
   2. Every `intent.md` item in "Definition of Done" is demonstrably met
-  3. Every `behavior.md` scenario has materialized as a test (or for prose changes, encoded)
+  3. Every rule, scenario, and architectural obligation is accounted for with credible grouped many-to-many evidence, and the changed test set preserves required behavioral and failure-mode protection
   4. The full suite is green
   5. Read `plan.md` against the diff. If the implementation diverged, note it.
 
-Item 1 is what stops the contract moving to meet the code. The rest are judged against the **complete final implementation**, even when the diff under review is only the latest increment.
+Item 1 is what stops the contract moving to meet the code. The rest are judged against the **complete final implementation**, even when the diff under review is only the latest increment. Reuse, strengthening, consolidation, or removal of tests is acceptable when protection remains; scrutinize removed or weakened assertions for lost coverage without demanding per-test bookkeeping.{{end}}
 
 Both axes run as **parallel sub-agents** when the harness supports them, so they don't pollute each other's context, then this skill aggregates their findings. The sequential fallback below preserves both axes when it does not.
 
-Use the supplied Work Item and Submission facts for originating context. This skill performs no backend mutations or workflow transitions.
+Use the supplied Work Item and Submission facts for originating context. This skill performs no backend mutations or workflow transitions.{{if .Implementation}} Audit reviews the candidate after the implementor's late target integration. Review conflict-resolution and integration effects, but do not label unrelated code inherited unchanged from the integrated target as scope creep or reopen settled preferences merely because that code is visible; concrete regressions and material risks remain reviewable.{{end}}
 
 
 ## Process
 
 ### 1. Pin the fixed point
 
-The goal is to review the work done for the single claimed unit of work. Which point that is depends on the round:
+{{if and .Implementation (eq .Implementation.Procedure "rework")}}This bundled Audit reviews one finding-driven Rework delta. Use the `Commit` on the latest applicable supplied review whose verdict caused the current Rework as the fixed point, and review only `<reviewed-commit>...HEAD`. Stop rather than guess when the applicable reviewed commit is missing or ambiguous. Do not use a review's `Final head` as the fixed point.
+{{else if .Implementation}}This bundled Audit reviews one claimed change after its late target merge. Pin the fixed point to the normal PR-base merge-base of the recorded integrated `main` SHA and the post-integration candidate head: run `git merge-base <recorded-integrated-sha> HEAD` and use the resulting SHA. Use the recorded cutoff SHA rather than chasing later target movement. First-pass Audit may precede the final completion ticks and the ledger retirement, and it reports those endpoints as pending rather than inferring them. An explicit fixed point the caller supplies replaces the default above.
+{{else}}The goal is to review the work done for the single claimed unit of work. Which point that is depends on the round:
 
 - **First workflow review of a change** — the merge-base with `main`, or the parent of the implementor's first commit. Never that first commit itself: `git diff <it>...HEAD` would omit everything it introduced. An independent Audit still uses any fixed point its caller explicitly supplies.
 - **Repeat review after a bounce** — the `Reviewed head` recorded in the previous reviewer's summary, so the round reads only what changed since.
+{{end}}
 
-Artifact integrity uses its own, unmoving Artifact Baseline and, when available, Artifact Completion from the engine's endpoint inspection. It never advances with review rounds. Refresh fixed Git facts with the packet's `inspect_command`, or `skl implement inspect --remote <name> --item <number>` when invoked independently; preserve any caller-supplied `--artifact-baseline <full-sha>` and `--artifact-completion <full-sha>`. The engine validates endpoint identity and snapshots, while you read and judge the historical contract.
+{{if and .Implementation (eq .Implementation.Procedure "rework")}}Rework Audit relies on the historical Contract endpoints already established by Implement. Audit does not repeat artifact endpoint or retirement inspection; Implement owns Inspect before editing and after all edits.
+{{else if .Implementation}}Artifact integrity uses its own, unmoving Artifact Baseline and Artifact Completion from the engine's endpoint inspection. They never advance with review rounds.{{if .Implementation.ArtifactBaseline}} The resolved endpoints are Artifact Baseline `{{.Implementation.ArtifactBaseline}}`{{if .Implementation.ArtifactCompletion}} and Artifact Completion `{{.Implementation.ArtifactCompletion}}`{{end}}.{{else}} They are not resolved in this invocation yet: run `{{.Implementation.InspectCommand}}` to resolve the Artifact Baseline and Completion from the fetched history, and never invent an endpoint or take one from the working tree.{{end}}{{if .Implementation.SuppliedArtifactBaseline}} The caller supplied `--artifact-baseline {{.Implementation.SuppliedArtifactBaseline}}`{{if .Implementation.SuppliedArtifactCompletion}} and `--artifact-completion {{.Implementation.SuppliedArtifactCompletion}}`{{end}}; preserve those exact full SHAs on every inspection, resume, submit, and Needs Human command.{{end}} The engine validates endpoint identity and snapshots, while you read and judge the historical contract.
+{{else}}Artifact integrity uses its own, unmoving Artifact Baseline and, when available, Artifact Completion from the engine's endpoint inspection. It never advances with review rounds. Refresh fixed Git facts with the packet's `inspect_command`, or `skl implement inspect --remote <name> --item <number>` when invoked independently; preserve any caller-supplied `--artifact-baseline <full-sha>` and `--artifact-completion <full-sha>`. The engine validates endpoint identity and snapshots, while you read and judge the historical contract.
+{{end}}
 
-If the user provides a fixed point — a commit SHA, branch name, tag, `main`, `HEAD~5`, etc. — use that instead. If no PR comparison or fixed point can be resolved, ask for one.
+{{if and .Implementation (eq .Implementation.Procedure "rework")}}The supplied review evidence is authoritative for this fixed point; no caller-provided comparison may replace it.
+{{else if .Implementation}}An explicit fixed point the caller supplies — a commit SHA, branch name, tag, `main`, `HEAD~5`, etc. — replaces the default above; the default never has to be asked for.
+{{else}}If the user provides a fixed point — a commit SHA, branch name, tag, `main`, `HEAD~5`, etc. — use that instead. If no PR comparison or fixed point can be resolved, ask for one.
+{{end}}
 
 Capture the diff command once: `git diff <fixed-point>...HEAD` (three-dot, so the comparison is against the merge-base). Also note the list of commits via `git log <fixed-point>..HEAD --oneline`.
 
@@ -39,50 +49,78 @@ Before going further, confirm the fixed point resolves (`git rev-parse <fixed-po
 
 ### 2. Identify the artifacts source
 
-Look for the originating artifacts, in this order:
+{{if .Implementation}}The artifacts are the accepted `.changes/{{.Implementation.Branch}}/` files of this Work Item. Read them from the resolved Artifact Baseline and Completion snapshots with `git show <snapshot>:.changes/{{.Implementation.Branch}}/<file>`. After retirement, read them from those historical snapshots and never recreate the ledger.
+{{else}}Look for the originating artifacts, in this order:
 
 1. The supplied Work Item's exact Artifact Baseline and Completion; read with `git show <snapshot>:.changes/<slug>/<file>`.
 2. A path the user passed as an argument.
 3. Artifacts in `.changes/<slug>` for the in-flight unit of work matching the branch name or feature; after retirement, read them from the historical Artifact Baseline and Completion without recreating them
 4. If nothing is found, ask the user where the artifacts are. If they say there isn't one, the **Artifacts** sub-agent will skip and report "no Artifacts available".
+{{end}}
 
-### 3. Identify the standards sources
+### 3. Identify the standards and acceptance sources
 
 Anything in the repo that documents how code should be written, such as `CODING_STANDARDS.md` or `CONTRIBUTING.md`.
 
 On top of whatever the repo documents, the Standards axis always carries the **smell baseline** from `skl skill --resource reference/smells.md audit` — a fixed set of Fowler code smells (_Refactoring_, ch.3) that applies even when a repo documents nothing, plus the two rules that bind it.
 
+Retrieve the shared contract criteria with `skl skill --resource reference/acceptance.md audit`. Give those criteria to both reviewers. They distinguish behavioral conformance, architectural conformance, and local implementation quality; sharing them with Watchdog does not execute Audit again.
+
 ### 4. Run the deterministic checks once
 
 These two produce facts, not judgements — a diff read or an exit code. Run them here, before spawning anything, and hand the recorded results to both briefs. Two reviewers running them concurrently would contend over the same worktree, and a fact produced inside a reviewer's context is a fact the two axes can end up reporting differently.
 
-1. **The documented gate** — the project's full suite, typecheck and lint, exactly once per invocation. A red gate is worth knowing before spending two reviewer contexts on it.
+{{if and .Implementation (eq .Implementation.Procedure "rework")}}1. **The documented gate** — Rework Audit owns one Full Gate run: the project's full suite, typecheck and lint, exactly once in this Audit invocation. A red gate is worth knowing before spending two reviewer contexts on it.
+2. **Artifact integrity** — do not run it here. Audit does not repeat artifact endpoint or retirement inspection; use the current valid result supplied by Implement as context for the reviewers.
+{{else if .Implementation}}1. **The documented gate** — the project's full suite, typecheck and lint, exactly once per invocation, on the integrated candidate. A red gate is worth knowing before spending two reviewer contexts on it.
 2. **Artifact integrity** — record the engine's endpoint inspection: Baseline, optional Completion, provisional/present/retired phase, and every violation. Compare only the resolved Baseline and Completion, or Baseline and current provisional head before Completion; do not inspect intermediate artifact contents, infer Completion from deletion, or require monotonic intermediate ticks. First-pass Audit may precede final ticks and retirement, so label those facts pending rather than claim review readiness. Normal submission requires completed automated boxes at Completion and ledger absence at the review head; Rework keeps it absent. For an independent Audit without engine facts, compare the supplied endpoint snapshots directly and report missing integrity evidence explicitly.
+{{else}}1. **The documented gate** — the project's full suite, typecheck and lint, exactly once per invocation. A red gate is worth knowing before spending two reviewer contexts on it.
+2. **Artifact integrity** — record the engine's endpoint inspection: Baseline, optional Completion, provisional/present/retired phase, and every violation. Compare only the resolved Baseline and Completion, or Baseline and current provisional head before Completion; do not inspect intermediate artifact contents, infer Completion from deletion, or require monotonic intermediate ticks. First-pass Audit may precede final ticks and retirement, so label those facts pending rather than claim review readiness. Normal submission requires completed automated boxes at Completion and ledger absence at the review head; Rework keeps it absent. For an independent Audit without engine facts, compare the supplied endpoint snapshots directly and report missing integrity evidence explicitly.
+{{end}}
 
-### 5. Spawn both sub-agents in parallel
+{{if .Implementation}}### 5. Spawn both sub-agents in parallel
+
+Dispatch both axes in fresh contexts using exactly this invocation's established execution capability:
+
+{{if eq .Implementation.Capability "claude-agents"}}- **Established Claude Agent parallel-review capability**: a single message with two `Agent` tool calls, using the `general-purpose` subagent for both. This is the only supported recipe for this invocation.
+{{else if eq .Implementation.Capability "pi-subagents"}}- **Established Pi subagent workflow capability**: a single asynchronous `subagent` call with a `workflowScript` using `runs.all` to launch both reviewers in fresh contexts. Set `timeoutMs: 3600000` on the workflow call and both reviewer items. This is the only supported recipe for this invocation.
+{{else if eq .Implementation.Capability "sequential"}}- **Established absence of a subagent mechanism**: run the two axes sequentially, Standards first. This is the only supported recipe for this invocation.
+{{else}}- **Capability unknown**: the invocation established no execution capability, and an adapter or harness name alone proves nothing. Choose among the supported recipes at runtime — the Claude parallel `Agent` calls, the Pi asynchronous parallel `subagent` workflow, or the sequential Standards-then-Artifacts fallback — and use exactly one of them.
+{{end}}
+The recipe changes how the two axes are dispatched, never what they check: both axes still run, in fresh contexts, and this skill still aggregates them.
+{{else}}### 5. Spawn both sub-agents in parallel
 
 Dispatch both axes as parallel sub-agents, each in a fresh context carrying its brief:
 
 - **Claude Code**: a single message with two `Agent` tool calls, using the `general-purpose` subagent for both.
 - **pi** ([pi-subagents](https://github.com/nicobailon/pi-subagents)): a single asynchronous `subagent` call with a `workflowScript` using `runs.all` to launch both reviewers in fresh contexts. Set `timeoutMs: 3600000` on the workflow call and both reviewer items.
 - **No sub-agent mechanism available**: run the two axes sequentially, Standards first.
+{{end}}
 
 **Standards sub-agent prompt** — include:
 
-- The full diff command and commit list.
+- The full diff command and commit list.{{if and .Implementation (eq .Implementation.Procedure "rework")}} Restrict Standards findings to violations or smells caused by the Rework delta; surrounding code may be read only to understand those consequences.{{end}}
 - The list of standards-source files you found in step 3, plus `skl skill --resource reference/smells.md audit`. Instruct the sub-agent to read those files and the command's output.
+- The shared criteria from `skl skill --resource reference/acceptance.md audit`.
 - The gate results from step 4.
 - The precedence between sources, so the sub-agent knows what outranks what: frozen artifacts, then required tooling and CI, then the project's `AGENTS.md`, standards docs and quality skills, then language and framework correctness, security and accessibility rules, then the generic smell baseline. An explicit project or language `MUST`, `ALWAYS`, `NEVER` or equivalent can be a hard violation; a generic smell stays a judgement call unless a local rule or a concrete behavior or maintenance impact elevates it.
-- The brief: "Report — per file/hunk where relevant — (a) every place the diff violates a documented standard: cite the standard (file + the rule); and (b) any baseline smell you spot: name it and quote the hunk. Tag each finding as `HARD` or `JUDGEMENT` as its first token; documented-standard breaches can be `HARD`, but baseline smells are always `JUDGEMENT`, and a documented repo standard overrides the baseline. Skip anything tooling enforces. Report each finding as its own bullet, anchored to `file:line`. Under 500 words. Compress findings rather than omit any."
-
+{{if .Implementation}}- The recorded integrated target SHA and instruction to review merge/conflict-resolution effects while excluding unrelated target additions inherited unchanged by the work branch.
+{{end}}{{if and .Implementation (eq .Implementation.Procedure "rework")}}- The brief: "Report only violations or smells caused by the Rework delta. Do not reopen findings against unrelated unchanged code or whole-change omissions. For each finding, cite the standard or name the baseline smell and quote the hunk. Tag each finding as `HARD` or `JUDGEMENT` as its first token; documented-standard breaches can be `HARD`, but baseline smells are always `JUDGEMENT`, and a documented repo standard overrides the baseline. Skip anything tooling enforces. Report each finding as its own bullet, anchored to `file:line`. Under 500 words. Compress findings rather than omit any."
+{{else}}- The brief: "Report — per file/hunk where relevant — (a) every place the diff violates a documented standard: cite the standard (file + the rule); and (b) any baseline smell you spot: name it and quote the hunk.{{if .Implementation}} Review integration and conflict-resolution effects, but exclude unrelated code inherited unchanged from the integrated target.{{end}} Tag each finding as `HARD` or `JUDGEMENT` as its first token; documented-standard breaches can be `HARD`, but baseline smells are always `JUDGEMENT`, and a documented repo standard overrides the baseline. Skip anything tooling enforces. Report each finding as its own bullet, anchored to `file:line`. Under 500 words. Compress findings rather than omit any."
+{{end}}
 **Artifacts sub-agent prompt** — include:
 
 - The diff command and commit list.
 - The paths or fetched contents of the Artifacts at the exact Baseline and, when available, Completion or provisional head.
+- The shared criteria from `skl skill --resource reference/acceptance.md audit`.
 - The gate and artifact-integrity results from step 4.
-- The brief: "Report: (a) requirements, intent and behaviors the artifacts asked for that are missing or partial; (b) behaviour in the diff that wasn't asked for (scope creep); (c) requirements that look implemented but where the implementation looks wrong; (d) the gate result you were given, if it is not green — do not rerun it; (e) read `plan.md` against the diff and note any divergence; (f) any endpoint violation the integrity result reports, without adding intermediate-history or deletion-inference rules. Judge (a) to (c) against the complete final implementation even when the diff is only the latest increment. Quote the spec line for each finding. Tag each finding `HARD` or `JUDGEMENT` as its first token: (a), (b), (c) and (f) are `HARD`; (d) is `HARD` when the gate is red; (e) is `JUDGEMENT` unless the divergence breaks a frozen requirement. Report each finding as its own bullet, anchored to `file:line`. Under 500 words — compress findings rather than omit any."
+{{if and .Implementation (eq .Implementation.Procedure "rework")}}- The brief: "Check resolution of the supplied Watchdog findings, Contract regressions caused by the Rework delta, unnecessary behavior introduced by the fixes, regression coverage at the accepted seams, and integration or conflict-resolution effects. Watchdog findings are evidence and resolution targets, never new frozen Contract Items. Report only problems caused by or necessary to verify the Rework delta; neither axis reopens findings against unrelated unchanged code or whole-change omissions, and unrelated additions inherited from the integrated target are not scope creep. Quote the relevant frozen Contract line or supplied finding for each result. Tag each finding `HARD` or `JUDGEMENT` as its first token and anchor it to `file:line`. Under 500 words — compress findings rather than omit any."
+{{else}}- The brief: "Report: (a) requirements, intent, rules, scenarios, or architectural obligations that are missing, partial, or contradicted; (b) behaviour in the diff that wasn't asked for (scope creep){{if .Implementation}}, excluding unrelated code inherited unchanged from the integrated target{{end}}; (c) claimed evidence that does not expose the promised consequence or distinguish a plausible violation, including protection lost through removed or weakened assertions; (d) the gate result you were given, if it is not green — do not rerun it; (e) read `plan.md` against the diff and note any divergence; (f) any endpoint violation the integrity result reports, without adding intermediate-history or deletion-inference rules.{{if .Implementation}} Review conflict-resolution and integration effects alongside the authored change.{{end}} Accept grouped many-to-many evidence and contract-preserving test reuse or consolidation; do not impose preferred test organization or implementation. Judge (a) to (c) against the complete final implementation even when the diff is only the latest increment. For an evidence gap, identify the obligation, plausible violation, and why existing evidence does not distinguish it. Quote the spec line for each finding. Tag each finding `HARD` or `JUDGEMENT` as its first token under the shared criteria: (a), (b), (c) and (f) are `HARD`; (d) is `HARD` when the gate is red; (e) is `JUDGEMENT` unless the divergence breaks a frozen requirement. Report each finding as its own bullet, anchored to `file:line`. Under 500 words — compress findings rather than omit any."
+{{end}}
 
 Nothing written after the artifacts were published is a requirement: not review comments, not rework notes. They can be evidence, never a spec line to hold the implementation against.
+
+Assign every new Audit Finding an `F<n>` identity. Begin with `F1` when no `F<n>` exists; otherwise continue after the greatest existing `F<n>`. Preserve historical identifiers in other formats unchanged and never renumber earlier findings.
 
 If the Artifacts is missing, skip the Artifacts sub-agent and note this in the final report.
 
@@ -100,3 +138,4 @@ A change can pass one axis and fail the other:
 - Code that does exactly what the issue asked but breaks the project's conventions → **Artifacts pass, Standards fail.**
 
 Reporting them separately stops one axis from masking the other.
+{{end -}}

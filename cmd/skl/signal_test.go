@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"strings"
@@ -29,10 +30,14 @@ func TestCommandSignals(t *testing.T) {
 		for _, sig := range []syscall.Signal{syscall.SIGINT, syscall.SIGTERM} {
 			t.Run(tc.name+"/"+sig.String(), func(t *testing.T) {
 				root := proposalRepository(t)
+				ledgerRoot := ""
+				if tc.args[0] != "setup" {
+					ledgerRoot = newLedgerFixture(t).clone
+				}
 				args := append([]string{"-test.run=^TestCommandSignalProcess$", "--"}, tc.args...)
 				args = append(args, "--repo", root)
 				cmd := exec.Command(os.Args[0], args...)
-				cmd.Env = append(os.Environ(), "SKL_SIGNAL_PROCESS=1", "GH_TOKEN=fixture")
+				cmd.Env = append(os.Environ(), "SKL_SIGNAL_PROCESS=1", "GH_TOKEN=fixture", "SKL_SIGNAL_LEDGER="+ledgerRoot)
 				stdin, err := cmd.StdinPipe()
 				if err != nil {
 					t.Fatal(err)
@@ -114,5 +119,15 @@ func TestCommandSignalProcess(t *testing.T) {
 		return nil, fmt.Errorf("unexpected fixture request: %s %s", r.Method, r.URL)
 	})
 	os.Args = append([]string{"skl"}, os.Args[3:]...)
+	if root := os.Getenv("SKL_SIGNAL_LEDGER"); root != "" {
+		// Exercise cancellable native Git observation of the private ledger,
+		// replacing the retired forge-authoritative queue observation.
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprintln(os.Stdout, "observation")
+			<-r.Context().Done()
+		}))
+		defer server.Close()
+		runGit(t, root, "remote", "set-url", "origin", server.URL+"/ledger.git")
+	}
 	main()
 }
