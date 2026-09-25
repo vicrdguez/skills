@@ -77,7 +77,7 @@ func HandoffDelivery(s *Store, repository github.RepositoryID, item, phase, clai
 			result = &DeliveryResult{Status: state.State, Item: item, Report: Reference{Commit: head, Path: reportPath}, State: state, AlreadyCompleted: true}
 			return nil
 		}
-		execution, err := s.currentExecution(repository, item, phase, claimCommit)
+		execution, err := s.currentExecution(repository, item, phase, claimCommit, false)
 		if err != nil {
 			return err
 		}

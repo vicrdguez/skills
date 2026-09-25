@@ -180,6 +180,7 @@ func (s *Store) freeze(project Project, declaration *ProposalDeclaration, accept
 		if err := s.writeSliceState(project.Name, declaration.Proposal, slice.Name, SliceState{
 			State: ReadyForImplementation, Title: slice.Title, Branch: slice.Branch,
 			Dependencies: declaration.CanonicalDependencies(slice),
+			Target:       &IntegrationTarget{Repository: project.Repository, Branch: "main"},
 		}); err != nil {
 			return err
 		}
