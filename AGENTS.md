@@ -68,5 +68,6 @@ Agent-visible prose is everything a worker reads: skills, Skill Resources, stubs
 - End every step on a clear check.
 - writing-for-agents applies to `skills/**`.
 - ADR and Contract wording is never transcribed into prose.
+- Agent-visible prose is verified by its golden in `testdata/prose/`. When a prose change breaks a test assertion on rendered wording, delete that assertion and regenerate the goldens.
 
 Changes to `skills/**`, stubs or Outcome Instructions follow `docs/agent-prose.md`.
