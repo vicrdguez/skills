@@ -2,13 +2,15 @@
 
 `skl` is a workflow engine for software changes made by coding agents. It started as a folder of personal skills and is no longer that. The deterministic parts of the workflow (which slice is eligible, who holds it, what state it moves to, what a handoff must contain) live in a Go binary. The agent keeps the judgment: designing, implementing, testing, reviewing. Records live in a private Git ledger. A human sits at the boundaries: deciding what to build, answering the questions automation cannot, and merging.
 
+It is my interpretation of David Mosher's [Deterministic Core, Agentic Shell](https://blog.davemo.com/posts/2026-02-14-deterministic-core-agentic-shell.html), applied to a development workflow rather than a conversation: the engine is the state machine that decides what is valid and what happens next, and the agent is the shell that does the messy, creative work inside the state it was handed.
+
 This is experimental. I built it for my own projects and I change direction often. Expect rough edges and breaking changes.
 
 ## Why not just skills
 
 Most agent workflows are a folder of Markdown the model reads and interprets, with state kept in the source tree or in issue labels. That works until the workflow has to be reliable: two workers pick the same item, a review runs in the same context that wrote the code, a `done` label means three different things.
 
-`skl` moves the deterministic part out of prose. Selection, Claims, state transitions, dependency gating and handoffs are engine operations that behave the same whichever harness runs the agent. What the agent receives is an Execution Skill: one Procedure with its facts already bound (the item, branch, worktree, exact Contract references, the next commands to run), composed with the Craft that step needs. Every command answers with an Outcome Instruction saying what happened and what to do next. The agent never navigates the ledger or keeps its own books.
+`skl` moves the deterministic part out of prose. Selection, Claims, state transitions, dependency gating and handoffs are engine operations that behave the same whichever harness runs the agent. What the agent receives is an Execution Skill: one Procedure with its facts already bound (the item, branch, worktree, exact Contract references, the next commands to run), composed with the Craft that step needs. There is an example [below](#what-an-execution-skill-looks-like). Every command answers with an Outcome Instruction saying what happened and what to do next. The agent never navigates the ledger or keeps its own books.
 
 The CLI is mostly for agents. Humans use `skl browse`, `skl decision inbox` and `skl ledger show`. The rest is what the installed entry points and skill stubs run.
 
@@ -82,9 +84,61 @@ What this buys:
 - **One inbox across projects.** Every Slice waiting on a human decision shows up in `skl decision inbox`, whichever project it belongs to.
 - **Browsable history.** `skl browse` walks projects, proposals and slices from committed records, without a forge ([ADR 0009](docs/adr/0009-separate-ledger-browsing-from-workflow-observation.md)).
 
-## Execution Skills and harnesses
+## What an Execution Skill looks like
 
-The prose an agent reads is authored under `prose/` as Procedures (one script per operation), Craft (judgment guidance written once), document templates and Outcome Instructions. It is embedded in the binary, and the engine composes it per invocation ([ADR 0008](docs/adr/0008-compose-execution-skills-from-procedures-and-craft.md), [docs/agent-prose.md](docs/agent-prose.md)).
+An Execution Skill is not a file anyone wrote. It is what `skl implement next` prints after it has selected a Slice and recorded a Claim. Abridged, for a hypothetical dashboard change:
+
+```markdown
+# Implement `widget-dashboard/foundation` (initial)
+
+Repository: acme/widgets on remote `origin`
+Branch: `widget-dashboard`
+Worktree: `/work/widgets/.worktrees/widget-dashboard`
+Claim: `3f9c…`
+
+## Contract
+`a41e…:projects/widgets/proposals/widget-dashboard/foundation/behavior.md`
+    # Dashboard foundation behavior
+    ## B1: The dashboard lists every widget
+    ### Scenario: An unhealthy widget is visible …
+
+## 1. Prepare
+Run `skl implement prepare --repo /work/widgets --item widget-dashboard/foundation --claim 3f9c…`.
+Check: inspection prints the source head.
+
+## 2. Implement
+Deliver every behavior, scenario and architecture commitment in the Contract, each with evidence …
+Check: every `B<n>`, `A<n>` and warranted `T<n>` has evidence, and the focused checks pass.
+
+## 3. Integrate the target
+`git -C /work/widgets/.worktrees/widget-dashboard fetch origin main` …
+
+## 4. Audit
+Run the Audit below once, over the integrated candidate …
+
+## 5. Report
+Retrieve the template with `skl skill --resource ledger-submission.md --input procedure=initial … implement` …
+
+## 6. Submit
+Submit with `skl implement submit --repo /work/widgets --item widget-dashboard/foundation --claim 3f9c… --head <final-source-sha> --target <observed-target-sha>`.
+Check: submit reports the work awaiting review.
+
+# Testing
+Tests show that the change keeps its Contract. What a good test is, where tests go, the anti-patterns …
+
+# Audit
+Two independent axes: Standards and Contracts …
+```
+
+Three kinds of text are stitched together here:
+
+- **Facts the engine bound.** The header, the Contract quoted at its exact ledger commit, and every flag in every command came from the ledger and the Claim. The two placeholders in step 6 are the only values the worker has to establish itself.
+- **The Procedure.** The numbered steps are the authored script for this operation, each ending on a check. A Slice in rework gets the same steps plus the prior review; Watchdog gets a different Procedure altogether.
+- **The Craft.** The Testing and Audit sections at the bottom are judgment guidance written once, and appended because this Procedure needs them. They contain no command, path or Claim. Explore composes `domain` the same way; Watchdog composes `review`.
+
+The point of composing at invocation time is that the worker reads only what applies to this Slice, in this state, on this harness, and the same ledger state renders the same skill everywhere. The prose is authored under `prose/` and embedded in the binary ([ADR 0008](docs/adr/0008-compose-execution-skills-from-procedures-and-craft.md), [docs/agent-prose.md](docs/agent-prose.md)).
+
+## Harnesses
 
 `skl install` puts the workflow into Pi, Codex, Claude Code and OpenCode. Every skill gets a one-line stub that runs `skl skill <name>`. Implement and Watchdog are installed as Harness Adapters in each harness's native entry point (a Pi prompt template, a user-invoked Claude Code skill, an OpenCode command; Codex keeps a stub) and run `skl implement next` or `skl watchdog next`. Changing harness changes nothing about the workflow.
 
