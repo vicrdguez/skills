@@ -1,0 +1,1 @@
+The {{.Name}} Execution Skill arrives with selected work, and this retrieval acquired no Claim. Run `skl {{.Name}} next` to start one Work Item, or `skl {{.Name}} resume --item <proposal>/<slice> --claim <acquisition-commit>` to continue a Claim you hold. Its named resources render with `skl skill --resource <name> {{.Name}}`.

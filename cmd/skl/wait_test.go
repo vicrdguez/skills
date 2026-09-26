@@ -74,7 +74,7 @@ func TestNextWaitCancellation(t *testing.T) {
 			return workflow.ImplementationOutcome{Status: "no_work"}, nil
 		})
 		cancel()
-		if !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "explicitly resume") {
+		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("cancellation diagnostics: %v", err)
 		}
 		if before && calls != 0 || !before && calls != 1 {

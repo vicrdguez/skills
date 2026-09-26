@@ -12,9 +12,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
+	skilldist "github.com/vicrdguez/skills"
 	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/ledger"
 	"github.com/vicrdguez/skills/setup"
@@ -740,6 +742,25 @@ func TestDeliveryCLIRefusalsPreserveClaim(t *testing.T) {
 	state := deliveryPersistedState(t, fixture.clone)
 	if state.Claim == nil || state.State != ledger.ReadyForImplementation {
 		t.Fatalf("wrong-target refusal advanced or released the Claim: %#v", state)
+	}
+
+	// The Markdown refusal of a verified Claim says the Claim is kept and binds
+	// the submit to rerun.
+	text, err := cli.deliveryRun(t, "skl", "implement", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", claim,
+		"--head", head, "--target", divergent, "--body", bodyPath)
+	if err != nil {
+		t.Fatalf("markdown wrong-target submit: %v", err)
+	}
+	refused := regexp.MustCompile(`(?m)^Refused: (.+)$`).FindStringSubmatch(text)
+	if refused == nil || refused[1] != wrong.Reason {
+		t.Fatalf("markdown refusal does not state the refused invariant %q:\n%s", wrong.Reason, text)
+	}
+	if !strings.Contains(text, "`"+claim+"` is kept") || strings.Contains(text, "changed no Claim") {
+		t.Fatalf("markdown refusal does not keep the verified Claim:\n%s", text)
+	}
+	rerun := regexp.MustCompile("`(skl implement submit [^`]*)`").FindStringSubmatch(text)
+	if rerun == nil || !strings.Contains(rerun[1], "--claim "+skilldist.ShellQuote(claim)) || !strings.Contains(rerun[1], "--target "+skilldist.ShellQuote(divergent)) {
+		t.Fatalf("markdown refusal does not bind the submit to rerun:\n%s", text)
 	}
 
 	good, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", claim,

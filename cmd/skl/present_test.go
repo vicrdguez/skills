@@ -248,7 +248,7 @@ func TestLedgerPresentReauthorsTheCurrentResultAfterMissedPhases(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Status: pending", "Public presentation: pending — " + pending.Presentation.Publication.Detail, "Present with fresh prose: `" + pending.Guidance.Continue + "`"} {
+	for _, want := range []string{"Status: pending", "Public presentation: pending — " + pending.Presentation.Publication.Detail, "`" + pending.Guidance.Continue + "`"} {
 		if !strings.Contains(pendingMarkdown, want) {
 			t.Errorf("Markdown limitation lacks %q:\n%s", want, pendingMarkdown)
 		}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -49,6 +50,9 @@ type deliveryOutput struct {
 	Packet    *skilldist.Packet        `json:"packet,omitempty"`
 	// Present continues an unpresented handoff with the then-current result.
 	Present string `json:"present,omitempty"`
+	// kind and facts select and supply the Markdown Outcome Instruction.
+	kind  string
+	facts any
 }
 
 func runDelivery(c *cli.Context, phase, operation string, newBackend backendFactory, stdout io.Writer) error {
@@ -61,13 +65,24 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 		return err
 	}
 	emit := func(out deliveryOutput) error { return renderDelivery(stdout, format, phase, operation, out) }
+	item, claim := c.String("item"), c.String("claim")
+	// Every refusal before acquisition leaves the worker without a Claim. A
+	// named Claim is reported kept only once the ledger confirms it current;
+	// until then the refusal only leaves it unchanged.
+	claimState := claimUnchanged
+	if operation == "next" {
+		claimState = claimNone
+	}
+	verified := func() { claimState = claimKept }
+	statusCmd := ""
 	refusal := func(err error) error {
-		return emit(deliveryOutput{Status: "fix_required", Reason: err.Error(), Repair: "preserve source progress and Result Documents; use the exact existing Claim reference when retrying or resuming"})
+		reason, repair := refusalParts(err)
+		facts := refusalFacts{Status: "fix_required", Reason: reason, Repair: repair, ClaimState: claimState, Claim: claim, StatusCommand: statusCmd, Rerun: boundCommand(c, "skl "+phase+" "+operation)}
+		return emit(deliveryOutput{Status: "fix_required", Reason: err.Error(), Repair: deliveryJSONRepair, kind: "refused", facts: facts})
 	}
 	if c.NArg() != 0 {
 		return refusal(fmt.Errorf("delivery commands take flags, not positional arguments"))
 	}
-	item, claim := c.String("item"), c.String("claim")
 	if operation == "next" {
 		if item != "" || claim != "" {
 			return refusal(fmt.Errorf("next selects its own project-scoped Work Item; resume an existing reservation explicitly"))
@@ -87,7 +102,7 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 		return refusal(err)
 	}
 	if operation == "submit" || operation == "needs-human" {
-		return submitDelivery(c, phase, operation, repository, store, newBackend, emit, refusal)
+		return submitDelivery(c, phase, operation, repository, store, newBackend, emit, refusal, verified)
 	}
 	var execution *ledger.Execution
 	if operation == "next" {
@@ -102,23 +117,34 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 		})
 		if err != nil {
 			if c.Context.Err() != nil {
+				if format == formatMarkdown {
+					if err := writeOutcome(stdout, "interrupted", phaseFacts{Phase: phase, StatusCommand: statusInvocation(repository)}); err != nil {
+						return err
+					}
+				}
 				return err
+			}
+			var refused *ledger.Refusal
+			if !errors.As(err, &refused) {
+				// Selection can fail after its acquisition commit.
+				claimState, statusCmd = claimUncertain, statusInvocation(repository)
 			}
 			return refusal(err)
 		}
 		if execution == nil {
-			return emit(deliveryOutput{Status: outcome.Status, Reason: outcome.Reason})
+			return emit(deliveryOutput{Status: outcome.Status, Reason: outcome.Reason, kind: selectionKinds[outcome.Status], facts: phaseFacts{Status: outcome.Status, Phase: phase}})
 		}
 	} else if operation == "release" {
 		if err := ledger.ReleaseDelivery(store, repository.Repository, item, phase, claim); err != nil {
 			return refusal(err)
 		}
-		return emit(deliveryOutput{Status: "released", Reason: "the exact reservation was released; source progress and lifecycle eligibility were preserved"})
+		return emit(deliveryOutput{Status: "released", Reason: "the exact reservation was released; source progress and lifecycle eligibility were preserved", kind: "released", facts: releasedFacts{Status: "released", Phase: phase, Item: item, Claim: claim, Next: nextInvocation(phase, repository)}})
 	} else {
 		execution, err = ledger.ResumeDelivery(store, repository.Repository, item, phase, claim)
 		if err != nil {
 			return refusal(err)
 		}
+		verified()
 	}
 	var source *workflow.DeliverySource
 	required, target, previous := deliverySourceInputs(execution, phase)
@@ -140,9 +166,28 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 	}
 	packet, err := setup.PresentDelivery(execution, repository, phase, operation, capability, source, c.Path("result-directory"))
 	if err != nil {
-		return refusal(fmt.Errorf("Claim %s remains acquired for %s, but execution rendering failed: %w", execution.Claim.Commit, execution.Item, err))
+		return emit(renderingFailedOutput(phase, repository, execution.Item, execution.Claim.Commit, err))
 	}
 	return emit(deliveryOutput{Status: map[string]string{"next": "work_available", "resume": "work_available", "prepare": "prepared", "inspect": "inspected"}[operation], Execution: execution, Source: source, Packet: &packet})
+}
+
+// deliveryJSONRepair is the repair the JSON transport has always carried for
+// a delivery refusal. Markdown shows each refusal's own repair instead.
+const deliveryJSONRepair = "preserve source progress and Result Documents; use the exact existing Claim reference when retrying or resuming"
+
+// selectionKinds maps an empty selection's status to its outcome kind.
+var selectionKinds = map[string]string{"no_work": "no-work", "idle_timeout": "idle-timeout"}
+
+// renderingFailedOutput reports an acquired Claim whose Execution Skill failed
+// to render.
+func renderingFailedOutput(phase string, repository setup.RepositoryContext, item, claim string, err error) deliveryOutput {
+	return deliveryOutput{
+		Status: "fix_required", Reason: fmt.Sprintf("Claim %s remains acquired for %s, but execution rendering failed: %v", claim, item, err),
+		Repair: deliveryJSONRepair,
+		kind:   "rendering-failed",
+		facts: renderingFailedFacts{Status: "fix_required", Phase: phase, Item: item, Claim: claim, Reason: err.Error(),
+			Resume: claimCommand(phase, "resume", repository, item, claim), Release: claimCommand(phase, "release", repository, item, claim)},
+	}
 }
 
 func requiredForInspection(phase, head string) string {
@@ -162,7 +207,7 @@ func deliverySourceInputs(e *ledger.Execution, phase string) (head, target, prev
 	return
 }
 
-func submitDelivery(c *cli.Context, phase, operation string, repository setup.RepositoryContext, store *ledger.Store, newBackend backendFactory, emit func(deliveryOutput) error, refusal func(error) error) error {
+func submitDelivery(c *cli.Context, phase, operation string, repository setup.RepositoryContext, store *ledger.Store, newBackend backendFactory, emit func(deliveryOutput) error, refusal func(error) error, verified func()) error {
 	body, err := os.ReadFile(c.Path("body"))
 	if err != nil {
 		return refusal(fmt.Errorf("read private phase Result Document: %w", err))
@@ -190,6 +235,7 @@ func submitDelivery(c *cli.Context, phase, operation string, repository setup.Re
 	e, activeErr := ledger.ResumeDelivery(store, repository.Repository, c.String("item"), phase, c.String("claim"))
 	source := ledger.SourceRevisions{Head: c.String("head"), Target: c.String("target")}
 	if activeErr == nil {
+		verified()
 		if phase == ledger.WatchdogPhase {
 			if e.Implement == nil {
 				return refusal(fmt.Errorf("review requires its fixed implementation report"))
@@ -246,11 +292,22 @@ func submitDelivery(c *cli.Context, phase, operation string, repository setup.Re
 	}
 	ledger.PublishDelivery(c.Context, store, repository.Repository, repository.Root, repository.Remote, result, public, forge)
 	ledger.ReplicateDelivery(store, repository.Repository, result)
-	out := deliveryOutput{Status: result.Status, Result: result}
+	return emit(handoffOutput(phase, repository, result))
+}
+
+// handoffOutput is the outcome of one committed handoff: submitted, or paused
+// for a human decision.
+func handoffOutput(phase string, repository setup.RepositoryContext, result *ledger.DeliveryResult) deliveryOutput {
+	out := deliveryOutput{Status: result.Status, Result: result, kind: "submitted"}
+	if result.Status == ledger.NeedsHuman {
+		out.kind = "paused"
+	}
 	if result.Publication == nil || result.Publication.Status != ledger.PullPresented {
 		out.Present = presentInvocation(repository, result.Item)
 	}
-	return emit(out)
+	out.facts = handoffFacts{Status: result.Status, Phase: phase, Item: result.Item, Report: result.Report, AlreadyCompleted: result.AlreadyCompleted,
+		Notes: notesOf(result.Replication, result.Publication), Present: out.Present}
+	return out
 }
 
 func renderDelivery(stdout io.Writer, format implementationFormatKind, phase, operation string, out deliveryOutput) error {
@@ -260,28 +317,10 @@ func renderDelivery(stdout io.Writer, format implementationFormatKind, phase, op
 	} else if out.Packet != nil {
 		_, err = fmt.Fprint(stdout, out.Packet.Instructions)
 	} else {
-		_, err = fmt.Fprintf(stdout, "Status: %s\n", out.Status)
-		if err == nil && out.Reason != "" {
-			_, err = fmt.Fprintln(stdout, out.Reason)
-		}
-		if err == nil && out.Repair != "" {
-			_, err = fmt.Fprintln(stdout, "Repair:", out.Repair)
-		}
-		if err == nil && out.Result != nil {
-			result := out.Result
-			_, err = fmt.Fprintf(stdout, "Work Item: %s\nPhase Report: %s at %s\nClaim: released by the local handoff; human merge remains separate.\n", result.Item, result.Report.Path, result.Report.Commit)
-			for label, note := range map[string]*ledger.PublicationNote{"Ledger replication": result.Replication, "Public presentation": result.Publication} {
-				if err == nil && note != nil {
-					_, err = fmt.Fprintf(stdout, "%s: %s — %s\n", label, note.Status, note.Detail)
-				}
-			}
-			if err == nil && out.Present != "" {
-				_, err = fmt.Fprintf(stdout, "Present the current view later, without repeating this handoff: `%s`\n", out.Present)
-			}
-		}
+		err = writeOutcome(stdout, out.kind, out.facts)
 	}
 	if err != nil {
-		return fmt.Errorf("%s %s established status %s but output delivery failed; preserve fixed inputs and explicitly resume or retry the same handoff rather than selecting another Claim: %w", phase, operation, out.Status, err)
+		return fmt.Errorf("%s %s established status %s, but writing its output failed: %w", phase, operation, out.Status, err)
 	}
 	return nil
 }

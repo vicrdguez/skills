@@ -1,3 +1,9 @@
 Status: fix_required
-the supplied execution does not own the current Claim; preserve later work and use the exact acquisition reference for your reservation
-Repair: preserve source progress and Result Documents; use the exact existing Claim reference when retrying or resuming
+
+Refused: the supplied execution does not own the current Claim
+
+Repair: preserve later work and use the exact acquisition reference for your reservation
+
+This refusal changed no Claim. Make the repair, then rerun:
+
+`skl implement resume --repo '/work/widgets' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001'`

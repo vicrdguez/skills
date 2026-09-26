@@ -16,7 +16,7 @@ const StubProtocol = "skl.stub/v1"
 
 var ownedMarker = []byte("<!-- skl-owned: " + StubProtocol + " -->")
 
-//go:embed prose/procedures prose/craft prose/documents prose/adapters/stub.md prose/adapters/stubs
+//go:embed prose/procedures prose/craft prose/documents prose/outcomes prose/adapters/stub.md prose/adapters/stubs
 //go:embed prose/adapters/prompts/implement-loop.md prose/adapters/prompts/watchdog-loop.md prose/adapters/prompts/queue-next.mjs prose/adapters/agents/implement-runner.md prose/adapters/agents/watchdog-runner.md
 var embedded embed.FS
 

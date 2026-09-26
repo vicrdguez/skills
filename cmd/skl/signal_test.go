@@ -86,7 +86,7 @@ func TestCommandSignals(t *testing.T) {
 						t.Fatalf("signal did not fail command: %v", err)
 					}
 					if tc.wait {
-						if exit.ExitCode() != 1 || !strings.Contains(stderr.String(), "queue waiting interrupted") || !strings.Contains(stderr.String(), "explicitly resume") {
+						if exit.ExitCode() != 1 || !strings.Contains(stderr.String(), "queue waiting interrupted") {
 							t.Fatalf("waiting lost cancellation diagnostics: %v: %s", err, &stderr)
 						}
 					} else if status := exit.Sys().(syscall.WaitStatus); !status.Signaled() || status.Signal() != sig {

@@ -40,46 +40,48 @@ func presentCommand(newBackend backendFactory, stdout io.Writer) *cli.Command {
 			if err != nil {
 				return err
 			}
+			rerun := boundCommand(command, "skl ledger present")
+			refuse := func(err error) error { return refuseLedger(stdout, format, rerun, err) }
 			if command.NArg() != 0 {
-				return renderLedgerRefusal(stdout, format, fmt.Errorf("ledger present takes flags, not arguments"))
+				return refuse(fmt.Errorf("ledger present takes flags, not arguments"))
 			}
 			repository, err := setup.ResolveRepository(command.Path("repo"), command.String("remote"))
 			if err != nil {
-				return renderLedgerRefusal(stdout, format, err)
+				return refuse(err)
 			}
 			store, err := openConfiguredLedger()
 			if err != nil {
-				return renderLedgerRefusal(stdout, format, err)
+				return refuse(err)
 			}
 			if err := store.RefuseSourceOverlap(repository.Root); err != nil {
-				return renderLedgerRefusal(stdout, format, err)
+				return refuse(err)
 			}
 			selected, err := ledger.SelectCurrentResult(store, repository.Repository, command.String("item"))
 			if err != nil {
-				return renderLedgerRefusal(stdout, format, err)
+				return refuse(err)
 			}
 			if command.Path("public-body") == "" {
-				return renderLedgerOutcome(stdout, format, ledgerOutcome{Status: "prose_required", Reason: "no public prose was supplied; author it for the current result from the private evidence below", Guidance: presentGuidance(repository, selected)})
+				return renderPresentation(stdout, format, ledgerOutcome{Status: "prose_required", Reason: "no public prose was supplied; author it for the current result from the private evidence below", Guidance: presentGuidance(repository, selected)})
 			}
 			body, err := os.ReadFile(command.Path("public-body"))
 			if err != nil {
-				return renderLedgerRefusal(stdout, format, fmt.Errorf("read the freshly authored public prose: %w", err))
+				return refuse(fmt.Errorf("read the freshly authored public prose: %w", err))
 			}
 			backend, err := newBackend(repository.Repository)
 			if err != nil {
 				note := ledger.PublicationNote{Status: ledger.IssuePending, Detail: "forge construction unavailable: " + err.Error()}
-				return renderLedgerOutcome(stdout, format, ledgerOutcome{Status: note.Status, Presentation: &ledger.Presentation{Result: selected, Publication: note}, Guidance: presentGuidance(repository, selected)})
+				return renderPresentation(stdout, format, ledgerOutcome{Status: note.Status, Presentation: &ledger.Presentation{Result: selected, Publication: note}, Guidance: presentGuidance(repository, selected)})
 			}
 			forge, ok := backend.(ledger.DeliveryForge)
 			if !ok {
-				return renderLedgerRefusal(stdout, format, fmt.Errorf("workflow backend does not support pull request presentation"))
+				return refuse(fmt.Errorf("workflow backend does not support pull request presentation"))
 			}
 			presentation := ledger.PresentCurrent(command.Context, store, repository.Repository, repository.Root, repository.Remote, selected, string(body), forge)
 			outcome := ledgerOutcome{Status: presentation.Publication.Status, Presentation: presentation}
 			if presentation.Publication.Status != ledger.PullPresented {
 				outcome.Guidance = presentGuidance(repository, presentation.Result)
 			}
-			return renderLedgerOutcome(stdout, format, outcome)
+			return renderPresentation(stdout, format, outcome)
 		},
 	}
 }
@@ -109,51 +111,38 @@ func presentInvocation(repository setup.RepositoryContext, item string) string {
 	return fmt.Sprintf("skl ledger present --repo %s --remote %s --item %s", q(repository.Root), q(repository.Remote), q(item))
 }
 
-// pullPresentationMarkdown renders the presentation facts the JSON transport
-// carries.
-func pullPresentationMarkdown(line func(string, ...any), presentation *ledger.Presentation, guidance *presentationGuidance) {
-	var result *ledger.CurrentResult
-	if presentation != nil {
-		result = &presentation.Result
-	} else if guidance != nil {
-		result = &guidance.Result
-	}
-	if result != nil {
-		line("Work Item: %s (%s)", result.Item, result.Lifecycle)
-		round := ""
-		if result.Round > 0 {
-			round = fmt.Sprintf(", review round %d", result.Round)
+// presentFacts are one presentation outcome: the selected current result,
+// its presentation notes in a fixed order, and the authoring guidance.
+type presentFacts struct {
+	Status   string
+	Result   *ledger.CurrentResult
+	Source   string
+	Notes    []noteFact
+	Guidance *presentationGuidance
+}
+
+// renderPresentation renders one presentation outcome with its facts.
+func renderPresentation(stdout io.Writer, format implementationFormatKind, outcome ledgerOutcome) error {
+	facts := presentFacts{Status: outcome.Status, Guidance: outcome.Guidance}
+	if presentation := outcome.Presentation; presentation != nil {
+		facts.Result = &presentation.Result
+		var publication *ledger.PublicationNote
+		if presentation.Publication.Status != "" {
+			publication = &presentation.Publication
 		}
-		line("Current result: %s %s%s at %s", result.Phase, result.Outcome, round, result.Report.Path)
-		line("Ledger commit: %s", result.Report.Commit)
+		facts.Notes = notesOf(presentation.Replication, publication)
+	} else if outcome.Guidance != nil {
+		facts.Result = &outcome.Guidance.Result
+	}
+	if result := facts.Result; result != nil {
 		var source []string
 		for _, revision := range []struct{ label, sha string }{{"head", result.Source.Head}, {"target", result.Source.Target}, {"reviewed", result.Source.Reviewed}} {
 			if revision.sha != "" {
 				source = append(source, revision.label+" "+revision.sha)
 			}
 		}
-		if len(source) > 0 {
-			line("Source: %s", strings.Join(source, ", "))
-		}
-		line("Branch: %s", result.Branch)
-		if result.Submission != nil {
-			line("Submission: %s#%d", result.Submission.Repository, result.Submission.Number)
-		}
-		if result.Claimed {
-			line("A later Claim is active; presentation leaves it unchanged.")
-		}
+		facts.Source = strings.Join(source, ", ")
 	}
-	if presentation != nil && presentation.Publication.Status != "" {
-		line("Public presentation: %s — %s", presentation.Publication.Status, presentation.Publication.Detail)
-	}
-	if presentation != nil && presentation.Replication != nil {
-		line("Ledger replication: %s — %s", presentation.Replication.Status, presentation.Replication.Detail)
-	}
-	if guidance != nil {
-		for _, command := range guidance.Evidence {
-			line("Private evidence: `%s`", command)
-		}
-		line("Authoring guidance: `%s`", guidance.Authoring)
-		line("Present with fresh prose: `%s`", guidance.Continue)
-	}
+	outcome.kind, outcome.facts = "ledger-present", facts
+	return renderLedgerOutcome(stdout, format, outcome)
 }
