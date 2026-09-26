@@ -45,6 +45,12 @@ func TestSetupMaintainsOnlyOwnedAgentsBlock(t *testing.T) {
 	}
 }
 
+func TestRepositoryAgentsCarriesCurrentBlock(t *testing.T) {
+	if agents := readFile(t, filepath.Join("..", "AGENTS.md")); !strings.Contains(agents, setup.AgentsBlock) {
+		t.Fatal("AGENTS.md block differs from what setup writes; rerun skl setup")
+	}
+}
+
 func TestSetupRefusesMalformedAgentsOwnershipMarkers(t *testing.T) {
 	cases := map[string]string{
 		"missing":   "<!-- dev-pipeline:start -->\n",
