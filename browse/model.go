@@ -2,6 +2,7 @@ package browse
 
 import (
 	"fmt"
+	"maps"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -70,15 +71,9 @@ type Model struct {
 	help     help.Model
 	detail   viewport.Model
 
-	screen          screen
-	includeArchived bool
-	project         string
-	proposal        string
-	item            string
-	cursor          map[screen]int
-	// relation selects the current Slice's followable relationship, which
-	// starts at detail row selectedRow.
-	relation, selectedRow int
+	location
+	// selectedRow is the detail row where the selected relationship starts.
+	selectedRow int
 	// history holds the browsing context each followed relationship left,
 	// most recent last; back restores it.
 	history []frame
@@ -93,14 +88,24 @@ type Model struct {
 	status        string
 }
 
+// location is the browsing context: the screen, its selections, and the
+// archive choice.
+type location struct {
+	screen          screen
+	includeArchived bool
+	project         string
+	proposal        string
+	item            string
+	cursor          map[screen]int
+	// relation selects the current Slice's followable relationship.
+	relation int
+}
+
 // frame is the browsing context restored by navigating back from a followed
-// relationship.
+// relationship, with the Slice detail's scroll offset.
 type frame struct {
-	screen                  screen
-	includeArchived         bool
-	project, proposal, item string
-	cursor                  map[screen]int
-	relation, offset        int
+	location
+	offset int
 }
 
 // openedMsg reports the outcome of one explicit external-browser request.
@@ -113,7 +118,7 @@ type openedMsg struct {
 func New(snapshot *ledger.Snapshot, options Options) Model {
 	model := Model{
 		snapshot: snapshot, open: options.Open, keys: newKeyMap(), help: help.New(),
-		detail: viewport.New(80, 10), cursor: map[screen]int{},
+		detail: viewport.New(80, 10), location: location{cursor: map[screen]int{}},
 		width: 80, height: 24, status: options.Notice,
 	}
 	model.help.Width = model.width
@@ -248,9 +253,7 @@ func (m *Model) back() {
 	if count := len(m.history); count > 0 {
 		previous := m.history[count-1]
 		m.history = m.history[:count-1]
-		m.screen, m.includeArchived = previous.screen, previous.includeArchived
-		m.project, m.proposal, m.item = previous.project, previous.proposal, previous.item
-		m.cursor, m.relation, m.status = previous.cursor, previous.relation, "Returned to "+previous.item
+		m.location, m.status = previous.location, "Returned to "+previous.item
 		m.load()
 		m.detail.SetYOffset(previous.offset)
 		return
@@ -286,15 +289,9 @@ func (m *Model) follow() {
 		m.status = "This Slice records no relationship to follow"
 		return
 	}
-	cursor := make(map[screen]int, len(m.cursor))
-	for screen, index := range m.cursor {
-		cursor[screen] = index
-	}
-	m.history = append(m.history, frame{
-		screen: m.screen, includeArchived: m.includeArchived,
-		project: m.project, proposal: m.proposal, item: m.item,
-		cursor: cursor, relation: m.relation, offset: m.detail.YOffset,
-	})
+	previous := frame{location: m.location, offset: m.detail.YOffset}
+	previous.cursor = maps.Clone(m.cursor)
+	m.history = append(m.history, previous)
 	from := m.item
 	m.item = relations[m.relation].item
 	m.proposal, _, _ = strings.Cut(m.item, "/")

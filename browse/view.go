@@ -51,9 +51,10 @@ func (m *Model) layoutDetail() {
 	lines, relations := sliceLines(m.slice)
 	m.relation = min(m.relation, max(len(relations)-1, 0))
 	for index, relation := range relations {
-		lines[relation.line] = "  " + lines[relation.line]
 		if index == m.relation {
-			lines[relation.line] = selectedStyle.Render("> " + strings.TrimPrefix(lines[relation.line], "  "))
+			lines[relation.line] = selectedStyle.Render("> " + lines[relation.line])
+		} else {
+			lines[relation.line] = "  " + lines[relation.line]
 		}
 	}
 	var rows []string

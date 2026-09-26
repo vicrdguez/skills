@@ -239,7 +239,10 @@ func TestBrowserFollowsRelationshipsAndRestoresContext(t *testing.T) {
 
 	s.press("tab", "enter")
 	s.shows("Slice: orders/refund", "> Depends on: orders/cancel — Cancel orders (Awaiting Review; unsatisfied until Merged)",
-		"Depends on: gone/missing (unresolved: ")
+		"Depends on: gone/missing (unresolved: ",
+		"Blocks incomplete: 1 unreadable or unsupported record may also depend on this Slice",
+		"! slice widgets/orders/broken: state.json is unreadable")
+	s.hides("Blocks: none")
 	s.press("tab")
 	s.shows("> Depends on: orders/cancel")
 	s.press("esc")
