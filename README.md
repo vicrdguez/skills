@@ -260,7 +260,7 @@ skl skill --resource SKILL-MECHANICS.md writing-for-agents
 skl skill --resource ledger-submission.md --describe-inputs implement
 ```
 
-Parameterized resources use repeated `--input name=value` flags, split at the first `=`. `--describe-inputs` reports accepted names, types, choices, and required status without rendering a procedure. An invocation binds every already-known input and defers resource bodies until needed. Retrieve a parent skill only when it was not already supplied; `SKILL.md` is not a resource name.
+Parameterized resources use repeated `--input name=value` flags, split at the first `=`. `--describe-inputs` reports accepted names, types, choices, and required status without rendering a procedure. An invocation binds every already-known input and defers resource bodies until needed. Retrieve a parent skill only when it was not already supplied.
 
 ## Legacy proposal publication
 

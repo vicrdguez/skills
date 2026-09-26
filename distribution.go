@@ -118,7 +118,7 @@ func stubFrontmatter(name string) (string, error) {
 		return "", err
 	}
 	if !bytes.HasPrefix(source, []byte("---\n")) || !bytes.HasSuffix(source, []byte("\n---\n")) {
-		return "", fmt.Errorf("skill %q has invalid frontmatter", name)
+		return "", fmt.Errorf("prose/adapters/stubs/%s.md is not frontmatter", name)
 	}
 	return strings.TrimSuffix(string(source), "\n"), nil
 }
