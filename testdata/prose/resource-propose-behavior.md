@@ -1,39 +1,32 @@
 # {Change title} Behavior
 
 <!--
-Write authoritative, scoped named rules where consequential ambiguity needs a
-decision. A rule governs its class of situations beyond the scenarios beneath it.
-Use binding scenarios only to discriminate plausible interpretations, not to
-inventory every simple case or prescribe one test or task per scenario.
+Write a named rule wherever a consequential ambiguity needs a decision. A rule
+governs its whole class of situations, beyond the scenarios beneath it.
 
-Use Gherkin notation as readable prose; there are no .feature files or Cucumber
-runtime. Given / When / Then / And / But help expose preconditions, actions, and
-observable outcomes. Where relevant, consider state and side effects, prohibited
-or unchanged effects, and failure, cancellation, retry, or partial completion.
-These are precision aids, not compulsory headings.
+Add a scenario only when it tells plausible interpretations of a rule apart.
+An unambiguously implied case needs none. Each scenario:
+- is observable through the interface the slice is verified at, never through
+  incidental implementation state;
+- states its precondition with Given, its action with When, and its observable
+  outcome with Then, adding And or But for further or unchanged outcomes;
+- considers, where relevant, state and side effects, effects that must not
+  happen, and failure, cancellation, retry or partial completion.
 
-Each rule and scenario has a readable, uniquely referenceable descriptive heading;
-IDs are not required. Give each independently tracked rule a descriptive local
-label B<n> so intent.md and plan.md can reference it; never duplicate a label
-across documents, and never number every paragraph or heading. Each scenario
-must be observable through the chosen module interface rather than incidental
-implementation state. An unambiguously implied case needs no extra scenario.
-Resolve any consequential behavior not settled by the approved source before
-publication rather than inventing an obligation.
+Scenarios are readable Gherkin prose, with no .feature files or runner. They
+bind behavior, never tests: one scenario is not one test or one task.
 
-Frozen when `skl ledger accept` records the proposal. Accepted files are
-read-only; review discoveries belong in findings or a renewed Proposal. Delete
-this comment in the real file.
+Delete this comment in the real file.
 -->
 
-## Rule: {scoped, consequential rule}
+## B1: {scoped, consequential rule}
 
-{State the authoritative rule, including its scope and material prohibited effects.}
+{State the rule, its scope, and the effects it rules out.}
 
 ### Scenario: {case that distinguishes plausible interpretations}
 - Given {the relevant precondition}
 - When {the action through an observable interface}
-- Then {the contractually observable outcome}
+- Then {the observable outcome}
 - And {a further observable or unchanged outcome, when relevant}
 
 ---
@@ -43,7 +36,7 @@ this comment in the real file.
 ```md
 # Order Cancellation Behavior
 
-## Rule: Cancellation is available only before shipment
+## B1: Cancellation is available only before shipment
 
 A customer may cancel an unshipped order. Cancellation makes the order cancelled
 and initiates a full refund. Once shipped, an order rejects cancellation and
