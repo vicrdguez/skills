@@ -196,11 +196,15 @@ func TestBrowserOpensRecordedAttachmentsOnlyOnExplicitAction(t *testing.T) {
 	s.shows("No recorded pull request attachment to open")
 }
 
-func TestBrowserFitsNarrowAndWideTerminals(t *testing.T) {
+// fits presses each key sequence in turn at both terminal sizes and fails
+// when a view overflows the terminal.
+func fits(t *testing.T, sequences [][]string) []*session {
+	t.Helper()
+	var sessions []*session
 	for _, size := range []tea.WindowSizeMsg{{Width: 40, Height: 14}, {Width: 140, Height: 30}} {
 		s := start(t, "widgets")
 		s.send(size)
-		for _, keys := range [][]string{nil, {"enter"}, {"down", "enter"}} {
+		for _, keys := range sequences {
 			s.press(keys...)
 			view := s.model.View()
 			if height := lipgloss.Height(view); height > size.Height {
@@ -212,6 +216,13 @@ func TestBrowserFitsNarrowAndWideTerminals(t *testing.T) {
 				}
 			}
 		}
+		sessions = append(sessions, s)
+	}
+	return sessions
+}
+
+func TestBrowserFitsNarrowAndWideTerminals(t *testing.T) {
+	for _, s := range fits(t, [][]string{nil, {"enter"}, {"down", "enter"}}) {
 		s.shows("Slice: orders/cancel")
 	}
 }
@@ -225,7 +236,7 @@ func TestBrowserNavigatesFromClaimFactToSlices(t *testing.T) {
 	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})
 	s.press("f")
 	s.shows("skl browse › Find slices › Facts", "✓ Any lifecycle (3)", "Awaiting Review (1)", "watchdog claim (1)", "unclaimed (1)",
-		"! Not counted: 1 with unknown lifecycle, 1 with unknown claim")
+		"! Counted only under Any: 1 with unknown lifecycle, 1 with unknown claim")
 
 	s.press(downs(10)...)
 	s.shows("Finds: any lifecycle · watchdog claim in Project widgets")
@@ -286,21 +297,24 @@ func TestBrowserTellsEmptyResultsFromUnknownOnes(t *testing.T) {
 }
 
 func TestBrowserFitsFindingScreens(t *testing.T) {
-	for _, size := range []tea.WindowSizeMsg{{Width: 40, Height: 14}, {Width: 140, Height: 30}} {
-		s := start(t, "widgets")
-		s.send(size)
-		for _, keys := range [][]string{{"f"}, {"enter"}, {"w", "g"}, {"/", "orders"}, {"enter"}} {
-			s.press(keys...)
-			view := s.model.View()
-			if height := lipgloss.Height(view); height > size.Height {
-				t.Fatalf("%dx%d view is %d lines tall:\n%s", size.Width, size.Height, height, view)
-			}
-			for _, line := range strings.Split(view, "\n") {
-				if width := lipgloss.Width(line); width > size.Width {
-					t.Fatalf("%dx%d view line is %d wide: %q", size.Width, size.Height, width, line)
-				}
-			}
-		}
+	for _, s := range fits(t, [][]string{{"f"}, {"enter"}, {"w", "g"}, {"/", "orders"}, {"enter"}}) {
 		s.shows("Find slices", "Finding:", "> ")
 	}
+}
+
+func TestBrowserKeepsItsContextAfterOpeningAResultElsewhere(t *testing.T) {
+	s := start(t, "widgets")
+	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})
+	s.press("enter", "/", "hammer", "enter")
+	s.shows(`name contains "hammer" in Project widgets`)
+	s.press("w", "enter")
+	s.shows("skl browse › Find slices › gadgets › tools/hammer", "Lifecycle: Rework")
+	s.press("f")
+	s.shows("skl browse › Find slices › Facts")
+	s.press("esc")
+	s.shows(`name contains "hammer" in every Project`, "tools/hammer")
+	s.press("w")
+	s.shows(`name contains "hammer" in Project widgets`)
+	s.press("esc")
+	s.shows("skl browse › Projects › widgets › orders", "Slices (3)")
 }

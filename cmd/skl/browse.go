@@ -104,7 +104,7 @@ func browseCommand(stdin io.Reader, stdout io.Writer) *cli.Command {
 			Flags: []cli.Flag{
 				projectFlag("Project to search; every Project when omitted"), archivedFlag,
 				&cli.StringSliceFlag{Name: "lifecycle", Usage: "Select any of these recorded lifecycles (" + strings.Join(ledger.Lifecycles, ", ") + ")"},
-				&cli.StringSliceFlag{Name: "claim", Usage: "Select any of these Claims (" + ledger.ImplementPhase + ", " + ledger.WatchdogPhase + ", " + ledger.ClaimNone + ")"},
+				&cli.StringSliceFlag{Name: "claim", Usage: "Select any of these Claims (" + strings.Join(ledger.Claims, ", ") + ")"},
 				&cli.StringFlag{Name: "search", Usage: "Select Slices whose project/proposal/slice identity or title contains this text"},
 				&cli.StringFlag{Name: "group", Value: ledger.GroupByProposal, Usage: "Group each Project's Slices by " + ledger.GroupByProposal + " or " + ledger.GroupByLifecycle},
 				implementationFormatFlag(),

@@ -177,6 +177,36 @@ func TestFindSlicesDisclosesUnknownFactsItCannotDecide(t *testing.T) {
 	}
 }
 
+func TestFindSlicesDisclosesUnknownMembership(t *testing.T) {
+	l := newDeliveryLedger(t)
+	l.addProject("widgets", "acme/widgets")
+	l.addSlice("widgets", "orders", "cancel", ledger.Merged, nil, deliveryInitial)
+	l.addProject("gadgets", "acme/gadgets")
+	l.addSlice("gadgets", "tools", "hammer", ledger.Merged, nil, deliveryInitial)
+	l.addProject("sprockets", "acme/sprockets")
+	l.addSlice("sprockets", "gears", "cog", ledger.Merged, nil, deliveryInitial)
+	l.addFile("projects/Not Valid/project.json", `{"repository": "acme/not-valid"}`)
+	l.addFile("projects/gadgets/proposals/Odd_Proposal/cog/state.json", `{"state": "merged"}`)
+	l.addFile("projects/sprockets/proposals/empty/proposal.json", "{}")
+	l.commitAll("record unknown membership")
+	snapshot := browseSnapshot(t, l)
+
+	widgets := find(t, snapshot, ledger.SliceQuery{Project: "widgets", Lifecycles: []string{ledger.Merged}})
+	if widgets.Incomplete || widgets.Matched != 1 {
+		t.Fatalf("a readable Project scope must stay complete beside damaged Projects: %+v", widgets)
+	}
+	for _, project := range []string{"gadgets", "sprockets"} {
+		scoped := find(t, snapshot, ledger.SliceQuery{Project: project, Lifecycles: []string{ledger.Merged}})
+		if !scoped.Incomplete || !scoped.Projects[0].Incomplete || len(scoped.Projects[0].Diagnostics) != 1 || scoped.Matched != 1 {
+			t.Fatalf("%s: unknown membership must keep healthy matches and mark the result incomplete: %+v", project, scoped)
+		}
+	}
+	everywhere := find(t, snapshot, ledger.SliceQuery{Text: "nothing matches this"})
+	if everywhere.Matched != 0 || !everywhere.Incomplete || len(everywhere.Diagnostics) != 1 || everywhere.Diagnostics[0].Scope != ledger.ScopeLedger || len(everywhere.Projects) != 2 {
+		t.Fatalf("an invalid Project name must keep a ledger-wide empty result incomplete: %+v", everywhere)
+	}
+}
+
 func TestFindSlicesGroupsTheSameFacts(t *testing.T) {
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")

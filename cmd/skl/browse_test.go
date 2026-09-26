@@ -158,6 +158,25 @@ func TestBrowseSlicesSelectsByIndependentFacts(t *testing.T) {
 	if ledgerSnapshot(t, fixture.clone) != clone {
 		t.Fatal("finding slices changed the ledger clone")
 	}
+
+	writeFile(t, filepath.Join(fixture.clone, "projects", "widgets", "proposals", "orders", "broken", "state.json"), "{broken")
+	runGit(t, fixture.clone, "add", "-A")
+	runGit(t, fixture.clone, "commit", "-q", "-m", "damage a record")
+	unknown := browseQuery(t, app, output, "slices", "--claim", "watchdog")
+	undecided := unknown.Slices.Projects[0].Undecided
+	if found(unknown) != "widgets:orders/cancel" || !unknown.Slices.Incomplete || unknown.Slices.Undecided != 1 || len(undecided) != 1 || undecided[0].Item != "orders/broken" {
+		t.Fatalf("an unreadable Claim must be undecided, never a match: %+v", unknown.Slices)
+	}
+	output.Reset()
+	if err := app.Run([]string{"skl", "browse", "slices", "--claim", "watchdog"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, fact := range []string{"Result: 1 matching slice; 1 undecided by unknown facts; incomplete", "### Undecided: unknown facts",
+		"- ! orders/broken — lifecycle unknown · claim unknown", "state.json is unreadable"} {
+		if !strings.Contains(output.String(), fact) {
+			t.Fatalf("markdown lacks %q:\n%s", fact, output)
+		}
+	}
 }
 
 func TestBrowseStartupSelection(t *testing.T) {

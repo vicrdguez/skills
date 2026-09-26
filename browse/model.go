@@ -37,7 +37,7 @@ var factOptions = func() []factOption {
 		options = append(options, factOption{value: lifecycle})
 	}
 	options = append(options, factOption{claim: true})
-	for _, claim := range claimValues {
+	for _, claim := range ledger.Claims {
 		options = append(options, factOption{claim: true, value: claim})
 	}
 	return options
@@ -57,10 +57,11 @@ func (option factOption) apply(query ledger.SliceQuery) ledger.SliceQuery {
 	return query
 }
 
-// result is one selectable Slice of the results screen.
+// result is one selectable Slice of the results screen under its group
+// heading.
 type result struct {
-	project string
-	match   ledger.SliceMatch
+	project, heading string
+	match            ledger.SliceMatch
 }
 
 // Options are the startup choices of one browsing session.
@@ -78,7 +79,7 @@ type keyMap struct {
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Enter, k.Back, k.Search, k.Facts, k.Projects, k.Help, k.Archived, k.Group, k.Scope, k.Issue, k.PullRequest, k.Quit}
+	return []key.Binding{k.Enter, k.Back, k.Projects, k.Help, k.Archived, k.Issue, k.PullRequest, k.Quit, k.Search, k.Facts}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
@@ -123,6 +124,9 @@ type Model struct {
 	// from finding.
 	parent map[screen]screen
 
+	// context is the hierarchy's Project and Proposal while a found Slice
+	// from elsewhere is open.
+	context [2]string
 	// query is the session's Slice selection; typing holds its name search
 	// while it is edited.
 	query  ledger.SliceQuery
@@ -187,7 +191,7 @@ func (m Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.typing != nil {
 		return m.typeSearch(msg)
 	}
-	finding := m.screen == factsScreen || m.screen == resultsScreen
+	finding := m.finding()
 	switch {
 	case key.Matches(msg, m.keys.Quit):
 		return m, tea.Quit
@@ -272,17 +276,22 @@ func (m Model) rows() int {
 }
 
 // results lists the selectable Slices of the current search in display
-// order: each Project's groups, then its undecided Slices.
+// order: each Project's groups, then its undecided Slices. Headings name the
+// Project too when every Project is searched.
 func (m Model) results() []result {
 	var results []result
 	for _, project := range m.search.Projects {
+		prefix := ""
+		if m.search.Query.Project == "" {
+			prefix = project.Name + " · "
+		}
 		for _, group := range project.Groups {
 			for _, match := range group.Slices {
-				results = append(results, result{project.Name, match})
+				results = append(results, result{project.Name, prefix + GroupTitle(group), match})
 			}
 		}
 		for _, match := range project.Undecided {
-			results = append(results, result{project.Name, match})
+			results = append(results, result{project.Name, prefix + UndecidedTitle, match})
 		}
 	}
 	return results
@@ -317,11 +326,20 @@ func (m Model) typeSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// finding reports whether the current screen belongs to finding: the facts,
+// the results, or a Slice opened from the results.
+func (m Model) finding() bool {
+	return m.screen == factsScreen || m.screen == resultsScreen || (m.screen == sliceScreen && m.parent[sliceScreen] == resultsScreen)
+}
+
 // find opens target within finding. Finding started from the hierarchy
 // searches the current Project, or every Project from the overview, and
 // returns to where it started.
 func (m *Model) find(target screen) {
-	finding := m.screen == factsScreen || m.screen == resultsScreen || (m.screen == sliceScreen && m.parent[sliceScreen] == resultsScreen)
+	finding := m.finding()
+	if m.screen == sliceScreen && finding {
+		m.project, m.proposal = m.context[0], m.context[1]
+	}
 	if !finding {
 		m.parent[resultsScreen] = m.screen
 		m.query.Project = ""
@@ -329,9 +347,9 @@ func (m *Model) find(target screen) {
 			m.query.Project = m.project
 		}
 	}
-	if target == factsScreen {
+	if target == factsScreen && m.screen != factsScreen {
 		m.parent[factsScreen] = m.parent[resultsScreen]
-		if m.screen == resultsScreen {
+		if finding {
 			m.parent[factsScreen] = resultsScreen
 		}
 	}
@@ -379,6 +397,7 @@ func (m *Model) enter() {
 		m.screen, m.cursor[resultsScreen] = resultsScreen, 0
 	case resultsScreen:
 		chosen := m.results()[selected]
+		m.context = [2]string{m.project, m.proposal}
 		m.project, m.proposal, m.item = chosen.project, chosen.match.Proposal, chosen.match.Item
 		m.screen, m.parent[sliceScreen] = sliceScreen, resultsScreen
 	}
@@ -391,6 +410,9 @@ func (m *Model) back() {
 	case overviewScreen:
 		return
 	case sliceScreen, factsScreen, resultsScreen:
+		if m.screen == sliceScreen && m.parent[sliceScreen] == resultsScreen {
+			m.project, m.proposal = m.context[0], m.context[1]
+		}
 		m.screen = m.parent[m.screen]
 	default:
 		m.screen--

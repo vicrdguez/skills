@@ -29,9 +29,6 @@ var claimLabels = map[string]string{
 	ledger.ClaimNone:      "unclaimed",
 }
 
-// claimValues lists the selectable Claim values in workflow order.
-var claimValues = []string{ledger.ImplementPhase, ledger.WatchdogPhase, ledger.ClaimNone}
-
 // lifecycleLabel names one recorded lifecycle.
 func lifecycleLabel(state string) string {
 	if label, ok := lifecycleLabels[state]; ok {

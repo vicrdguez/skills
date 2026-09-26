@@ -18,6 +18,9 @@ const (
 // Lifecycles lists the canonical lifecycles in workflow order.
 var Lifecycles = []string{ReadyForImplementation, AwaitingReview, Rework, NeedsHuman, ReadyForMerge, Merged, Superseded}
 
+// Claims lists the selectable Claim values in workflow order.
+var Claims = []string{ImplementPhase, WatchdogPhase, ClaimNone}
+
 // SliceQuery selects Slices by criteria that must all hold. An empty
 // criterion selects every Slice along its dimension. Lifecycle and Claim are
 // independent: a Claim phase never selects a lifecycle, and no criterion
@@ -191,8 +194,8 @@ func (v *Snapshot) normalize(query SliceQuery) (SliceQuery, error) {
 		}
 	}
 	for _, claim := range query.Claims {
-		if claim != ImplementPhase && claim != WatchdogPhase && claim != ClaimNone {
-			return query, refuse("unsupported Claim selection "+strconv.Quote(claim), "select "+ImplementPhase+", "+WatchdogPhase+", or "+ClaimNone)
+		if !slices.Contains(Claims, claim) {
+			return query, refuse("unsupported Claim selection "+strconv.Quote(claim), "select one of "+strings.Join(Claims, ", "))
 		}
 	}
 	switch query.GroupBy {
@@ -291,15 +294,17 @@ func group(matches []SliceMatch, by string) []SliceGroup {
 		}
 		return groups
 	}
-	for _, lifecycle := range append(slices.Clone(Lifecycles), "") {
-		bucket := SliceGroup{Lifecycle: lifecycle, UnknownLifecycle: lifecycle == ""}
-		for _, match := range matches {
-			if known := match.Readable && knownLifecycle(match.Lifecycle); (known && match.Lifecycle == lifecycle) || (!known && lifecycle == "") {
-				bucket.Slices = append(bucket.Slices, match)
-			}
+	buckets := map[string][]SliceMatch{}
+	for _, match := range matches {
+		lifecycle := ""
+		if match.Readable && knownLifecycle(match.Lifecycle) {
+			lifecycle = match.Lifecycle
 		}
-		if len(bucket.Slices) > 0 {
-			groups = append(groups, bucket)
+		buckets[lifecycle] = append(buckets[lifecycle], match)
+	}
+	for _, lifecycle := range append(slices.Clone(Lifecycles), "") {
+		if members := buckets[lifecycle]; len(members) > 0 {
+			groups = append(groups, SliceGroup{Lifecycle: lifecycle, UnknownLifecycle: lifecycle == "", Slices: members})
 		}
 	}
 	return groups

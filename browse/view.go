@@ -55,7 +55,7 @@ func (m Model) header() string {
 		path = []string{"Find slices", "Facts"}
 	case m.screen == resultsScreen:
 		path = []string{"Find slices"}
-	case m.screen == sliceScreen && m.parent[sliceScreen] == resultsScreen:
+	case m.finding():
 		path = []string{"Find slices", m.project, m.item}
 	default:
 		path = []string{"Projects"}
@@ -206,7 +206,7 @@ func (m Model) listContent() (context []string, title string, rows []string, cur
 		context = m.findingContext()
 		facets := m.search.Facets
 		if facets.UnknownLifecycle > 0 || facets.UnknownClaim > 0 {
-			context = append(context, warningStyle.Render(fmt.Sprintf("! Not counted: %d with unknown lifecycle, %d with unknown claim", facets.UnknownLifecycle, facets.UnknownClaim)))
+			context = append(context, warningStyle.Render(fmt.Sprintf("! Counted only under Any: %d with unknown lifecycle, %d with unknown claim", facets.UnknownLifecycle, facets.UnknownClaim)))
 		}
 		title = "Facts — select one to find its Slices"
 		for _, option := range factOptions {
@@ -228,8 +228,17 @@ func (m Model) listContent() (context []string, title string, rows []string, cur
 			title = fmt.Sprintf("Slices (%d matched, %d undecided)", m.search.Matched, m.search.Undecided)
 		}
 		empty = ResultText(m.search)
-		rows, cursorRow = m.resultRows(cursor)
-		if results := m.results(); len(results) > 0 {
+		results := m.results()
+		for index, found := range results {
+			if index == 0 || found.heading != results[index-1].heading {
+				rows = append(rows, titleStyle.Render(found.heading))
+			}
+			if index == cursor {
+				cursorRow = len(rows)
+			}
+			rows = append(rows, MatchRow(found.match))
+		}
+		if len(results) > 0 {
 			chosen := results[cursor]
 			selected = append([]string{"Project: " + chosen.project}, SliceSummaryLines(chosen.match.SliceSummary)...)
 		}
@@ -271,35 +280,6 @@ func (m Model) factRow(option factOption) string {
 		mark = "✓ "
 	}
 	return fmt.Sprintf("%s%s (%d)", mark, label, count)
-}
-
-// resultRows lists the found Slices under their group headings, prefixed by
-// Project when every Project is searched, and returns the row of the cursor.
-func (m Model) resultRows(cursor int) (rows []string, cursorRow int) {
-	index := 0
-	add := func(heading string, matches []ledger.SliceMatch) {
-		rows = append(rows, titleStyle.Render(heading))
-		for _, match := range matches {
-			if index == cursor {
-				cursorRow = len(rows)
-			}
-			rows = append(rows, MatchRow(match))
-			index++
-		}
-	}
-	for _, project := range m.search.Projects {
-		prefix := ""
-		if m.search.Query.Project == "" {
-			prefix = project.Name + " · "
-		}
-		for _, group := range project.Groups {
-			add(prefix+GroupTitle(group), group.Slices)
-		}
-		if len(project.Undecided) > 0 {
-			add(prefix+UndecidedTitle, project.Undecided)
-		}
-	}
-	return rows, cursorRow
 }
 
 // progressText is the compact delivery state of one Proposal row.
