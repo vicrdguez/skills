@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"os/exec"
 	"sort"
@@ -175,7 +174,9 @@ type proposalTree struct {
 	name     string
 	archived bool
 	slices   []*sliceTree
-	invalid  []Diagnostic
+	// invalid diagnoses member directories whose names cannot be Slice
+	// identities; each still counts as a member of unknown lifecycle.
+	invalid []Diagnostic
 }
 
 type sliceTree struct {
@@ -195,7 +196,7 @@ func (s *Store) Snapshot() (*Snapshot, error) {
 		)
 	}
 	arguments := []string{"ls-tree", "-r", "-z", "--name-only", head, "--", projectsRoot}
-	listing, err := exec.Command("git", append([]string{"-C", s.Root}, arguments...)...).Output()
+	listing, err := git(s.Root, arguments...)
 	if err != nil {
 		return nil, refuse(
 			"the records of ledger revision "+head+" are unreadable: "+gitError(s.Root, arguments, err).Error(),
@@ -203,7 +204,7 @@ func (s *Store) Snapshot() (*Snapshot, error) {
 		)
 	}
 	snapshot := &Snapshot{store: s, Revision: head, projects: map[string]*projectTree{}}
-	for _, path := range strings.Split(string(listing), "\x00") {
+	for _, path := range strings.Split(listing, "\x00") {
 		if path != "" {
 			snapshot.index(strings.Split(path, "/"))
 		}
@@ -264,12 +265,7 @@ func (v *Snapshot) index(parts []string) {
 		proposal.invalid = appendDiagnostic(proposal.invalid, Diagnostic{ScopeProposal, subject, parts[4] + " is not a valid Slice record name"})
 		return
 	}
-	var slice *sliceTree
-	for _, candidate := range proposal.slices {
-		if candidate.name == parts[4] {
-			slice = candidate
-		}
-	}
+	slice := proposal.slice(parts[4])
 	if slice == nil {
 		slice = &sliceTree{name: parts[4], files: map[string]bool{}}
 		proposal.slices = append(proposal.slices, slice)
@@ -277,6 +273,15 @@ func (v *Snapshot) index(parts []string) {
 	if len(parts) == 6 {
 		slice.files[parts[5]] = true
 	}
+}
+
+func (p *proposalTree) slice(name string) *sliceTree {
+	for _, slice := range p.slices {
+		if slice.name == name {
+			return slice
+		}
+	}
+	return nil
 }
 
 func appendDiagnostic(diagnostics []Diagnostic, diagnostic Diagnostic) []Diagnostic {
@@ -368,12 +373,7 @@ func (v *Snapshot) Slice(projectName, item string) (*SliceDetail, error) {
 	if err != nil {
 		return nil, err
 	}
-	var tree *sliceTree
-	for _, candidate := range proposal.slices {
-		if candidate.name == sliceName {
-			tree = candidate
-		}
-	}
+	tree := proposal.slice(sliceName)
 	if tree == nil {
 		return nil, refuse(
 			"no Slice "+item+" in project "+project.name+" at ledger revision "+v.Revision,
@@ -400,11 +400,12 @@ func (v *Snapshot) Slice(projectName, item string) (*SliceDetail, error) {
 		Diagnostics: append(append([]Diagnostic(nil), read.diagnostics...), proposalRead.diagnostics...),
 	}
 	detail.Diagnostics = append(detail.Diagnostics, slice.diagnostics...)
-	for _, name := range []string{"behavior.md", "intent.md", "plan.md", "tasks.md"} {
-		if tree.files[name] {
+	for name := range tree.files {
+		if contractFiles[name] {
 			detail.Documents = append(detail.Documents, name)
 		}
 	}
+	sort.Strings(detail.Documents)
 	for _, phase := range []string{ImplementPhase, WatchdogPhase} {
 		if tree.files[phase+"-report.md"] {
 			detail.Reports = append(detail.Reports, phase)
@@ -428,43 +429,33 @@ func (v *Snapshot) Slice(projectName, item string) (*SliceDetail, error) {
 
 // dependency resolves one recorded Dependency's blocker at this revision.
 func (v *Snapshot) dependency(project *projectTree, reference string) DependencyFact {
-	item := strings.TrimPrefix(reference, "proposals/")
-	fact := DependencyFact{Item: item}
-	proposalName, sliceName, found := strings.Cut(item, "/")
-	if !found {
+	fact := DependencyFact{Item: strings.TrimPrefix(reference, "proposals/")}
+	proposalName, sliceName, ok := workItemReference(reference)
+	if !ok {
 		fact.Problem = "the recorded reference is not a proposal/slice identity"
 		return fact
 	}
-	for _, archived := range []bool{false, true} {
-		for _, proposal := range project.proposals {
-			if proposal.name != proposalName || proposal.archived != archived {
-				continue
-			}
-			for _, slice := range proposal.slices {
-				if slice.name != sliceName {
-					continue
-				}
-				path := v.slicePath(project.name, proposal, slice.name) + "/state.json"
-				blobs, err := v.blobs([]string{path})
-				if err != nil {
-					fact.Problem = "the blocker record is unreadable: " + err.Error()
-					return fact
-				}
-				contents, present := blobs[path]
-				read := decodeSlice(project.name+"/"+proposal.name, slice, contents, present)
-				switch {
-				case !read.readable:
-					fact.Problem = "the blocker's state record is unreadable"
-				case !knownLifecycle(read.state.State):
-					fact.Lifecycle, fact.Problem = read.state.State, "the blocker records an unsupported lifecycle"
-				default:
-					fact.Lifecycle = read.state.State
-				}
-				return fact
-			}
-		}
+	_, proposal, err := v.proposal(project.name, proposalName)
+	if err != nil || proposal.slice(sliceName) == nil {
+		fact.Problem = "no committed record of the blocker exists at this revision"
+		return fact
 	}
-	fact.Problem = "no committed record of the blocker exists at this revision"
+	path := v.slicePath(project.name, proposal, sliceName) + "/state.json"
+	blobs, err := v.blobs([]string{path})
+	if err != nil {
+		fact.Problem = "the blocker record is unreadable: " + err.Error()
+		return fact
+	}
+	contents, present := blobs[path]
+	read := decodeSlice(project.name+"/"+proposal.name, proposal.slice(sliceName), contents, present)
+	switch {
+	case !read.readable:
+		fact.Problem = "the blocker's state record is unreadable"
+	case !knownLifecycle(read.state.State):
+		fact.Lifecycle, fact.Problem = read.state.State, "the blocker records an unsupported lifecycle"
+	default:
+		fact.Lifecycle = read.state.State
+	}
 	return fact
 }
 
@@ -612,7 +603,7 @@ func (v *Snapshot) decodeProposal(project string, proposal *proposalTree, blobs 
 		read.meta = ProposalMeta{}
 		read.diagnostics = append(read.diagnostics, Diagnostic{ScopeProposal, subject, "proposal.json is unreadable, so its acceptance metadata is unknown"})
 	}
-	if len(proposal.slices) == 0 {
+	if len(proposal.slices) == 0 && len(proposal.invalid) == 0 {
 		read.diagnostics = append(read.diagnostics, Diagnostic{ScopeProposal, subject, "records no Slices, so its membership is unknown"})
 	}
 	for _, slice := range proposal.slices {
@@ -681,6 +672,8 @@ func (r proposalRead) summary() ProposalSummary {
 		summary.Tally.add(slice)
 		summary.Diagnostics = append(summary.Diagnostics, slice.diagnostics...)
 	}
+	summary.Slices += len(r.tree.invalid)
+	summary.Unknown += len(r.tree.invalid)
 	summary.FullyDelivered = summary.Slices > 0 && summary.Unknown == 0 && summary.Lifecycles[Merged] == summary.Slices
 	summary.Incomplete = len(summary.Diagnostics) > 0
 	return summary
@@ -728,21 +721,18 @@ func (v *Snapshot) blobs(paths []string) (map[string][]byte, error) {
 	for _, path := range paths {
 		input.WriteString(v.Revision + ":" + path + "\n")
 	}
-	arguments := []string{"cat-file", "--batch"}
-	command := exec.Command("git", "-C", v.store.Root, "cat-file", "--batch")
+	arguments := []string{"-C", v.store.Root, "cat-file", "--batch"}
+	command := exec.Command("git", arguments...)
 	command.Stdin = strings.NewReader(input.String())
 	output, err := command.Output()
 	if err != nil {
-		return nil, refuse(
-			"the records of ledger revision "+v.Revision+" are unreadable: "+gitError(v.store.Root, arguments, err).Error(),
-			"repair the ledger clone or the configured path, then retry",
-		)
+		return nil, v.unreadable(gitError(v.store.Root, arguments[2:], err).Error())
 	}
 	reader := bufio.NewReader(bytes.NewReader(output))
 	for _, path := range paths {
 		header, err := reader.ReadString('\n')
 		if err != nil {
-			return nil, fmt.Errorf("read ledger revision %s: truncated object output for %s", v.Revision, path)
+			return nil, v.unreadable("truncated object output for " + path)
 		}
 		fields := strings.Fields(header)
 		if len(fields) != 3 {
@@ -750,15 +740,22 @@ func (v *Snapshot) blobs(paths []string) (map[string][]byte, error) {
 		}
 		size, err := strconv.Atoi(fields[2])
 		if err != nil {
-			return nil, fmt.Errorf("read ledger revision %s: malformed object header %q", v.Revision, strings.TrimSpace(header))
+			return nil, v.unreadable("malformed object header " + strconv.Quote(strings.TrimSpace(header)))
 		}
 		contents := make([]byte, size+1)
 		if _, err := io.ReadFull(reader, contents); err != nil {
-			return nil, fmt.Errorf("read ledger revision %s: truncated object %s", v.Revision, path)
+			return nil, v.unreadable("truncated object " + path)
 		}
 		if fields[1] == "blob" {
 			result[path] = contents[:size]
 		}
 	}
 	return result, nil
+}
+
+func (v *Snapshot) unreadable(cause string) error {
+	return refuse(
+		"the records of ledger revision "+v.Revision+" are unreadable: "+cause,
+		"repair the ledger clone or the configured path, then retry",
+	)
 }

@@ -138,7 +138,7 @@ func (m Model) listContent() (context []string, title string, rows, selected []s
 		title = fmt.Sprintf("Projects (%d)", len(m.overview.Projects))
 		empty = "No Projects are recorded in the configured ledger at this revision."
 		for _, diagnostic := range m.overview.Diagnostics {
-			context = append(context, warningStyle.Render("! "+diagnostic.Subject+": "+diagnostic.Problem))
+			context = append(context, warningStyle.Render(DiagnosticText(diagnostic)))
 		}
 		for _, project := range m.overview.Projects {
 			row := project.Name + " — " + orUnknown(project.Repository) + " — " + plural(project.Slices, "slice")
@@ -155,9 +155,9 @@ func (m Model) listContent() (context []string, title string, rows, selected []s
 		}
 	case projectScreen:
 		project := m.inventory.Project
-		context = []string{"Project " + project.Name + " (" + orUnknown(project.Repository) + ") · " + TallyText(project.Tally)}
+		context = []string{"Project " + project.Name + " (" + orUnknown(project.Repository) + ") · " + tallyText(project.Tally)}
 		if project.Incomplete {
-			context = append(context, warningStyle.Render(fmt.Sprintf("! Incomplete: %s in this Project", plural(len(project.Diagnostics), "unreadable or unsupported record"))))
+			context = append(context, warningStyle.Render("! Incomplete: "+incompleteText(project.Diagnostics)+" in this Project"))
 		}
 		title = fmt.Sprintf("Proposals (%d)", len(m.inventory.Proposals))
 		empty = fmt.Sprintf("No active Proposals. %d archived; press a to include them.", project.ArchivedProposals)
@@ -174,10 +174,10 @@ func (m Model) listContent() (context []string, title string, rows, selected []s
 		proposal := m.members.Proposal
 		context = []string{
 			"Proposal " + proposal.Name + flags(proposal) + " — " + orUnknown(proposal.ParentTitle),
-			"Delivery: " + DeliveryText(proposal) + " · Parent issue: " + attachmentText(proposal.ParentIssue),
+			"Delivery: " + deliveryText(proposal) + " · Parent issue: " + attachmentText(proposal.ParentIssue),
 		}
 		if proposal.Incomplete {
-			context = append(context, warningStyle.Render(fmt.Sprintf("! Incomplete: %s in this Proposal", plural(len(proposal.Diagnostics), "unreadable or unsupported record"))))
+			context = append(context, warningStyle.Render("! Incomplete: "+incompleteText(proposal.Diagnostics)+" in this Proposal"))
 		}
 		title = fmt.Sprintf("Slices (%d)", len(m.members.Slices))
 		empty = "This Proposal records no Slices."
@@ -199,7 +199,7 @@ func sliceRow(slice ledger.SliceSummary) string {
 	if slice.ClaimPhase != "" {
 		claim = slice.ClaimPhase + " claim"
 	}
-	return marked(len(slice.Diagnostics) > 0, slice.Slice+" — "+LifecycleLabel(slice.Lifecycle)+" · "+claim)
+	return marked(len(slice.Diagnostics) > 0, slice.Slice+" — "+lifecycleLabel(slice.Lifecycle)+" · "+claim)
 }
 
 // progressText is the compact delivery state of one Proposal row.

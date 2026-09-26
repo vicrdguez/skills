@@ -100,7 +100,7 @@ func New(snapshot *ledger.Snapshot, options Options) Model {
 	}
 	model.help.Width = model.width
 	if model.open == nil {
-		model.open = SystemOpen
+		model.open = systemOpen
 	}
 	if options.Project != "" {
 		model.screen, model.project = projectScreen, options.Project
@@ -278,9 +278,9 @@ func (m *Model) openAttachment(issue bool) tea.Cmd {
 		m.status = "Open an issue or pull request from a Slice, or a parent issue from a Proposal"
 		return nil
 	}
-	url, ok := PullRequestURL(attachment)
+	url, ok := pullRequestURL(attachment)
 	if issue {
-		url, ok = IssueURL(attachment)
+		url, ok = issueURL(attachment)
 	}
 	if !ok {
 		m.status = "No recorded " + noun + " attachment to open"
@@ -290,8 +290,8 @@ func (m *Model) openAttachment(issue bool) tea.Cmd {
 	return func() tea.Msg { return openedMsg{url: url, err: open(url)} }
 }
 
-// SystemOpen asks the operating system to open url in the external browser.
-func SystemOpen(url string) error {
+// systemOpen asks the operating system to open url in the external browser.
+func systemOpen(url string) error {
 	var command *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":

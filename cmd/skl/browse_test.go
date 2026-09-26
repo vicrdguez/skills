@@ -60,6 +60,9 @@ func browseQuery(t *testing.T, app *stageApp, output *bytes.Buffer, args ...stri
 	if err := json.Unmarshal(output.Bytes(), &outcome); err != nil {
 		t.Fatalf("decode %q: %v", output, err)
 	}
+	if outcome.Status == "shown" && outcome.Overview == nil && outcome.Inventory == nil && outcome.Proposal == nil && outcome.Slice == nil {
+		t.Fatalf("browse %v showed no result: %s", args, output)
+	}
 	return outcome
 }
 

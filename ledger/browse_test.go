@@ -184,8 +184,8 @@ func TestBrowseIsolatesUnreadableRecords(t *testing.T) {
 	}
 
 	billing, err := snapshot.Proposal("widgets", "billing")
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || len(billing.Slices) != 1 || len(billing.Proposal.Diagnostics) == 0 {
+		t.Fatalf("billing = %+v, %v", billing, err)
 	}
 	if !billing.Proposal.Incomplete || billing.Slices[0].Lifecycle != ledger.Rework || billing.Proposal.Diagnostics[0].Scope != ledger.ScopeProposal {
 		t.Fatalf("damaged proposal metadata must be diagnosed without hiding members: %+v", billing)
@@ -193,6 +193,9 @@ func TestBrowseIsolatesUnreadableRecords(t *testing.T) {
 	overview, err := snapshot.Overview(false)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(overview.Projects) != 2 {
+		t.Fatalf("overview = %+v", overview.Projects)
 	}
 	gadgets := overview.Projects[0]
 	if gadgets.Name != "gadgets" || gadgets.Repository != "" || !gadgets.Incomplete || gadgets.Lifecycles[ledger.ReadyForImplementation] != 1 {
@@ -238,7 +241,7 @@ func TestBrowseArchivedProposalsOnExplicitSelection(t *testing.T) {
 		t.Fatalf("archived slice keeps its identity and lifecycle: %+v, %v", slice, err)
 	}
 	dependent, err := snapshot.Slice("widgets", "orders/cancel")
-	if err != nil || dependent.Dependencies[0] != (ledger.DependencyFact{Item: "legacy/shipped", Lifecycle: ledger.Merged}) {
+	if err != nil || len(dependent.Dependencies) != 1 || dependent.Dependencies[0] != (ledger.DependencyFact{Item: "legacy/shipped", Lifecycle: ledger.Merged}) {
 		t.Fatalf("dependency on an archived blocker = %+v, %v", dependent, err)
 	}
 }
@@ -266,5 +269,32 @@ func TestBrowseRefusesUnknownSelectionsAndUnreadableLedger(t *testing.T) {
 	}
 	if _, err := store.Snapshot(); err == nil {
 		t.Fatal("an unreadable ledger must block browsing")
+	}
+}
+
+func TestBrowseCountsInvalidRecordNamesAsUnknown(t *testing.T) {
+	l := newDeliveryLedger(t)
+	l.addProject("widgets", "acme/widgets")
+	l.addSlice("widgets", "orders", "shipped", ledger.Merged, nil, deliveryInitial)
+	l.addFile("projects/widgets/proposals/orders/Bad Name/state.json", `{"state": "merged", "title": "bad", "branch": "bad"}`)
+	l.addFile("projects/widgets/proposals/Odd_Proposal/proposal.json", "{}")
+	l.addFile("projects/Not Valid/project.json", `{"repository": "acme/not-valid"}`)
+	l.commitAll("record invalid names")
+
+	snapshot := browseSnapshot(t, l)
+	proposal, err := snapshot.Proposal("widgets", "orders")
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary := proposal.Proposal
+	if summary.FullyDelivered || !summary.Incomplete || summary.Slices != 2 || summary.Unknown != 1 || summary.Lifecycles[ledger.Merged] != 1 {
+		t.Fatalf("an invalid-named member must count as unknown, never as delivered: %+v", summary)
+	}
+	overview, err := snapshot.Overview(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(overview.Projects) != 1 || !overview.Projects[0].Incomplete || len(overview.Diagnostics) != 1 || overview.Diagnostics[0].Scope != ledger.ScopeLedger {
+		t.Fatalf("invalid Project and Proposal names must be diagnosed: %+v", overview)
 	}
 }

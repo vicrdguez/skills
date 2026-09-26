@@ -23,8 +23,8 @@ var lifecycleOrder = []struct{ state, label string }{
 	{ledger.Superseded, "Superseded"},
 }
 
-// LifecycleLabel names one recorded lifecycle.
-func LifecycleLabel(state string) string {
+// lifecycleLabel names one recorded lifecycle.
+func lifecycleLabel(state string) string {
 	for _, lifecycle := range lifecycleOrder {
 		if lifecycle.state == state {
 			return lifecycle.label
@@ -33,8 +33,8 @@ func LifecycleLabel(state string) string {
 	return "unsupported lifecycle " + strconv.Quote(state)
 }
 
-// TallyText summarizes a scope's Slices by lifecycle, Claims, and unknowns.
-func TallyText(tally ledger.Tally) string {
+// tallyText summarizes a scope's Slices by lifecycle, Claims, and unknowns.
+func tallyText(tally ledger.Tally) string {
 	parts := []string{plural(tally.Slices, "slice")}
 	var lifecycles []string
 	for _, lifecycle := range lifecycleOrder {
@@ -54,9 +54,9 @@ func TallyText(tally ledger.Tally) string {
 	return strings.Join(parts, " · ")
 }
 
-// DeliveryText states a Proposal's delivery without equating archival,
+// deliveryText states a Proposal's delivery without equating archival,
 // retirement, or supersession with full delivery.
-func DeliveryText(proposal ledger.ProposalSummary) string {
+func deliveryText(proposal ledger.ProposalSummary) string {
 	merged := proposal.Lifecycles[ledger.Merged]
 	switch {
 	case proposal.FullyDelivered:
@@ -73,7 +73,7 @@ func ProjectLines(project ledger.ProjectSummary) []string {
 	lines := []string{
 		"Repository: " + orUnknown(project.Repository),
 		fmt.Sprintf("Proposals: %d active, %d archived", project.Proposals, project.ArchivedProposals),
-		"Slices: " + TallyText(project.Tally),
+		"Slices: " + tallyText(project.Tally),
 	}
 	return append(lines, diagnosticLines(project.Diagnostics)...)
 }
@@ -84,18 +84,11 @@ func ProposalLines(proposal ledger.ProposalSummary) []string {
 	if proposal.ParentTitle != "" {
 		lines = append(lines, "Title: "+proposal.ParentTitle)
 	}
-	location := "active"
-	if proposal.Archived {
-		location = "archived"
-	}
-	if proposal.Retired {
-		location += ", retired"
-	}
 	lines = append(lines,
 		"Accepted: "+orUnknown(proposal.Accepted),
-		"Location: "+location,
-		"Delivery: "+DeliveryText(proposal),
-		"Slices: "+TallyText(proposal.Tally),
+		"Location: "+locationText(proposal.Archived, proposal.Retired),
+		"Delivery: "+deliveryText(proposal),
+		"Slices: "+tallyText(proposal.Tally),
 		"Parent issue: "+attachmentText(proposal.ParentIssue),
 	)
 	return append(lines, diagnosticLines(proposal.Diagnostics)...)
@@ -105,7 +98,7 @@ func ProposalLines(proposal ledger.ProposalSummary) []string {
 func SliceSummaryLines(slice ledger.SliceSummary) []string {
 	lines := []string{"Slice: " + slice.Item}
 	if slice.Readable {
-		lines = append(lines, "Title: "+slice.Title, "Lifecycle: "+LifecycleLabel(slice.Lifecycle), "Claim: "+claimText(slice.ClaimPhase, ""))
+		lines = append(lines, "Title: "+slice.Title, "Lifecycle: "+lifecycleLabel(slice.Lifecycle), "Claim: "+claimText(slice.ClaimPhase, ""))
 	} else {
 		lines = append(lines, "Lifecycle: unknown", "Claim: unknown")
 	}
@@ -118,18 +111,11 @@ func SliceLines(slice *ledger.SliceDetail) []string {
 	if slice.Readable {
 		lines = append(lines, "Title: "+slice.Title)
 	}
-	location := "active proposal"
-	if slice.Archived {
-		location = "archived proposal"
-	}
-	if slice.ProposalRetired {
-		location += ", retired"
-	}
-	lines = append(lines, "Project: "+slice.Project+" ("+orUnknown(slice.Repository)+")", "Location: "+location)
+	lines = append(lines, "Project: "+slice.Project+" ("+orUnknown(slice.Repository)+")", "Location: "+locationText(slice.Archived, slice.ProposalRetired)+" proposal")
 	if !slice.Readable {
 		lines = append(lines, "Lifecycle: unknown", "Claim: unknown")
 	} else {
-		lines = append(lines, "Lifecycle: "+LifecycleLabel(slice.Lifecycle))
+		lines = append(lines, "Lifecycle: "+lifecycleLabel(slice.Lifecycle))
 		if slice.Claim == nil {
 			lines = append(lines, "Claim: none")
 		} else {
@@ -144,7 +130,7 @@ func SliceLines(slice *ledger.SliceDetail) []string {
 			case dependency.Problem != "":
 				lines = append(lines, "Depends on: "+dependency.Item+" (lifecycle unknown: "+dependency.Problem+")")
 			default:
-				lines = append(lines, "Depends on: "+dependency.Item+" ("+LifecycleLabel(dependency.Lifecycle)+")")
+				lines = append(lines, "Depends on: "+dependency.Item+" ("+lifecycleLabel(dependency.Lifecycle)+")")
 			}
 		}
 		lines = append(lines, "Issue: "+attachmentText(slice.Issue), "Pull request: "+attachmentText(slice.Submission))
@@ -172,13 +158,13 @@ func SliceLines(slice *ledger.SliceDetail) []string {
 	return append(lines, diagnosticLines(slice.Diagnostics)...)
 }
 
-// IssueURL and PullRequestURL construct GitHub links from a recorded
+// issueURL and pullRequestURL construct GitHub links from a recorded
 // attachment identity. They return false when the identity cannot name one.
-func IssueURL(attachment *ledger.ForgeAttachment) (string, bool) {
+func issueURL(attachment *ledger.ForgeAttachment) (string, bool) {
 	return attachmentURL(attachment, "issues")
 }
 
-func PullRequestURL(attachment *ledger.ForgeAttachment) (string, bool) {
+func pullRequestURL(attachment *ledger.ForgeAttachment) (string, bool) {
 	return attachmentURL(attachment, "pull")
 }
 
@@ -215,11 +201,33 @@ func diagnosticLines(diagnostics []ledger.Diagnostic) []string {
 	if len(diagnostics) == 0 {
 		return nil
 	}
-	lines := []string{"Incomplete: " + plural(len(diagnostics), "unreadable or unsupported record") + "; the facts above omit them"}
+	lines := []string{"Incomplete: " + incompleteText(diagnostics) + "; the facts above omit them"}
 	for _, diagnostic := range diagnostics {
-		lines = append(lines, "! "+diagnostic.Scope+" "+diagnostic.Subject+": "+diagnostic.Problem)
+		lines = append(lines, DiagnosticText(diagnostic))
 	}
 	return lines
+}
+
+// DiagnosticText is the marked, labeled line of one diagnostic.
+func DiagnosticText(diagnostic ledger.Diagnostic) string {
+	return "! " + diagnostic.Scope + " " + diagnostic.Subject + ": " + diagnostic.Problem
+}
+
+func incompleteText(diagnostics []ledger.Diagnostic) string {
+	return plural(len(diagnostics), "unreadable or unsupported record")
+}
+
+// locationText names where a Proposal is recorded and whether it was
+// retired; neither states delivery.
+func locationText(archived, retired bool) string {
+	location := "active"
+	if archived {
+		location = "archived"
+	}
+	if retired {
+		location += ", retired"
+	}
+	return location
 }
 
 func listText(values []string) string {

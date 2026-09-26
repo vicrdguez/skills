@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
+	"strconv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -113,8 +115,11 @@ func startBrowser(explicit string, explicitSet bool, location string) (browse.Mo
 		return browse.Model{}, err
 	}
 	if explicitSet {
-		if _, err := snapshot.Project(explicit, false); err != nil {
-			return browse.Model{}, err
+		if !slices.Contains(snapshot.ProjectNames(), explicit) {
+			return browse.Model{}, &ledger.Refusal{
+				Invariant: "unknown Project " + strconv.Quote(explicit) + " in the configured ledger at revision " + snapshot.Revision,
+				Repair:    "select a Project listed by `skl browse projects`",
+			}
 		}
 		return browse.New(snapshot, browse.Options{Project: explicit}), nil
 	}
@@ -127,16 +132,21 @@ func startBrowser(explicit string, explicitSet bool, location string) (browse.Mo
 		return browse.Model{}, err
 	}
 	identity := repository.Repository.Owner + "/" + repository.Repository.Name
-	var matches []string
+	var matches, unreadable []string
 	for _, project := range overview.Projects {
-		if project.Repository == identity {
+		switch project.Repository {
+		case identity:
 			matches = append(matches, project.Name)
+		case "":
+			unreadable = append(unreadable, project.Name)
 		}
 	}
-	switch len(matches) {
-	case 1:
+	switch {
+	case len(matches) == 1:
 		return browse.New(snapshot, browse.Options{Project: matches[0]}), nil
-	case 0:
+	case len(matches) == 0 && len(unreadable) > 0:
+		return browse.New(snapshot, browse.Options{Notice: "Showing every Project: no readable Project records " + identity + "; the repository of " + strings.Join(unreadable, ", ") + " is unreadable"}), nil
+	case len(matches) == 0:
 		return browse.New(snapshot, browse.Options{Notice: "Showing every Project: no Project records " + identity}), nil
 	default:
 		return browse.New(snapshot, browse.Options{Notice: "Showing every Project: several Projects record " + identity + " (" + strings.Join(matches, ", ") + ")"}), nil
@@ -199,7 +209,9 @@ func renderBrowse(stdout io.Writer, format implementationFormatKind, outcome bro
 	}
 	if overview := outcome.Overview; overview != nil {
 		line("Ledger revision: " + overview.Revision)
-		list(browseDiagnostics(overview.Diagnostics))
+		for _, diagnostic := range overview.Diagnostics {
+			line("- " + browse.DiagnosticText(diagnostic))
+		}
 		if len(overview.Projects) == 0 {
 			line("No Projects are recorded at this revision.")
 		}
@@ -236,12 +248,4 @@ func renderBrowse(stdout io.Writer, format implementationFormatKind, outcome bro
 	}
 	_, err := fmt.Fprint(stdout, report.String())
 	return err
-}
-
-func browseDiagnostics(diagnostics []ledger.Diagnostic) []string {
-	var lines []string
-	for _, diagnostic := range diagnostics {
-		lines = append(lines, "! "+diagnostic.Scope+" "+diagnostic.Subject+": "+diagnostic.Problem)
-	}
-	return lines
 }
