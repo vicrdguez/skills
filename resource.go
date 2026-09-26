@@ -27,17 +27,12 @@ func checkResultDirectory(resource, value string) error {
 	return nil
 }
 
-// submissionData, decisionData and reviewData are the ordinary typed values a
-// converted resource renders from. They are never a CLI context or an
+// submissionData, ledgerReviewData and issuePublicationData are the ordinary
+// typed values a converted resource renders from. They are never a CLI context or an
 // arbitrary input-name map.
 type submissionData struct {
 	ResultDirectory string
 	Procedure       string
-}
-
-type decisionData struct {
-	ResultDirectory string
-	Preserve        bool
 }
 
 type ledgerReviewData struct {
@@ -50,13 +45,6 @@ type issuePublicationData struct {
 	Proposal string
 	Repo     string
 	Remote   string
-}
-
-type reviewData struct {
-	ResultDirectory string
-	PR              int
-	Round           int
-	ReviewedHead    string
 }
 
 // resourceInput declares one scalar a named resource accepts, using the CLI
@@ -115,19 +103,11 @@ type resourceSpec struct {
 
 func resourceSpecFor(resource string) resourceSpec {
 	switch resource {
-	case "reference/submission.md", "reference/ledger-submission.md":
+	case "reference/ledger-submission.md":
 		data := &submissionData{}
 		return resourceSpec{data: data, inputs: []resourceInput{
 			{flag: &cli.StringFlag{Name: "result_directory", Required: true, Usage: resultDirectoryUsage, Destination: &data.ResultDirectory}},
 			{flag: &cli.StringFlag{Name: "procedure", Required: true, Usage: "Which submission procedure to render.", Destination: &data.Procedure}, choices: []string{"initial", "resumed", "rework"}},
-		}, validate: func(resource string) error {
-			return checkResultDirectory(resource, data.ResultDirectory)
-		}}
-	case "reference/decision.md":
-		data := &decisionData{}
-		return resourceSpec{data: data, inputs: []resourceInput{
-			{flag: &cli.StringFlag{Name: "result_directory", Required: true, Usage: resultDirectoryUsage, Destination: &data.ResultDirectory}},
-			{flag: &cli.BoolFlag{Name: "preserve", Required: true, Usage: "Whether implementation work exists that a draft Submission must preserve.", Destination: &data.Preserve}},
 		}, validate: func(resource string) error {
 			return checkResultDirectory(resource, data.ResultDirectory)
 		}}
@@ -155,28 +135,6 @@ func resourceSpecFor(resource string) resourceSpec {
 			}
 			if !filepath.IsAbs(data.Repo) {
 				return fmt.Errorf("invalid input %q for resource %q: want the absolute path of the source repository root", "repo", resource)
-			}
-			return nil
-		}}
-	case "reference/review.md":
-		data := &reviewData{}
-		return resourceSpec{data: data, inputs: []resourceInput{
-			{flag: &cli.StringFlag{Name: "result_directory", Required: true, Usage: resultDirectoryUsage, Destination: &data.ResultDirectory}},
-			{flag: &cli.IntFlag{Name: "pr", Required: true, Usage: "Selected Submission PR number.", Destination: &data.PR}},
-			{flag: &cli.IntFlag{Name: "round", Required: true, Usage: "Review round number for this Submission.", Destination: &data.Round}},
-			{flag: &cli.StringFlag{Name: "reviewed_head", Required: true, Usage: "Original full SHA of the reviewed head.", Destination: &data.ReviewedHead}},
-		}, validate: func(resource string) error {
-			if data.PR < 1 {
-				return fmt.Errorf("invalid input %q for resource %q: want a positive Submission PR number", "pr", resource)
-			}
-			if data.Round < 1 {
-				return fmt.Errorf("invalid input %q for resource %q: want a positive review round", "round", resource)
-			}
-			if err := checkResultDirectory(resource, data.ResultDirectory); err != nil {
-				return err
-			}
-			if !reviewedHeadPattern.MatchString(data.ReviewedHead) {
-				return fmt.Errorf("invalid input %q for resource %q: want the full 40-character SHA of the original reviewed head", "reviewed_head", resource)
 			}
 			return nil
 		}}

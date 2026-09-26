@@ -2,38 +2,14 @@ package main
 
 import (
 	"bytes"
-	"context"
-
-	"errors"
-
 	"os"
 	"path/filepath"
-
 	"strings"
 	"testing"
 
 	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/setup"
-	"github.com/vicrdguez/skills/workflow"
 )
-
-type failedWatchdogQueue struct{ *implementationMemory }
-
-func (*failedWatchdogQueue) QueuePage(context.Context, workflow.QueueKind, string) (workflow.QueuePage, error) {
-	return workflow.QueuePage{}, errors.New("backend unavailable")
-}
-
-type uncertainWatchdogClaim struct{ *implementationMemory }
-
-func (*uncertainWatchdogClaim) ClaimSelected(context.Context, workflow.QueueCandidate, workflow.ImplementationItem) (workflow.ImplementationItem, error) {
-	return workflow.ImplementationItem{}, errors.New("read-back unavailable")
-}
-
-type selectedOnlyWatchdogInspection struct{ *implementationMemory }
-
-func (*selectedOnlyWatchdogInspection) ImplementationItems(context.Context) ([]workflow.ImplementationItem, error) {
-	return nil, errors.New("global Work Item scan is unavailable")
-}
 
 func TestPlainWatchdogSkillRetrievalRequiresSelectedWork(t *testing.T) {
 	for _, format := range []string{"markdown", "json"} {

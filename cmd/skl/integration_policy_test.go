@@ -7,13 +7,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/setup"
+	"github.com/vicrdguez/skills/workflow"
 )
 
 // selectionGraphQL answers the candidate-queue and owning-link queries from the
@@ -145,7 +145,7 @@ func TestStatusRefusesRetargetedPartialHandoffThroughGitHub(t *testing.T) {
 	if err := app.Run([]string{"skl", "status", "--repo", root}); err != nil {
 		t.Fatal(err)
 	}
-	var result setup.ImplementationOutput
+	var result workflow.ImplementationOutcome
 	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}

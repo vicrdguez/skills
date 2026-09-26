@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"slices"
 	"strconv"
@@ -1522,160 +1521,6 @@ func TestRetrieveAuditManifest(t *testing.T) {
 	}
 }
 
-func TestRenderImplementSubmissionInstructions(t *testing.T) {
-	directory := t.TempDir()
-	cases := []struct {
-		procedure string
-		present   []string
-		absent    []string
-	}{
-		{
-			procedure: "initial",
-			present: []string{
-				"`" + filepath.Join(directory, "submission.md") + "`",
-				"## Summary",
-				"## Verification",
-				"## Audit ledger",
-				"scenario",
-				"Full Gate",
-				"fixed point",
-				"Closes #",
-			},
-			absent: []string{"## Rework", "resolution commit"},
-		},
-		{
-			procedure: "rework",
-			present: []string{
-				"`" + filepath.Join(directory, "submission.md") + "`",
-				"## Summary",
-				"## Verification",
-				"## Audit ledger",
-				"## Rework",
-				"stable",
-				"resolution commit",
-				"Debt Marker",
-			},
-		},
-	}
-	for _, testCase := range cases {
-		t.Run(testCase.procedure, func(t *testing.T) {
-			instructions := renderResource(t, "implement", "reference/submission.md",
-				"result_directory="+directory, "procedure="+testCase.procedure)
-			for _, want := range testCase.present {
-				if !strings.Contains(instructions, want) {
-					t.Errorf("instructions are missing %q:\n%s", want, instructions)
-				}
-			}
-			for _, unwanted := range testCase.absent {
-				if strings.Contains(instructions, unwanted) {
-					t.Errorf("instructions include %q:\n%s", unwanted, instructions)
-				}
-			}
-			if sha := regexp.MustCompile(`[0-9a-f]{40}`).FindString(instructions); sha != "" {
-				t.Errorf("instructions authored the reviewed %s instead of leaving it to the worker:\n%s", sha, instructions)
-			}
-		})
-	}
-}
-
-func TestRenderImplementDecisionInstructions(t *testing.T) {
-	directory := t.TempDir()
-	obligations := []string{
-		"`" + filepath.Join(directory, "decision.md") + "`",
-		"blocking requirement",
-		"current Workflow State",
-		"completed work",
-		"options",
-		"consequences",
-		"recommendation",
-		"--reason",
-		"Do not invent Completion, tick unfinished work, or retire an incomplete ledger during this pause.",
-	}
-	cases := []struct {
-		preserve string
-		present  []string
-		absent   []string
-	}{
-		{
-			preserve: "false",
-			present:  append(slices.Clone(obligations), "no implementation work"),
-			absent:   []string{"--body", "push the branch"},
-		},
-		{
-			preserve: "true",
-			present: append(slices.Clone(obligations),
-				"--body", "push the branch", "`"+filepath.Join(directory, "submission.md")+"`"),
-		},
-	}
-	for _, testCase := range cases {
-		t.Run("preserve="+testCase.preserve, func(t *testing.T) {
-			instructions := renderResource(t, "implement", "reference/decision.md",
-				"result_directory="+directory, "preserve="+testCase.preserve)
-			for _, want := range testCase.present {
-				if !strings.Contains(instructions, want) {
-					t.Errorf("instructions are missing %q:\n%s", want, instructions)
-				}
-			}
-			for _, unwanted := range testCase.absent {
-				if strings.Contains(instructions, unwanted) {
-					t.Errorf("instructions include %q:\n%s", unwanted, instructions)
-				}
-			}
-		})
-	}
-}
-
-func TestRenderWatchdogReviewInstructions(t *testing.T) {
-	obligations := []string{
-		"W<n>",
-		"identity",
-		"monotonic",
-		"owner",
-		"member",
-		"collaborator",
-		"after the finding",
-		"case-insensitive",
-		"latest authorized directive wins",
-		"WAIVE",
-		"BLOCK",
-		"NOTE",
-		"reactions",
-		"silence",
-		"deleted",
-		"findings.json",
-		"verdict",
-		"Manual Verification",
-		"unchecked",
-		"Audit",
-		"original reviewed head",
-	}
-	// A first review and a repeat review are the two distinct contexts. A reset
-	// Review Count re-enters at round 1 and must render the same identities and
-	// authorization guidance, so it needs no separate case.
-	for _, testCase := range []struct {
-		round int
-		head  string
-	}{{1, strings.Repeat("a", 40)}, {2, strings.Repeat("b", 40)}} {
-		t.Run(fmt.Sprintf("round %d", testCase.round), func(t *testing.T) {
-			directory := t.TempDir()
-			// No verdict, finding disposition, or Result Document prose is supplied:
-			// the authorization and precedence guidance must already be available.
-			instructions := renderResource(t, "watchdog", "reference/review.md",
-				"result_directory="+directory,
-				"pr=11",
-				fmt.Sprintf("round=%d", testCase.round),
-				"reviewed_head="+testCase.head)
-			for _, want := range append(slices.Clone(obligations),
-				fmt.Sprintf("round %d", testCase.round), testCase.head,
-				filepath.Join(directory, "summary.md"), filepath.Join(directory, "submission.md")) {
-				if !strings.Contains(instructions, want) {
-					t.Errorf("instructions are missing %q:\n%s", want, instructions)
-				}
-			}
-		})
-	}
-}
-
 // renderResource runs one named-resource request through the in-process CLI and
 // returns its rendered instructions. Any Workflow Backend access is a defect.
 func renderResource(t *testing.T, owner, resource string, inputs ...string) string {
@@ -1708,69 +1553,54 @@ func TestRejectInvalidResourceInputs(t *testing.T) {
 		wants    []string
 	}{
 		{
-			name: "input without separator", owner: "implement", resource: "reference/submission.md",
+			name: "input without separator", owner: "implement", resource: "reference/ledger-submission.md",
 			inputs: []string{"result_directory"},
 			wants:  []string{"result_directory", "name=value"},
 		},
 		{
-			name: "undeclared input", owner: "implement", resource: "reference/submission.md",
+			name: "undeclared input", owner: "implement", resource: "reference/ledger-submission.md",
 			inputs: []string{"result_directory=" + directory, "procedure=initial", "findings=1"},
 			wants:  []string{"findings", "--describe-inputs"},
 		},
 		{
-			name: "duplicate input", owner: "watchdog", resource: "reference/review.md",
-			inputs: []string{"result_directory=" + directory, "pr=11", "round=1", "round=1", "reviewed_head=" + head},
+			name: "duplicate input", owner: "watchdog", resource: "reference/ledger-review.md",
+			inputs: []string{"result_directory=" + directory, "round=1", "round=1", "reviewed_head=" + head},
 			wants:  []string{"round", "duplicate"},
 		},
 		{
-			name: "missing required input", owner: "implement", resource: "reference/decision.md",
+			name: "missing required input", owner: "implement", resource: "reference/ledger-submission.md",
 			inputs: []string{"result_directory=" + directory},
-			wants:  []string{"preserve", "required"},
+			wants:  []string{"procedure", "required"},
 		},
 		{
-			name: "invalid boolean", owner: "implement", resource: "reference/decision.md",
-			inputs: []string{"result_directory=" + directory, "preserve=maybe"},
-			wants:  []string{"preserve", "boolean"},
-		},
-		{
-			name: "invalid integer", owner: "watchdog", resource: "reference/review.md",
-			inputs: []string{"result_directory=" + directory, "pr=11", "round=two", "reviewed_head=" + head},
+			name: "invalid integer", owner: "watchdog", resource: "reference/ledger-review.md",
+			inputs: []string{"result_directory=" + directory, "round=two", "reviewed_head=" + head},
 			wants:  []string{"round", "integer"},
 		},
 		{
-			name: "unsupported choice", owner: "implement", resource: "reference/submission.md",
+			name: "unsupported choice", owner: "implement", resource: "reference/ledger-submission.md",
 			inputs: []string{"result_directory=" + directory, "procedure=later"},
 			wants:  []string{"procedure", "initial", "rework"},
 		},
 		{
-			name: "zero round", owner: "watchdog", resource: "reference/review.md",
-			inputs: []string{"result_directory=" + directory, "pr=11", "round=0", "reviewed_head=" + head},
+			name: "zero round", owner: "watchdog", resource: "reference/ledger-review.md",
+			inputs: []string{"result_directory=" + directory, "round=0", "reviewed_head=" + head},
 			wants:  []string{"round", "positive"},
 		},
 		{
-			name: "missing PR", owner: "watchdog", resource: "reference/review.md",
-			inputs: []string{"result_directory=" + directory, "round=1", "reviewed_head=" + head},
-			wants:  []string{"pr", "required"},
-		},
-		{
-			name: "zero PR", owner: "watchdog", resource: "reference/review.md",
-			inputs: []string{"result_directory=" + directory, "pr=0", "round=1", "reviewed_head=" + head},
-			wants:  []string{"pr", "positive"},
-		},
-		{
-			name: "empty result directory", owner: "implement", resource: "reference/decision.md",
-			inputs: []string{"result_directory=", "preserve=true"},
+			name: "empty result directory", owner: "implement", resource: "reference/ledger-submission.md",
+			inputs: []string{"result_directory=", "procedure=initial"},
 			wants:  []string{"result_directory", "absolute"},
 		},
 		{
-			name: "relative result directory", owner: "implement", resource: "reference/submission.md",
+			name: "relative result directory", owner: "implement", resource: "reference/ledger-submission.md",
 			inputs: []string{"result_directory=.worktrees/result", "procedure=initial"},
 			wants:  []string{"result_directory", "absolute"},
 		},
 		{
-			name: "malformed reviewed head", owner: "watchdog", resource: "reference/review.md",
-			inputs: []string{"result_directory=" + directory, "pr=11", "round=1", "reviewed_head=" + head[:12] + "nonsense"},
-			wants:  []string{"reviewed_head", "40-character"},
+			name: "malformed reviewed head", owner: "watchdog", resource: "reference/ledger-review.md",
+			inputs: []string{"result_directory=" + directory, "round=1", "reviewed_head=" + head[:12] + "nonsense"},
+			wants:  []string{"reviewed source SHA", "40 lowercase hexadecimal"},
 		},
 		{
 			name: "input without resource", owner: "implement",
@@ -1833,7 +1663,7 @@ func TestPreserveLiteralResourceInputValues(t *testing.T) {
 	}, bytes.NewReader(nil), &output, &output)
 	render := func(inputs ...string) (string, error) {
 		output.Reset()
-		command := []string{"skl", "skill", "--resource", "reference/submission.md"}
+		command := []string{"skl", "skill", "--resource", "reference/ledger-submission.md"}
 		for _, input := range inputs {
 			command = append(command, "--input", input)
 		}
@@ -1845,7 +1675,7 @@ func TestPreserveLiteralResourceInputValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(rendered, first+"/submission.md") {
+	if !strings.Contains(rendered, first+"/implement-report.md") {
 		t.Errorf("rendering did not preserve every supplied character:\n%s", rendered)
 	}
 
@@ -1853,7 +1683,7 @@ func TestPreserveLiteralResourceInputValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(rendered, second+"/submission.md") || strings.Contains(rendered, "one, two=three") {
+	if !strings.Contains(rendered, second+"/implement-report.md") || strings.Contains(rendered, "one, two=three") {
 		t.Errorf("a rendering reused an earlier call's inputs:\n%s", rendered)
 	}
 
@@ -2045,21 +1875,6 @@ func TestContextFreeResourcesRetainOwnershipAndDefaults(t *testing.T) {
 		})
 	}
 
-	packet, err := skilldist.BuildPacket("implement", skilldist.InvocationFacts{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, owned := range []string{"reference/acceptance.md audit", "reference/smells.md audit", "reference/tests.md testing", "reference/DEEPENING.md design", "reference/CONTEXT-FORMAT.md domain"} {
-		if !strings.Contains(packet.Instructions, owned) {
-			t.Errorf("bundled definition lost its owning reference %q", owned)
-		}
-	}
-	for _, stolen := range []string{"reference/acceptance.md implement", "reference/smells.md implement", "reference/tests.md implement", "reference/acceptance.md, ", "reference/smells.md, ", "reference/tests.md, "} {
-		if strings.Contains(packet.Instructions+strings.Join(packet.Resources, ", "), stolen) {
-			t.Errorf("bundled instructions took over %q", stolen)
-		}
-	}
-
 	var markdown, jsonPacket bytes.Buffer
 	if err := newApp(nil, bytes.NewReader(nil), &markdown, &markdown).Run([]string{"skl", "skill", "testing"}); err != nil {
 		t.Fatal(err)
@@ -2108,16 +1923,18 @@ func TestPrivateSkillModulesAreNotPublicResources(t *testing.T) {
 		}
 	}
 
-	// The embedded module composes into every Implement result document,
-	// including the active ledger-submission resource, so the engine never
-	// reads worker prose as a second decision.
-	for resource, inputs := range map[string][]string{
-		"reference/submission.md":        {"result_directory=" + t.TempDir(), "procedure=initial"},
-		"reference/ledger-submission.md": {"result_directory=" + t.TempDir(), "procedure=initial"},
-		"reference/decision.md":          {"result_directory=" + t.TempDir(), "preserve=false"},
+}
+
+func TestRetiredGitHubResourcesAreUnknown(t *testing.T) {
+	for _, request := range [][]string{
+		{"reference/submission.md", "implement"},
+		{"reference/decision.md", "implement"},
+		{"reference/review.md", "watchdog"},
 	} {
-		if instructions := renderResource(t, "implement", resource, inputs...); !strings.Contains(instructions, "never parses, judges, or cross-checks the prose") {
-			t.Errorf("%s did not compose the shared Result Document module:\n%s", resource, instructions)
+		var output bytes.Buffer
+		err := newApp(nil, bytes.NewReader(nil), &output, &output).Run([]string{"skl", "skill", "--resource", request[0], request[1]})
+		if err == nil || !strings.Contains(err.Error(), "unknown resource") || output.Len() != 0 {
+			t.Errorf("%s of %s is still served: %v\n%s", request[0], request[1], err, output.String())
 		}
 	}
 }
@@ -2144,45 +1961,31 @@ func TestRetrieveOneNamedResource(t *testing.T) {
 
 func TestDescribeNamedResourceInputs(t *testing.T) {
 	cases := []struct {
-		owner      string
-		resource   string
-		inputs     []string
-		described  []string
-		procedural string
+		owner     string
+		resource  string
+		inputs    []string
+		described []string
 	}{
 		{
-			owner: "implement", resource: "reference/submission.md",
+			owner: "implement", resource: "reference/ledger-submission.md",
 			inputs: []string{"result_directory=/tmp/result", "procedure=initial"},
 			described: []string{
 				"result_directory (string, required): Absolute path of the private Result Document directory this invocation created.",
 				"procedure (string, required, one of: initial, resumed, rework): Which submission procedure to render.",
 			},
-			procedural: "# Submission Result Document",
 		},
 		{
-			owner: "implement", resource: "reference/decision.md",
-			inputs: []string{"result_directory=/tmp/result", "preserve=true"},
+			owner: "watchdog", resource: "reference/ledger-review.md",
+			inputs: []string{"result_directory=/tmp/result", "round=2", "reviewed_head=" + strings.Repeat("a", 40)},
 			described: []string{
 				"result_directory (string, required): Absolute path of the private Result Document directory this invocation created.",
-				"preserve (boolean, required): Whether implementation work exists that a draft Submission must preserve.",
+				"round (integer, required): Next completed Work Item review round.",
+				"reviewed_head (string, required): Fixed reviewed source commit.",
 			},
-			procedural: "# Decision Result Document",
-		},
-		{
-			owner: "watchdog", resource: "reference/review.md",
-			inputs: []string{"result_directory=/tmp/result", "pr=11", "round=2", "reviewed_head=" + strings.Repeat("a", 40)},
-			described: []string{
-				"result_directory (string, required): Absolute path of the private Result Document directory this invocation created.",
-				"pr (integer, required): Selected Submission PR number.",
-				"round (integer, required): Review round number for this Submission.",
-				"reviewed_head (string, required): Original full SHA of the reviewed head.",
-			},
-			procedural: "# Review Result Documents",
 		},
 		{
 			owner: "testing", resource: "reference/tests.md",
-			described:  []string{"reference/tests.md accepts no inputs."},
-			procedural: "# Behavioral and Regression Tests",
+			described: []string{"reference/tests.md accepts no inputs."},
 		},
 	}
 	for _, testCase := range cases {
@@ -2205,10 +2008,6 @@ func TestDescribeNamedResourceInputs(t *testing.T) {
 					t.Errorf("description is missing %q:\n%s", want, description)
 				}
 			}
-			if strings.Contains(description, testCase.procedural) {
-				t.Errorf("description rendered procedural content %q:\n%s", testCase.procedural, description)
-			}
-
 			run := func(inputs []string) error {
 				stdout.Reset()
 				command := []string{"skl", "skill", "--resource", testCase.resource}
@@ -2220,8 +2019,10 @@ func TestDescribeNamedResourceInputs(t *testing.T) {
 			if err := run(testCase.inputs); err != nil {
 				t.Fatalf("described inputs are not retrievable: %v", err)
 			}
-			if !strings.Contains(stdout.String(), testCase.procedural) {
-				t.Errorf("retrieval with described inputs lacks %q:\n%s", testCase.procedural, stdout.String())
+			// The description names the inputs; it never renders the resource.
+			title, _, _ := strings.Cut(stdout.String(), "\n")
+			if title == "" || strings.Contains(description, title) {
+				t.Errorf("description rendered the resource %q:\n%s", title, description)
 			}
 			if err := run(append(slices.Clone(testCase.inputs), "undeclared=1")); err == nil || !strings.Contains(err.Error(), "undeclared") {
 				t.Fatalf("description described more inputs than retrieval accepts: %v", err)
@@ -2236,7 +2037,7 @@ func TestBundleGuaranteedSupportingSkills(t *testing.T) {
 	if !slices.Equal(packet.IncludedSkills, want) {
 		t.Fatalf("included_skills = %v, want %v", packet.IncludedSkills, want)
 	}
-	if !slices.Equal(packet.Resources, []string{"reference/decision.md", "reference/ledger-submission.md", "reference/pull-presentation.md", "reference/report-schema.md", "reference/submission.md"}) {
+	if !slices.Equal(packet.Resources, []string{"reference/ledger-submission.md", "reference/pull-presentation.md", "reference/report-schema.md"}) {
 		t.Fatalf("implementation resources changed: %v", packet.Resources)
 	}
 	for _, included := range want {

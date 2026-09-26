@@ -4,18 +4,17 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/workflow"
 )
 
 func TestGitHubLifecyclePresentationKeepsNativeJSON(t *testing.T) {
-	output, err := PresentImplementation(workflow.ImplementationOutcome{
-		Status: "inspected",
-		Item: &workflow.ImplementationItem{
+	output, err := PresentStatus(workflow.StatusOutcome{
+		Status: "observed",
+		Items: []workflow.ImplementationItem{{
 			ID: "7", Order: 7, Blockers: []workflow.WorkItemID{"2"},
 			Submission: &workflow.Submission{ID: "11"},
-		},
-	}, InvocationContext{Repository: github.RepositoryID{Owner: "acme", Name: "widgets"}})
+		}},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +26,7 @@ func TestGitHubLifecyclePresentationKeepsNativeJSON(t *testing.T) {
 	if err := json.Unmarshal(payload, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	item := decoded["item"].(map[string]any)
+	item := decoded["items"].([]any)[0].(map[string]any)
 	submission := item["Submission"].(map[string]any)
 	if item["Number"] != float64(7) || submission["Number"] != float64(11) || item["Blockers"].([]any)[0] != float64(2) {
 		t.Fatalf("native identities changed: %s", payload)
