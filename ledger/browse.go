@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"os/exec"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -594,7 +595,7 @@ func decodeProject(name string, contents []byte, diagnostics []Diagnostic) (stri
 
 func (v *Snapshot) decodeProposal(project string, proposal *proposalTree, blobs map[string][]byte) proposalRead {
 	subject := project + "/" + proposal.name
-	read := proposalRead{tree: proposal, diagnostics: append([]Diagnostic(nil), proposal.invalid...)}
+	read := proposalRead{tree: proposal, diagnostics: proposal.membership(subject)}
 	path := v.proposalPath(project, proposal)
 	switch contents, present := blobs[path+"/proposal.json"]; {
 	case !present:
@@ -603,14 +604,21 @@ func (v *Snapshot) decodeProposal(project string, proposal *proposalTree, blobs 
 		read.meta = ProposalMeta{}
 		read.diagnostics = append(read.diagnostics, Diagnostic{ScopeProposal, subject, "proposal.json is unreadable, so its acceptance metadata is unknown"})
 	}
-	if len(proposal.slices) == 0 && len(proposal.invalid) == 0 {
-		read.diagnostics = append(read.diagnostics, Diagnostic{ScopeProposal, subject, "records no Slices, so its membership is unknown"})
-	}
 	for _, slice := range proposal.slices {
 		state, present := blobs[path+"/"+slice.name+"/state.json"]
 		read.slices = append(read.slices, decodeSlice(subject, slice, state, present))
 	}
 	return read
+}
+
+// membership diagnoses what keeps a Proposal's Slice membership unknown:
+// member names that cannot be Slice identities, or no members at all.
+func (p *proposalTree) membership(subject string) []Diagnostic {
+	diagnostics := append([]Diagnostic(nil), p.invalid...)
+	if len(p.slices) == 0 && len(p.invalid) == 0 {
+		diagnostics = append(diagnostics, Diagnostic{ScopeProposal, subject, "records no Slices, so its membership is unknown"})
+	}
+	return diagnostics
 }
 
 // decodeSlice interprets one state record. A missing or malformed record
@@ -639,11 +647,7 @@ func decodeSlice(proposalSubject string, slice *sliceTree, contents []byte, pres
 }
 
 func knownLifecycle(state string) bool {
-	switch state {
-	case ReadyForImplementation, AwaitingReview, Rework, NeedsHuman, ReadyForMerge, Merged, Superseded:
-		return true
-	}
-	return false
+	return slices.Contains(Lifecycles, state)
 }
 
 func (t *Tally) add(slice sliceRead) {
@@ -651,10 +655,10 @@ func (t *Tally) add(slice sliceRead) {
 	if t.Lifecycles == nil {
 		t.Lifecycles = map[string]int{}
 	}
-	if !slice.readable || !knownLifecycle(slice.state.State) {
-		t.Unknown++
+	if lifecycle, known := slice.lifecycle(); known {
+		t.Lifecycles[lifecycle]++
 	} else {
-		t.Lifecycles[slice.state.State]++
+		t.Unknown++
 	}
 	if slice.readable && slice.state.Claim != nil {
 		t.Claimed++

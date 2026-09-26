@@ -49,16 +49,26 @@ func (m *Model) layoutDetail() {
 }
 
 func (m Model) header() string {
-	path := []string{"Projects"}
-	if m.screen >= projectScreen {
-		path = append(path, m.project)
-	}
-	if m.screen >= proposalScreen {
-		path = append(path, m.proposal)
-	}
-	if m.screen == sliceScreen {
-		_, slice, _ := strings.Cut(m.item, "/")
-		path = append(path, slice)
+	var path []string
+	switch {
+	case m.screen == factsScreen:
+		path = []string{"Find slices", "Facts"}
+	case m.screen == resultsScreen:
+		path = []string{"Find slices"}
+	case m.screen == sliceScreen && m.parent[sliceScreen] == resultsScreen:
+		path = []string{"Find slices", m.project, m.item}
+	default:
+		path = []string{"Projects"}
+		if m.screen >= projectScreen {
+			path = append(path, m.project)
+		}
+		if m.screen >= proposalScreen {
+			path = append(path, m.proposal)
+		}
+		if m.screen == sliceScreen {
+			_, slice, _ := strings.Cut(m.item, "/")
+			path = append(path, slice)
+		}
 	}
 	archived := "archived hidden"
 	if m.includeArchived {
@@ -81,39 +91,42 @@ func (m Model) footer() string {
 	if m.status != "" {
 		lines = append(lines, wrap(m.status, m.width))
 	}
+	if m.typing != nil {
+		lines = append(lines, wrap(titleStyle.Render("Search names: ")+*m.typing+"█  (enter apply · esc cancel)", m.width))
+	}
 	return strings.Join(append(lines, truncate(m.help.View(m.keys), m.width)), "\n")
 }
 
 // listBody renders the current list screen: its parent context, the list,
 // and the selected entry's facts, side by side when the terminal is wide.
 func (m Model) listBody(height int) string {
-	context, title, rows, selected, empty := m.listContent()
+	context, title, rows, cursor, selected, empty := m.listContent()
 	width := m.width
 	top := ""
 	if len(context) > 0 {
 		top = wrap(strings.Join(context, "\n"), width) + "\n"
 	}
 	available := max(height-lipgloss.Height(top)-1, 2)
+	title = truncate(titleStyle.Render(title), width)
 	if len(rows) == 0 {
-		return top + titleStyle.Render(title) + "\n" + wrap(empty, width)
+		return top + title + "\n" + wrap(empty, width)
 	}
 	if width >= wideLayout {
 		listWidth := width / 2
-		list := m.list(rows, available, listWidth-2)
+		list := m.list(rows, cursor, available, listWidth-2)
 		facts := clip(wrap(strings.Join(selected, "\n"), width-listWidth-2), available)
-		return top + titleStyle.Render(title) + "\n" + lipgloss.JoinHorizontal(lipgloss.Top,
+		return top + title + "\n" + lipgloss.JoinHorizontal(lipgloss.Top,
 			lipgloss.NewStyle().Width(listWidth).Render(list), facts)
 	}
 	listHeight := min(len(rows), max(available/2, 3))
-	list := m.list(rows, listHeight, width)
+	list := m.list(rows, cursor, listHeight, width)
 	facts := clip(wrap(strings.Join(selected, "\n"), width), max(available-listHeight-1, 1))
-	return top + titleStyle.Render(title) + "\n" + list + "\n" + mutedStyle.Render(strings.Repeat("─", min(width, 40))) + "\n" + facts
+	return top + title + "\n" + list + "\n" + mutedStyle.Render(strings.Repeat("─", min(width, 40))) + "\n" + facts
 }
 
-// list renders rows in a window that keeps the cursor visible. The cursor is
-// marked by text as well as style.
-func (m Model) list(rows []string, height, width int) string {
-	cursor := m.cursor[m.screen]
+// list renders rows in a window that keeps the cursor row visible. The
+// cursor is marked by text as well as style.
+func (m Model) list(rows []string, cursor, height, width int) string {
 	start := 0
 	if cursor >= height {
 		start = cursor - height + 1
@@ -130,9 +143,11 @@ func (m Model) list(rows []string, height, width int) string {
 }
 
 // listContent supplies the current list screen's parent context, list title,
-// rows, the selected entry's facts, and the text shown for an empty list.
-func (m Model) listContent() (context []string, title string, rows, selected []string, empty string) {
+// rows, the cursor row, the selected entry's facts, and the text shown for an
+// empty list.
+func (m Model) listContent() (context []string, title string, rows []string, cursorRow int, selected []string, empty string) {
 	cursor := m.cursor[m.screen]
+	cursorRow = cursor
 	switch m.screen {
 	case overviewScreen:
 		title = fmt.Sprintf("Projects (%d)", len(m.overview.Projects))
@@ -182,24 +197,109 @@ func (m Model) listContent() (context []string, title string, rows, selected []s
 		title = fmt.Sprintf("Slices (%d)", len(m.members.Slices))
 		empty = "This Proposal records no Slices."
 		for _, slice := range m.members.Slices {
-			rows = append(rows, sliceRow(slice))
+			rows = append(rows, SliceRow(slice.Slice, slice))
 		}
 		if len(rows) > 0 {
 			selected = SliceSummaryLines(m.members.Slices[cursor])
 		}
+	case factsScreen:
+		context = m.findingContext()
+		facets := m.search.Facets
+		if facets.UnknownLifecycle > 0 || facets.UnknownClaim > 0 {
+			context = append(context, warningStyle.Render(fmt.Sprintf("! Not counted: %d with unknown lifecycle, %d with unknown claim", facets.UnknownLifecycle, facets.UnknownClaim)))
+		}
+		title = "Facts — select one to find its Slices"
+		for _, option := range factOptions {
+			rows = append(rows, m.factRow(option))
+		}
+		selected = []string{"Finds: " + SelectionText(factOptions[cursor].apply(m.search.Query))}
+	case resultsScreen:
+		context = m.findingContext()
+		for _, diagnostic := range m.search.Diagnostics {
+			context = append(context, warningStyle.Render(DiagnosticText(diagnostic)))
+		}
+		for _, project := range m.search.Projects {
+			for _, diagnostic := range project.Diagnostics {
+				context = append(context, warningStyle.Render(DiagnosticText(diagnostic)))
+			}
+		}
+		title = fmt.Sprintf("Slices (%d)", m.search.Matched)
+		if m.search.Undecided > 0 {
+			title = fmt.Sprintf("Slices (%d matched, %d undecided)", m.search.Matched, m.search.Undecided)
+		}
+		empty = ResultText(m.search)
+		rows, cursorRow = m.resultRows(cursor)
+		if results := m.results(); len(results) > 0 {
+			chosen := results[cursor]
+			selected = append([]string{"Project: " + chosen.project}, SliceSummaryLines(chosen.match.SliceSummary)...)
+		}
 	}
-	return context, title, rows, selected, empty
+	return context, title, rows, cursorRow, selected, empty
 }
 
-func sliceRow(slice ledger.SliceSummary) string {
-	if !slice.Readable {
-		return marked(true, slice.Slice+" — lifecycle unknown · claim unknown")
+// findingContext states the current selection and its result.
+func (m Model) findingContext() []string {
+	result := ResultText(m.search)
+	if m.search.Incomplete {
+		result = warningStyle.Render("! " + result)
 	}
-	claim := "unclaimed"
-	if slice.ClaimPhase != "" {
-		claim = slice.ClaimPhase + " claim"
+	return []string{"Finding: " + SelectionText(m.search.Query), result}
+}
+
+// factRow is one navigable fact with the number of Slices selecting it would
+// find, marked when it is the current selection.
+func (m Model) factRow(option factOption) string {
+	facets := m.search.Facets
+	counts, unknown, current, label := facets.Lifecycles, facets.UnknownLifecycle, m.search.Query.Lifecycles, "Any lifecycle"
+	if option.claim {
+		counts, unknown, current, label = facets.Claims, facets.UnknownClaim, m.search.Query.Claims, "Any claim"
 	}
-	return marked(len(slice.Diagnostics) > 0, slice.Slice+" — "+lifecycleLabel(slice.Lifecycle)+" · "+claim)
+	count := counts[option.value]
+	switch {
+	case option.value == "":
+		count = unknown
+		for _, value := range counts {
+			count += value
+		}
+	case option.claim:
+		label = claimLabels[option.value]
+	default:
+		label = lifecycleLabel(option.value)
+	}
+	mark := "  "
+	if (option.value == "" && len(current) == 0) || (len(current) == 1 && current[0] == option.value) {
+		mark = "✓ "
+	}
+	return fmt.Sprintf("%s%s (%d)", mark, label, count)
+}
+
+// resultRows lists the found Slices under their group headings, prefixed by
+// Project when every Project is searched, and returns the row of the cursor.
+func (m Model) resultRows(cursor int) (rows []string, cursorRow int) {
+	index := 0
+	add := func(heading string, matches []ledger.SliceMatch) {
+		rows = append(rows, titleStyle.Render(heading))
+		for _, match := range matches {
+			if index == cursor {
+				cursorRow = len(rows)
+			}
+			rows = append(rows, MatchRow(match))
+			index++
+		}
+	}
+	for _, project := range m.search.Projects {
+		prefix := ""
+		if m.search.Query.Project == "" {
+			prefix = project.Name + " · "
+		}
+		for _, group := range project.Groups {
+			add(prefix+GroupTitle(group), group.Slices)
+		}
+		if len(project.Undecided) > 0 {
+			add(prefix+UndecidedTitle, project.Undecided)
+		}
+	}
+	return rows, cursorRow
 }
 
 // progressText is the compact delivery state of one Proposal row.

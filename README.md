@@ -112,6 +112,8 @@ The first command returns the committed current report references and explicitly
 
 `skl browse` opens a terminal browser over the configured ledger: Projects, their Proposals, and each Slice's lifecycle, Claim, dependencies, branch, and attachments. It starts at the Project of the current checkout when exactly one Project records its repository, otherwise at the overview; `--project <name>` selects the starting Project explicitly. Press `s` to switch Projects, `a` to include archived Proposals, and `i` or `p` to open a Slice's recorded issue or pull request in your browser (`i` on a Proposal opens its parent issue).
 
+To find Slices, press `f` to pick a lifecycle or Claim from the counted facts of the current Project (every Project from the overview), or `/` to search Project, Proposal, and Slice names and Slice titles. Lifecycle, Claim, and name criteria narrow the same results together. In the results, `w` switches between the current Project and every Project, `g` groups by Proposal or lifecycle, and `enter` opens the Slice. Slices whose unreadable records keep a criterion undecided are listed separately, never counted as matches.
+
 The same facts are available without a terminal UI:
 
 ```sh
@@ -119,6 +121,7 @@ skl browse projects [--include-archived]
 skl browse project --project <name> [--include-archived]
 skl browse proposal --project <name> --proposal <proposal>
 skl browse slice --project <name> --item <proposal>/<slice>
+skl browse slices [--project <name>] [--lifecycle <state>]... [--claim implement|watchdog|none]... [--search <text>] [--group proposal|lifecycle] [--include-archived]
 ```
 
 Every view reads one committed ledger revision and never fetches, contacts a forge, or changes Workflow State, so it can lag a merge that `skl status` has not yet observed. A Claim is shown as a reservation, not as a running worker. Unreadable records are diagnosed where they occur and mark the affected summaries incomplete; the rest stays browsable.
