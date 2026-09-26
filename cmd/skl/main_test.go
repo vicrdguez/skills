@@ -446,7 +446,7 @@ func activeDeliveryPacket(t *testing.T, root, phase, operation string, state led
 		execution.Implement = &ledger.Report{Source: ledger.SourceRevisions{Head: strings.Repeat("a", 40), Target: strings.Repeat("b", 40)}}
 		execution.Watchdog = &ledger.Report{Round: 1, Source: ledger.SourceRevisions{Reviewed: strings.Repeat("a", 40)}}
 	}
-	packet, err := setup.PresentDelivery(execution, repository, phase, operation, skilldist.UnknownCapability, nil, t.TempDir())
+	packet, err := setup.PresentDelivery(execution, repository, phase, operation, nil, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1778,8 +1778,8 @@ func TestDeferredResourceCommandsFromParentInstructions(t *testing.T) {
 			// resumed and rework branches keep one marker each.
 			if testCase.resource == "ledger-submission.md" {
 				for procedure, marker := range map[string]string{
-					"resumed": "Identify what was already complete",
-					"rework":  "Preserve every historical",
+					"resumed": "What was already done",
+					"rework":  "Keep every earlier",
 				} {
 					if strings.Contains(instructions, marker) != (procedure == testCase.procedure) {
 						t.Errorf("%s resource and the %s marker %q disagree:\n%s", testCase.procedure, procedure, marker, instructions)

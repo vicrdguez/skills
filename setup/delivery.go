@@ -12,7 +12,7 @@ import (
 
 // PresentDelivery binds known commands and evidence without exposing private
 // storage navigation or asking workers to choose an engine-resolvable procedure.
-func PresentDelivery(e *ledger.Execution, repository RepositoryContext, phase, operation string, capability skilldist.ExecutionCapability, source *workflow.DeliverySource, directory string) (skilldist.Packet, error) {
+func PresentDelivery(e *ledger.Execution, repository RepositoryContext, phase, operation string, source *workflow.DeliverySource, directory string) (skilldist.Packet, error) {
 	worktree, err := workflow.DeliveryWorktree(repository.Root, e.State.Branch)
 	if err != nil {
 		return skilldist.Packet{}, err
@@ -25,7 +25,7 @@ func PresentDelivery(e *ledger.Execution, repository RepositoryContext, phase, o
 	} else if !filepath.IsAbs(directory) {
 		return skilldist.Packet{}, fmt.Errorf("result-directory must be absolute")
 	}
-	f := &skilldist.DeliveryFacts{Phase: phase, Operation: operation, Repository: e.Repository, Remote: repository.Remote, Item: e.Item, Branch: e.State.Branch, Worktree: worktree, ResultDirectory: directory, Claim: e.Claim.Commit, Capability: capability, Documents: e.Documents, Procedure: "initial"}
+	f := &skilldist.DeliveryFacts{Phase: phase, Operation: operation, Repository: e.Repository, Remote: repository.Remote, Item: e.Item, Branch: e.State.Branch, Worktree: worktree, ResultDirectory: directory, Claim: e.Claim.Commit, Documents: e.Documents, Procedure: "initial"}
 	if operation == "resume" {
 		f.Procedure = "resumed"
 	}
@@ -75,17 +75,13 @@ func PresentDelivery(e *ledger.Execution, repository RepositoryContext, phase, o
 	f.SubmitCommand = command("submit") + " --body " + private + " --public-body " + public
 	f.PauseCommand = command("needs-human") + " --body " + private + " --public-body " + public
 	if phase == ledger.ImplementPhase {
-		f.SubmitCommand += " --head <final-source-sha> --target <integrated-target-sha>"
+		f.SubmitCommand += " --head <final-source-sha> --target <observed-target-sha>"
+		f.PauseCommand += " --head <branch-head> --target <observed-target-sha>"
 		f.ResultResourceCommand = fmt.Sprintf("skl skill --resource ledger-submission.md --input result_directory=%s --input procedure=%s implement", q(directory), f.Procedure)
 	} else {
 		f.SubmitCommand += " --outcome <pass|rework|needs-human>"
 		f.PauseCommand = command("submit") + " --body " + private + " --public-body " + public + " --outcome needs-human"
 		f.ResultResourceCommand = fmt.Sprintf("skl skill --resource ledger-review.md --input result_directory=%s --input round=%d --input reviewed_head=%s watchdog", q(directory), f.ReviewNumber, q(f.RequiredHead))
-	}
-	if capability != skilldist.UnknownCapability {
-		f.PrepareCommand += " --capability " + q(string(capability))
-		f.InspectCommand += " --capability " + q(string(capability))
-		f.ResumeCommand += " --capability " + q(string(capability))
 	}
 	return skilldist.BuildPacket(phase, skilldist.InvocationFacts{Delivery: f})
 }

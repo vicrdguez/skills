@@ -29,7 +29,7 @@ func deliveryCommands(phase string, newBackend backendFactory, stdout io.Writer)
 			&cli.StringFlag{Name: "item"}, &cli.StringFlag{Name: "claim"},
 			&cli.StringFlag{Name: "head"}, &cli.StringFlag{Name: "target"},
 			&cli.StringFlag{Name: "outcome"}, &cli.PathFlag{Name: "body"}, &cli.PathFlag{Name: "public-body"}, &cli.PathFlag{Name: "result-directory"},
-			implementationFormatFlag(), implementationCapabilityFlag(),
+			implementationFormatFlag(),
 		}, Action: func(c *cli.Context) error { return runDelivery(c, phase, name, newBackend, stdout) }}
 		if name == "next" {
 			command.Flags = append(command.Flags, waitFlags()...)
@@ -57,10 +57,6 @@ type deliveryOutput struct {
 
 func runDelivery(c *cli.Context, phase, operation string, newBackend backendFactory, stdout io.Writer) error {
 	format, err := implementationFormat(c.String("format"))
-	if err != nil {
-		return err
-	}
-	capability, err := implementationCapability(c.String("capability"))
 	if err != nil {
 		return err
 	}
@@ -164,7 +160,7 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 		}
 		source = &observed
 	}
-	packet, err := setup.PresentDelivery(execution, repository, phase, operation, capability, source, c.Path("result-directory"))
+	packet, err := setup.PresentDelivery(execution, repository, phase, operation, source, c.Path("result-directory"))
 	if err != nil {
 		return emit(renderingFailedOutput(phase, repository, execution.Item, execution.Claim.Commit, err))
 	}

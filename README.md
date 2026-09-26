@@ -111,7 +111,7 @@ The first command returns the committed current report references and explicitly
 ## Implement a Work Item
 
 ```sh
-skl implement next --repo <path> --capability pi-subagents
+skl implement next --repo <path>
 # Continue exactly the reservation returned above:
 skl implement resume --repo <path> --item <proposal>/<slice> --claim <acquisition-commit>
 ```
@@ -146,7 +146,7 @@ skl implement submit --repo <path> --item <proposal>/<slice> --claim <acquisitio
 
 Use `skl implement needs-human` with the same item, Claim, and private body for a permitted blocker decision. Include the question, evidence, options, recommendation, and incomplete obligations. If source progress exists, also supply its clean `--head` and `--target`; source-less pause is allowed only before the planned branch/worktree exists. This records `needs_human` and releases the Claim atomically. `fix_required` retains the Claim and source progress for repair.
 
-All delivery commands accept the selected `--remote`. `--capability claude-agents`, `pi-subagents`, or `sequential` binds the available helper recipe; omission leaves a bounded runtime capability check. Unsupported format/capability values fail before Claim or result-directory creation. `--result-directory` retains a supplied absolute Result Document location through prepare, inspect, and resume.
+All delivery commands accept the selected `--remote`. The worker may delegate bounded work to fresh-context subagents when its harness can spawn them; the guidance is the same for every harness. An unsupported format fails before Claim or result-directory creation. `--result-directory` retains a supplied absolute Result Document location through prepare, inspect, and resume.
 
 ## Review and human completion
 

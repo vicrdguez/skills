@@ -45,7 +45,6 @@ type DeliveryFacts struct {
 	FetchStatus           string                    `json:"fetch_status,omitempty"`
 	ReviewCount           uint64                    `json:"review_count"`
 	ReviewNumber          uint64                    `json:"review_number"`
-	Capability            ExecutionCapability       `json:"capability,omitempty"`
 	Documents             []ledger.ContractDocument `json:"documents"`
 }
 
@@ -53,19 +52,6 @@ type InvocationFacts struct {
 	Delivery *DeliveryFacts `json:"delivery,omitempty"`
 	Decision *DecisionFacts `json:"decision,omitempty"`
 }
-
-// ExecutionCapability is the adapter capability an invocation established. It
-// selects supported helper recipes for optional implementation/testing
-// delegation; a harness name alone establishes nothing, and an unknown
-// capability keeps a bounded runtime choice. Audit dispatch never reads it.
-type ExecutionCapability string
-
-const (
-	ClaudeAgentReview ExecutionCapability = "claude-agents"
-	PiSubagentReview  ExecutionCapability = "pi-subagents"
-	SequentialReview  ExecutionCapability = "sequential"
-	UnknownCapability ExecutionCapability = ""
-)
 
 // EvidenceSource is a canonical repository-bound identity for one observed or
 // required evidence stream.
