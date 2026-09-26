@@ -7,3 +7,6 @@ Phase Report: `{{.Report.Path}}` at `{{.Report.Commit}}`
 {{template "outcome-notes" .Notes}}{{if .Present}}
 The pull request does not show this result yet. To present it later, without repeating the handoff, run `{{.Present}}`.
 {{end}}{{end}}
+{{- define "outcome-previous"}}{{with .}}Claim `{{.Claim}}` on Work Item `{{.Item}}` {{if eq .Ending "awaiting_review"}}was submitted for review{{else if eq .Ending "pass"}}passed review{{else if eq .Ending "rework"}}was returned for rework{{else if eq .Ending "needs_human"}}was paused for a human decision{{end}}.
+
+{{end}}{{end}}

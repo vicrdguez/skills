@@ -252,6 +252,18 @@ Bare `--wait` allows 15 minutes; `--poll` defaults to 30 seconds. Durations must
 
 The idle deadline prevents new polls, not completion of an in-flight Claim. Errors and refusals stop waiting. SIGINT/SIGTERM or caller cancellation interrupts waiting with a nonzero diagnostic, unless in-flight selection already returns its Claim. No Claim is automatically released or retried; inspect and explicitly resume an uncertain reservation instead of blindly selecting again.
 
+## Drain a queue with a Supervisor
+
+A Supervisor drains one phase's queue through Dispatches (ADR 0010):
+
+```sh
+skl implement next --dispatch --wait --repo <path> --worker-model <model> --worker-thinking <level>
+```
+
+A Dispatch claims one Slice like `next`, but answers with two bound commands instead of the Execution Skill: a worker command (`skl <phase> resume … --dispatched`) that a fresh subagent runs to receive the Execution Skill `next` would have returned, and a continue command that repeats the Dispatch with `--after <claim>`. Worker model and thinking values are opaque and optional; every other option carries through, and the waiting rules above apply unchanged.
+
+The continue command first reads how the named Claim ended in the ledger. It continues only after that Claim's own phase handoff (Implement: submitted or needs-human; Watchdog: a recorded pass, rework or needs-human review), whatever the Slice's current state. A Claim still held, or released without a handoff, stops the Supervisor with the Claim left as it is; an invalid reference is refused before anything is selected or awaited.
+
 ## Install skills
 
 ```sh
