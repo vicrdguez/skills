@@ -21,15 +21,27 @@ Every sentence of agent-visible prose sorts into one of these kinds. A sentence 
 
 ## Kinds of authored prose
 
-| Kind | What it is | Where it lives today |
-| --- | --- | --- |
-| Procedures | One script per workflow operation or user-invoked activity. | `skills/dev/*/SKILL.md` and `skills/dev/*/modules/` |
-| Craft | Judgment guidance composed into the Procedures that need it. | `skills/dev/testing`, `design`, `domain`, and the review guidance in `audit` |
-| Outcomes | Outcome Instructions in Workflow Engine responses: what happened and the worker's next step. | Go rendering in `cmd/skl/`, refusal reasons in the engine packages, and the Decision Inbox templates |
-| Documents | Templates and instructions for the documents a worker writes: Contract files, phase reports, public prose. | `skills/dev/propose/reference/`, `skills/dev/implement/reference/`, `skills/dev/watchdog/reference/` |
-| Adapters | Harness Adapters: the installed stubs and harness-specific entry points. | `stubs/common.md`, `agents/`, `prompts/` |
+Authored prose lives under `prose/`, one directory per kind.
 
-The reorganization slice sets the final paths. Until then, the table records where each kind lives now.
+| Kind | What it is | Where it lives |
+| --- | --- | --- |
+| Procedures | One script per workflow operation or user-invoked activity. | `prose/procedures/` |
+| Craft | Judgment guidance composed into the Procedures that need it. | `prose/craft/` |
+| Outcomes | Outcome Instructions in Workflow Engine responses: what happened and the worker's next step. | Go rendering in `cmd/skl/`, refusal reasons in the engine packages, and the Decision Inbox templates |
+| Documents | Templates and instructions for the documents a worker writes: Contract files, phase reports, public prose. | `prose/documents/` |
+| Adapters | Harness Adapters: the installed stubs and harness-specific entry points. | `prose/adapters/` |
+
+### Layout
+
+- `prose/procedures/<name>.md` is a Procedure. Delivery continuations are Procedures of their own: `implement-prepare.md`, `implement-inspect.md`, `watchdog-prepare.md` and `watchdog-inspect.md`. `audit-step.md` is the Audit step inside Implement; `audit.md` is standalone Audit. `decision-inbox.md` renders the Decision Inbox and its results; `decision.md` is the standalone retrieval.
+- `prose/procedures/modules/` holds `define` blocks that several Procedures or resources share, such as the source facts every Implement rendering starts with.
+- `prose/craft/<name>.md` is a Craft file. `prose/craft/audit.md` holds the two review axes that both Audit Procedures include.
+- `prose/<kind>/<name>/` holds the Skill Resources of the skill `<name>`. A resource's name is its path in that directory, so `prose/craft/testing/tests.md` is `skl skill --resource tests.md testing`.
+- `prose/adapters/stub.md` is the stub template, and `prose/adapters/stubs/<name>.md` is each skill's discovery frontmatter. `prose/adapters/agents/` and `prose/adapters/prompts/` are the Pi runner and loop files.
+
+Every file in `prose/procedures/`, `prose/craft/` and `prose/documents/` parses into one template set, named by its path under `prose/`. A file includes another with `{{template "craft/audit.md" .}}`, and a shared block by its defined name. `catalog.go` maps each skill name to its definition and resource directory, lists the Craft and Procedures each Procedure composes, and selects the continuation file for an invocation.
+
+The report format that `implement-report.md` and `watchdog-report.md` follow is documented for maintainers in `docs/report-schema.md`. It is not agent-visible.
 
 ## Composition rules
 

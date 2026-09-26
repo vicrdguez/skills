@@ -53,7 +53,7 @@ func TestDecisionStandaloneManifest(t *testing.T) {
 	if packet.Skill != "decision" || len(packet.IncludedSkills) != 0 {
 		t.Fatalf("standalone decision packet = %#v", packet)
 	}
-	if !slices.Equal(packet.Resources, []string{"reference/triage.md"}) {
+	if !slices.Equal(packet.Resources, []string{"triage.md"}) {
 		t.Errorf("decision resources = %v", packet.Resources)
 	}
 }

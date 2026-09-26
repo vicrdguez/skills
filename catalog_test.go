@@ -10,7 +10,7 @@ func TestAuditAppliesContractAcceptanceCriteria(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(audit.Resources, []string{"reference/acceptance.md", "reference/smells.md"}) {
+	if !slices.Equal(audit.Resources, []string{"acceptance.md", "smells.md"}) {
 		t.Fatalf("audit resources = %v", audit.Resources)
 	}
 }

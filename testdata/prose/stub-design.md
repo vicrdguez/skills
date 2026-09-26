@@ -5,4 +5,4 @@ description: Shared vocabulary for designing deep modules. Use when the user wan
 
 <!-- skl-owned: skl.stub/v1 -->
 
-Run `skl skill design`. Skip activation for every skill named in `included_skills`; its definition is already in the packet.
+Run `skl skill design`.

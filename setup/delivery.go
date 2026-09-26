@@ -76,11 +76,11 @@ func PresentDelivery(e *ledger.Execution, repository RepositoryContext, phase, o
 	f.PauseCommand = command("needs-human") + " --body " + private + " --public-body " + public
 	if phase == ledger.ImplementPhase {
 		f.SubmitCommand += " --head <final-source-sha> --target <integrated-target-sha>"
-		f.ResultResourceCommand = fmt.Sprintf("skl skill --resource reference/ledger-submission.md --input result_directory=%s --input procedure=%s implement", q(directory), f.Procedure)
+		f.ResultResourceCommand = fmt.Sprintf("skl skill --resource ledger-submission.md --input result_directory=%s --input procedure=%s implement", q(directory), f.Procedure)
 	} else {
 		f.SubmitCommand += " --outcome <pass|rework|needs-human>"
 		f.PauseCommand = command("submit") + " --body " + private + " --public-body " + public + " --outcome needs-human"
-		f.ResultResourceCommand = fmt.Sprintf("skl skill --resource reference/ledger-review.md --input result_directory=%s --input round=%d --input reviewed_head=%s watchdog", q(directory), f.ReviewNumber, q(f.RequiredHead))
+		f.ResultResourceCommand = fmt.Sprintf("skl skill --resource ledger-review.md --input result_directory=%s --input round=%d --input reviewed_head=%s watchdog", q(directory), f.ReviewNumber, q(f.RequiredHead))
 	}
 	if capability != skilldist.UnknownCapability {
 		f.PrepareCommand += " --capability " + q(string(capability))

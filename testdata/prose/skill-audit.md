@@ -1,15 +1,3 @@
-Protocol: skl.instructions/v1
-Skill: audit
-Included skills: none
-Facts: {}
-Resources: reference/acceptance.md, reference/smells.md
-
----
-name: audit
-description: Review a branch, PR, or changes since a fixed point along independent Standards and Contracts axes; run both reviews in fresh contexts and report them side by side.
----
-
-
 Review the candidate along two independent axes: **Standards** and **Contracts**.
 Audit is implementation-phase judgment, not a Claim, workflow transition, or
 independent Watchdog Review. It edits no workflow records.
@@ -39,8 +27,8 @@ movement or repeat a completed target integration merely because work resumed.
 ## Establish shared facts once
 
 1. Identify applicable `AGENTS.md`, standards documents, required tooling, and
-   project quality skills. Retrieve `skl skill --resource reference/smells.md audit`
-   and `skl skill --resource reference/acceptance.md audit`. Supply both review
+   project quality skills. Retrieve `skl skill --resource smells.md audit`
+   and `skl skill --resource acceptance.md audit`. Supply both review
    axes with the shared acceptance criteria.
 2. Run the project's **Full Gate** once on this integrated candidate: its entire
    test, typecheck, and lint suite. Record the commands, head, results, and any

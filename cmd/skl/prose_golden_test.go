@@ -349,14 +349,14 @@ func TestAgentProseGoldens(t *testing.T) {
 		g.capture("skill-"+name, worker, "skill", name)
 	}
 	resources := map[string][]string{
-		"audit":              {"reference/acceptance.md", "reference/smells.md"},
-		"decision":           {"reference/triage.md"},
-		"design":             {"reference/DEEPENING.md", "reference/DESIGN-IT-TWICE.md"},
-		"domain":             {"reference/ADR-FORMAT.md", "reference/CONTEXT-FORMAT.md"},
-		"propose":            {"reference/behavior.md", "reference/intent.md", "reference/plan.md", "reference/tasks.md"},
-		"implement":          {"reference/pull-presentation.md"},
-		"testing":            {"reference/mocking.md", "reference/tests.md"},
-		"watchdog":           {"reference/pull-presentation.md"},
+		"audit":              {"acceptance.md", "smells.md"},
+		"decision":           {"triage.md"},
+		"design":             {"DEEPENING.md", "DESIGN-IT-TWICE.md"},
+		"domain":             {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
+		"propose":            {"behavior.md", "intent.md", "plan.md", "tasks.md"},
+		"implement":          {"pull-presentation.md"},
+		"testing":            {"mocking.md", "tests.md"},
+		"watchdog":           {"pull-presentation.md"},
 		"writing-for-agents": {"SKILL-MECHANICS.md"},
 	}
 	for skill, names := range resources {
@@ -364,11 +364,11 @@ func TestAgentProseGoldens(t *testing.T) {
 			g.capture(proseResourceGolden(skill, resource), worker, "skill", "--resource", resource, skill)
 		}
 	}
-	g.capture("resource-propose-issue-publication", worker, "skill", "--resource", "reference/issue-publication.md",
+	g.capture("resource-propose-issue-publication", worker, "skill", "--resource", "issue-publication.md",
 		"--input", "proposal="+proseProposal, "--input", "repo="+source, "--input", "remote=origin", "propose")
-	g.capture("resource-implement-ledger-submission", worker, "skill", "--resource", "reference/ledger-submission.md",
+	g.capture("resource-implement-ledger-submission", worker, "skill", "--resource", "ledger-submission.md",
 		"--input", "result_directory="+result, "--input", "procedure=initial", "implement")
-	g.capture("resource-watchdog-ledger-review", worker, "skill", "--resource", "reference/ledger-review.md",
+	g.capture("resource-watchdog-ledger-review", worker, "skill", "--resource", "ledger-review.md",
 		"--input", "result_directory="+reviewResult, "--input", "round=1", "--input", "reviewed_head="+head, "watchdog")
 
 	// Installed stubs and runner files, and the AGENTS.md block setup writes.

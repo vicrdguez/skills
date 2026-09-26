@@ -476,13 +476,12 @@ func TestDocumentedResourceCommands(t *testing.T) {
 		if !strings.Contains(command, "--resource") {
 			continue
 		}
-		for _, arg := range runSkillCommand(t, command) {
-			if strings.HasPrefix(arg, "reference/") {
-				seen[arg] = true
-			}
+		args := runSkillCommand(t, command)
+		if index := slices.Index(args, "--resource"); index >= 0 {
+			seen[args[index+1]] = true
 		}
 	}
-	for _, want := range []string{"reference/ledger-submission.md", "reference/report-schema.md", "reference/ledger-review.md", "reference/DEEPENING.md"} {
+	for _, want := range []string{"ledger-submission.md", "ledger-review.md", "DEEPENING.md"} {
 		if !seen[want] {
 			t.Errorf("README lacks a documented command for %s: %v", want, seen)
 		}
@@ -782,7 +781,7 @@ func TestRetrieveApprovedContractGuidance(t *testing.T) {
 		{name: "explore", included: []string{"domain"}},
 		{
 			name: "propose", included: []string{"design", "testing"},
-			resources: []string{"reference/behavior.md", "reference/intent.md", "reference/issue-publication.md", "reference/plan.md", "reference/tasks.md"},
+			resources: []string{"behavior.md", "intent.md", "issue-publication.md", "plan.md", "tasks.md"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -792,17 +791,11 @@ func TestRetrieveApprovedContractGuidance(t *testing.T) {
 			if err := json.Unmarshal([]byte(typed), &packet); err != nil {
 				t.Fatalf("typed retrieval is not JSON: %v\n%s", err, typed)
 			}
-			if markdown != packet.Markdown() {
+			if markdown != packet.Instructions {
 				t.Fatalf("Markdown and explicit JSON differ for %s", tc.name)
 			}
 			if !slices.Equal(packet.IncludedSkills, tc.included) || !slices.Equal(packet.Resources, tc.resources) {
 				t.Fatalf("%s manifest = included %v resources %v", tc.name, packet.IncludedSkills, packet.Resources)
-			}
-			for _, included := range tc.included {
-				marker := "## Included Skill: " + included
-				if count := strings.Count(packet.Instructions, marker); count != 1 {
-					t.Errorf("%s included marker %q appears %d times", tc.name, marker, count)
-				}
 			}
 		})
 	}
@@ -1475,8 +1468,7 @@ func TestCleanupPreservesUnacceptedLocalHead(t *testing.T) {
 }
 
 func TestRetrieveEquivalentTypedInstructions(t *testing.T) {
-	wantResources := []string{"reference/mocking.md", "reference/tests.md"}
-	wantHeader := "Protocol: skl.instructions/v1\nSkill: testing\nIncluded skills: none\nFacts: {}\nResources: reference/mocking.md, reference/tests.md\n\n"
+	wantResources := []string{"mocking.md", "tests.md"}
 	var markdown bytes.Buffer
 	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &markdown, &markdown, t.TempDir())
 	if err := app.Run([]string{"skl", "skill", "testing"}); err != nil {
@@ -1492,7 +1484,7 @@ func TestRetrieveEquivalentTypedInstructions(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &packet); err != nil {
 		t.Fatalf("stdout is not a JSON packet: %v\n%s", err, stdout.String())
 	}
-	if packet.Protocol != "skl.instructions/v1" || packet.Skill != "testing" || packet.Facts != (skilldist.InvocationFacts{}) || len(packet.IncludedSkills) != 0 || !slices.Equal(packet.Resources, wantResources) || packet.Instructions == "" || markdown.String() != wantHeader+packet.Instructions {
+	if packet.Protocol != "skl.instructions/v1" || packet.Skill != "testing" || packet.Facts != (skilldist.InvocationFacts{}) || len(packet.IncludedSkills) != 0 || !slices.Equal(packet.Resources, wantResources) || packet.Instructions == "" || markdown.String() != packet.Instructions {
 		t.Fatalf("JSON and Markdown packets differ: %#v", packet)
 	}
 	if stderr.Len() != 0 {
@@ -1505,10 +1497,6 @@ func TestRetrieveAuditManifest(t *testing.T) {
 	if err := newApp(nil, bytes.NewReader(nil), &markdown, &markdown).Run([]string{"skl", "skill", "audit"}); err != nil {
 		t.Fatal(err)
 	}
-	header := "Protocol: skl.instructions/v1\nSkill: audit\nIncluded skills: none\nFacts: {}\nResources: reference/acceptance.md, reference/smells.md\n\n"
-	if !strings.HasPrefix(markdown.String(), header) {
-		t.Fatalf("unexpected Audit manifest: %s", markdown.String())
-	}
 	if err := newApp(nil, bytes.NewReader(nil), &typed, &typed).Run([]string{"skl", "skill", "--format", "json", "audit"}); err != nil {
 		t.Fatal(err)
 	}
@@ -1516,7 +1504,7 @@ func TestRetrieveAuditManifest(t *testing.T) {
 	if err := json.Unmarshal(typed.Bytes(), &packet); err != nil {
 		t.Fatal(err)
 	}
-	if len(packet.IncludedSkills) != 0 || !slices.Equal(packet.Resources, []string{"reference/acceptance.md", "reference/smells.md"}) {
+	if len(packet.IncludedSkills) != 0 || !slices.Equal(packet.Resources, []string{"acceptance.md", "smells.md"}) {
 		t.Fatalf("unexpected Audit dependencies: %#v", packet)
 	}
 }
@@ -1553,52 +1541,52 @@ func TestRejectInvalidResourceInputs(t *testing.T) {
 		wants    []string
 	}{
 		{
-			name: "input without separator", owner: "implement", resource: "reference/ledger-submission.md",
+			name: "input without separator", owner: "implement", resource: "ledger-submission.md",
 			inputs: []string{"result_directory"},
 			wants:  []string{"result_directory", "name=value"},
 		},
 		{
-			name: "undeclared input", owner: "implement", resource: "reference/ledger-submission.md",
+			name: "undeclared input", owner: "implement", resource: "ledger-submission.md",
 			inputs: []string{"result_directory=" + directory, "procedure=initial", "findings=1"},
 			wants:  []string{"findings", "--describe-inputs"},
 		},
 		{
-			name: "duplicate input", owner: "watchdog", resource: "reference/ledger-review.md",
+			name: "duplicate input", owner: "watchdog", resource: "ledger-review.md",
 			inputs: []string{"result_directory=" + directory, "round=1", "round=1", "reviewed_head=" + head},
 			wants:  []string{"round", "duplicate"},
 		},
 		{
-			name: "missing required input", owner: "implement", resource: "reference/ledger-submission.md",
+			name: "missing required input", owner: "implement", resource: "ledger-submission.md",
 			inputs: []string{"result_directory=" + directory},
 			wants:  []string{"procedure", "required"},
 		},
 		{
-			name: "invalid integer", owner: "watchdog", resource: "reference/ledger-review.md",
+			name: "invalid integer", owner: "watchdog", resource: "ledger-review.md",
 			inputs: []string{"result_directory=" + directory, "round=two", "reviewed_head=" + head},
 			wants:  []string{"round", "integer"},
 		},
 		{
-			name: "unsupported choice", owner: "implement", resource: "reference/ledger-submission.md",
+			name: "unsupported choice", owner: "implement", resource: "ledger-submission.md",
 			inputs: []string{"result_directory=" + directory, "procedure=later"},
 			wants:  []string{"procedure", "initial", "rework"},
 		},
 		{
-			name: "zero round", owner: "watchdog", resource: "reference/ledger-review.md",
+			name: "zero round", owner: "watchdog", resource: "ledger-review.md",
 			inputs: []string{"result_directory=" + directory, "round=0", "reviewed_head=" + head},
 			wants:  []string{"round", "positive"},
 		},
 		{
-			name: "empty result directory", owner: "implement", resource: "reference/ledger-submission.md",
+			name: "empty result directory", owner: "implement", resource: "ledger-submission.md",
 			inputs: []string{"result_directory=", "procedure=initial"},
 			wants:  []string{"result_directory", "absolute"},
 		},
 		{
-			name: "relative result directory", owner: "implement", resource: "reference/ledger-submission.md",
+			name: "relative result directory", owner: "implement", resource: "ledger-submission.md",
 			inputs: []string{"result_directory=.worktrees/result", "procedure=initial"},
 			wants:  []string{"result_directory", "absolute"},
 		},
 		{
-			name: "malformed reviewed head", owner: "watchdog", resource: "reference/ledger-review.md",
+			name: "malformed reviewed head", owner: "watchdog", resource: "ledger-review.md",
 			inputs: []string{"result_directory=" + directory, "round=1", "reviewed_head=" + head[:12] + "nonsense"},
 			wants:  []string{"reviewed source SHA", "40 lowercase hexadecimal"},
 		},
@@ -1663,7 +1651,7 @@ func TestPreserveLiteralResourceInputValues(t *testing.T) {
 	}, bytes.NewReader(nil), &output, &output)
 	render := func(inputs ...string) (string, error) {
 		output.Reset()
-		command := []string{"skl", "skill", "--resource", "reference/ledger-submission.md"}
+		command := []string{"skl", "skill", "--resource", "ledger-submission.md"}
 		for _, input := range inputs {
 			command = append(command, "--input", input)
 		}
@@ -1724,24 +1712,24 @@ func TestDeferredResourceCommandsFromParentInstructions(t *testing.T) {
 		{
 			name: "first implementation", phase: ledger.ImplementPhase, operation: "next", owner: "implement",
 			state:    ledger.SliceState{State: ledger.ReadyForImplementation, Title: "Foundation", Branch: "foundation"},
-			resource: "reference/ledger-submission.md", procedure: "initial",
+			resource: "ledger-submission.md", procedure: "initial",
 		},
 		{
 			// The engine's operation and reconciled Workflow State select the
 			// procedure; the bound report resource receives it as typed input.
 			name: "resumed implementation", phase: ledger.ImplementPhase, operation: "resume", owner: "implement",
 			state:    ledger.SliceState{State: ledger.ReadyForImplementation, Title: "Foundation", Branch: "foundation"},
-			resource: "reference/ledger-submission.md", procedure: "resumed",
+			resource: "ledger-submission.md", procedure: "resumed",
 		},
 		{
 			name: "finding-driven rework", phase: ledger.ImplementPhase, operation: "next", owner: "implement",
 			state:    ledger.SliceState{State: ledger.Rework, Title: "Foundation", Branch: "foundation"},
-			resource: "reference/ledger-submission.md", procedure: "rework",
+			resource: "ledger-submission.md", procedure: "rework",
 		},
 		{
 			name: "watchdog invocation", phase: ledger.WatchdogPhase, operation: "next", owner: "watchdog",
 			state:    ledger.SliceState{State: ledger.AwaitingReview, Title: "Foundation", Branch: "foundation"},
-			resource: "reference/ledger-review.md",
+			resource: "ledger-review.md",
 		},
 	}
 	for _, testCase := range cases {
@@ -1788,7 +1776,7 @@ func TestDeferredResourceCommandsFromParentInstructions(t *testing.T) {
 			instructions := runDeferredCommand(t, command, "", "")
 			// The golden journey renders only the initial report resource, so the
 			// resumed and rework branches keep one marker each.
-			if testCase.resource == "reference/ledger-submission.md" {
+			if testCase.resource == "ledger-submission.md" {
 				for procedure, marker := range map[string]string{
 					"resumed": "Identify what was already complete",
 					"rework":  "Preserve every historical",
@@ -1842,18 +1830,18 @@ func deferredCommand(t *testing.T, instructions, resource string) string {
 
 func TestContextFreeResourcesRetainOwnershipAndDefaults(t *testing.T) {
 	cases := []struct{ owner, resource string }{
-		{"audit", "reference/acceptance.md"},
-		{"audit", "reference/smells.md"},
-		{"design", "reference/DEEPENING.md"},
-		{"design", "reference/DESIGN-IT-TWICE.md"},
-		{"domain", "reference/ADR-FORMAT.md"},
-		{"domain", "reference/CONTEXT-FORMAT.md"},
-		{"propose", "reference/intent.md"},
-		{"propose", "reference/behavior.md"},
-		{"propose", "reference/plan.md"},
-		{"propose", "reference/tasks.md"},
-		{"testing", "reference/mocking.md"},
-		{"testing", "reference/tests.md"},
+		{"audit", "acceptance.md"},
+		{"audit", "smells.md"},
+		{"design", "DEEPENING.md"},
+		{"design", "DESIGN-IT-TWICE.md"},
+		{"domain", "ADR-FORMAT.md"},
+		{"domain", "CONTEXT-FORMAT.md"},
+		{"propose", "intent.md"},
+		{"propose", "behavior.md"},
+		{"propose", "plan.md"},
+		{"propose", "tasks.md"},
+		{"testing", "mocking.md"},
+		{"testing", "tests.md"},
 		{"writing-for-agents", "SKILL-MECHANICS.md"},
 	}
 	for _, testCase := range cases {
@@ -1879,9 +1867,6 @@ func TestContextFreeResourcesRetainOwnershipAndDefaults(t *testing.T) {
 	if err := newApp(nil, bytes.NewReader(nil), &markdown, &markdown).Run([]string{"skl", "skill", "testing"}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(markdown.String(), "Protocol: skl.instructions/v1\nSkill: testing\nIncluded skills: none\nFacts: {}\nResources: reference/mocking.md, reference/tests.md\n\n") {
-		t.Errorf("default Markdown rendering changed:\n%s", markdown.String())
-	}
 	if err := newApp(nil, bytes.NewReader(nil), &jsonPacket, &jsonPacket).Run([]string{"skl", "skill", "--format", "json", "testing"}); err != nil {
 		t.Fatal(err)
 	}
@@ -1898,9 +1883,9 @@ func TestPrivateSkillModulesAreNotPublicResources(t *testing.T) {
 		return nil, nil
 	}, bytes.NewReader(nil), &output, &output)
 
-	// SKILL.md is a definition and authored modules are internal: neither is a
-	// public resource, by enumeration, retrieval, or input discovery.
-	for _, resource := range []string{"modules/result-document.md", "SKILL.md"} {
+	// The definition and shared modules are internal: neither is a public
+	// resource, by enumeration, retrieval, or input discovery.
+	for _, resource := range []string{"procedures/modules/implement.md", "procedures/implement.md", "implement.md"} {
 		for _, request := range [][]string{
 			{"skl", "skill", "--resource", resource, "implement"},
 			{"skl", "skill", "--resource", resource, "--describe-inputs", "implement"},
@@ -1927,9 +1912,9 @@ func TestPrivateSkillModulesAreNotPublicResources(t *testing.T) {
 
 func TestRetiredGitHubResourcesAreUnknown(t *testing.T) {
 	for _, request := range [][]string{
-		{"reference/submission.md", "implement"},
-		{"reference/decision.md", "implement"},
-		{"reference/review.md", "watchdog"},
+		{"submission.md", "implement"},
+		{"decision.md", "implement"},
+		{"review.md", "watchdog"},
 	} {
 		var output bytes.Buffer
 		err := newApp(nil, bytes.NewReader(nil), &output, &output).Run([]string{"skl", "skill", "--resource", request[0], request[1]})
@@ -1943,15 +1928,15 @@ func TestRetrieveOneNamedResource(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &stdout, &stderr, t.TempDir())
 
-	if err := app.Run([]string{"skl", "skill", "--resource", "reference/tests.md", "testing"}); err != nil {
+	if err := app.Run([]string{"skl", "skill", "--resource", "tests.md", "testing"}); err != nil {
 		t.Fatal(err)
 	}
 
-	if got, want := stdout.String(), readRepositoryFile(t, "skills/dev/testing/reference/tests.md"); got != want {
+	if got, want := stdout.String(), readRepositoryFile(t, "prose/craft/testing/tests.md"); got != want {
 		t.Fatalf("stdout did not contain only the requested resource:\n%s", got)
 	}
 	stdout.Reset()
-	if err := app.Run([]string{"skl", "skill", "--resource", "reference/CAPABILITIES-FORMAT.md", "domain"}); err == nil || !strings.Contains(err.Error(), "unknown resource") {
+	if err := app.Run([]string{"skl", "skill", "--resource", "CAPABILITIES-FORMAT.md", "domain"}); err == nil || !strings.Contains(err.Error(), "unknown resource") {
 		t.Fatalf("retired capability resource error = %v", err)
 	}
 	if stdout.Len() != 0 {
@@ -1967,7 +1952,7 @@ func TestDescribeNamedResourceInputs(t *testing.T) {
 		described []string
 	}{
 		{
-			owner: "implement", resource: "reference/ledger-submission.md",
+			owner: "implement", resource: "ledger-submission.md",
 			inputs: []string{"result_directory=/tmp/result", "procedure=initial"},
 			described: []string{
 				"result_directory (string, required): Absolute path of the private Result Document directory this invocation created.",
@@ -1975,7 +1960,7 @@ func TestDescribeNamedResourceInputs(t *testing.T) {
 			},
 		},
 		{
-			owner: "watchdog", resource: "reference/ledger-review.md",
+			owner: "watchdog", resource: "ledger-review.md",
 			inputs: []string{"result_directory=/tmp/result", "round=2", "reviewed_head=" + strings.Repeat("a", 40)},
 			described: []string{
 				"result_directory (string, required): Absolute path of the private Result Document directory this invocation created.",
@@ -1984,8 +1969,8 @@ func TestDescribeNamedResourceInputs(t *testing.T) {
 			},
 		},
 		{
-			owner: "testing", resource: "reference/tests.md",
-			described: []string{"reference/tests.md accepts no inputs."},
+			owner: "testing", resource: "tests.md",
+			described: []string{"tests.md accepts no inputs."},
 		},
 	}
 	for _, testCase := range cases {
@@ -2033,24 +2018,18 @@ func TestDescribeNamedResourceInputs(t *testing.T) {
 
 func TestBundleGuaranteedSupportingSkills(t *testing.T) {
 	packet := implementBundle(t)
-	want := []string{"testing", "audit", "design", "domain"}
+	want := []string{"testing", "audit"}
 	if !slices.Equal(packet.IncludedSkills, want) {
 		t.Fatalf("included_skills = %v, want %v", packet.IncludedSkills, want)
 	}
-	if !slices.Equal(packet.Resources, []string{"reference/ledger-submission.md", "reference/pull-presentation.md", "reference/report-schema.md"}) {
+	if !slices.Equal(packet.Resources, []string{"ledger-submission.md", "pull-presentation.md"}) {
 		t.Fatalf("implementation resources changed: %v", packet.Resources)
-	}
-	for _, included := range want {
-		marker := "\n\n## Included Skill: " + included + "\n\n"
-		if count := strings.Count(packet.Instructions, marker); count != 1 {
-			t.Errorf("included definition %s appears %d times, want once", included, count)
-		}
 	}
 }
 
 func TestIgnoreConsumerRepositoryOverrides(t *testing.T) {
 	repository := t.TempDir()
-	override := filepath.Join(repository, "skills/dev/testing/SKILL.md")
+	override := filepath.Join(repository, "prose/craft/testing.md")
 	if err := os.MkdirAll(filepath.Dir(override), 0o755); err != nil {
 		t.Fatal(err)
 	}

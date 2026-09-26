@@ -35,7 +35,7 @@ func deliveryWatchdogFacts(operation, procedure, scope string, reviewCount uint6
 			" --body '/tmp/result/watchdog-report.md' --public-body '/tmp/result/public.md' --outcome <pass|rework|needs-human>",
 		PauseCommand: "skl watchdog submit --repo '/tmp/add-refunds' --item 'add-refunds/refund' --claim '" + claim + "'" +
 			" --body '/tmp/result/watchdog-report.md' --public-body '/tmp/result/public.md' --outcome needs-human",
-		ResultResourceCommand: "skl skill --resource reference/ledger-review.md --input result_directory='/tmp/result'" +
+		ResultResourceCommand: "skl skill --resource ledger-review.md --input result_directory='/tmp/result'" +
 			" --input round=" + fmt.Sprint(reviewCount+1) + " --input reviewed_head='" + reviewed + "' watchdog",
 		RequiredHead:     reviewed,
 		RecordedTarget:   target,
@@ -156,7 +156,7 @@ func TestDeliveryWatchdogNarrowPrepareAndInspect(t *testing.T) {
 // inputs.
 func TestDeliveryWatchdogReportResource(t *testing.T) {
 	reviewed := strings.Repeat("a", 40)
-	resource, err := RenderResource("watchdog", "reference/ledger-review.md", []string{
+	resource, err := RenderResource("watchdog", "ledger-review.md", []string{
 		"result_directory=/tmp/result",
 		"round=2",
 		"reviewed_head=" + reviewed,
@@ -178,25 +178,25 @@ func TestDeliveryWatchdogReportResource(t *testing.T) {
 
 	// Every representable engine round works, but the resource must not
 	// advertise object identities the documented schema-1 codec refuses.
-	if _, err := RenderResource("watchdog", "reference/ledger-review.md", []string{
+	if _, err := RenderResource("watchdog", "ledger-review.md", []string{
 		"result_directory=/tmp/result", "round=18446744073709551615", "reviewed_head=" + reviewed,
 	}); err != nil {
 		t.Fatalf("valid engine facts were not renderable: %v", err)
 	}
-	if _, err := RenderResource("watchdog", "reference/ledger-review.md", []string{
+	if _, err := RenderResource("watchdog", "ledger-review.md", []string{
 		"result_directory=/tmp/result", "round=1", "reviewed_head=" + strings.Repeat("a", 64),
 	}); err == nil {
 		t.Fatal("resource advertised a SHA-256 identity unsupported by schema 1")
 	}
 
-	if _, err := RenderResource("watchdog", "reference/ledger-review.md", []string{
+	if _, err := RenderResource("watchdog", "ledger-review.md", []string{
 		"result_directory=/tmp/result",
 		"round=0",
 		"reviewed_head=" + reviewed,
 	}); err == nil {
 		t.Error("review report resource accepted round zero")
 	}
-	if _, err := RenderResource("watchdog", "reference/ledger-review.md", []string{
+	if _, err := RenderResource("watchdog", "ledger-review.md", []string{
 		"result_directory=/tmp/result",
 		"round=2",
 		"reviewed_head=not-a-sha",

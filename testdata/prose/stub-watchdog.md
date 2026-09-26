@@ -6,4 +6,4 @@ disable-model-invocation: true
 
 <!-- skl-owned: skl.stub/v1 -->
 
-Run `skl watchdog next`. Skip activation for every skill named in `included_skills`; its definition is already in the packet. Start Watchdog in a fresh session, process one Work Item, and report the verified result in normal Markdown.
+Run `skl watchdog next`. Start Watchdog in a fresh session, process one Work Item, and report the verified result in normal Markdown.

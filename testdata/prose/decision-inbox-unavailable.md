@@ -1,9 +1,3 @@
----
-name: decision
-description: Resolve current Needs Human requests from the ledger-wide Decision Inbox with explicitly scoped human direction.
-disable-model-invocation: true
----
-
 # Decision Inbox Unavailable
 
 The configured Workflow Ledger could not be resolved or read, so no inbox was observed. This is not an empty inbox, and no Needs Human request was answered, dismissed, or created.
