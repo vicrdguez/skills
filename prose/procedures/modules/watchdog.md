@@ -4,12 +4,16 @@ Branch: `{{.Branch}}`
 Worktree: `{{.Worktree}}`
 Result Documents: `{{.ResultDirectory}}`
 Claim: `{{.Claim}}`
-{{if .RequiredHead}}Fixed reviewed implementation head: `{{.RequiredHead}}`
+{{if .RequiredHead}}Reviewed head: `{{.RequiredHead}}`
 {{end}}{{if .RecordedTarget}}Recorded Integration Target: `{{.RecordedTarget}}`
 {{end}}{{if .PreviousReviewed}}Previous reviewed revision: `{{.PreviousReviewed}}`
-{{end}}Completed reviews: {{.ReviewCount}}; this invocation is review number {{.ReviewNumber}}
+{{end}}Review round: {{.ReviewNumber}}
 {{if .ReviewScope}}Review scope: `{{.ReviewScope}}`
 {{end}}{{if .SourceHead}}Prepared source head: `{{.SourceHead}}`
 {{end}}{{if .SourceTarget}}Prepared integrated target: `{{.SourceTarget}}`
 {{end}}{{if .FetchStatus}}Source fetch: {{.FetchStatus}}
 {{end}}{{end}}
+
+{{define "watchdog-incremental"}}`git diff {{.PreviousReviewed}}...HEAD` as a repeat review{{end}}
+
+{{define "watchdog-full"}}the complete change, `git diff {{.RecordedTarget}}...HEAD`, against every Contract item{{end}}

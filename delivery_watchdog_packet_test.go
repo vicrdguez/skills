@@ -109,7 +109,7 @@ func TestDeliveryWatchdogBindsEachProceeding(t *testing.T) {
 			}
 			for _, fixed := range []string{
 				facts.RequiredHead, facts.RecordedTarget,
-				fmt.Sprintf("Completed reviews: %d; this invocation is review number %d", facts.ReviewCount, facts.ReviewNumber),
+				fmt.Sprintf("Review round: %d", facts.ReviewNumber),
 			} {
 				if !strings.Contains(active, fixed) {
 					t.Errorf("%s instructions omitted fixed review fact %q", tc.name, fixed)
@@ -205,19 +205,20 @@ func TestDeliveryWatchdogReportResource(t *testing.T) {
 	}
 }
 
-// TestDeliveryWatchdogScopeAndFixedIdentity proves the fixed reviewed head,
-// target and completed-review count survive every supplied scope, and that a
-// render made before inspection reports its scope carries the unresolved-scope
-// branch.
+// TestDeliveryWatchdogScopeAndFixedIdentity proves the fixed reviewed head and
+// target survive every supplied scope, that a render made before inspection
+// reports its scope carries both scopes, and that a first review with no
+// previous reviewed revision is a full review.
 func TestDeliveryWatchdogScopeAndFixedIdentity(t *testing.T) {
 	for _, tc := range []struct {
 		scope  string
 		count  uint64
 		marker string
 	}{
-		{"incremental", 1, "completed-review count (1)"},
-		{"full", 2, "completed-review count (2)"},
-		{"", 1, "## Review scope"},
+		{"incremental", 1, "Review `git diff " + strings.Repeat("d", 40) + "...HEAD`"},
+		{"full", 2, "Review the complete change"},
+		{"", 1, "When inspection reports `incremental`"},
+		{"", 0, "Review the complete change"},
 	} {
 		facts := deliveryWatchdogFacts("next", "initial", tc.scope, tc.count)
 		packet, err := BuildPacket("watchdog", InvocationFacts{Delivery: facts})
