@@ -2050,7 +2050,7 @@ func TestIgnoreConsumerRepositoryOverrides(t *testing.T) {
 	if err := app.Run([]string{"skl", "skill", "testing"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := stdout.String(); !strings.Contains(got, "# Contract-Grounded Testing") || strings.Contains(got, "consumer override") {
+	if got, want := stdout.String(), readRepositoryFile(t, "prose/craft/testing.md"); got != want {
 		t.Fatalf("consumer repository overrode embedded definition:\n%s", got)
 	}
 }

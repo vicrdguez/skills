@@ -1,31 +1,59 @@
-# Boundary Substitutes and Controlled Reproductions
+# When to Mock
 
-Use a substitute only when it preserves the behavior needed to establish the obligation.
+Mock at **system boundaries** only:
 
-## Substitute at real seams
+- External APIs (payment, email, etc.)
+- Databases (sometimes - prefer test DB)
+- Time/randomness
+- File system (sometimes)
 
-Appropriate seams commonly include:
+Don't mock:
 
-- external APIs;
-- time or randomness;
-- operating-system and file-system effects;
-- unavailable or unsafe infrastructure;
-- a stable interface with multiple real adapters.
+- Your own classes/modules
+- Internal collaborators
+- Anything you control
 
-Prefer a real lightweight adapter when it is deterministic and practical. Do not mock private methods or internal collaborators merely to assert implementation call order.
+## Designing for Mockability
 
-## Keep substitutes faithful
+At system boundaries, design interfaces that are easy to mock:
 
-A substitute must model the trigger and observable consequence relevant to the check. Keep its behavior narrow and explicit; conditional "mock worlds" that reimplement production policy create a second implementation and a weak oracle.
+**1. Use dependency injection**
 
-Accept dependencies at the seam rather than constructing external clients inside the behavior under test. Use operation-specific interfaces so a substitute has one clear result shape instead of a generic dispatcher with test-only conditionals.
+Pass external dependencies in rather than creating them internally:
 
-## Controlled regression alternatives
+```typescript
+// Easy to mock
+function processPayment(order, paymentClient) {
+  return paymentClient.charge(order.total);
+}
 
-When the original failure cannot be reproduced reliably or safely, acceptable alternatives include:
+// Hard to mock
+function processPayment(order) {
+  const client = new StripeClient(process.env.STRIPE_KEY);
+  return client.charge(order.total);
+}
+```
 
-- a faithful isolated reproduction;
-- replay of a captured trace whose provenance and relevant fields are known;
-- controlled fault injection at the real failure seam.
+**2. Prefer SDK-style interfaces over generic fetchers**
 
-Record material limitations: what was simulated, which trigger was preserved, which observable failure was checked, and what remains unverified. If those limits leave material uncertainty about protection, seek a human decision rather than report the substitute as complete evidence.
+Create specific functions for each external operation instead of one generic function with conditional logic:
+
+```typescript
+// GOOD: Each function is independently mockable
+const api = {
+  getUser: (id) => fetch(`/users/${id}`),
+  getOrders: (userId) => fetch(`/users/${userId}/orders`),
+  createOrder: (data) => fetch('/orders', { method: 'POST', body: data }),
+};
+
+// BAD: Mocking requires conditional logic inside the mock
+const api = {
+  fetch: (endpoint, options) => fetch(endpoint, options),
+};
+```
+
+The SDK approach means:
+- Each mock returns one specific shape
+- No conditional logic in test setup
+- Easier to see which endpoints a test exercises
+- Type safety per endpoint
