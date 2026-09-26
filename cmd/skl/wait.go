@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/urfave/cli/v2"
-	"github.com/vicrdguez/skills/workflow"
+	"github.com/vicrdguez/skills/ledger"
 )
 
 type stageApp struct{ *cli.App }
@@ -18,8 +18,9 @@ func (app *stageApp) Run(args []string) error {
 }
 
 func (app *stageApp) RunContext(ctx context.Context, args []string) error {
-	// urfave/cli requires values for duration flags. Expand only bare --wait,
-	// leaving all ordinary flag parsing and errors to the CLI library.
+	// urfave/cli requires values for flags that take one. Expand only bare
+	// --wait and --after, leaving all ordinary flag parsing and errors to the
+	// CLI library.
 	args = append([]string(nil), args...)
 	if len(args) >= 3 && (args[1] == "implement" || args[1] == "watchdog") {
 		command := app.Command(args[1]).Command(args[2])
@@ -28,6 +29,12 @@ func (app *stageApp) RunContext(ctx context.Context, args []string) error {
 				arg := args[i]
 				if arg == "--" || !strings.HasPrefix(arg, "-") {
 					break
+				}
+				// A bare --after is an empty continuation reference, which
+				// Dispatch refuses as an Outcome Instruction.
+				if arg == "--after" && (i+1 == len(args) || strings.HasPrefix(args[i+1], "-")) {
+					args[i] = "--after="
+					continue
 				}
 				if arg == "--wait" {
 					next := ""
@@ -78,7 +85,7 @@ func waitFlags() []cli.Flag {
 	return flags
 }
 
-func nextWork(ctx context.Context, wait, poll time.Duration, selectWork func() (workflow.ImplementationOutcome, error)) (outcome workflow.ImplementationOutcome, err error) {
+func nextWork(ctx context.Context, wait, poll time.Duration, selectWork func() (ledger.Selection, error)) (selection ledger.Selection, err error) {
 	if wait == 0 {
 		return selectWork()
 	}
@@ -90,18 +97,18 @@ func nextWork(ctx context.Context, wait, poll time.Duration, selectWork func() (
 	deadline := time.Now().Add(wait)
 	for {
 		if err := ctx.Err(); err != nil {
-			return workflow.ImplementationOutcome{}, err
+			return ledger.Selection{}, err
 		}
 		if !time.Now().Before(deadline) {
-			return workflow.ImplementationOutcome{Status: "idle_timeout", Reason: "no claimable work in this queue during the idle window; not global completion"}, nil
+			return ledger.Selection{Status: ledger.IdleTimeout}, nil
 		}
-		outcome, err = selectWork()
+		selection, err = selectWork()
 		// The idle window stops new attempts, never an in-flight Claim.
-		if err != nil || outcome.Status != "no_work" {
-			return outcome, err
+		if err != nil || selection.Status != ledger.NoWork {
+			return selection, err
 		}
 		if err := ctx.Err(); err != nil {
-			return workflow.ImplementationOutcome{}, err
+			return ledger.Selection{}, err
 		}
 		remaining := time.Until(deadline)
 		if remaining > 0 {
@@ -109,7 +116,7 @@ func nextWork(ctx context.Context, wait, poll time.Duration, selectWork func() (
 			select {
 			case <-ctx.Done():
 				timer.Stop()
-				return workflow.ImplementationOutcome{}, ctx.Err()
+				return ledger.Selection{}, ctx.Err()
 			case <-timer.C:
 			}
 		}
