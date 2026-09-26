@@ -1,7 +1,8 @@
 # Decision Inbox
 
-The configured Workflow Ledger is readable and currently has no Needs Human requests. This is an empty inbox: it creates no work and changes no Workflow State, and it is not an authorization to start, merge, or retire anything.
+No request is waiting on a human. There is nothing to answer.
 
-Refresh: `skl decision inbox`.
+Scope: every Project in the configured ledger, wherever you run it. Narrow it only when the user names a Project, with `--project <name>`.
 
-The scope is every Project in the configured ledger.
+Refresh: `skl decision inbox`
+
