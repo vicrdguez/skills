@@ -33,7 +33,11 @@ func deliveryCommands(phase string, newBackend backendFactory, stdout io.Writer)
 		}, Action: func(c *cli.Context) error { return runDelivery(c, phase, name, newBackend, stdout) }}
 		if name == "next" {
 			command.Flags = append(command.Flags, waitFlags()...)
+			command.Flags = append(command.Flags, dispatchFlags()...)
 			command.Aliases = []string{"start"}
+		}
+		if name == "resume" {
+			command.Flags = append(command.Flags, &cli.BoolFlag{Name: "dispatched", Usage: "render the Execution Skill a Dispatch of this Claim stands for"})
 		}
 		commands = append(commands, command)
 	}
@@ -48,6 +52,10 @@ type deliveryOutput struct {
 	Source    *workflow.DeliverySource `json:"source,omitempty"`
 	Result    *ledger.DeliveryResult   `json:"result,omitempty"`
 	Packet    *skilldist.Packet        `json:"packet,omitempty"`
+	// Previous is how a continued Dispatch's Claim ended; Dispatch is the
+	// Claim this Dispatch made.
+	Previous *ledger.ClaimEnding `json:"previous,omitempty"`
+	Dispatch *dispatched         `json:"dispatch,omitempty"`
 	// Present continues an unpresented handoff with the then-current result.
 	Present string `json:"present,omitempty"`
 	// kind and facts select and supply the Markdown Outcome Instruction.
@@ -71,10 +79,14 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 	}
 	verified := func() { claimState = claimKept }
 	statusCmd := ""
+	// A Dispatch ends its Supervisor's lane on every refusal: a rerun could
+	// replay a continuation or hide an interrupted worker.
+	dispatch := operation == "next" && c.Bool("dispatch")
+	var continued *ledger.ClaimEnding
 	refusal := func(err error) error {
 		reason, repair := refusalParts(err)
-		facts := refusalFacts{Status: "fix_required", Reason: reason, Repair: repair, ClaimState: claimState, Claim: claim, StatusCommand: statusCmd, Rerun: boundCommand(c, "skl "+phase+" "+operation)}
-		return emit(deliveryOutput{Status: "fix_required", Reason: err.Error(), Repair: deliveryJSONRepair, kind: "refused", facts: facts})
+		facts := refusalFacts{Status: "fix_required", Reason: reason, Repair: repair, ClaimState: claimState, Claim: claim, StatusCommand: statusCmd, Rerun: boundCommand(c, "skl "+phase+" "+operation), Stop: dispatch, Previous: continued}
+		return emit(deliveryOutput{Status: "fix_required", Reason: err.Error(), Repair: deliveryJSONRepair, Previous: continued, kind: "refused", facts: facts})
 	}
 	if c.NArg() != 0 {
 		return refusal(fmt.Errorf("delivery commands take flags, not positional arguments"))
@@ -82,6 +94,9 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 	if operation == "next" {
 		if item != "" || claim != "" {
 			return refusal(fmt.Errorf("next selects its own project-scoped Work Item; resume an existing reservation explicitly"))
+		}
+		if !dispatch && (c.IsSet("after") || c.IsSet("worker-model") || c.IsSet("worker-thinking")) {
+			return refusal(fmt.Errorf("--after, --worker-model and --worker-thinking apply only to --dispatch"))
 		}
 	} else if item == "" || claim == "" {
 		return refusal(fmt.Errorf("%s requires --item <proposal>/<slice> and the exact --claim <acquisition-commit>", operation))
@@ -102,19 +117,30 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 	}
 	var execution *ledger.Execution
 	if operation == "next" {
-		outcome, err := nextWork(c.Context, c.Duration("wait"), c.Duration("poll"), func() (workflow.ImplementationOutcome, error) {
-			var err error
-			execution, err = ledger.StartDeliveryContext(c.Context, store, repository.Repository, phase)
-			status := "no_work"
-			if execution != nil {
-				status = "work_available"
+		// A continuation passes only after its dispatched Claim's handoff,
+		// established before anything is selected, claimed or awaited.
+		if dispatch && c.IsSet("after") {
+			ending, err := ledger.ClaimEndingOf(store, repository.Repository, phase, c.String("after"))
+			if err != nil {
+				return refusal(err)
 			}
-			return workflow.ImplementationOutcome{Status: status}, err
+			if !ending.Handoff() {
+				return emit(stoppedOutput(phase, repository, ending))
+			}
+			continued = &ending
+		}
+		selection, err := nextWork(c.Context, c.Duration("wait"), c.Duration("poll"), func() (ledger.Selection, error) {
+			execution, err := ledger.StartDeliveryContext(c.Context, store, repository.Repository, phase)
+			if execution == nil {
+				return ledger.Selection{Status: ledger.NoWork}, err
+			}
+			return ledger.Selection{Status: ledger.WorkAvailable, Execution: execution}, err
 		})
+		execution = selection.Execution
 		if err != nil {
 			if c.Context.Err() != nil {
 				if format == formatMarkdown {
-					if err := writeOutcome(stdout, "interrupted", phaseFacts{Phase: phase, StatusCommand: statusInvocation(repository)}); err != nil {
+					if err := writeOutcome(stdout, "interrupted", phaseFacts{Phase: phase, StatusCommand: statusInvocation(repository), Previous: continued}); err != nil {
 						return err
 					}
 				}
@@ -128,7 +154,10 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 			return refusal(err)
 		}
 		if execution == nil {
-			return emit(deliveryOutput{Status: outcome.Status, Reason: outcome.Reason, kind: selectionKinds[outcome.Status], facts: phaseFacts{Status: outcome.Status, Phase: phase}})
+			return emit(deliveryOutput{Status: selection.Status, Reason: selectionReasons[selection.Status], Previous: continued, kind: selectionKinds[selection.Status], facts: phaseFacts{Status: selection.Status, Phase: phase, Previous: continued}})
+		}
+		if dispatch {
+			return emit(dispatchOutput(c, phase, repository, execution, continued))
 		}
 	} else if operation == "release" {
 		if err := ledger.ReleaseDelivery(store, repository.Repository, item, phase, claim); err != nil {
@@ -160,11 +189,16 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 		}
 		source = &observed
 	}
-	packet, err := setup.PresentDelivery(execution, repository, phase, operation, source, c.Path("result-directory"))
+	// A dispatched worker receives what next would have rendered for its Claim.
+	rendered := operation
+	if operation == "resume" && c.Bool("dispatched") {
+		rendered = "next"
+	}
+	packet, err := setup.PresentDelivery(execution, repository, phase, rendered, source, c.Path("result-directory"))
 	if err != nil {
 		return emit(renderingFailedOutput(phase, repository, execution.Item, execution.Claim.Commit, err))
 	}
-	return emit(deliveryOutput{Status: map[string]string{"next": "work_available", "resume": "work_available", "prepare": "prepared", "inspect": "inspected"}[operation], Execution: execution, Source: source, Packet: &packet})
+	return emit(deliveryOutput{Status: map[string]string{"next": ledger.WorkAvailable, "resume": ledger.WorkAvailable, "prepare": "prepared", "inspect": "inspected"}[operation], Execution: execution, Source: source, Packet: &packet})
 }
 
 // deliveryJSONRepair is the repair the JSON transport has always carried for
@@ -172,7 +206,10 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 const deliveryJSONRepair = "preserve source progress and Result Documents; use the exact existing Claim reference when retrying or resuming"
 
 // selectionKinds maps an empty selection's status to its outcome kind.
-var selectionKinds = map[string]string{"no_work": "no-work", "idle_timeout": "idle-timeout"}
+var selectionKinds = map[string]string{ledger.NoWork: "no-work", ledger.IdleTimeout: "idle-timeout"}
+
+// selectionReasons are the JSON reasons of empty selections.
+var selectionReasons = map[string]string{ledger.IdleTimeout: "no claimable work in this queue during the idle window; not global completion"}
 
 // renderingFailedOutput reports an acquired Claim whose Execution Skill failed
 // to render.

@@ -1,19 +1,15 @@
 # {title}
 
 <!--
-State the desired result compactly. Keep detailed rules and scenarios in
-behavior.md rather than repeating them here. Delete this comment in the real file.
-
-Frozen when `skl ledger accept` records the proposal. Accepted files stay
-read-only: progress and completion evidence live in phase reports, never in
-completion ticks or edits here.
+State the desired result compactly; the rules and scenarios live in
+behavior.md. Delete this comment in the real file.
 -->
 
 ## Why
 <!-- The problem and motivation from the user's perspective. -->
 
 ## What
-<!-- The result this change introduces, without restating behavior.md. -->
+<!-- The result this change introduces. -->
 
 ## Scope
 <!-- What this change includes. -->
@@ -23,22 +19,16 @@ completion ticks or edits here.
 
 ## Definition of Done
 <!--
-Observable completion outcomes. Give each independently tracked outcome its
-descriptive local label (B<n> for behavior rules, A<n> for architectural
-commitments, warranted T<n>). Rules and scenarios may map many-to-many to these
-outcomes; do not create one item per scenario or test.
-
-Use Markdown task bullets: `- [ ]`.
+Observable completion outcomes as `- [ ]` bullets, each citing the labels it
+covers: B<n> rules, A<n> commitments, warranted T<n> tasks. An outcome may cover
+several rules, and a rule several outcomes.
 -->
 
 ## Manual verification
 <!--
-Human-owned checks an agent cannot run or observe, such as visual checks,
-third-party dashboards, unavailable credentials, or production-like data.
-Label each check M<n>. Frozen like every other obligation. "None" is a valid
-answer.
-
-Use Markdown task bullets `- [ ]` when checks exist.
+Checks only a human can run, such as visual checks, third-party dashboards,
+unavailable credentials or production-like data, as `- [ ]` bullets labelled
+M<n>. "None" is a valid answer.
 -->
 
 ---
@@ -63,10 +53,10 @@ Let a customer cancel an order before shipment and receive a full refund.
 - Post-shipment returns
 
 ## Definition of Done
-- [ ] Eligible cancellation is available and leaves the order cancelled.
-- [ ] Cancellation refunds the complete order payment.
-- [ ] Ineligible cancellation is rejected without changing the order.
+- [ ] Eligible cancellation is available and leaves the order cancelled (B1).
+- [ ] Cancellation refunds the complete order payment (B1).
+- [ ] Ineligible cancellation is rejected without changing the order (B1).
 
 ## Manual verification
-- [ ] Confirm the initiated refund in the Stripe test dashboard.
+- [ ] M1: Confirm the initiated refund in the Stripe test dashboard.
 ```

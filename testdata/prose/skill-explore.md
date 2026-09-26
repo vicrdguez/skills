@@ -1,14 +1,17 @@
-Interview the user relentlessly until you reach a shared understanding. Map this as a **design tree**: every decision branches into the decisions that hang off it.
+Interview the user relentlessly until you share one understanding of the change. Map it as a **design tree**: every decision branches into the decisions that hang off it.
 
-When the user supplies the exact path to a `.thinking` artifact, read it as starting context and carry its settled concepts forward unless project evidence contradicts them. Never enumerate `.thinking` or select an artifact on the user's behalf.
+## Start
 
-If the user names a superseded slug or its closed issue/PR, first read that issue, the PR's audit ledger and review findings, and the abandoned artifacts. Use the failed attempt as evidence when mapping the design tree: keep what it established and reopen the decisions implicated in its supersession.
+- When the user supplies the exact path to a `.thinking` artifact, read it as starting context and carry its settled concepts forward unless the project contradicts them. Read only the path the user gives.
+- When the user names a superseded slice, read its Contract with `skl ledger show --item <proposal>/<slice>`, then its reports by running that command once with `--phase implement` and once with `--phase watchdog`. Keep what the failed attempt established, and reopen the decisions its supersession implicates.
 
-Use the `domain` skill throughout the session to sharpen the project's language and write durable docs as decisions crystallise.
+Check: you have read everything the user named.
 
-Work the tree in **rounds**. The **frontier** is every decision whose prerequisites are already settled: the questions you can ask _now_ without guessing at answers you haven't heard yet. Ask the whole frontier in one round: number each question and give your recommended answer. Then wait for the user's answers before the next round.
+Use the `domain` guidance below throughout the session: sharpen the project's language and write durable docs as decisions crystallise.
 
-Format a round like so:
+## Ask in rounds
+
+The **frontier** is every decision whose prerequisites are settled: the questions you can ask now without guessing at answers you haven't heard. Ask the whole frontier in one round, numbered, each with your recommended answer:
 
 ```
 ❓ **Q1** - **<question title>**: <question body, might be multiple paragraphs, including multiple choices>
@@ -22,20 +25,23 @@ Format a round like so:
 ➡️ <your recommended answer>
 ```
 
-Each round the user answers reshapes the tree: settled decisions push the frontier outward and unblock questions that depended on them. Recompute the frontier and ask the next round. A question whose answer depends on another question still open in this round belongs to a _later_ round, not this one.
+Wait for the answers, recompute the frontier, and ask the next round. A question that depends on another question still open belongs to a later round.
 
-Finding _facts_ is your job, never the user's. When a frontier question needs a fact from the environment (filesystem, tools, etc.), dispatch a sub-agent to find it; don't ask the user for anything you could look up yourself. Don't block on it: a running exploration is an unsettled prerequisite, so only the questions downstream of it wait for the sub-agent to report; ask the rest of the frontier now. The _decisions_ are the user's: put each to them and wait.
+Facts are yours to find; decisions are the user's. When a question needs a fact from the environment, dispatch a sub-agent to find it, and meanwhile ask the rest of the frontier: only the questions downstream of that fact wait for it. Put every decision to the user and wait for their answer.
 
-The session is done when the frontier is empty: every branch of the design tree visited, nothing left silently assumed. Present one final approval recap that separates:
+Check: the frontier is empty. Every branch is visited and nothing is silently assumed.
+
+## Recap and approval
+
+Present one final recap that separates:
 
 - consequential rules the change must preserve;
-- architectural commitments and responsibility ownership;
+- architectural commitments and who owns each responsibility;
 - choices deliberately delegated to implementation.
 
-Name the ADRs or other decisions that carry relevant context. Ask the user to correct or confirm this recap; confirmation is the semantic approval for the whole Proposal. If they correct it, update the design tree and recap before asking again.
+Name the ADRs and other decisions that carry them. Ask the user to correct or confirm the recap. A correction updates the tree and the recap; ask again. Confirmation approves the meaning of the whole Proposal.
 
-After confirmation, stop. Suggest running the `propose` skill in the same session so it can materialize the shared understanding, carrying the exact approved recap and referenced decisions forward. Faithful artifacts do not require the user to reread or separately reapprove each one. Never run `propose` yourself.
-
+After confirmation, stop. Suggest running the `propose` skill in this session, carrying the confirmed recap and its decisions forward. Leave running it to the user.
 
 
 Actively build and sharpen the project's domain model as you design. This is the *active discipline* — challenging terms, inventing edge-case scenarios, and writing the glossary and decisions down **the moment they crystallise**. (Merely reading CONTEXT.md for vocabulary is not this skill — that's a one-line habit any skill can do. This skill is for when you're changing the model, not just consuming it.)

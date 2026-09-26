@@ -780,7 +780,7 @@ func TestRetrieveApprovedContractGuidance(t *testing.T) {
 	}{
 		{name: "explore", included: []string{"domain"}},
 		{
-			name: "propose", included: []string{"design", "testing"},
+			name:      "propose",
 			resources: []string{"behavior.md", "intent.md", "issue-publication.md", "plan.md", "tasks.md"},
 		},
 	} {
