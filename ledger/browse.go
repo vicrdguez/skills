@@ -89,12 +89,35 @@ type ClaimFacts struct {
 	Basis string `json:"basis"`
 }
 
-// DependencyFact is one recorded Dependency with its blocker's lifecycle at
-// the same revision, or the problem that keeps that lifecycle unknown.
-type DependencyFact struct {
+// RelatedSlice is the other end of one recorded Dependency with its recorded
+// facts at the same revision. Recorded is false when no committed record of
+// that Slice exists, so it cannot be opened; Problem explains why its
+// lifecycle is unknown.
+type RelatedSlice struct {
 	Item      string `json:"item"`
+	Recorded  bool   `json:"recorded"`
+	Archived  bool   `json:"archived"`
+	Title     string `json:"title,omitempty"`
 	Lifecycle string `json:"lifecycle,omitempty"`
 	Problem   string `json:"problem,omitempty"`
+}
+
+// DependencyFact is one recorded Dependency on a blocker. Satisfied is set
+// only when the blocker is Merged; Ready for Merge, Superseded, and unknown
+// blockers never satisfy it.
+type DependencyFact struct {
+	RelatedSlice
+	Satisfied bool `json:"satisfied"`
+}
+
+// ReverseDependencies lists the Slices whose records name one Slice as a
+// Dependency. It states the recorded relationship, not that those Slices
+// still wait on it. Incomplete is set when unreadable records could also name
+// it; Diagnostics disclose them.
+type ReverseDependencies struct {
+	Slices      []RelatedSlice `json:"slices"`
+	Incomplete  bool           `json:"incomplete"`
+	Diagnostics []Diagnostic   `json:"diagnostics,omitempty"`
 }
 
 // Overview is the ledger-wide Project overview at one committed revision.
@@ -126,30 +149,31 @@ type ProposalDetail struct {
 // Readable is false when its state record cannot be interpreted; the facts it
 // would carry are then unknown rather than absent, unclaimed, or complete.
 type SliceDetail struct {
-	Revision        string             `json:"revision"`
-	Project         string             `json:"project"`
-	Repository      string             `json:"repository,omitempty"`
-	Proposal        string             `json:"proposal"`
-	Slice           string             `json:"slice"`
-	Item            string             `json:"item"`
-	Archived        bool               `json:"archived"`
-	ProposalRetired bool               `json:"proposal_retired"`
-	Readable        bool               `json:"readable"`
-	Title           string             `json:"title,omitempty"`
-	Lifecycle       string             `json:"lifecycle,omitempty"`
-	Claim           *ClaimFacts        `json:"claim,omitempty"`
-	Branch          string             `json:"branch,omitempty"`
-	Dependencies    []DependencyFact   `json:"dependencies"`
-	Issue           *ForgeAttachment   `json:"issue,omitempty"`
-	ParentIssue     *ForgeAttachment   `json:"parent_issue,omitempty"`
-	Submission      *ForgeAttachment   `json:"submission,omitempty"`
-	Target          *IntegrationTarget `json:"integration_target,omitempty"`
-	Completion      *TerminalEvidence  `json:"completion,omitempty"`
-	ActiveDecision  bool               `json:"active_decision"`
-	Pending         *PublicationState  `json:"pending_publication,omitempty"`
-	Documents       []string           `json:"documents"`
-	Reports         []string           `json:"reports"`
-	Diagnostics     []Diagnostic       `json:"diagnostics,omitempty"`
+	Revision        string              `json:"revision"`
+	Project         string              `json:"project"`
+	Repository      string              `json:"repository,omitempty"`
+	Proposal        string              `json:"proposal"`
+	Slice           string              `json:"slice"`
+	Item            string              `json:"item"`
+	Archived        bool                `json:"archived"`
+	ProposalRetired bool                `json:"proposal_retired"`
+	Readable        bool                `json:"readable"`
+	Title           string              `json:"title,omitempty"`
+	Lifecycle       string              `json:"lifecycle,omitempty"`
+	Claim           *ClaimFacts         `json:"claim,omitempty"`
+	Branch          string              `json:"branch,omitempty"`
+	Dependencies    []DependencyFact    `json:"dependencies"`
+	Blocks          ReverseDependencies `json:"blocks"`
+	Issue           *ForgeAttachment    `json:"issue,omitempty"`
+	ParentIssue     *ForgeAttachment    `json:"parent_issue,omitempty"`
+	Submission      *ForgeAttachment    `json:"submission,omitempty"`
+	Target          *IntegrationTarget  `json:"integration_target,omitempty"`
+	Completion      *TerminalEvidence   `json:"completion,omitempty"`
+	ActiveDecision  bool                `json:"active_decision"`
+	Pending         *PublicationState   `json:"pending_publication,omitempty"`
+	Documents       []string            `json:"documents"`
+	Reports         []string            `json:"reports"`
+	Diagnostics     []Diagnostic        `json:"diagnostics,omitempty"`
 }
 
 // Snapshot pins one committed ledger revision for a browsing view. Every
@@ -360,7 +384,8 @@ func (v *Snapshot) Proposal(projectName, name string) (*ProposalDetail, error) {
 }
 
 // Slice returns every recorded fact of one Slice identified as
-// proposal/slice, with its Dependencies resolved at the same revision.
+// proposal/slice, with its Dependencies and the Slices it blocks resolved at
+// the same revision.
 func (v *Snapshot) Slice(projectName, item string) (*SliceDetail, error) {
 	proposalName, sliceName, found := strings.Cut(item, "/")
 	if !found || !ValidRecordName(proposalName) || !ValidRecordName(sliceName) {
@@ -411,6 +436,11 @@ func (v *Snapshot) Slice(projectName, item string) (*SliceDetail, error) {
 			detail.Reports = append(detail.Reports, phase)
 		}
 	}
+	records, err := v.states(project)
+	if err != nil {
+		return nil, err
+	}
+	detail.Blocks = v.blocks(project, tree, records)
 	if !slice.readable {
 		return detail, nil
 	}
@@ -422,41 +452,107 @@ func (v *Snapshot) Slice(projectName, item string) (*SliceDetail, error) {
 		detail.Claim = &ClaimFacts{Phase: state.Claim.Phase, Basis: state.Claim.Basis}
 	}
 	for _, dependency := range state.Dependencies {
-		detail.Dependencies = append(detail.Dependencies, v.dependency(project, dependency))
+		detail.Dependencies = append(detail.Dependencies, v.dependency(project, dependency, records))
 	}
 	return detail, nil
 }
 
-// dependency resolves one recorded Dependency's blocker at this revision.
-func (v *Snapshot) dependency(project *projectTree, reference string) DependencyFact {
-	fact := DependencyFact{Item: strings.TrimPrefix(reference, "proposals/")}
+// sliceRecord is one decoded Slice state with the Proposal holding it.
+type sliceRecord struct {
+	proposal *proposalTree
+	read     sliceRead
+}
+
+// states decodes every Slice state of one Project, active and archived, with
+// one batched object read.
+func (v *Snapshot) states(project *projectTree) (map[*sliceTree]sliceRecord, error) {
+	var paths []string
+	for _, proposal := range project.proposals {
+		for _, slice := range proposal.slices {
+			paths = append(paths, v.slicePath(project.name, proposal, slice.name)+"/state.json")
+		}
+	}
+	blobs, err := v.blobs(paths)
+	if err != nil {
+		return nil, err
+	}
+	records := map[*sliceTree]sliceRecord{}
+	for _, proposal := range project.proposals {
+		for _, slice := range proposal.slices {
+			contents, present := blobs[v.slicePath(project.name, proposal, slice.name)+"/state.json"]
+			records[slice] = sliceRecord{proposal, decodeSlice(project.name+"/"+proposal.name, slice, contents, present)}
+		}
+	}
+	return records, nil
+}
+
+// resolve finds the Slice one recorded Dependency reference names, preferring
+// an active Proposal as every other lookup does, or the problem that leaves it
+// unresolved.
+func (v *Snapshot) resolve(project *projectTree, reference string) (*sliceTree, string) {
 	proposalName, sliceName, ok := workItemReference(reference)
 	if !ok {
-		fact.Problem = "the recorded reference is not a proposal/slice identity"
-		return fact
+		return nil, "the recorded reference is not a proposal/slice identity"
 	}
 	_, proposal, err := v.proposal(project.name, proposalName)
 	if err != nil || proposal.slice(sliceName) == nil {
-		fact.Problem = "no committed record of the blocker exists at this revision"
-		return fact
+		return nil, "no committed record of it exists at this revision"
 	}
-	path := v.slicePath(project.name, proposal, sliceName) + "/state.json"
-	blobs, err := v.blobs([]string{path})
-	if err != nil {
-		fact.Problem = "the blocker record is unreadable: " + err.Error()
-		return fact
-	}
-	contents, present := blobs[path]
-	read := decodeSlice(project.name+"/"+proposal.name, proposal.slice(sliceName), contents, present)
+	return proposal.slice(sliceName), ""
+}
+
+// related states one recorded Slice's identity and lifecycle.
+func related(slice *sliceTree, record sliceRecord) RelatedSlice {
+	fact := RelatedSlice{Item: record.proposal.name + "/" + slice.name, Recorded: true, Archived: record.proposal.archived}
+	state := record.read.state
 	switch {
-	case !read.readable:
-		fact.Problem = "the blocker's state record is unreadable"
-	case !knownLifecycle(read.state.State):
-		fact.Lifecycle, fact.Problem = read.state.State, "the blocker records an unsupported lifecycle"
+	case !record.read.readable:
+		fact.Problem = "its state record is unreadable"
+	case !knownLifecycle(state.State):
+		fact.Title, fact.Lifecycle, fact.Problem = state.Title, state.State, "it records an unsupported lifecycle"
 	default:
-		fact.Lifecycle = read.state.State
+		fact.Title, fact.Lifecycle = state.Title, state.State
 	}
 	return fact
+}
+
+// dependency resolves one recorded Dependency's blocker at this revision.
+func (v *Snapshot) dependency(project *projectTree, reference string, records map[*sliceTree]sliceRecord) DependencyFact {
+	blocker, problem := v.resolve(project, reference)
+	if blocker == nil {
+		return DependencyFact{RelatedSlice: RelatedSlice{Item: strings.TrimPrefix(reference, "proposals/"), Problem: problem}}
+	}
+	fact := DependencyFact{RelatedSlice: related(blocker, records[blocker])}
+	fact.Satisfied = fact.Problem == "" && fact.Lifecycle == Merged
+	return fact
+}
+
+// blocks finds every Slice of the Project whose record names target as a
+// Dependency. Records that cannot be read or named could name it too, so
+// they leave the result incomplete rather than empty.
+func (v *Snapshot) blocks(project *projectTree, target *sliceTree, records map[*sliceTree]sliceRecord) ReverseDependencies {
+	result := ReverseDependencies{Slices: []RelatedSlice{}, Diagnostics: append([]Diagnostic(nil), project.diagnostics...)}
+	for _, proposal := range project.proposals {
+		result.Diagnostics = append(result.Diagnostics, proposal.invalid...)
+		for _, slice := range proposal.slices {
+			if slice == target {
+				continue
+			}
+			record := records[slice]
+			if !record.read.readable {
+				result.Diagnostics = append(result.Diagnostics, record.read.diagnostics...)
+				continue
+			}
+			for _, reference := range record.read.state.Dependencies {
+				if blocker, _ := v.resolve(project, reference); blocker == target {
+					result.Slices = append(result.Slices, related(slice, record))
+					break
+				}
+			}
+		}
+	}
+	result.Incomplete = len(result.Diagnostics) > 0
+	return result
 }
 
 func (v *Snapshot) project(name string) (*projectTree, error) {

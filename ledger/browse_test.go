@@ -59,7 +59,7 @@ func TestBrowseKeepsLifecycleAndWatchdogClaimIndependent(t *testing.T) {
 	if slice.Revision != revision || slice.Title != "Cancel orders" || slice.Branch != "feat/cancel" || slice.Repository != "acme/widgets" {
 		t.Fatalf("recorded identity facts differ: %+v", slice)
 	}
-	if len(slice.Dependencies) != 1 || slice.Dependencies[0] != (ledger.DependencyFact{Item: "orders/base", Lifecycle: ledger.Merged}) {
+	if len(slice.Dependencies) != 1 || slice.Dependencies[0] != (ledger.DependencyFact{RelatedSlice: ledger.RelatedSlice{Item: "orders/base", Recorded: true, Title: "base", Lifecycle: ledger.Merged}, Satisfied: true}) {
 		t.Fatalf("dependency facts = %+v, want orders/base Merged", slice.Dependencies)
 	}
 	if slice.Issue.Number != 11 || slice.Submission.Number != 12 || slice.ParentIssue.Number != 10 || slice.Target.Branch != "main" {
@@ -241,7 +241,7 @@ func TestBrowseArchivedProposalsOnExplicitSelection(t *testing.T) {
 		t.Fatalf("archived slice keeps its identity and lifecycle: %+v, %v", slice, err)
 	}
 	dependent, err := snapshot.Slice("widgets", "orders/cancel")
-	if err != nil || len(dependent.Dependencies) != 1 || dependent.Dependencies[0] != (ledger.DependencyFact{Item: "legacy/shipped", Lifecycle: ledger.Merged}) {
+	if err != nil || len(dependent.Dependencies) != 1 || dependent.Dependencies[0] != (ledger.DependencyFact{RelatedSlice: ledger.RelatedSlice{Item: "legacy/shipped", Recorded: true, Archived: true, Title: "shipped", Lifecycle: ledger.Merged}, Satisfied: true}) {
 		t.Fatalf("dependency on an archived blocker = %+v, %v", dependent, err)
 	}
 }
@@ -296,5 +296,124 @@ func TestBrowseCountsInvalidRecordNamesAsUnknown(t *testing.T) {
 	}
 	if len(overview.Projects) != 1 || !overview.Projects[0].Incomplete || len(overview.Diagnostics) != 1 || overview.Diagnostics[0].Scope != ledger.ScopeLedger {
 		t.Fatalf("invalid Project and Proposal names must be diagnosed: %+v", overview)
+	}
+}
+
+func related(item string, archived bool, lifecycle string) ledger.RelatedSlice {
+	_, title, _ := strings.Cut(item, "/")
+	return ledger.RelatedSlice{Item: item, Recorded: true, Archived: archived, Title: title, Lifecycle: lifecycle}
+}
+
+func TestBrowseRelatesDependenciesInBothDirectionsAcrossProposals(t *testing.T) {
+	l := newDeliveryLedger(t)
+	l.addProject("widgets", "acme/widgets")
+	l.addSlice("widgets", "orders", "base", ledger.ReadyForMerge, nil, deliveryInitial)
+	l.addSlice("widgets", "orders", "cancel", ledger.ReadyForImplementation, []string{"proposals/orders/base", "proposals/legacy/shipped", "proposals/legacy/dropped"}, deliveryInitial)
+	l.addSlice("widgets", "billing", "invoice", ledger.Merged, []string{"proposals/orders/base"}, deliveryInitial)
+	l.addSlice("widgets", "billing", "unrelated", ledger.Rework, nil, deliveryInitial)
+	l.addSlice("widgets", "legacy", "shipped", ledger.Merged, nil, deliveryInitial)
+	l.addSlice("widgets", "legacy", "dropped", ledger.Superseded, nil, deliveryInitial)
+	l.commitAll("accept")
+	if err := os.MkdirAll(filepath.Join(l.root, "projects", "widgets", "archive"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	deliveryGit(t, l.root, "mv", "projects/widgets/proposals/legacy", "projects/widgets/archive/legacy")
+	revision := l.commitAll("archive legacy")
+	before := browseObservable(t, l)
+	snapshot := browseSnapshot(t, l)
+
+	cancel, err := snapshot.Slice("widgets", "orders/cancel")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []ledger.DependencyFact{
+		{RelatedSlice: related("orders/base", false, ledger.ReadyForMerge)},
+		{RelatedSlice: related("legacy/shipped", true, ledger.Merged), Satisfied: true},
+		{RelatedSlice: related("legacy/dropped", true, ledger.Superseded)},
+	}
+	if len(cancel.Dependencies) != len(want) {
+		t.Fatalf("dependencies = %+v, want %+v", cancel.Dependencies, want)
+	}
+	for index := range want {
+		if cancel.Dependencies[index] != want[index] {
+			t.Fatalf("dependency %d = %+v, want %+v: only a Merged blocker satisfies it", index, cancel.Dependencies[index], want[index])
+		}
+	}
+
+	base, err := snapshot.Slice("widgets", "orders/base")
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocked := []ledger.RelatedSlice{related("billing/invoice", false, ledger.Merged), related("orders/cancel", false, ledger.ReadyForImplementation)}
+	if base.Revision != revision || base.Blocks.Incomplete || len(base.Blocks.Slices) != 2 || base.Blocks.Slices[0] != blocked[0] || base.Blocks.Slices[1] != blocked[1] {
+		t.Fatalf("orders/base blocks = %+v at %s, want %+v at %s with each lifecycle as recorded", base.Blocks, base.Revision, blocked, revision)
+	}
+	if base.Lifecycle != ledger.ReadyForMerge {
+		t.Fatalf("a relation changed the blocker's recorded lifecycle: %s", base.Lifecycle)
+	}
+
+	shipped, err := snapshot.Slice("widgets", "legacy/shipped")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !shipped.Archived || len(shipped.Blocks.Slices) != 1 || shipped.Blocks.Slices[0] != related("orders/cancel", false, ledger.ReadyForImplementation) {
+		t.Fatalf("an archived blocker keeps its reverse relationship: %+v", shipped.Blocks)
+	}
+	unrelated, err := snapshot.Slice("widgets", "billing/unrelated")
+	if err != nil || len(unrelated.Dependencies) != 0 || len(unrelated.Blocks.Slices) != 0 || unrelated.Blocks.Incomplete {
+		t.Fatalf("an unrelated slice has no relationships: %+v, %v", unrelated, err)
+	}
+	if after := browseObservable(t, l); after != before {
+		t.Fatalf("querying relationships changed the ledger:\n%s\nwant\n%s", after, before)
+	}
+}
+
+func TestBrowseDisclosesUnresolvedAndIncompleteRelationships(t *testing.T) {
+	l := newDeliveryLedger(t)
+	l.addProject("widgets", "acme/widgets")
+	l.addSlice("widgets", "orders", "base", ledger.Merged, nil, deliveryInitial)
+	l.addSlice("widgets", "orders", "damaged", ledger.Merged, nil, deliveryInitial)
+	l.addFile(deliveryStatePath("widgets", "orders/damaged"), "{not json")
+	l.addSlice("widgets", "orders", "cancel", ledger.ReadyForImplementation, []string{"proposals/orders/base", "proposals/orders/damaged", "proposals/gone/missing"}, deliveryInitial)
+	l.addFile("projects/widgets/proposals/orders/Bad Name/state.json", `{"state": "merged", "title": "bad", "branch": "bad"}`)
+	l.commitAll("record damaged relationships")
+	snapshot := browseSnapshot(t, l)
+
+	cancel, err := snapshot.Slice("widgets", "orders/cancel")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cancel.Dependencies) != 3 || cancel.Dependencies[0] != (ledger.DependencyFact{RelatedSlice: related("orders/base", false, ledger.Merged), Satisfied: true}) {
+		t.Fatalf("the healthy dependency stays resolved: %+v", cancel.Dependencies)
+	}
+	damaged, missing := cancel.Dependencies[1], cancel.Dependencies[2]
+	if damaged.Item != "orders/damaged" || !damaged.Recorded || damaged.Lifecycle != "" || damaged.Problem == "" || damaged.Satisfied {
+		t.Fatalf("an unreadable blocker must stay an unknown, unsatisfied edge: %+v", damaged)
+	}
+	if missing.Item != "gone/missing" || missing.Recorded || missing.Problem == "" || missing.Satisfied {
+		t.Fatalf("a missing blocker must stay an unresolved, unsatisfied edge: %+v", missing)
+	}
+
+	base, err := snapshot.Slice("widgets", "orders/base")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !base.Blocks.Incomplete || len(base.Blocks.Slices) != 1 || base.Blocks.Slices[0].Item != "orders/cancel" {
+		t.Fatalf("reverse dependencies must list what is readable and disclose the rest: %+v", base.Blocks)
+	}
+	diagnosed := map[string]bool{}
+	for _, diagnostic := range base.Blocks.Diagnostics {
+		diagnosed[diagnostic.Subject] = true
+	}
+	if !diagnosed["widgets/orders/damaged"] || !diagnosed["widgets/orders"] {
+		t.Fatalf("the unreadable state and the invalid-named member must both be disclosed: %+v", base.Blocks.Diagnostics)
+	}
+
+	unreadable, err := snapshot.Slice("widgets", "orders/damaged")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unreadable.Readable || len(unreadable.Blocks.Slices) != 1 || unreadable.Blocks.Slices[0].Item != "orders/cancel" {
+		t.Fatalf("an unreadable slice still shows the recorded slices it blocks: %+v", unreadable.Blocks)
 	}
 }

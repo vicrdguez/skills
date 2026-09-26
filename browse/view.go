@@ -39,13 +39,32 @@ func (m Model) bodyHeight(header, footer string) int {
 	return max(m.height-lipgloss.Height(header)-lipgloss.Height(footer), 3)
 }
 
-// layoutDetail fits the Slice detail viewport to the current terminal.
+// layoutDetail fits the Slice detail viewport to the current terminal and
+// marks its followable relationships, the selected one by text as well as
+// style.
 func (m *Model) layoutDetail() {
 	m.detail.Width = m.width
 	m.detail.Height = m.bodyHeight(m.header(), m.footer())
-	if m.screen == sliceScreen && m.slice != nil {
-		m.detail.SetContent(wrap(strings.Join(SliceLines(m.slice), "\n"), m.width))
+	if m.screen != sliceScreen || m.slice == nil {
+		return
 	}
+	lines, relations := sliceLines(m.slice)
+	m.relation = min(m.relation, max(len(relations)-1, 0))
+	for index, relation := range relations {
+		lines[relation.line] = "  " + lines[relation.line]
+		if index == m.relation {
+			lines[relation.line] = selectedStyle.Render("> " + strings.TrimPrefix(lines[relation.line], "  "))
+		}
+	}
+	var rows []string
+	m.selectedRow = 0
+	for index, line := range lines {
+		if len(relations) > 0 && index == relations[m.relation].line {
+			m.selectedRow = len(rows)
+		}
+		rows = append(rows, strings.Split(wrap(line, m.width), "\n")...)
+	}
+	m.detail.SetContent(strings.Join(rows, "\n"))
 }
 
 func (m Model) header() string {

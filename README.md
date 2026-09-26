@@ -110,7 +110,7 @@ The first command returns the committed current report references and explicitly
 
 ### Browse the ledger
 
-`skl browse` opens a terminal browser over the configured ledger: Projects, their Proposals, and each Slice's lifecycle, Claim, dependencies, branch, and attachments. It starts at the Project of the current checkout when exactly one Project records its repository, otherwise at the overview; `--project <name>` selects the starting Project explicitly. Press `s` to switch Projects, `a` to include archived Proposals, and `i` or `p` to open a Slice's recorded issue or pull request in your browser (`i` on a Proposal opens its parent issue).
+`skl browse` opens a terminal browser over the configured ledger: Projects, their Proposals, and each Slice's lifecycle, Claim, dependencies, branch, and attachments. It starts at the Project of the current checkout when exactly one Project records its repository, otherwise at the overview; `--project <name>` selects the starting Project explicitly. Press `s` to switch Projects, `a` to include archived Proposals, and `i` or `p` to open a Slice's recorded issue or pull request in your browser (`i` on a Proposal opens its parent issue). A Slice lists the Slices it depends on and the Slices it blocks, including ones in other or archived Proposals; `tab` selects a relationship, `enter` opens it without changing the archive choice, and `esc` returns to where you were.
 
 The same facts are available without a terminal UI:
 
@@ -120,6 +120,8 @@ skl browse project --project <name> [--include-archived]
 skl browse proposal --project <name> --proposal <proposal>
 skl browse slice --project <name> --item <proposal>/<slice>
 ```
+
+`skl browse slice` includes both directions of the Slice's recorded Dependencies. A dependency is satisfied only by a Merged blocker; a missing or unreadable blocker stays listed as unresolved, and the blocked list says when unreadable records could also depend on the Slice.
 
 Every view reads one committed ledger revision and never fetches, contacts a forge, or changes Workflow State, so it can lag a merge that `skl status` has not yet observed. A Claim is shown as a reservation, not as a running worker. Unreadable records are diagnosed where they occur and mark the affected summaries incomplete; the rest stays browsable.
 

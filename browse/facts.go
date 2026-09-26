@@ -107,13 +107,27 @@ func SliceSummaryLines(slice ledger.SliceSummary) []string {
 
 // SliceLines are the labeled facts of one Slice detail.
 func SliceLines(slice *ledger.SliceDetail) []string {
+	lines, _ := sliceLines(slice)
+	return lines
+}
+
+// relation is one followable relationship line of a Slice detail: its line
+// index and the recorded Slice it opens.
+type relation struct {
+	line int
+	item string
+}
+
+// sliceLines are SliceLines with the followable relationship lines in order.
+func sliceLines(slice *ledger.SliceDetail) ([]string, []relation) {
+	var relations []relation
 	lines := []string{"Slice: " + slice.Item}
 	if slice.Readable {
 		lines = append(lines, "Title: "+slice.Title)
 	}
 	lines = append(lines, "Project: "+slice.Project+" ("+orUnknown(slice.Repository)+")", "Location: "+locationText(slice.Archived, slice.ProposalRetired)+" proposal")
 	if !slice.Readable {
-		lines = append(lines, "Lifecycle: unknown", "Claim: unknown")
+		lines = append(lines, "Lifecycle: unknown", "Claim: unknown", "Dependencies: unknown")
 	} else {
 		lines = append(lines, "Lifecycle: "+lifecycleLabel(slice.Lifecycle))
 		if slice.Claim == nil {
@@ -126,13 +140,30 @@ func SliceLines(slice *ledger.SliceDetail) []string {
 			lines = append(lines, "Dependencies: none")
 		}
 		for _, dependency := range slice.Dependencies {
-			switch {
-			case dependency.Problem != "":
-				lines = append(lines, "Depends on: "+dependency.Item+" (lifecycle unknown: "+dependency.Problem+")")
-			default:
-				lines = append(lines, "Depends on: "+dependency.Item+" ("+lifecycleLabel(dependency.Lifecycle)+")")
+			satisfaction := "unsatisfied until Merged"
+			if dependency.Satisfied {
+				satisfaction = "satisfied"
 			}
+			if dependency.Recorded {
+				relations = append(relations, relation{len(lines), dependency.Item})
+			}
+			lines = append(lines, "Depends on: "+relationText(dependency.RelatedSlice, satisfaction))
 		}
+	}
+	for _, blocked := range slice.Blocks.Slices {
+		relations = append(relations, relation{len(lines), blocked.Item})
+		lines = append(lines, "Blocks: "+relationText(blocked, ""))
+	}
+	switch {
+	case slice.Blocks.Incomplete:
+		lines = append(lines, "Blocks incomplete: "+incompleteText(slice.Blocks.Diagnostics)+" may also depend on this Slice")
+		for _, diagnostic := range slice.Blocks.Diagnostics {
+			lines = append(lines, DiagnosticText(diagnostic))
+		}
+	case len(slice.Blocks.Slices) == 0:
+		lines = append(lines, "Blocks: none")
+	}
+	if slice.Readable {
 		lines = append(lines, "Issue: "+attachmentText(slice.Issue), "Pull request: "+attachmentText(slice.Submission))
 		if slice.Target != nil {
 			lines = append(lines, "Integration target: "+slice.Target.Repository+" "+slice.Target.Branch)
@@ -155,7 +186,32 @@ func SliceLines(slice *ledger.SliceDetail) []string {
 		}
 	}
 	lines = append(lines, "Parent issue: "+attachmentText(slice.ParentIssue), "Contract documents: "+listText(slice.Documents), "Current reports: "+listText(slice.Reports))
-	return append(lines, diagnosticLines(slice.Diagnostics)...)
+	return append(lines, diagnosticLines(slice.Diagnostics)...), relations
+}
+
+// relationText names a related Slice with its recorded state. Qualifier
+// follows a known lifecycle; an unknown one is never read as satisfied.
+func relationText(slice ledger.RelatedSlice, qualifier string) string {
+	text := slice.Item
+	if slice.Archived {
+		text += " [archived]"
+	}
+	if slice.Title != "" {
+		text += " — " + slice.Title
+	}
+	var state string
+	switch {
+	case !slice.Recorded:
+		state = "unresolved: " + slice.Problem
+	case slice.Problem != "":
+		state = "lifecycle unknown: " + slice.Problem
+	default:
+		state = lifecycleLabel(slice.Lifecycle)
+	}
+	if qualifier != "" {
+		state += "; " + qualifier
+	}
+	return text + " (" + state + ")"
 }
 
 // issueURL and pullRequestURL construct GitHub links from a recorded

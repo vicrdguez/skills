@@ -36,7 +36,8 @@ func git(t *testing.T, root string, args ...string) {
 }
 
 // fixtureLedger commits two Projects: widgets with an attached, watchdog
-// claimed Slice and an archived Proposal, and gadgets with one Slice.
+// claimed Slice that depends on a Slice of an archived Proposal and blocks a
+// sibling, and gadgets with one Slice.
 func fixtureLedger(t *testing.T) *ledger.Snapshot {
 	t.Helper()
 	root := t.TempDir()
@@ -47,8 +48,10 @@ func fixtureLedger(t *testing.T) *ledger.Snapshot {
 	write(t, root, "projects/widgets/proposals/orders/proposal.json", `{"accepted": "2024-01-01T00:00:00Z", "parent_title": "Order cancellation", "parent_issue": {"repository": "acme/widgets", "number": 10}}`)
 	write(t, root, "projects/widgets/proposals/orders/cancel/state.json", `{"state": "awaiting_review", "title": "Cancel orders", "branch": "feat/cancel",
 		"issue": {"repository": "acme/widgets", "number": 11}, "submission": {"repository": "acme/widgets", "number": 12},
-		"claim": {"phase": "watchdog", "basis": "3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c", "inputs": {"contract": []}}}`)
-	write(t, root, "projects/widgets/proposals/orders/refund/state.json", `{"state": "ready_for_implementation", "title": "Refund orders", "branch": "feat/refund"}`)
+		"claim": {"phase": "watchdog", "basis": "3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c", "inputs": {"contract": []}},
+		"dependencies": ["proposals/legacy/old"]}`)
+	write(t, root, "projects/widgets/proposals/orders/refund/state.json", `{"state": "ready_for_implementation", "title": "Refund orders", "branch": "feat/refund",
+		"dependencies": ["proposals/orders/cancel", "proposals/gone/missing"]}`)
 	write(t, root, "projects/widgets/proposals/orders/broken/state.json", `{broken`)
 	write(t, root, "projects/widgets/archive/legacy/proposal.json", `{"accepted": "2023-01-01T00:00:00Z"}`)
 	write(t, root, "projects/widgets/archive/legacy/old/state.json", `{"state": "merged", "title": "Old work", "branch": "old"}`)
@@ -95,6 +98,8 @@ func (s *session) press(keys ...string) {
 			msg = tea.KeyMsg{Type: tea.KeyEsc}
 		case "down":
 			msg = tea.KeyMsg{Type: tea.KeyDown}
+		case "tab":
+			msg = tea.KeyMsg{Type: tea.KeyTab}
 		default:
 			msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(name)}
 		}
@@ -213,5 +218,39 @@ func TestBrowserFitsNarrowAndWideTerminals(t *testing.T) {
 			}
 		}
 		s.shows("Slice: orders/cancel")
+	}
+}
+
+func TestBrowserFollowsRelationshipsAndRestoresContext(t *testing.T) {
+	s := start(t, "widgets")
+	s.send(tea.WindowSizeMsg{Width: 120, Height: 40})
+	s.press("enter", "down", "enter")
+	s.shows("Slice: orders/cancel", "archived hidden",
+		"> Depends on: legacy/old [archived] — Old work (Merged; satisfied)",
+		"  Blocks: orders/refund — Refund orders (Ready for Implementation)")
+
+	s.press("enter")
+	s.shows("skl browse › Projects › widgets › legacy › old", "archived hidden", "Slice: legacy/old",
+		"Location: archived proposal", "Lifecycle: Merged", "> Blocks: orders/cancel — Cancel orders (Awaiting Review)")
+	s.press("a")
+	s.shows("archived shown", "Slice: legacy/old")
+	s.press("esc")
+	s.shows("skl browse › Projects › widgets › orders › cancel", "archived hidden", "> Depends on: legacy/old")
+
+	s.press("tab", "enter")
+	s.shows("Slice: orders/refund", "> Depends on: orders/cancel — Cancel orders (Awaiting Review; unsatisfied until Merged)",
+		"Depends on: gone/missing (unresolved: ")
+	s.press("tab")
+	s.shows("> Depends on: orders/cancel")
+	s.press("esc")
+	s.shows("Slice: orders/cancel", "> Blocks: orders/refund")
+
+	s.press("esc")
+	s.shows("Slices (3)", "> cancel — Awaiting Review")
+	s.press("esc")
+	s.shows("Proposals (1)", "archived hidden")
+	s.hides("legacy")
+	if len(s.opened) != 0 {
+		t.Fatalf("following relationships opened links: %v", s.opened)
 	}
 }
