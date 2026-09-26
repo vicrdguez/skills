@@ -12,3 +12,5 @@ Claim: `{{.Claim}}`
 {{end}}{{if .ReviewScope}}Review scope: `{{.ReviewScope}}`
 {{end}}{{if .FetchStatus}}Source fetch: {{.FetchStatus}}
 {{end}}{{end}}
+
+{{define "subagent-choice"}}{{with .Model}} with `{{.}}`{{end}}{{with .Thinking}} at `{{.}}` thinking{{end}}{{end}}

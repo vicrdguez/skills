@@ -275,6 +275,10 @@ skl install
 
 Implement and Watchdog are Harness Adapters in each harness's native entry-point mechanism: the `/implement` and `/watchdog` prompt templates in `~/.pi/agent/prompts/`, user-invoked skills in `~/.claude/skills/`, and commands in `~/.config/opencode/commands/`. Codex has no entry point that takes arguments, so it keeps the Implement and Watchdog stubs. Each runs its `next` command. Plain `skl skill implement` and `skl skill watchdog` refuse read-only retrieval because no Work Item would be selected or claimed. Named resources remain retrievable. Independent skills use `skl skill <name>` or `skl skill --format json <name>`; flags precede the skill name.
 
+`implement-team` runs `skl implement next --mode team`: the Execution Skill has the worker lead a team of implementer subagents. `implement` takes the reviewer model and thinking level as its arguments; `implement-team` takes the helper model and thinking level first, then the reviewer's. `skl` passes these values to the worker without interpreting them, and an omitted one leaves the harness default. The pi templates default to `openai-codex/gpt-6-sol` at `xhigh` for reviewers and `openai-codex/gpt-6-luna` at `xhigh` for helpers. Codex's `implement-team` stub passes the mode only.
+
+To use other defaults, copy an installed template to a new name and edit its defaults; `skl install` refreshes only the files it installed.
+
 For a one-time OpenCode cutover, install the new binary and stubs before removing obsolete Pi skill-directory or raw-source entries from OpenCode's `skills.paths`. Preserve unrelated settings and other skills. The installer does not edit discovery settings. Restart OpenCode and confirm the native stubs load without claiming work.
 
 The `prose/` tree is authoring input. Installed stubs retrieve embedded definitions from the running binary, not the checkout or neighboring files. Rebuild the binary after Markdown edits, then refresh owned adapters. Raw source-tree registration bypasses this distribution arrangement.

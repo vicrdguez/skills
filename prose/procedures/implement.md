@@ -70,4 +70,7 @@ Check: the pause reports the work waiting on a human.
 
 ## Delegation
 
-When you can spawn fresh-context subagents, you may give them bounded implementation or testing work whose writes do not overlap; otherwise work serially. Brief each one fully: the assignment, the worktree, the Contract items it serves, the standards, the checks it runs and the files it may write. Helpers return their changes, evidence and limitations. You keep the Claim: integrate and verify every contribution, and submit alone. Helper checks are input; the integrated checks, the Full Gate and Audit still run over the combined work.
+{{if eq .Mode "team"}}Lead a team of fresh-context implementer subagents. You keep the Claim and every workflow operation: commits, pushes, `skl` commands, the Audit and the handoff.{{with .Helper}} Run each implementer{{template "subagent-choice" .}}.{{end}}
+
+{{template "craft/team.md" .}}{{else}}When you can spawn fresh-context subagents, you may give them bounded implementation or testing work whose writes do not overlap; otherwise work serially. Brief each one fully: the assignment, the worktree, the Contract items it serves, the standards, the checks it runs and the files it may write. Helpers return their changes, evidence and limitations. You keep the Claim: integrate and verify every contribution, and submit alone. Helper checks are input; the integrated checks, the Full Gate and Audit still run over the combined work.
+{{end -}}
