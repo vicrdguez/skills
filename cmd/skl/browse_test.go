@@ -60,7 +60,7 @@ func browseQuery(t *testing.T, app *stageApp, output *bytes.Buffer, args ...stri
 	if err := json.Unmarshal(output.Bytes(), &outcome); err != nil {
 		t.Fatalf("decode %q: %v", output, err)
 	}
-	if outcome.Status == "shown" && outcome.Overview == nil && outcome.Inventory == nil && outcome.Proposal == nil && outcome.Slice == nil {
+	if outcome.Status == "shown" && outcome.Overview == nil && outcome.Inventory == nil && outcome.Proposal == nil && outcome.Slice == nil && outcome.Slices == nil {
 		t.Fatalf("browse %v showed no result: %s", args, output)
 	}
 	return outcome
@@ -104,6 +104,78 @@ func TestBrowseQueriesReadCommittedRecordsWithoutSideEffects(t *testing.T) {
 	}
 	if ledgerSnapshot(t, fixture.clone) != clone || runGitOutput(t, fixture.upstream, "for-each-ref") != upstream {
 		t.Fatal("browse queries changed the ledger clone or its upstream")
+	}
+}
+
+func TestBrowseSlicesSelectsByIndependentFacts(t *testing.T) {
+	fixture := browseFixture(t)
+	app, output := browseApp(t)
+	clone := ledgerSnapshot(t, fixture.clone)
+	found := func(outcome browseOutcome) string {
+		t.Helper()
+		var items []string
+		for _, project := range outcome.Slices.Projects {
+			for _, group := range project.Groups {
+				for _, slice := range group.Slices {
+					items = append(items, project.Name+":"+slice.Item)
+				}
+			}
+		}
+		return strings.Join(items, " ")
+	}
+
+	watchdog := browseQuery(t, app, output, "slices", "--claim", "watchdog")
+	if found(watchdog) != "widgets:orders/cancel" || watchdog.Slices.Incomplete {
+		t.Fatalf("watchdog claims = %+v", watchdog.Slices)
+	}
+	combined := browseQuery(t, app, output, "slices", "--claim", "none", "--lifecycle", "rework", "--lifecycle", "awaiting_review", "--search", "HAM")
+	if found(combined) != "gadgets:tools/hammer" {
+		t.Fatalf("combined selection = %+v", combined.Slices)
+	}
+	empty := browseQuery(t, app, output, "slices", "--project", "gadgets", "--claim", "watchdog")
+	if empty.Slices.Matched != 0 || empty.Slices.Incomplete || len(empty.Slices.Projects) != 1 {
+		t.Fatalf("an empty readable Project scope = %+v", empty.Slices)
+	}
+	archived := browseQuery(t, app, output, "slices", "--include-archived", "--search", "old", "--group", "lifecycle")
+	if found(archived) != "widgets:legacy/old" || archived.Slices.Projects[0].Groups[0].Lifecycle != "superseded" {
+		t.Fatalf("archived lifecycle grouping = %+v", archived.Slices)
+	}
+	refused := browseQuery(t, app, output, "slices", "--claim", "deploy")
+	if refused.Status != "fix_required" || !strings.Contains(refused.Reason, `"deploy"`) || refused.Repair == "" {
+		t.Fatalf("unsupported claim = %+v", refused)
+	}
+
+	output.Reset()
+	if err := app.Run([]string{"skl", "browse", "slices", "--claim", "watchdog"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, fact := range []string{"Selection: any lifecycle · watchdog claim in every Project", "Result: 1 matching slice",
+		"## Project widgets (acme/widgets)", "### Proposal orders", "- orders/cancel — Awaiting Review · watchdog claim — Cancel orders"} {
+		if !strings.Contains(output.String(), fact) {
+			t.Fatalf("markdown lacks %q:\n%s", fact, output)
+		}
+	}
+	if ledgerSnapshot(t, fixture.clone) != clone {
+		t.Fatal("finding slices changed the ledger clone")
+	}
+
+	writeFile(t, filepath.Join(fixture.clone, "projects", "widgets", "proposals", "orders", "broken", "state.json"), "{broken")
+	runGit(t, fixture.clone, "add", "-A")
+	runGit(t, fixture.clone, "commit", "-q", "-m", "damage a record")
+	unknown := browseQuery(t, app, output, "slices", "--claim", "watchdog")
+	undecided := unknown.Slices.Projects[0].Undecided
+	if found(unknown) != "widgets:orders/cancel" || !unknown.Slices.Incomplete || unknown.Slices.Undecided != 1 || len(undecided) != 1 || undecided[0].Item != "orders/broken" {
+		t.Fatalf("an unreadable Claim must be undecided, never a match: %+v", unknown.Slices)
+	}
+	output.Reset()
+	if err := app.Run([]string{"skl", "browse", "slices", "--claim", "watchdog"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, fact := range []string{"Result: 1 matching slice; 1 undecided by unknown facts; incomplete", "### Undecided: unknown facts",
+		"- ! orders/broken — lifecycle unknown · claim unknown", "state.json is unreadable"} {
+		if !strings.Contains(output.String(), fact) {
+			t.Fatalf("markdown lacks %q:\n%s", fact, output)
+		}
 	}
 }
 

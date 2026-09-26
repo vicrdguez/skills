@@ -196,11 +196,15 @@ func TestBrowserOpensRecordedAttachmentsOnlyOnExplicitAction(t *testing.T) {
 	s.shows("No recorded pull request attachment to open")
 }
 
-func TestBrowserFitsNarrowAndWideTerminals(t *testing.T) {
+// fits presses each key sequence in turn at both terminal sizes and fails
+// when a view overflows the terminal.
+func fits(t *testing.T, sequences [][]string) []*session {
+	t.Helper()
+	var sessions []*session
 	for _, size := range []tea.WindowSizeMsg{{Width: 40, Height: 14}, {Width: 140, Height: 30}} {
 		s := start(t, "widgets")
 		s.send(size)
-		for _, keys := range [][]string{nil, {"enter"}, {"down", "enter"}} {
+		for _, keys := range sequences {
 			s.press(keys...)
 			view := s.model.View()
 			if height := lipgloss.Height(view); height > size.Height {
@@ -212,6 +216,105 @@ func TestBrowserFitsNarrowAndWideTerminals(t *testing.T) {
 				}
 			}
 		}
+		sessions = append(sessions, s)
+	}
+	return sessions
+}
+
+func TestBrowserFitsNarrowAndWideTerminals(t *testing.T) {
+	for _, s := range fits(t, [][]string{nil, {"enter"}, {"down", "enter"}}) {
 		s.shows("Slice: orders/cancel")
 	}
+}
+
+func downs(count int) []string {
+	return strings.Fields(strings.Repeat("down ", count))
+}
+
+func TestBrowserNavigatesFromClaimFactToSlices(t *testing.T) {
+	s := start(t, "widgets")
+	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})
+	s.press("f")
+	s.shows("skl browse › Find slices › Facts", "✓ Any lifecycle (3)", "Awaiting Review (1)", "watchdog claim (1)", "unclaimed (1)",
+		"! Counted only under Any: 1 with unknown lifecycle, 1 with unknown claim")
+
+	s.press(downs(10)...)
+	s.shows("Finds: any lifecycle · watchdog claim in Project widgets")
+	s.press("enter")
+	s.shows("skl browse › Find slices", "Finding: any lifecycle · watchdog claim in Project widgets",
+		"Proposal orders", "orders/cancel — Awaiting Review · watchdog claim — Cancel orders",
+		"Undecided: unknown facts", "! orders/broken — lifecycle unknown · claim unknown",
+		"! 1 matching slice; 1 undecided by unknown facts; incomplete")
+	s.hides("orders/refund", "tools/hammer")
+
+	s.press("enter")
+	s.shows("skl browse › Find slices › widgets › orders/cancel", "Lifecycle: Awaiting Review", "Claim: watchdog reservation")
+	s.press("esc")
+	s.shows("Finding: any lifecycle · watchdog claim")
+	s.press("esc")
+	s.shows("skl browse › Projects › widgets", "Proposals (1)")
+}
+
+func TestBrowserCombinesNameSearchWithFactsScopeAndGrouping(t *testing.T) {
+	s := start(t, "widgets")
+	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})
+	s.press("/", "q", "u", "i", "t")
+	s.shows("Search names: quit█")
+	s.press("esc")
+	s.hides("Search names:")
+
+	s.press("/", "ORDERS", "enter")
+	s.shows(`Finding: any lifecycle · any claim · name contains "ORDERS" in Project widgets`, "3 matching slices", "orders/refund")
+	s.press("f", "down", "enter")
+	s.shows(`Finding: Ready for Implementation · any claim · name contains "ORDERS"`, "orders/refund — Ready for Implementation · unclaimed",
+		"! orders/broken", "1 matching slice; 1 undecided")
+	s.hides("orders/cancel")
+
+	s.press("/", "hammer", "enter")
+	s.shows(`Finding: Ready for Implementation · any claim · name contains "hammer" in Project widgets`, "No Slice is known to match; 1 undecided by unknown facts")
+	s.press("w")
+	s.shows("in every Project", "No Slice is known to match")
+	s.hides("tools/hammer")
+	s.press("f", "k", "enter")
+	s.shows("any lifecycle · any claim", "gadgets · Proposal tools", "tools/hammer — Rework · unclaimed — Hammer", "widgets · Undecided")
+	s.hides("orders/refund")
+	s.press("g")
+	s.shows("grouped by lifecycle", "gadgets · Rework", "widgets · Undecided")
+	s.press("enter")
+	s.shows("skl browse › Find slices › gadgets › tools/hammer", "Lifecycle: Rework")
+}
+
+func TestBrowserTellsEmptyResultsFromUnknownOnes(t *testing.T) {
+	s := start(t, "gadgets")
+	s.press("/", "zzz", "enter")
+	s.shows("No Slice matches this selection.")
+	s.hides("incomplete")
+
+	s.press("w")
+	s.shows("No Slice is known to match; 1 undecided by unknown facts; incomplete", "widgets · Undecided", "orders/broken")
+	s.press("a", "/", "old", "enter")
+	s.shows("archived shown", "legacy/old [archived] — Merged · unclaimed — Old work")
+}
+
+func TestBrowserFitsFindingScreens(t *testing.T) {
+	for _, s := range fits(t, [][]string{{"f"}, {"enter"}, {"w", "g"}, {"/", "orders"}, {"enter"}}) {
+		s.shows("Find slices", "Finding:", "> ")
+	}
+}
+
+func TestBrowserKeepsItsContextAfterOpeningAResultElsewhere(t *testing.T) {
+	s := start(t, "widgets")
+	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})
+	s.press("enter", "/", "hammer", "enter")
+	s.shows(`name contains "hammer" in Project widgets`)
+	s.press("w", "enter")
+	s.shows("skl browse › Find slices › gadgets › tools/hammer", "Lifecycle: Rework")
+	s.press("f")
+	s.shows("skl browse › Find slices › Facts")
+	s.press("esc")
+	s.shows(`name contains "hammer" in every Project`, "tools/hammer")
+	s.press("w")
+	s.shows(`name contains "hammer" in Project widgets`)
+	s.press("esc")
+	s.shows("skl browse › Projects › widgets › orders", "Slices (3)")
 }
