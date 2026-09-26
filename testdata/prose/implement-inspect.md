@@ -16,3 +16,4 @@ These are the prepared source facts. Re-read them with `skl implement inspect --
 - Submit settled work with `skl implement submit --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --body '/tmp/skl-implement-result/implement-report.md' --public-body '/tmp/skl-implement-result/public.md' --head <final-source-sha> --target <observed-target-sha>`.
 - Pause for a human decision with `skl implement needs-human --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --body '/tmp/skl-implement-result/implement-report.md' --public-body '/tmp/skl-implement-result/public.md' --head <branch-head> --target <observed-target-sha>`.
 - Release the Claim with `skl implement release --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001'`.
+

@@ -1,6 +1,6 @@
 # Implementation report
 
-Write the report body at `{{.ResultDirectory}}/implement-report.md`, in Markdown. The frontmatter is added on submit. The report must stand on its own, with these sections:
+Write the report body at `{{.ResultDirectory}}/implement-report.md`, in Markdown. Start at the first heading, with no frontmatter. The report must stand on its own, with these sections:
 
 ## Summary
 
