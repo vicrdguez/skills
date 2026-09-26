@@ -1,15 +1,3 @@
-Protocol: skl.instructions/v1
-Skill: explore
-Included skills: domain
-Facts: {}
-Resources: none
-
----
-name: explore
-description: A relentless interview to sharpen a plan, design or idea which also creates durable docs (ADRs and glossary) as we go.
-disable-model-invocation: true
----
-
 Interview the user relentlessly until you reach a shared understanding. Map this as a **design tree**: every decision branches into the decisions that hang off it.
 
 When the user supplies the exact path to a `.thinking` artifact, read it as starting context and carry its settled concepts forward unless project evidence contradicts them. Never enumerate `.thinking` or select an artifact on the user's behalf.
@@ -50,15 +38,7 @@ After confirmation, stop. Suggest running the `propose` skill in the same sessio
 
 
 
-## Included Skill: domain
-
----
-name: domain
-description: Actively build and sharpen a project's domain model. Use when the user wants to pin down domain terminology or a ubiquitous language, record an architectural decision, or when another skill needs to maintain the domain model
----
-
 Actively build and sharpen the project's domain model as you design. This is the *active discipline* — challenging terms, inventing edge-case scenarios, and writing the glossary and decisions down **the moment they crystallise**. (Merely reading CONTEXT.md for vocabulary is not this skill — that's a one-line habit any skill can do. This skill is for when you're changing the model, not just consuming it.)
-
 
 ## File structure
 
@@ -108,7 +88,7 @@ When domain relationships are being discussed, stress-test them with specific sc
 When the user states how something works, check whether the code agrees. If you find a contradiction, surface it: "Your code cancels entire Orders, but you just said partial cancellation is possible — which is right?"
 
 ### Update `CONTEXT.md` inline
-When a term is resolved, update `CONTEXT.md` right there. Don't batch these up — capture them as they happen. Use the format from `skl skill --resource reference/CONTEXT-FORMAT.md domain`.
+When a term is resolved, update `CONTEXT.md` right there. Don't batch these up — capture them as they happen. Use the format from `skl skill --resource CONTEXT-FORMAT.md domain`.
 
 `CONTEXT.md` should be totally devoid of implementation details. Do not treat `CONTEXT.md` as a spec, a scratch pad, or a repository for implementation decisions. It is a glossary and nothing else.
 
@@ -119,4 +99,4 @@ Only offer to create an ADR when all three are true:
 2. Surprising without context — a future reader will wonder "why did they do it this way?"
 3. The result of a real trade-off — there were genuine alternatives and you picked one for specific reasons
 
-If any of the three is missing, skip the ADR. Use the format from `skl skill --resource reference/ADR-FORMAT.md domain`.
+If any of the three is missing, skip the ADR. Use the format from `skl skill --resource ADR-FORMAT.md domain`.

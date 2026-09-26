@@ -66,8 +66,8 @@ Agent-visible prose is everything a worker reads: skills, Skill Resources, stubs
 - One place per meaning across the bundle.
 - Explain a reason only when it steers judgment.
 - End every step on a clear check.
-- writing-for-agents applies to `skills/**`.
+- writing-for-agents applies to `prose/**`.
 - ADR and Contract wording is never transcribed into prose.
 - Agent-visible prose is verified by its golden in `testdata/prose/`; regenerate the goldens after a prose change. Tests of rendered prose check structure: bound values, the resource manifest, emitted commands that run, and branch markers the golden journey does not reach. When a prose change breaks a wording assertion, delete that assertion.
 
-Changes to `skills/**`, stubs or Outcome Instructions follow `docs/agent-prose.md`.
+Changes to `prose/**`, stubs or Outcome Instructions follow `docs/agent-prose.md`.

@@ -1,9 +1,3 @@
----
-name: decision
-description: Resolve current Needs Human requests from the ledger-wide Decision Inbox with explicitly scoped human direction.
-disable-model-invocation: true
----
-
 # Decision Inbox
 
 The Decision Inbox is the ledger-wide set of current Needs Human requests in the configured Workflow Ledger. It is resolved from the ledger, not from the working directory: reading it from inside one Project's source checkout never narrows it, and no source checkout or forge authentication is required. Reading the inbox claims no work and changes no Workflow State.
@@ -112,7 +106,7 @@ round: 2
 
 - Group related questions freely for the human, but keep each request's identity, exact reference, commitment, conflict, evidence, options, consequences, and recommendation separate. A shared rule does not merge two obligations or erase their differences.
 - Any missing commitment, conflict, evidence, option, consequence, or recommendation is clarified with the human; it is never invented, guessed, or filled in by inference.
-- Reading the inbox, grouping requests, and discussing them record no decision and change no Workflow State. Retrieving the detailed rules with `skl skill --resource reference/triage.md decision` records nothing either.
+- Reading the inbox, grouping requests, and discussing them record no decision and change no Workflow State. Retrieving the detailed rules with `skl skill --resource triage.md decision` records nothing either.
 
 
 ## Only the human answer authorizes

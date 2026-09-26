@@ -21,7 +21,7 @@ func TestInstallPiQueueAdaptersWithoutDuplicatingSkills(t *testing.T) {
 		}
 		for _, file := range []string{"prompts/implement-loop.md", "prompts/watchdog-loop.md", "prompts/queue-next.mjs", "agents/implement-runner.md", "agents/watchdog-runner.md"} {
 			got := readFile(t, filepath.Join(home, ".pi/agent", file))
-			want := readRepositoryFile(t, file)
+			want := readRepositoryFile(t, filepath.Join("prose/adapters", file))
 			if got != want {
 				t.Fatalf("installed adapter %s differs", file)
 			}

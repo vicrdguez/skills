@@ -93,7 +93,7 @@ skl ledger publish --repo <path> --proposal add-foundation \
   --issue add-foundation=/tmp/add-foundation.md
 ```
 
-Established issues are updated in place and missing ones created; only established attachments are recorded. Reads and updates retry briefly, but a create whose outcome is unknown is never retried, so a later publication may duplicate it. Without prose, the outcome names the private readback and guidance from `skl skill --resource reference/issue-publication.md --input proposal=add-foundation --input repo=/abs/path --input remote=origin propose` to author it. Known competing upstream history requires explicit reconciliation, never automatic merge, rebase, or force-push. Public bodies are not retained as private workflow history.
+Established issues are updated in place and missing ones created; only established attachments are recorded. Reads and updates retry briefly, but a create whose outcome is unknown is never retried, so a later publication may duplicate it. Without prose, the outcome names the private readback and guidance from `skl skill --resource issue-publication.md --input proposal=add-foundation --input repo=/abs/path --input remote=origin propose` to author it. Known competing upstream history requires explicit reconciliation, never automatic merge, rebase, or force-push. Public bodies are not retained as private workflow history.
 
 Read exact evidence with `skl ledger show --commit <sha> --path <ledger-path>`; a missing reference is refused, not substituted. Commands default to Markdown; `--format json` gives equivalent typed transport.
 
@@ -129,10 +129,10 @@ Audit uses that fixed integrated comparison, runs the Full Gate, and dispatches 
 Retrieve the bound deferred report resource when verification and dispositions are settled:
 
 ```sh
-skl skill --resource reference/ledger-submission.md --input result_directory=/tmp/skl-result --input procedure=initial implement
+skl skill --resource ledger-submission.md --input result_directory=/tmp/skl-result --input procedure=initial implement
 ```
 
-Write the private Markdown body at the returned location. It contains the full current completion-and-evidence table for `B<n>`, `A<n>`, and warranted `T<n>` items, explicit `complete`/`incomplete` declarations, grouped evidence, separate human-owned `M<n>` checks, and the Audit ledger. Omitted items are not complete. The engine adds schema-1 YAML metadata and exact input references; it never infers a verdict from prose. The format is documented by `skl skill --resource reference/report-schema.md implement`.
+Write the private Markdown body at the returned location. It contains the full current completion-and-evidence table for `B<n>`, `A<n>`, and warranted `T<n>` items, explicit `complete`/`incomplete` declarations, grouped evidence, separate human-owned `M<n>` checks, and the Audit ledger. Omitted items are not complete. The engine adds schema-1 YAML metadata and exact input references; it never infers a verdict from prose. The format is documented in `docs/report-schema.md`.
 
 Commit source changes and keep the planned worktree clean, then use the bound command:
 
@@ -164,7 +164,7 @@ Run the Full Gate independently and verify the implementation's complete current
 Retrieve the bound deferred report instructions:
 
 ```sh
-skl skill --resource reference/ledger-review.md --input result_directory=/tmp/skl-result --input round=2 --input reviewed_head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa watchdog
+skl skill --resource ledger-review.md --input result_directory=/tmp/skl-result --input round=2 --input reviewed_head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa watchdog
 ```
 
 Record stable Work-Item-local `W<n>` identities, evidence, required outcomes, and `BLOCK`, `HUMAN`, or `NOTE` dispositions. Distinguish resolved historical findings from still-active ones. Submit the private body with the bound `skl watchdog submit` command and `--outcome pass`, `rework`, or `needs-human`:
@@ -186,7 +186,7 @@ skl ledger present --repo <path> --item <proposal>/<slice>
 skl ledger present --repo <path> --item <proposal>/<slice> --public-body <fresh-public-prose.md>
 ```
 
-Without `--public-body` it returns the current result, its exact private evidence references for `skl ledger show`, the phase's `reference/pull-presentation.md` authoring guidance, and the bound continuation; author fresh prose rather than restoring an earlier body. With prose it pushes the recorded source revision normally (never forcing), presents it as draft, and marks an approved result ready only while the pull request shows its reviewed final revision. It reruns no phase and changes no lifecycle, report, Claim, or review count; only a newly established pull request association is recorded. Reads and repeatable updates retry immediately within a small bound, further updates stop once a later local result supersedes the selected one, and a creation whose response was lost is reported as `uncertain` rather than retried. Temporarily stale public content is possible and is corrected by presenting the then-current result.
+Without `--public-body` it returns the current result, its exact private evidence references for `skl ledger show`, the phase's `pull-presentation.md` authoring guidance, and the bound continuation; author fresh prose rather than restoring an earlier body. With prose it pushes the recorded source revision normally (never forcing), presents it as draft, and marks an approved result ready only while the pull request shows its reviewed final revision. It reruns no phase and changes no lifecycle, report, Claim, or review count; only a newly established pull request association is recorded. Reads and repeatable updates retry immediately within a small bound, further updates stop once a later local result supersedes the selected one, and a creation whose response was lost is reported as `uncertain` rather than retried. Temporarily stale public content is possible and is corrected by presenting the then-current result.
 
 Ledger-backed terminal observation/archival and final-review packaging are separate work, not implied by these delivery commands. Existing `skl status` and legacy proposal operations do not replace those ledger operations. In-flight forge-authoritative work must finish with its former binary or undergo an explicit administrative cutover with normal workers stopped; current delivery commands never silently adopt it.
 
@@ -250,17 +250,17 @@ Direct Implement and Watchdog stubs run their respective `next` commands. Plain 
 
 For a one-time OpenCode cutover, install the new binary and stubs before removing obsolete Pi skill-directory or raw-source entries from OpenCode's `skills.paths`. Preserve unrelated settings and other skills. The installer does not edit discovery settings. Restart OpenCode and confirm the native stubs load without claiming work.
 
-The `skills/` tree is authoring input. Installed stubs retrieve embedded definitions from the running binary, not the checkout or neighboring files. Rebuild the binary after Markdown edits, then refresh owned adapters. Raw source-tree registration bypasses this distribution arrangement.
+The `prose/` tree is authoring input. Installed stubs retrieve embedded definitions from the running binary, not the checkout or neighboring files. Rebuild the binary after Markdown edits, then refresh owned adapters. Raw source-tree registration bypasses this distribution arrangement.
 
 Resource names are exact and owner-relative, including inside nested resources:
 
 ```sh
-skl skill --resource reference/DEEPENING.md design
+skl skill --resource DEEPENING.md design
 skl skill --resource SKILL-MECHANICS.md writing-for-agents
-skl skill --resource reference/ledger-submission.md --describe-inputs implement
+skl skill --resource ledger-submission.md --describe-inputs implement
 ```
 
-Parameterized resources use repeated `--input name=value` flags, split at the first `=`. `--describe-inputs` reports accepted names, types, choices, and required status without rendering a procedure. An invocation binds every already-known input and defers resource bodies until needed. Retrieve a parent skill only when it was not already supplied; `SKILL.md` is not a resource name.
+Parameterized resources use repeated `--input name=value` flags, split at the first `=`. `--describe-inputs` reports accepted names, types, choices, and required status without rendering a procedure. An invocation binds every already-known input and defers resource bodies until needed. Retrieve a parent skill only when it was not already supplied.
 
 ## Legacy proposal publication
 

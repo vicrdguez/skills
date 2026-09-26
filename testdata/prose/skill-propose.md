@@ -1,15 +1,3 @@
-Protocol: skl.instructions/v1
-Skill: propose
-Included skills: design, testing
-Facts: {}
-Resources: reference/behavior.md, reference/intent.md, reference/issue-publication.md, reference/plan.md, reference/tasks.md
-
----
-name: propose
-description: Materialize the current conversation into a change spec -- This is not about interviewing, just synthesis of what we've already discussed
-disable-model-invocation: true
----
-
 This skill takes the current conversation context and codebase understanding into a set of tickets: tracer-bullet vertical slices. Each will declare any blocking dependencies (if any) and include the artifacts that drive implementation. 
 
 The thinking and decision making already happened, thus this stage is just precise materialization.
@@ -103,22 +91,15 @@ Keep the artifact set compact and authoritative. Preserve approved decisions; do
 Label independently tracked commitments with descriptive local labels: `B<n>` for binding behavior rules, `A<n>` for architectural commitments, warranted `T<n>` for tasks, and `M<n>` for human-owned Manual Verification. Number independently tracked commitments only — never every paragraph or heading — do not duplicate an identity across documents, and expect no CLI numbering service: the labels are yours to assign and keep stable from acceptance on.
 
 **Always**:
-- `intent.md`: State the desired result, scope, exclusions, Definition of Done, and human-owned Manual Verification without duplicating detailed behavior. Follow the template from `skl skill --resource reference/intent.md propose`.
-- `behavior.md`: State scoped named rules where consequential ambiguity needs resolution, then add only binding scenarios that discriminate plausible interpretations. Rules govern their whole class of situations beyond the examples. Use `testing` and its public guidance (`skl skill --resource reference/tests.md testing`) to choose observable seams and credible evidence without prescribing one test or task per scenario. Follow the template from `skl skill --resource reference/behavior.md propose`.
+- `intent.md`: State the desired result, scope, exclusions, Definition of Done, and human-owned Manual Verification without duplicating detailed behavior. Follow the template from `skl skill --resource intent.md propose`.
+- `behavior.md`: State scoped named rules where consequential ambiguity needs resolution, then add only binding scenarios that discriminate plausible interpretations. Rules govern their whole class of situations beyond the examples. Use `testing` and its public guidance (`skl skill --resource tests.md testing`) to choose observable seams and credible evidence without prescribing one test or task per scenario. Follow the template from `skl skill --resource behavior.md propose`.
 
 **When warranted**:
-- `plan.md`: Required when the approved design pins architecture. Preserve responsibility ownership, boundary assumptions, deliberately agreed interfaces, and verification strategy from the approved source; reference relevant existing ADRs and label incidental sketches as illustrative. Follow the template from `skl skill --resource reference/plan.md propose`.
-- `tasks.md`: Create it only when useful sequencing, dependencies, or coordination need an explicit ledger. Do not manufacture tasks from scenario or test counts. Follow the template from `skl skill --resource reference/tasks.md propose`.
+- `plan.md`: Required when the approved design pins architecture. Preserve responsibility ownership, boundary assumptions, deliberately agreed interfaces, and verification strategy from the approved source; reference relevant existing ADRs and label incidental sketches as illustrative. Follow the template from `skl skill --resource plan.md propose`.
+- `tasks.md`: Create it only when useful sequencing, dependencies, or coordination need an explicit ledger. Do not manufacture tasks from scenario or test counts. Follow the template from `skl skill --resource tasks.md propose`.
 
 An unambiguously implied case may be implemented and tested without extending the frozen artifact set. Resolve every consequential behavioral or architectural gap before publication; silence does not delegate it, and no new convention relaxes an explicit obligation in an existing ledger.
 
-
-## Included Skill: design
-
----
-name: design
-description: Shared vocabulary for designing deep modules. Use when the user wants to design or improve a module's interface, find deepening opportunities, decide where a seam goes, make code more testable or AI-navigable, or when another skill needs the deep-module vocabulary.
----
 
 # Codebase Design
 
@@ -227,27 +208,15 @@ Good interfaces make testing natural:
 
 ## Going deeper
 
-- **Deepening a cluster given its dependencies** — see `skl skill --resource reference/DEEPENING.md design`: dependency categories, seam discipline, and replace-don't-layer testing.
-- **Exploring alternative interfaces** — see `skl skill --resource reference/DESIGN-IT-TWICE.md design`: spin up parallel sub-agents to design the interface several radically different ways, then compare on depth, locality, and seam placement.
+- **Deepening a cluster given its dependencies** — see `skl skill --resource DEEPENING.md design`: dependency categories, seam discipline, and replace-don't-layer testing.
+- **Exploring alternative interfaces** — see `skl skill --resource DESIGN-IT-TWICE.md design`: spin up parallel sub-agents to design the interface several radically different ways, then compare on depth, locality, and seam placement.
 
-
-## Included Skill: testing
-
----
-name: testing
-description: Design, assess, and retain tests that establish observable behavior and detect relevant regressions. Use when adding or changing tests, fixing bugs, choosing verification seams, mocking boundaries, or evaluating test evidence.
----
 
 # Contract-Grounded Testing
 
 Testing establishes that delivered behavior and architecture satisfy their accepted contract. Choose the construction order, test organization, and verification boundaries that make that evidence credible; no universal test-first chronology or scenario-to-test cardinality is required.
 
 When exploring a codebase, read `CONTEXT.md` (if it exists) so test names and interface vocabulary match the project's domain language, and respect applicable ADRs and repository standards.
-
-## Start from the obligation
-
-Identify the promised behavior, architecture commitments, and mandatory standards before judging evidence. Clarify a consequential unresolved behavioral or architectural choice with the user; do not turn silence into a requirement or an assumption.
-
 
 ## Verify observable behavior
 
@@ -262,7 +231,7 @@ A strong check:
 - keeps unrelated setup, imports, and infrastructure from masquerading as behavioral evidence;
 - remains stable when implementation details change without changing behavior.
 
-See `skl skill --resource reference/tests.md testing` for examples and test-set assessment, and `skl skill --resource reference/mocking.md testing` for boundary substitutes and controlled alternatives.
+See `skl skill --resource tests.md testing` for examples and test-set assessment, and `skl skill --resource mocking.md testing` for boundary substitutes and controlled alternatives.
 
 ## Ground expected outcomes independently
 
@@ -280,7 +249,7 @@ If the original failure cannot be reproduced reliably or safely, a faithful isol
 
 ## Assess the changed test set together
 
-Required behavioral and failure-mode protection matters more than test inventory. Use `skl skill --resource reference/tests.md testing` for the detailed retention, consolidation, and removal guidance; unrelated repository-wide test pruning remains outside the current change unless explicitly accepted.
+Required behavioral and failure-mode protection matters more than test inventory. Use `skl skill --resource tests.md testing` for the detailed retention, consolidation, and removal guidance; unrelated repository-wide test pruning remains outside the current change unless explicitly accepted.
 
 ## Report evidence honestly
 

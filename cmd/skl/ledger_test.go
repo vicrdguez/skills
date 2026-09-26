@@ -2460,7 +2460,7 @@ func TestMissingProseGuidesFreshAuthoring(t *testing.T) {
 			"skl ledger show " + selection + " --item 'lost-prose/feature'",
 			"skl ledger show " + selection + " --item 'lost-prose/foundation'",
 		},
-		Guidance:     "skl skill --resource reference/issue-publication.md --input 'proposal=lost-prose' --input 'repo=" + root + "' --input 'remote=upstream' propose",
+		Guidance:     "skl skill --resource issue-publication.md --input 'proposal=lost-prose' --input 'repo=" + root + "' --input 'remote=upstream' propose",
 		Continuation: "skl ledger publish " + selection + " --proposal 'lost-prose' --issue 'feature='<body-file> --issue 'foundation='<body-file> --parent-body <parent-body-file>",
 	}
 	if mustJSON(t, outcome.Authoring) != mustJSON(t, want) {
@@ -2474,7 +2474,7 @@ func TestMissingProseGuidesFreshAuthoring(t *testing.T) {
 	}
 	// The guidance renders with the continuation arguments bound.
 	cli.out.Reset()
-	if err := cli.app.Run([]string{"skl", "skill", "--resource", "reference/issue-publication.md", "--input", "proposal=lost-prose", "--input", "repo=" + root, "--input", "remote=upstream", "propose"}); err != nil {
+	if err := cli.app.Run([]string{"skl", "skill", "--resource", "issue-publication.md", "--input", "proposal=lost-prose", "--input", "repo=" + root, "--input", "remote=upstream", "propose"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, wanted := range []string{

@@ -102,7 +102,7 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 				return err
 			}
 			if command.String("format") == "markdown" {
-				_, err = fmt.Fprint(stdout, packet.Markdown())
+				_, err = fmt.Fprint(stdout, packet.Instructions)
 				return err
 			}
 			return fmt.Errorf("unsupported format %q", command.String("format"))

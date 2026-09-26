@@ -5,4 +5,4 @@ description: Actively build and sharpen a project's domain model. Use when the u
 
 <!-- skl-owned: skl.stub/v1 -->
 
-Run `skl skill domain`. Skip activation for every skill named in `included_skills`; its definition is already in the packet.
+Run `skl skill domain`.

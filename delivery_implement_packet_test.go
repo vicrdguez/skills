@@ -32,7 +32,7 @@ func deliveryImplementFacts(operation, procedure string) *DeliveryFacts {
 			" --head <final-head> --target <observed-target-sha> --body '/tmp/result/implement-report.md'",
 		PauseCommand: "skl implement needs-human --repo '/tmp/add-refunds' --item 'add-refunds/refund' --claim '" + claim + "'" +
 			" --body '/tmp/result/implement-report.md'",
-		ResultResourceCommand: "skl skill --resource reference/ledger-submission.md --input result_directory='/tmp/result'" +
+		ResultResourceCommand: "skl skill --resource ledger-submission.md --input result_directory='/tmp/result'" +
 			" --input procedure='" + procedure + "' implement",
 		RequiredHead:     strings.Repeat("a", 40),
 		RecordedTarget:   strings.Repeat("b", 40),
@@ -50,16 +50,6 @@ func deliveryImplementFacts(operation, procedure string) *DeliveryFacts {
 	}
 }
 
-// deliveryImplementActive isolates the specialized Implement definition from
-// the bundled testing, audit, design, and domain skill definitions.
-func deliveryImplementActive(instructions string) string {
-	const marker = "\n\n## Included Skill: "
-	if strings.Contains(instructions, marker) {
-		return strings.SplitN(instructions, marker, 2)[0]
-	}
-	return instructions
-}
-
 // TestDeliveryImplementBindsEachProcedure proves the private-ledger path
 // binds every command, the recorded target and the frozen Contract once for
 // the initial, resumed, and rework procedures.
@@ -70,11 +60,11 @@ func TestDeliveryImplementBindsEachProcedure(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !slices.Equal(packet.IncludedSkills, []string{"testing", "audit", "design", "domain"}) {
+			if !slices.Equal(packet.IncludedSkills, []string{"testing", "audit"}) {
 				t.Fatalf("included skills = %v", packet.IncludedSkills)
 			}
 			facts := packet.Facts.Delivery
-			active := deliveryImplementActive(packet.Instructions)
+			active := packet.Instructions
 			for _, command := range []string{
 				facts.PrepareCommand, facts.InspectCommand, facts.ResumeCommand, facts.ReleaseCommand,
 				facts.SubmitCommand, facts.PauseCommand, facts.ResultResourceCommand,

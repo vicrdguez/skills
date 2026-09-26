@@ -5,4 +5,4 @@ description: Review a branch, PR, or changes since a fixed point along independe
 
 <!-- skl-owned: skl.stub/v1 -->
 
-Run `skl skill audit`. Skip activation for every skill named in `included_skills`; its definition is already in the packet.
+Run `skl skill audit`.

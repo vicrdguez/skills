@@ -98,7 +98,7 @@ func presentGuidance(repository setup.RepositoryContext, result ledger.CurrentRe
 	return &presentationGuidance{
 		Result:    result,
 		Evidence:  evidence,
-		Authoring: "skl skill --resource reference/pull-presentation.md " + result.Phase,
+		Authoring: "skl skill --resource pull-presentation.md " + result.Phase,
 		Continue:  presentInvocation(repository, result.Item) + " --public-body <fresh-public-prose.md>",
 	}
 }

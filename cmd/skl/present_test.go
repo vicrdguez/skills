@@ -204,7 +204,7 @@ func TestLedgerPresentReauthorsTheCurrentResultAfterMissedPhases(t *testing.T) {
 	if len(guided.Guidance.Evidence) != 2 || !strings.Contains(guided.Guidance.Evidence[0], passed.Result.Report.Commit) || !strings.Contains(guided.Guidance.Evidence[1], "implement-report.md") {
 		t.Fatalf("evidence = %v, want the current review and its consumed implementation", guided.Guidance.Evidence)
 	}
-	if !strings.Contains(guided.Guidance.Continue, "--item '"+deliveryTestItem+"'") || !strings.Contains(guided.Guidance.Authoring, "reference/pull-presentation.md watchdog") {
+	if !strings.Contains(guided.Guidance.Continue, "--item '"+deliveryTestItem+"'") || !strings.Contains(guided.Guidance.Authoring, "pull-presentation.md watchdog") {
 		t.Fatalf("guidance commands = %#v", guided.Guidance)
 	}
 	markdown, err := offline.deliveryRun(t, "skl", "ledger", "present", "--repo", source, "--item", deliveryTestItem)
@@ -230,7 +230,7 @@ func TestLedgerPresentReauthorsTheCurrentResultAfterMissedPhases(t *testing.T) {
 	if shown.Document == nil || !strings.Contains(shown.Document.Contents, "PRIVATE watchdog report") {
 		t.Fatalf("evidence retrieval = %#v", shown.Document)
 	}
-	if authoring, err := offline.deliveryRun(t, "skl", "skill", "--resource", "reference/pull-presentation.md", "watchdog"); err != nil {
+	if authoring, err := offline.deliveryRun(t, "skl", "skill", "--resource", "pull-presentation.md", "watchdog"); err != nil {
 		t.Fatalf("authoring guidance = %q, %v", authoring, err)
 	}
 

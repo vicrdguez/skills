@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
 	"text/template"
 )
 
@@ -14,8 +16,8 @@ const StubProtocol = "skl.stub/v1"
 
 var ownedMarker = []byte("<!-- skl-owned: " + StubProtocol + " -->")
 
-//go:embed skills/dev/audit skills/dev/decision skills/dev/design skills/dev/domain skills/dev/explore skills/dev/implement skills/dev/propose skills/dev/testing skills/dev/watchdog skills/misc/writing-for-agents skills/thinking/brainstorm skills/thinking/shape stubs/common.md
-//go:embed prompts/implement-loop.md prompts/watchdog-loop.md prompts/queue-next.mjs agents/implement-runner.md agents/watchdog-runner.md
+//go:embed prose/procedures prose/craft prose/documents prose/adapters/stub.md prose/adapters/stubs
+//go:embed prose/adapters/prompts/implement-loop.md prose/adapters/prompts/watchdog-loop.md prose/adapters/prompts/queue-next.mjs prose/adapters/agents/implement-runner.md prose/adapters/agents/watchdog-runner.md
 var embedded embed.FS
 
 type stubData struct {
@@ -30,7 +32,7 @@ type InstallOutcome struct {
 }
 
 func Install(home string) (InstallOutcome, error) {
-	tmpl, err := template.ParseFS(embedded, "stubs/common.md")
+	tmpl, err := template.ParseFS(embedded, "prose/adapters/stub.md")
 	if err != nil {
 		return InstallOutcome{}, err
 	}
@@ -51,7 +53,7 @@ func Install(home string) (InstallOutcome, error) {
 		}
 
 		for _, name := range SkillNames() {
-			frontmatter, err := definitionFrontmatter(name)
+			frontmatter, err := stubFrontmatter(name)
 			if err != nil {
 				return outcome, err
 			}
@@ -84,7 +86,7 @@ func Install(home string) (InstallOutcome, error) {
 		}
 	}
 	for _, file := range []string{"prompts/implement-loop.md", "prompts/watchdog-loop.md", "prompts/queue-next.mjs", "agents/implement-runner.md", "agents/watchdog-runner.md"} {
-		contents, err := embedded.ReadFile(file)
+		contents, err := embedded.ReadFile(path.Join(proseRoot, "adapters", file))
 		if err != nil {
 			return outcome, err
 		}
@@ -108,17 +110,15 @@ func Install(home string) (InstallOutcome, error) {
 	return outcome, nil
 }
 
-func definitionFrontmatter(name string) (string, error) {
-	source, err := fs.ReadFile(embedded, definitionPaths[name])
+// stubFrontmatter is the discovery metadata a harness reads from a skill's
+// installed stub.
+func stubFrontmatter(name string) (string, error) {
+	source, err := fs.ReadFile(embedded, path.Join(proseRoot, "adapters/stubs", name+".md"))
 	if err != nil {
 		return "", err
 	}
-	if !bytes.HasPrefix(source, []byte("---\n")) {
-		return "", fmt.Errorf("skill %q has invalid frontmatter", name)
+	if !bytes.HasPrefix(source, []byte("---\n")) || !bytes.HasSuffix(source, []byte("\n---\n")) {
+		return "", fmt.Errorf("prose/adapters/stubs/%s.md is not frontmatter", name)
 	}
-	end := bytes.Index(source[4:], []byte("\n---\n"))
-	if end < 0 {
-		return "", fmt.Errorf("skill %q has invalid frontmatter", name)
-	}
-	return string(source[:end+8]), nil
+	return strings.TrimSuffix(string(source), "\n"), nil
 }

@@ -1,9 +1,3 @@
----
-name: watchdog
-description: Adversarial validation in a fresh context, passing review to the human merge boundary or returning findings.
-disable-model-invocation: true
----
-
 # Watchdog review of `widget-dashboard/foundation` (initial)
 
 Repository: acme/widgets on remote `origin`
@@ -156,7 +150,7 @@ The inspection reports the review scope after `skl watchdog inspect --repo '/wor
 
 Run the project's Full Gate once yourself: the full suite, typecheck, and lint. A green suite you did not run is not evidence. Retrieve the shared acceptance criteria before judging conformance:
 
-`skl skill --resource reference/acceptance.md audit`
+`skl skill --resource acceptance.md audit`
 
 Applying that Audit-owned resource is not another Audit execution.
 
@@ -173,7 +167,7 @@ Review the integration effects against the recorded Integration Target `00000000
 
 After verification, retrieve the report instructions and follow them:
 
-`skl skill --resource reference/ledger-review.md --input result_directory='/tmp/skl-watchdog-result' --input round=2 --input reviewed_head='0000000000000000000000000000000000000002' watchdog`
+`skl skill --resource ledger-review.md --input result_directory='/tmp/skl-watchdog-result' --input round=2 --input reviewed_head='0000000000000000000000000000000000000002' watchdog`
 
 Record the current finding ledger with stable Work-Item-local `W<n>` identities, preserving every prior identity, and give each finding one disposition — `BLOCK`, `HUMAN`, or `NOTE` — with the frozen obligation or concrete hazard it comes from, the evidence of what goes wrong and where, and the required observable outcome. Distinguish active findings from resolved historical findings so preserving an identity does not reopen it. Honor supplied recorded human direction within the frozen Contract. The typed semantic outcome is the only machine verdict; the engine never reads the report prose as a second outcome.
 

@@ -10,7 +10,7 @@ The inbox is every Project's current Needs Human requests. It is resolved from t
 
 - Group related questions freely for the human, but keep each request's identity, exact reference, commitment, conflict, evidence, options, consequences, and recommendation separate. A shared rule does not merge two obligations or erase their differences.
 - Any missing commitment, conflict, evidence, option, consequence, or recommendation is clarified with the human; it is never invented, guessed, or filled in by inference.
-- Reading the inbox, grouping requests, and discussing them record no decision and change no Workflow State. Retrieving the detailed rules with `skl skill --resource reference/triage.md decision` records nothing either.
+- Reading the inbox, grouping requests, and discussing them record no decision and change no Workflow State. Retrieving the detailed rules with `skl skill --resource triage.md decision` records nothing either.
 
 
 ## Only the human answer authorizes

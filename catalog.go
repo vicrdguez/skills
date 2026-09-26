@@ -119,59 +119,91 @@ type Packet struct {
 	Instructions   string          `json:"instructions"`
 }
 
-var definitionPaths = map[string]string{
-	"audit":              "skills/dev/audit/SKILL.md",
-	"brainstorm":         "skills/thinking/brainstorm/SKILL.md",
-	"decision":           "skills/dev/decision/SKILL.md",
-	"design":             "skills/dev/design/SKILL.md",
-	"domain":             "skills/dev/domain/SKILL.md",
-	"explore":            "skills/dev/explore/SKILL.md",
-	"implement":          "skills/dev/implement/SKILL.md",
-	"propose":            "skills/dev/propose/SKILL.md",
-	"shape":              "skills/thinking/shape/SKILL.md",
-	"testing":            "skills/dev/testing/SKILL.md",
-	"watchdog":           "skills/dev/watchdog/SKILL.md",
-	"writing-for-agents": "skills/misc/writing-for-agents/SKILL.md",
+// proseRoot holds the authored prose, organized by kind: procedures, craft,
+// documents and adapters. Every procedure, craft and document file is a
+// template named by its path under this root.
+const proseRoot = "prose"
+
+// skill is what `skl skill <name>` renders: its definition, and the directory
+// whose files are its public resources ("" when it has none).
+type skill struct {
+	definition string
+	resources  string
 }
 
-var dependencies = map[string][]string{
+var skills = map[string]skill{
+	"audit":              {"procedures/audit.md", "craft/audit"},
+	"brainstorm":         {"procedures/brainstorm.md", ""},
+	"decision":           {"procedures/decision.md", "procedures/decision"},
+	"design":             {"craft/design.md", "craft/design"},
+	"domain":             {"craft/domain.md", "craft/domain"},
+	"explore":            {"procedures/explore.md", ""},
+	"implement":          {"procedures/implement.md", "documents/implement"},
+	"propose":            {"procedures/propose.md", "documents/propose"},
+	"shape":              {"procedures/shape.md", ""},
+	"testing":            {"craft/testing.md", "craft/testing"},
+	"watchdog":           {"procedures/watchdog.md", "documents/watchdog"},
+	"writing-for-agents": {"craft/writing-for-agents.md", "craft/writing-for-agents"},
+}
+
+// composition is the Craft and Procedures a Procedure inlines after its own
+// text on every run.
+var composition = map[string][]string{
 	"explore":   {"domain"},
 	"propose":   {"design", "testing"},
-	"implement": {"testing", "audit", "design", "domain"},
+	"implement": {"testing", "audit"},
 }
 
 func SkillNames() []string {
-	names := make([]string, 0, len(definitionPaths))
-	for name := range definitionPaths {
+	names := make([]string, 0, len(skills))
+	for name := range skills {
 		names = append(names, name)
 	}
 	slices.Sort(names)
 	return names
 }
 
+// procedure selects the file an invocation renders for a skill, and the facts
+// it renders from. Delivery continuations and the Audit step inside Implement
+// are procedures of their own.
+func procedure(name string, facts InvocationFacts) (string, any) {
+	switch {
+	case facts.Delivery != nil && name == "audit":
+		return "procedures/audit-step.md", facts.Delivery
+	case facts.Delivery != nil && (facts.Delivery.Operation == "prepare" || facts.Delivery.Operation == "inspect"):
+		return "procedures/" + name + "-" + facts.Delivery.Operation + ".md", facts.Delivery
+	case facts.Delivery != nil:
+		return skills[name].definition, facts.Delivery
+	case facts.Decision != nil:
+		return "procedures/decision-inbox.md", facts.Decision
+	}
+	return skills[name].definition, nil
+}
+
 func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
-	definition, ok := definitionPaths[name]
-	if !ok {
+	if _, ok := skills[name]; !ok {
 		return Packet{}, fmt.Errorf("unknown skill %q", name)
 	}
-	instructions, err := renderDefinition(definition, facts)
+	file, data := procedure(name, facts)
+	instructions, err := renderDocument(file, data)
 	if err != nil {
 		return Packet{}, err
 	}
 	// A read-only inspection returns a narrow continuation, not another copy of
-	// every bundled definition.
-	included := dependencies[name]
+	// every composed skill.
+	included := composition[name]
 	if facts.Delivery != nil && (facts.Delivery.Operation == "inspect" || facts.Delivery.Operation == "prepare") {
 		included = nil
 	}
-	for _, bundled := range included {
-		rendered, err := renderDefinition(definitionPaths[bundled], facts)
+	for _, composed := range included {
+		file, data := procedure(composed, facts)
+		rendered, err := renderDocument(file, data)
 		if err != nil {
 			return Packet{}, err
 		}
-		instructions += "\n\n## Included Skill: " + bundled + "\n\n" + rendered
+		instructions += "\n\n" + rendered
 	}
-	resources, err := resourceNames(definition)
+	resources, err := resourceNames(name)
 	if err != nil {
 		return Packet{}, err
 	}
@@ -219,82 +251,54 @@ func markdownFence(value string) string {
 	return strings.Repeat("`", max(3, longest+1))
 }
 
-func renderDefinition(file string, facts InvocationFacts) (string, error) {
-	return renderDocument(path.Dir(file), file, facts)
-}
-
-// renderDocument executes one embedded authored document with ordinary typed
-// data. Definitions and parameterized resources share it so specialization
-// never grows a second rendering mechanism, and the owning skill's private
-// modules compose into both.
-func renderDocument(skillDirectory, file string, data any) (string, error) {
-	tmpl := template.New("modules").Option("missingkey=error").Funcs(templateFuncs)
-	modules, err := fs.Glob(embedded, path.Join(skillDirectory, modulesDirectory, "*.md"))
-	if err != nil {
-		return "", err
-	}
-	for _, module := range modules {
-		source, err := fs.ReadFile(embedded, module)
+// renderDocument executes one authored prose file with ordinary typed data.
+// Every procedure, craft and document file parses into one template set, so a
+// file includes another by its path and shared blocks by their defined name.
+func renderDocument(file string, data any) (string, error) {
+	tmpl := template.New("").Option("missingkey=error").Funcs(templateFuncs)
+	for _, kind := range []string{"procedures", "craft", "documents"} {
+		err := fs.WalkDir(embedded, path.Join(proseRoot, kind), func(source string, entry fs.DirEntry, err error) error {
+			if err != nil || entry.IsDir() {
+				return err
+			}
+			contents, err := fs.ReadFile(embedded, source)
+			if err != nil {
+				return err
+			}
+			if _, err := tmpl.New(strings.TrimPrefix(source, proseRoot+"/")).Parse(string(contents)); err != nil {
+				return fmt.Errorf("%s: %w", source, err)
+			}
+			return nil
+		})
 		if err != nil {
 			return "", err
 		}
-		if _, err := tmpl.Parse(string(source)); err != nil {
-			return "", fmt.Errorf("%s: %w", module, err)
-		}
-	}
-	source, err := fs.ReadFile(embedded, file)
-	if err != nil {
-		return "", err
-	}
-	document, err := tmpl.New("document").Parse(string(source))
-	if err != nil {
-		return "", fmt.Errorf("%s: %w", file, err)
 	}
 	var rendered bytes.Buffer
-	if err := document.Execute(&rendered, data); err != nil {
+	if err := tmpl.ExecuteTemplate(&rendered, file, data); err != nil {
 		return "", err
 	}
 	return rendered.String(), nil
 }
 
-// modulesDirectory holds a skill's authored internal modules: embedded and
-// composable into that skill's documents, but never public resources.
-const modulesDirectory = "modules"
-
-func resourceNames(definition string) ([]string, error) {
-	directory := path.Dir(definition)
-	private := path.Join(directory, modulesDirectory)
+// resourceNames lists a skill's public resources by their path under its
+// resource directory.
+func resourceNames(name string) ([]string, error) {
+	directory := skills[name].resources
+	if directory == "" {
+		return nil, nil
+	}
+	root := path.Join(proseRoot, directory)
 	var names []string
-	err := fs.WalkDir(embedded, directory, func(file string, entry fs.DirEntry, err error) error {
-		if err != nil {
+	err := fs.WalkDir(embedded, root, func(file string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
 			return err
 		}
-		if entry.IsDir() {
-			if file == private {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if file != definition {
-			names = append(names, strings.TrimPrefix(file, directory+"/"))
-		}
+		names = append(names, strings.TrimPrefix(file, root+"/"))
 		return nil
 	})
 	sort.Strings(names)
 	return names, err
-}
-
-func (packet Packet) Markdown() string {
-	resources := strings.Join(packet.Resources, ", ")
-	if resources == "" {
-		resources = "none"
-	}
-	included := strings.Join(packet.IncludedSkills, ", ")
-	if included == "" {
-		included = "none"
-	}
-	facts, _ := json.Marshal(packet.Facts)
-	return fmt.Sprintf("Protocol: %s\nSkill: %s\nIncluded skills: %s\nFacts: %s\nResources: %s\n\n%s", packet.Protocol, packet.Skill, included, facts, resources, packet.Instructions)
 }
 
 func (packet Packet) JSON() ([]byte, error) {

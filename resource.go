@@ -103,7 +103,7 @@ type resourceSpec struct {
 
 func resourceSpecFor(resource string) resourceSpec {
 	switch resource {
-	case "reference/ledger-submission.md":
+	case "ledger-submission.md":
 		data := &submissionData{}
 		return resourceSpec{data: data, inputs: []resourceInput{
 			{flag: &cli.StringFlag{Name: "result_directory", Required: true, Usage: resultDirectoryUsage, Destination: &data.ResultDirectory}},
@@ -111,7 +111,7 @@ func resourceSpecFor(resource string) resourceSpec {
 		}, validate: func(resource string) error {
 			return checkResultDirectory(resource, data.ResultDirectory)
 		}}
-	case "reference/ledger-review.md":
+	case "ledger-review.md":
 		data := &ledgerReviewData{}
 		return resourceSpec{data: data, inputs: []resourceInput{
 			{flag: &cli.StringFlag{Name: "result_directory", Required: true, Usage: resultDirectoryUsage, Destination: &data.ResultDirectory}},
@@ -123,7 +123,7 @@ func resourceSpecFor(resource string) resourceSpec {
 			}
 			return checkResultDirectory(resource, data.ResultDirectory)
 		}}
-	case "reference/issue-publication.md":
+	case "issue-publication.md":
 		data := &issuePublicationData{}
 		return resourceSpec{data: data, inputs: []resourceInput{
 			{flag: &cli.StringFlag{Name: "proposal", Required: true, Usage: "Accepted proposal whose issue presentation is published.", Destination: &data.Proposal}},
@@ -214,7 +214,7 @@ func RenderResource(name, resource string, assignments []string) ([]byte, error)
 	if err := spec.parse(name, resource, assignments); err != nil {
 		return nil, err
 	}
-	rendered, err := renderDocument(path.Dir(definitionPaths[name]), file, spec.data)
+	rendered, err := renderDocument(file, spec.data)
 	if err != nil {
 		return nil, err
 	}
@@ -248,20 +248,19 @@ func DescribeResourceInputs(name, resource string) (string, error) {
 	return description.String(), nil
 }
 
-// resourceFile resolves one public resource to its embedded path. Private
-// modules and `SKILL.md` are not resources.
+// resourceFile resolves one public resource to its template path. A skill's
+// definition and shared modules are not resources.
 func resourceFile(name, resource string) (string, error) {
-	definition, ok := definitionPaths[name]
-	if !ok {
+	if _, ok := skills[name]; !ok {
 		return "", fmt.Errorf("unknown skill %q", name)
 	}
-	resources, err := resourceNames(definition)
+	resources, err := resourceNames(name)
 	if err != nil {
 		return "", err
 	}
 	for _, available := range resources {
 		if resource == available {
-			return path.Join(path.Dir(definition), resource), nil
+			return path.Join(skills[name].resources, resource), nil
 		}
 	}
 	return "", fmt.Errorf("unknown resource %q for skill %q", resource, name)

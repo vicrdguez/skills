@@ -44,8 +44,8 @@ func TestB19GenericImplementRetrievalRefusesWithoutWorkflowEffects(t *testing.T)
 	for _, retrieval := range [][]string{
 		{"skl", "skill", "testing"},
 		{"skl", "skill", "--format", "json", "design"},
-		{"skl", "skill", "--resource", "reference/ledger-submission.md", "--input", "result_directory=" + t.TempDir(), "--input", "procedure=initial", "implement"},
-		{"skl", "skill", "--resource", "reference/ledger-submission.md", "--describe-inputs", "implement"},
+		{"skl", "skill", "--resource", "ledger-submission.md", "--input", "result_directory=" + t.TempDir(), "--input", "procedure=initial", "implement"},
+		{"skl", "skill", "--resource", "ledger-submission.md", "--describe-inputs", "implement"},
 	} {
 		output.Reset()
 		if err := app.Run(retrieval); err != nil || output.Len() == 0 {
@@ -116,7 +116,7 @@ func TestB20InstallationDisablesOwnedLegacyLoopsWithoutCollateralRemoval(t *test
 
 // TestB21ThePiRunnerReportsOneItemInNormalMarkdown materializes B21.
 func TestB21ThePiRunnerReportsOneItemInNormalMarkdown(t *testing.T) {
-	runner := readRepositoryFile(t, "agents/implement-runner.md")
+	runner := readRepositoryFile(t, "prose/adapters/agents/implement-runner.md")
 	for _, required := range []string{
 		"Run `skl implement next` and follow the returned Execution Skill exactly",
 		"Process at most one Work Item",
@@ -142,7 +142,7 @@ func TestB21ThePiRunnerReportsOneItemInNormalMarkdown(t *testing.T) {
 		}
 	}
 
-	loop := readRepositoryFile(t, "prompts/implement-loop.md")
+	loop := readRepositoryFile(t, "prose/adapters/prompts/implement-loop.md")
 	for _, forbidden := range []string{"Launch", "launch a", "spawn", "subagent", "queue-next.mjs", "--format json", "argument-hint"} {
 		if strings.Contains(loop, forbidden) {
 			t.Errorf("disabled loop still schedules work with %q", forbidden)
