@@ -27,7 +27,7 @@ Authored prose lives under `prose/`, one directory per kind.
 | --- | --- | --- |
 | Procedures | One script per workflow operation or user-invoked activity. | `prose/procedures/` |
 | Craft | Judgment guidance composed into the Procedures that need it. | `prose/craft/` |
-| Outcomes | Outcome Instructions in Workflow Engine responses: what happened and the worker's next step. | Go rendering in `cmd/skl/`, refusal reasons in the engine packages, and the Decision Inbox templates |
+| Outcomes | Outcome Instructions in Workflow Engine responses: what happened and the worker's next step. | `prose/outcomes/`, refusal reasons in the engine packages, and the Decision Inbox templates |
 | Documents | Templates and instructions for the documents a worker writes: Contract files, phase reports, public prose. | `prose/documents/` |
 | Adapters | Harness Adapters: the installed stubs and harness-specific entry points. | `prose/adapters/` |
 
@@ -36,10 +36,11 @@ Authored prose lives under `prose/`, one directory per kind.
 - `prose/procedures/<name>.md` is a Procedure. Delivery continuations are Procedures of their own: `implement-prepare.md`, `implement-inspect.md`, `watchdog-prepare.md` and `watchdog-inspect.md`. `audit-step.md` is the Audit step inside Implement; `audit.md` is standalone Audit. `decision-inbox.md` renders the Decision Inbox and its results; `decision.md` is the standalone retrieval.
 - `prose/procedures/modules/` holds `define` blocks that several Procedures or resources share, such as the source facts every Implement rendering starts with.
 - `prose/craft/<name>.md` is a Craft file. `prose/craft/audit.md` holds the two review axes that both Audit Procedures include.
+- `prose/outcomes/<kind>.md` is the Outcome Instruction of one outcome kind, such as `refused.md` or `submitted.md`; `prose/outcomes/modules/` holds the blocks they share. Command code chooses the kind and supplies its facts: the status, bound commands, the refusal's invariant and repair, the Claim state and publication notes. It writes no worker-directed sentence of its own.
 - `prose/<kind>/<name>/` holds the Skill Resources of the skill `<name>`. A resource's name is its path in that directory, so `prose/craft/testing/tests.md` is `skl skill --resource tests.md testing`.
 - `prose/adapters/stub.md` is the stub template, and `prose/adapters/stubs/<name>.md` is each skill's discovery frontmatter. `prose/adapters/agents/` and `prose/adapters/prompts/` are the Pi runner and loop files.
 
-Every file in `prose/procedures/`, `prose/craft/` and `prose/documents/` parses into one template set, named by its path under `prose/`. A file includes another with `{{template "craft/audit.md" .}}`, and a shared block by its defined name. `catalog.go` maps each skill name to its definition and resource directory, lists the Craft and Procedures each Procedure composes, and selects the continuation file for an invocation.
+Every file in `prose/procedures/`, `prose/craft/`, `prose/documents/` and `prose/outcomes/` parses into one template set, named by its path under `prose/`. A file includes another with `{{template "craft/audit.md" .}}`, and a shared block by its defined name. `catalog.go` maps each skill name to its definition and resource directory, lists the Craft and Procedures each Procedure composes, and selects the continuation file for an invocation.
 
 The report format that `implement-report.md` and `watchdog-report.md` follow is documented for maintainers in `docs/report-schema.md`. It is not agent-visible.
 

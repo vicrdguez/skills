@@ -120,8 +120,8 @@ type Packet struct {
 }
 
 // proseRoot holds the authored prose, organized by kind: procedures, craft,
-// documents and adapters. Every procedure, craft and document file is a
-// template named by its path under this root.
+// documents, outcomes and adapters. Every procedure, craft, document and
+// outcome file is a template named by its path under this root.
 const proseRoot = "prose"
 
 // skill is what `skl skill <name>` renders: its definition, and the directory
@@ -251,12 +251,19 @@ func markdownFence(value string) string {
 	return strings.Repeat("`", max(3, longest+1))
 }
 
+// RenderOutcome renders the Outcome Instruction of one outcome kind,
+// prose/outcomes/<kind>.md, from the facts a command established.
+func RenderOutcome(kind string, facts any) (string, error) {
+	return renderDocument("outcomes/"+kind+".md", facts)
+}
+
 // renderDocument executes one authored prose file with ordinary typed data.
-// Every procedure, craft and document file parses into one template set, so a
-// file includes another by its path and shared blocks by their defined name.
+// Every procedure, craft, document and outcome file parses into one template
+// set, so a file includes another by its path and shared blocks by their
+// defined name.
 func renderDocument(file string, data any) (string, error) {
 	tmpl := template.New("").Option("missingkey=error").Funcs(templateFuncs)
-	for _, kind := range []string{"procedures", "craft", "documents"} {
+	for _, kind := range []string{"procedures", "craft", "documents", "outcomes"} {
 		err := fs.WalkDir(embedded, path.Join(proseRoot, kind), func(source string, entry fs.DirEntry, err error) error {
 			if err != nil || entry.IsDir() {
 				return err

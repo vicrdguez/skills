@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -64,11 +65,14 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 			if resource == "" && len(inputs) > 0 {
 				return fmt.Errorf("--input requires --resource <owner-relative-name>")
 			}
-			if resource == "" && name == "implement" {
-				// The Implement Execution Skill is delivered by its own lane: a
-				// read-only retrieval would name no Work Item, open no Workflow
-				// Backend, and acquire no Claim.
-				return fmt.Errorf("the implement Skill Definition is not retrievable read-only; run `skl implement next` for one Work Item's complete Execution Skill, or `skl implement resume --item <proposal>/<slice> --claim <acquisition-commit>` to continue a Claim. Its named resources stay retrievable with `skl skill --resource <name> implement`")
+			if resource == "" && (name == "implement" || name == "watchdog") {
+				// Delivery Execution Skills arrive with selected work: a read-only
+				// retrieval would name no Work Item and acquire no Claim.
+				refusal, err := skilldist.RenderOutcome("skill-delivered", struct{ Name string }{name})
+				if err != nil {
+					return err
+				}
+				return errors.New(strings.TrimRight(refusal, "\n"))
 			}
 			if resource != "" {
 				if describe {
@@ -85,9 +89,6 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 				}
 				_, err = stdout.Write(contents)
 				return err
-			}
-			if name == "watchdog" {
-				return fmt.Errorf("the Watchdog Execution Skill requires selected work; run `skl watchdog next` for one Work Item or `skl watchdog resume --item <proposal>/<slice> --claim <acquisition-commit>` for an interrupted Claim. Named resources remain available with --resource")
 			}
 			packet, err := skilldist.BuildPacket(name, skilldist.InvocationFacts{})
 			if err != nil {

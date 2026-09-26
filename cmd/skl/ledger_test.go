@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"testing"
 
+	skilldist "github.com/vicrdguez/skills"
 	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/ledger"
 	"github.com/vicrdguez/skills/setup"
@@ -927,10 +928,14 @@ func TestLedgerShowReturnsExactAcceptedContent(t *testing.T) {
 		t.Fatalf("acceptance failed: %s", mustJSON(t, acceptance))
 	}
 	// The acceptance output binds the concrete public readback command.
-	report := ledgerMarkdown(ledgerOutcome{Status: acceptance.Status, Acceptance: acceptance.Acceptance})
-	readbackCommand := "skl ledger show --item readback-work/foundation"
-	if !strings.Contains(report, readbackCommand) {
-		t.Fatalf("acceptance output names no concrete readback command:\n%s", report)
+	repository := setup.RepositoryContext{Root: root, Remote: "origin"}
+	var report strings.Builder
+	if err := writeOutcome(&report, "ledger-accept", proposalFactsOf(repository, acceptance.Acceptance, nil)); err != nil {
+		t.Fatal(err)
+	}
+	readbackCommand := "skl ledger show --repo " + skilldist.ShellQuote(root) + " --remote 'origin' --item 'readback-work/foundation'"
+	if !strings.Contains(report.String(), readbackCommand) {
+		t.Fatalf("acceptance output names no concrete readback command:\n%s", report.String())
 	}
 
 	// Later activity: another proposal committed, temporary inputs removed,
@@ -2489,7 +2494,7 @@ func TestMissingProseGuidesFreshAuthoring(t *testing.T) {
 	if err := cli.app.Run([]string{"skl", "ledger", "publish", "--repo", root, "--remote", "upstream", "--proposal", "lost-prose"}); err != nil {
 		t.Fatal(err)
 	}
-	for _, wanted := range []string{"Issue: missing_input", "  Guidance: " + want.Guidance, "  Then publish: " + want.Continuation} {
+	for _, wanted := range []string{"Issue: missing_input", "`" + want.Guidance + "`", "`" + want.Continuation + "`"} {
 		if !strings.Contains(cli.out.String(), wanted) {
 			t.Fatalf("Markdown lacks %q:\n%s", wanted, cli.out.String())
 		}

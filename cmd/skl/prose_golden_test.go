@@ -11,6 +11,7 @@ package main
 //	go test ./cmd/skl -run TestAgentProseGoldens -update-prose
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -40,9 +41,7 @@ var (
 	proseSHA        = regexp.MustCompile(`\b[0-9a-f]{40}\b`)
 	proseResultDir  = regexp.MustCompile(`skl-(implement|watchdog)-[0-9]+`)
 	proseTimestamp  = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})`)
-	// Delivery outcomes print these two notes in map iteration order.
-	proseNotes    = regexp.MustCompile("(?m)^(Public presentation: .*\n)(Ledger replication: .*\n)")
-	proseResource = regexp.MustCompile("skl skill --resource ([^<\\s]\\S*)(?: --input [^`\\s]+)* ([a-z-]+)")
+	proseResource   = regexp.MustCompile("skl skill --resource ([^<\\s]\\S*)(?: --input [^`\\s]+)* ([a-z-]+)")
 )
 
 // proseGoldens compares or rewrites each rendering after replacing the values
@@ -74,7 +73,6 @@ func (g *proseGoldens) normalize(text string) string {
 	for _, pair := range paths {
 		text = strings.ReplaceAll(text, pair[0], pair[1])
 	}
-	text = proseNotes.ReplaceAllString(text, "$2$1")
 	text = proseResultDir.ReplaceAllString(text, "skl-$1-result")
 	text = proseTimestamp.ReplaceAllString(text, "2026-01-01T00:00:00Z")
 	numbers := map[string]int{}
@@ -338,6 +336,14 @@ func TestAgentProseGoldens(t *testing.T) {
 	g.capture("outcome-implement-needs-human", worker, "implement", "needs-human", "--repo", source, "--item", pausedProposal+"/foundation", "--claim", paused,
 		"--body", proseFixturePath("pause.md"), "--public-body", public)
 	g.capture("outcome-implement-next-no-work", worker, "implement", "next", "--repo", source)
+	g.capture("outcome-implement-next-idle-timeout", worker, "implement", "next", "--repo", source, "--wait", "1ms", "--poll", "1ms")
+	interrupted, cancel := context.WithCancel(context.Background())
+	cancel()
+	worker.out.Reset()
+	err := worker.app.RunContext(interrupted, []string{"skl", "watchdog", "next", "--repo", source, "--wait", "1m"})
+	g.check("outcome-watchdog-next-interrupted", worker.out.String()+err.Error()+"\n")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	g.capture("outcome-implement-next-unconfigured", worker, "implement", "next", "--repo", source)
 
 	// Standalone Execution Skills, the refusals for the delivered ones, and
 	// every named resource a rendering tells the worker to retrieve.

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/urfave/cli/v2"
 	"github.com/vicrdguez/skills/ledger"
@@ -49,11 +48,13 @@ func cleanupCommand(newBackend backendFactory, stdout io.Writer) *cli.Command {
 			if err != nil {
 				return err
 			}
+			rerun := boundCommand(command, "skl propose cleanup")
 			if failure != nil {
+				failure.rerun = rerun
 				return renderLedgerOutcome(stdout, format, *failure)
 			}
 			if store != nil {
-				return renderCleanup(stdout, format, ledgerCleanup(command, store, repository))
+				return renderCleanup(stdout, format, rerun, ledgerCleanup(command, store, repository))
 			}
 			backend, err := newBackend(repository.Repository)
 			if err != nil {
@@ -68,7 +69,7 @@ func cleanupCommand(newBackend backendFactory, stdout io.Writer) *cli.Command {
 				return err
 			}
 			if format == formatJSON {
-				return renderCleanup(stdout, format, cleanupOutcome{Status: cleanupStatus(false, len(outcome.Removed) > 0), Source: &outcome})
+				return renderCleanup(stdout, format, "", cleanupOutcome{Status: cleanupStatus(false, len(outcome.Removed) > 0), Source: &outcome})
 			}
 			for _, slug := range outcome.Removed {
 				fmt.Fprintln(stdout, "removed", slug)
@@ -132,60 +133,15 @@ func cleanupRepair(err error) *ledgerOutcome {
 	return &ledgerOutcome{Status: "fix_required", Reason: err.Error()}
 }
 
-func renderCleanup(stdout io.Writer, format implementationFormatKind, outcome cleanupOutcome) error {
+// cleanupFacts are one cleanup outcome and the invocation that reruns it.
+type cleanupFacts struct {
+	cleanupOutcome
+	Rerun string
+}
+
+func renderCleanup(stdout io.Writer, format implementationFormatKind, rerun string, outcome cleanupOutcome) error {
 	if format == formatJSON {
 		return json.NewEncoder(stdout).Encode(outcome)
 	}
-	var text strings.Builder
-	line := func(format string, args ...any) { fmt.Fprintf(&text, format+"\n", args...) }
-	line("Status: %s", outcome.Status)
-	repair := func(label string, repair *ledgerOutcome) {
-		if repair != nil {
-			line("%s: %s", label, repair.Reason)
-			if repair.Repair != "" {
-				line("  Repair: %s", repair.Repair)
-			}
-		}
-	}
-	repair("Archive refused", outcome.ArchiveRepair)
-	if archive := outcome.Archive; archive != nil {
-		for _, archived := range archive.Archived {
-			delivery := "fully delivered"
-			if !archived.FullyDelivered {
-				delivery = "retired without full delivery"
-			}
-			line("Archived proposal: %s (%s) at %s", archived.Proposal, delivery, archived.Commit)
-			if archived.Resumed {
-				line("  Finished an interrupted archive move")
-			}
-		}
-		for _, kept := range archive.Kept {
-			line("Kept active proposal: %s: %s", kept.Proposal, kept.Reason)
-		}
-		for _, kept := range archive.Repairs {
-			line("Archive repair for %s: %s", kept.Proposal, kept.Reason)
-			line("  Repair: %s", kept.Repair)
-		}
-		if note := archive.Replication; note != nil {
-			if note.Status == ledger.PushPushed {
-				line("Ledger replication: %s", note.Status)
-			} else {
-				line("Ledger replication: %s: %s", note.Status, note.Detail)
-			}
-		}
-	}
-	repair("Source cleanup refused", outcome.SourceRepair)
-	if source := outcome.Source; source != nil {
-		for _, branch := range source.Removed {
-			line("Removed local source work: %s", branch)
-		}
-		for _, preserved := range source.Preserved {
-			line("Preserved local source work: %s: %s", preserved.Branch, preserved.Reason)
-		}
-		for _, failed := range source.Failed {
-			line("Source removal failed: %s: %s", failed.Branch, failed.Reason)
-		}
-	}
-	_, err := io.WriteString(stdout, text.String())
-	return err
+	return writeOutcome(stdout, "cleanup", cleanupFacts{outcome, rerun})
 }
