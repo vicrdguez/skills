@@ -567,7 +567,7 @@ func TestInstallSupportedSkillStubs(t *testing.T) {
 		}
 	}
 	entries, err := os.ReadDir(filepath.Join(root, ".config/opencode"))
-	if err != nil || len(entries) != 2 || entries[0].Name() != "commands" || entries[1].Name() != "skills" {
+	if err != nil || len(entries) != 2 || entries[0].Name() != "commands" || entries[1].Name() != "skills" || !entries[0].IsDir() || !entries[1].IsDir() {
 		t.Fatalf("unexpected OpenCode configuration or adapters: %v: %v", entries, err)
 	}
 	entries, err = os.ReadDir(filepath.Join(root, ".config/opencode/skills"))
@@ -628,7 +628,7 @@ func TestInstallRefreshesOnlyOwnedStubs(t *testing.T) {
 			}
 			if harness == ".config/opencode/skills" {
 				entries, err := os.ReadDir(filepath.Join(root, ".config/opencode"))
-				if err != nil || len(entries) != 2 || entries[0].Name() != "commands" || entries[1].Name() != "skills" {
+				if err != nil || len(entries) != 2 || entries[0].Name() != "commands" || entries[1].Name() != "skills" || !entries[0].IsDir() || !entries[1].IsDir() {
 					t.Fatalf("reinstallation wrote OpenCode configuration: %v: %v", entries, err)
 				}
 			}

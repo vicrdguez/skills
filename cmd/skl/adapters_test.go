@@ -103,11 +103,11 @@ func TestInstallRetiresOwnedPiRunnersLoopsAndReplacedStubs(t *testing.T) {
 	openCodeStub := writeHomeFile(t, home, ".config/opencode/skills/watchdog/SKILL.md", stub)
 	notes := writeHomeFile(t, home, ".config/opencode/skills/watchdog/notes.md", "keep\n")
 	userRunner := writeHomeFile(t, home, ".pi/agent/agents/my-runner.md", "mine\n")
-	userLoop := t.TempDir()
-	userLoopRunner := writeHomeFile(t, userLoop, ".pi/agent/agents/watchdog-runner.md", "my own runner\n")
+	userHome := t.TempDir()
+	userRunnerCopy := writeHomeFile(t, userHome, ".pi/agent/agents/watchdog-runner.md", "my own runner\n")
 
 	installInto(t, home)
-	installInto(t, userLoop)
+	installInto(t, userHome)
 
 	for _, path := range append(retired, openCodeStub) {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -120,7 +120,7 @@ func TestInstallRetiresOwnedPiRunnersLoopsAndReplacedStubs(t *testing.T) {
 	if !strings.Contains(readFile(t, filepath.Join(home, ".pi/agent/prompts/implement.md")), "skl implement next") {
 		t.Error("the pi Implement entry point was not installed")
 	}
-	for path, want := range map[string]string{notes: "keep\n", userRunner: "mine\n", userLoopRunner: "my own runner\n"} {
+	for path, want := range map[string]string{notes: "keep\n", userRunner: "mine\n", userRunnerCopy: "my own runner\n"} {
 		if got := readFile(t, path); got != want {
 			t.Errorf("user file %s changed: %q", path, got)
 		}

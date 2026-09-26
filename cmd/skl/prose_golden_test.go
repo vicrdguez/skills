@@ -422,11 +422,10 @@ func TestAgentProseGoldens(t *testing.T) {
 	for _, name := range skilldist.SkillNames() {
 		g.check("stub-"+name, readFileString(t, filepath.Join(home, ".codex", "skills", name, "SKILL.md")))
 	}
-	for harness, location := range map[string]string{
-		"pi":       ".pi/agent/prompts/%s.md",
-		"claude":   ".claude/skills/%s/SKILL.md",
-		"opencode": ".config/opencode/commands/%s.md",
-	} {
+	for harness, location := range entryPoints {
+		if harness == "codex" {
+			continue
+		}
 		for _, operation := range []string{"implement", "watchdog"} {
 			g.check("adapter-"+harness+"-"+operation, readFileString(t, filepath.Join(home, fmt.Sprintf(location, operation))))
 		}

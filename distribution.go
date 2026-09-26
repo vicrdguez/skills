@@ -61,6 +61,7 @@ type installData struct {
 	Name        string
 	Protocol    string
 	Frontmatter string
+	EntryPoint  bool
 }
 
 type InstallOutcome struct {
@@ -79,7 +80,7 @@ func Install(home string) (InstallOutcome, error) {
 	}
 	var outcome InstallOutcome
 	for _, target := range harnesses {
-		if err := outcome.retire(filepath.Join(home, target.skills, "tdd", "SKILL.md"), stubMarker); err != nil {
+		if err := outcome.retireStub(filepath.Join(home, target.skills, "tdd", "SKILL.md")); err != nil {
 			return outcome, err
 		}
 		for _, name := range SkillNames() {
@@ -88,8 +89,9 @@ func Install(home string) (InstallOutcome, error) {
 				return outcome, err
 			}
 			stubPath := filepath.Join(home, target.skills, name, "SKILL.md")
-			if target.entryPoint == "" || !slices.Contains(entryPoints, name) {
-				data := installData{Name: name, Protocol: StubProtocol, Frontmatter: frontmatter}
+			entryPoint := slices.Contains(entryPoints, name)
+			if target.entryPoint == "" || !entryPoint {
+				data := installData{Name: name, Protocol: StubProtocol, Frontmatter: frontmatter, EntryPoint: entryPoint}
 				if err := outcome.write(stubPath, stub, data); err != nil {
 					return outcome, fmt.Errorf("install %s for %s: %w", name, target.skills, err)
 				}
@@ -101,14 +103,14 @@ func Install(home string) (InstallOutcome, error) {
 				return outcome, fmt.Errorf("install %s adapter for %s: %w", name, target.skills, err)
 			}
 			if adapterPath != stubPath {
-				if err := outcome.retire(stubPath, stubMarker); err != nil {
+				if err := outcome.retireStub(stubPath); err != nil {
 					return outcome, err
 				}
 			}
 		}
 	}
 	for _, file := range retiredPiFiles {
-		if err := outcome.retire(filepath.Join(home, ".pi/agent", file), piMarker); err != nil {
+		if _, err := outcome.retire(filepath.Join(home, ".pi/agent", file), piMarker); err != nil {
 			return outcome, err
 		}
 	}
@@ -145,24 +147,42 @@ func (outcome *InstallOutcome) write(file string, tmpl *template.Template, data 
 }
 
 // retire removes a file an earlier installation wrote, when it still carries
-// that installation's marker, and then its directory if nothing else is in it.
-func (outcome *InstallOutcome) retire(file string, marker []byte) error {
+// that installation's marker, and reports whether it did.
+func (outcome *InstallOutcome) retire(file string, marker []byte) (bool, error) {
 	current, err := os.ReadFile(file)
 	switch {
 	case os.IsNotExist(err):
-		return nil
+		return false, nil
 	case err != nil:
-		return fmt.Errorf("inspect retired %s: %w", file, err)
+		return false, fmt.Errorf("inspect retired %s: %w", file, err)
 	case !bytes.Contains(current, marker):
 		outcome.Unchanged++
-		return nil
+		return false, nil
 	}
 	if err := os.Remove(file); err != nil {
-		return fmt.Errorf("retire %s: %w", file, err)
+		return false, fmt.Errorf("retire %s: %w", file, err)
 	}
 	outcome.Changed++
-	if entries, err := os.ReadDir(filepath.Dir(file)); err == nil && len(entries) == 0 && filepath.Base(file) == "SKILL.md" {
-		return os.Remove(filepath.Dir(file))
+	return true, nil
+}
+
+// retireStub retires an owned Skill Stub and then its skill directory, unless
+// something else is in it.
+func (outcome *InstallOutcome) retireStub(file string) error {
+	retired, err := outcome.retire(file, stubMarker)
+	if err != nil || !retired {
+		return err
+	}
+	directory := filepath.Dir(file)
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return fmt.Errorf("inspect retired %s: %w", directory, err)
+	}
+	if len(entries) > 0 {
+		return nil
+	}
+	if err := os.Remove(directory); err != nil {
+		return fmt.Errorf("retire %s: %w", directory, err)
 	}
 	return nil
 }
@@ -181,7 +201,7 @@ func stubFrontmatter(name string) (string, error) {
 }
 
 // frontmatterKeys keeps only the frontmatter lines a harness's entry point
-// recognizes.
+// recognizes. Every stub frontmatter key holds a one-line value.
 func frontmatterKeys(frontmatter string, keys []string) string {
 	var kept []string
 	for _, line := range strings.Split(frontmatter, "\n") {
