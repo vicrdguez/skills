@@ -106,6 +106,9 @@ _Avoid_: Phase report, implementation ledger, durable project knowledge
 An **Agent Worker**'s recorded outcome, evidence, and input references for one implementation or **Watchdog Review** phase. Its outcome is distinct from the resulting **Workflow State**.
 _Avoid_: Agent transcript, workflow state
 
+**Report Version**:
+A recorded content revision of a **Phase Report**, including its metadata and authored body. Relocating a report or changing unrelated records does not create a new Report Version.
+
 **Completion Declaration**:
 An **Agent Worker**'s explicit statement that an identified **Contract Item** is complete or incomplete at the reported source revision. Complete means the required outcome is satisfied and its applicable verification has succeeded; **Manual Verification** remains human-owned.
 _Avoid_: Implied completion, contract checkbox mutation, engine judgment
@@ -114,9 +117,12 @@ _Avoid_: Implied completion, contract checkbox mutation, engine judgment
 An approved definition of one change materialized as one or more **Work Items**, with a **Coordination Item** for multi-slice work and explicit Dependencies between its Work Items. Changed contractual obligations require a replacement Proposal rather than rewriting the existing contracts.
 _Avoid_: Work item, implementation ledger
 
-**Work Item**:
-One implementation slice whose identity remains stable from acceptance through merge or supersession. Issues, submissions, branches, worktrees, and contract documents are attachments or projections of it.
+**Slice**:
+One accepted unit of a **Proposal** whose identity remains stable from acceptance through merge or supersession. Issues, submissions, branches, worktrees, and contract documents are attachments or projections of it.
 _Avoid_: Agent session, issue, pull request
+
+**Work Item**:
+An existing name for a **Slice**, with the same identity and meaning rather than a separate entity. **Slice** is the preferred term.
 
 **Contract**:
 The frozen obligations accepted for one **Work Item**, covering its agreed behavior, architecture, delivery requirements, and **Manual Verification**. Changed obligations require renewed proposal rather than amendment of the existing Contract.
@@ -139,7 +145,7 @@ A relationship in which one **Work Item** cannot become eligible until every blo
 _Avoid_: Ready-for-merge prerequisite
 
 **Claim**:
-The exclusive reservation of a **Work Item** by one **Agent Worker**, orthogonal to **Workflow State**. Claims do not expire automatically; ordinary selection skips reserved work, and interrupted work requires explicit resume or release.
+The exclusive, non-expiring reservation of a **Slice** by one **Agent Worker**, orthogonal to **Workflow State** and not proof that the worker is currently running. Ordinary selection skips reserved work, and interrupted work requires explicit resume or release.
 _Avoid_: Workflow state, issue label, time-limited lease
 
 **Transition Operation**:
