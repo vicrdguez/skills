@@ -1,31 +1,34 @@
-### Standards brief
+Review the change along two independent axes, each by its own reviewer:
 
-Read the diff and relevant callers. Report every documented-standard violation
-and material local-quality concern in changed code or integration effects. Cite
-the standard and file/hunk. For a simplification, name the concrete simpler
-alternative, the burden it removes, and why required behavior and verification
-remain intact. A smell name alone is insufficient. Tag each finding `HARD` or
-`JUDGEMENT`; generic smells are always `JUDGEMENT`, while an explicit mandatory
-rule or concrete hazard may justify `HARD`. Skip tooling-enforced observations.
-Exclude unrelated target additions inherited unchanged. Keep the report under
-500 words, compressing rather than omitting findings.
+- **Standards**: does the code follow this repository's documented standards, required tooling, project quality skills and the smell baseline?
+- **Contracts**: does the code deliver the complete accepted behavior, architecture and Definition of Done, with evidence behind each?
 
-### Contracts brief
+Code inherited unchanged from a merged target is outside the review. The effects of the merge and its conflict resolutions are inside it.
 
-Judge the complete final implementation against every accepted behavior,
-scenario, Definition of Done, and architecture commitment. Check the current
-completion-and-evidence table, not merely the latest delta. Accept grouped
-many-to-many evidence, construction freedom, and test reuse or consolidation
-when required behavior and failure-mode protection remain. Check removed or
-weakened assertions for lost protection without demanding per-test bookkeeping.
+When sources disagree, the higher one wins: the accepted Contract, then required tooling and CI, then the project's `AGENTS.md`, standards documents and quality skills, then language and framework correctness, security and accessibility, then the smell baseline.
 
-Report missing, partial, contradicted, or out-of-scope behavior; frozen
-architectural violations; selected-input integrity failures; and specific
-coverage/evidence gaps as `HARD`. Quote the obligation and identify the plausible
-violation existing evidence cannot distinguish. A red Full Gate is `HARD`.
-A plan divergence is `JUDGEMENT` unless it breaks an accepted obligation. Review
-integration effects while excluding unrelated inherited target additions. Prior
-findings and recorded human directions are evidence within the frozen Contract,
-not amendments or new requirements. Keep the report under 500 words, compressing
-rather than omitting findings.
+## Standards brief
+
+Read the diff, the callers it affects, the standards sources and the smell baseline. Report, per file and hunk, every place the diff breaks a documented standard, citing the file and rule, and every baseline smell you spot, naming it and quoting the hunk. For a simplification, name the simpler alternative, the burden it removes, and why behavior and verification stay intact. Skip anything tooling enforces.
+
+## Contracts brief
+
+Judge the complete final implementation against every accepted behavior, scenario, architecture commitment and Definition of Done item, even when the diff is only the latest increment. Apply the acceptance criteria. Report behavior that is missing, partial, wrong or unasked for; plan commitments the code breaks; and specific evidence gaps, naming the obligation and the plausible violation the existing evidence cannot distinguish. Quote the Contract line for each finding. Reports and notes written after the Contract was accepted are evidence, not requirements. Note where the implementation diverges from the plan.
+
+## Tag every finding
+
+Start each finding with `HARD` or `JUDGEMENT` and anchor it to `file:line`. Contract violations, material risks, specific evidence gaps and a red gate are `HARD`. A breach of an explicit mandatory standard can be `HARD`. Generic smells are always `JUDGEMENT`, and so is a plan divergence that breaks no accepted obligation. Keep each report under 500 words by compressing findings rather than dropping any.
+
+## Aggregate without reranking
+
+Number each new finding `F<n>`, continuing after the greatest existing `F<n>`. Present the reports under `## Standards` and `## Contracts`, each finding keeping the tag its axis gave it: the axis that found it saw the evidence, and you did not. Merge nothing across axes. End with the `HARD` and `JUDGEMENT` counts and the worst issue within each axis, beside the gate result.
+
+## Why two axes
+
+A change can pass one axis and fail the other:
+
+- Code that follows every standard but implements the wrong thing: **Standards pass, Contracts fail.**
+- Code that does exactly what the Contract asked but breaks the project's conventions: **Contracts pass, Standards fail.**
+
+Reporting them separately stops one axis from masking the other.
 

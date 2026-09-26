@@ -55,9 +55,9 @@ type InvocationFacts struct {
 }
 
 // ExecutionCapability is the adapter capability an invocation established. It
-// selects supported helper recipes for optional implementation/testing delegation
-// and mandatory Audit dispatch; a harness name alone establishes nothing, and an
-// unknown capability keeps a bounded runtime choice.
+// selects supported helper recipes for optional implementation/testing
+// delegation; a harness name alone establishes nothing, and an unknown
+// capability keeps a bounded runtime choice. Audit dispatch never reads it.
 type ExecutionCapability string
 
 const (

@@ -260,106 +260,58 @@ Required behavioral and failure-mode protection matters more than test inventory
 Connect the obligations to concrete tests, commands, or appropriate inspection evidence, including results and material limitations. Many obligations may share evidence and one obligation may need several checks. Prose assurance alone is insufficient for ordinary executable behavior, and merely listing a gap does not make it acceptable.
 
 
-Review the candidate along two independent axes: **Standards** and **Contracts**.
-Audit is implementation-phase judgment, not a Claim, workflow transition, or
-independent Watchdog Review. It edits no workflow records.
+# Audit
 
-## Pin the comparison and Contract
+Review the change along two independent axes, each by its own reviewer:
 
-Work Item: `widget-dashboard/foundation`; source worktree: `/work/widgets/.worktrees/widget-dashboard`.
-The exact accepted Contract and consumed reports were supplied as labeled data
-in this execution. Use those references, not public descriptions or source
-markers. Refresh the selected Claim and prepared source facts with
-`skl implement inspect --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --result-directory '/tmp/skl-implement-result' --target '0000000000000000000000000000000000000003'` before Audit, substituting the exact newly integrated
-SHA for its target argument rather than retaining an older preparation target.
+- **Standards**: does the code follow this repository's documented standards, required tooling, project quality skills and the smell baseline?
+- **Contracts**: does the code deliver the complete accepted behavior, architecture and Definition of Done, with evidence behind each?
 
-After the required late target integration, resolve `git merge-base <recorded-integrated-target-sha> HEAD`.
-That normal PR-base merge-base is the default fixed point. Use a supplied fixed
-point when the invocation establishes one. For finding-driven Rework, an
-available ancestral previously reviewed revision can delimit the delta; an
-unavailable or non-ancestral revision requires the full comparison, without
-resetting completed-review accounting or findings.
+Code inherited unchanged from a merged target is outside the review. The effects of the merge and its conflict resolutions are inside it.
 
-Record and validate the fixed point, candidate head, exact
-`git diff <fixed-point>...HEAD` command, and `git log <fixed-point>..HEAD --oneline`.
-An empty diff is legal; judge the complete resulting implementation and current
-evidence. Review integration and conflict-resolution effects. Unrelated changes
-inherited unchanged from the recorded target are not scope creep; concrete
-regressions and material risks remain reviewable. Do not chase later target
-movement or repeat a completed target integration merely because work resumed.
+When sources disagree, the higher one wins: the accepted Contract, then required tooling and CI, then the project's `AGENTS.md`, standards documents and quality skills, then language and framework correctness, security and accessibility, then the smell baseline.
 
-## Establish shared facts once
+## Standards brief
 
-1. Identify applicable `AGENTS.md`, standards documents, required tooling, and
-   project quality skills. Retrieve `skl skill --resource smells.md audit`
-   and `skl skill --resource acceptance.md audit`. Supply both review
-   axes with the shared acceptance criteria.
-2. Run the project's **Full Gate** once on this integrated candidate: its entire
-   test, typecheck, and lint suite. Record the commands, head, results, and any
-   limitations before reviewers begin. The reviewers do not rerun this gate.
-3. Record the selected-input inspection result and exact frozen Contract
-   references. The Contract is read-only; current completion belongs in the
-   implementation report's full table of explicit `complete`/`incomplete`
-   declarations. Missing entries do not imply completion. Manual Verification
-   remains human-owned. Report missing or incompatible inputs as concrete gaps.
+Read the diff, the callers it affects, the standards sources and the smell baseline. Report, per file and hunk, every place the diff breaks a documented standard, citing the file and rule, and every baseline smell you spot, naming it and quoting the hunk. For a simplification, name the simpler alternative, the burden it removes, and why behavior and verification stay intact. Skip anything tooling enforces.
 
-## Dispatch independent axes
+## Contracts brief
 
-Make one bounded check for a supported helper mechanism. When available,
-dispatch both axes as parallel fresh subagents; otherwise run Standards then
-Contracts sequentially. A harness name alone establishes no capability.
+Judge the complete final implementation against every accepted behavior, scenario, architecture commitment and Definition of Done item, even when the diff is only the latest increment. Apply the acceptance criteria. Report behavior that is missing, partial, wrong or unasked for; plan commitments the code breaks; and specific evidence gaps, naming the obligation and the plausible violation the existing evidence cannot distinguish. Quote the Contract line for each finding. Reports and notes written after the Contract was accepted are evidence, not requirements. Note where the implementation diverges from the plan.
 
-Neither reviewer writes source, changes a Claim, performs a handoff, or replaces
-Watchdog. Each receives the fixed diff command, commit list, exact Contract and
-consumed report references, standards sources, shared criteria, and recorded gate
-and inspection facts. Frozen obligations outrank required tooling and CI, then
-project standards and quality skills, then language/framework correctness,
-security and accessibility, then the generic smell baseline.
+## Tag every finding
 
-### Standards brief
-
-Read the diff and relevant callers. Report every documented-standard violation
-and material local-quality concern in changed code or integration effects. Cite
-the standard and file/hunk. For a simplification, name the concrete simpler
-alternative, the burden it removes, and why required behavior and verification
-remain intact. A smell name alone is insufficient. Tag each finding `HARD` or
-`JUDGEMENT`; generic smells are always `JUDGEMENT`, while an explicit mandatory
-rule or concrete hazard may justify `HARD`. Skip tooling-enforced observations.
-Exclude unrelated target additions inherited unchanged. Keep the report under
-500 words, compressing rather than omitting findings.
-
-### Contracts brief
-
-Judge the complete final implementation against every accepted behavior,
-scenario, Definition of Done, and architecture commitment. Check the current
-completion-and-evidence table, not merely the latest delta. Accept grouped
-many-to-many evidence, construction freedom, and test reuse or consolidation
-when required behavior and failure-mode protection remain. Check removed or
-weakened assertions for lost protection without demanding per-test bookkeeping.
-
-Report missing, partial, contradicted, or out-of-scope behavior; frozen
-architectural violations; selected-input integrity failures; and specific
-coverage/evidence gaps as `HARD`. Quote the obligation and identify the plausible
-violation existing evidence cannot distinguish. A red Full Gate is `HARD`.
-A plan divergence is `JUDGEMENT` unless it breaks an accepted obligation. Review
-integration effects while excluding unrelated inherited target additions. Prior
-findings and recorded human directions are evidence within the frozen Contract,
-not amendments or new requirements. Keep the report under 500 words, compressing
-rather than omitting findings.
+Start each finding with `HARD` or `JUDGEMENT` and anchor it to `file:line`. Contract violations, material risks, specific evidence gaps and a red gate are `HARD`. A breach of an explicit mandatory standard can be `HARD`. Generic smells are always `JUDGEMENT`, and so is a plan divergence that breaks no accepted obligation. Keep each report under 500 words by compressing findings rather than dropping any.
 
 ## Aggregate without reranking
 
-Keep the reports under `## Standards` and `## Contracts`, preserving their
-`HARD`/`JUDGEMENT` tags. Assign new Audit Findings `F<n>` after the greatest
-existing `F<n>`; preserve historical identifiers. Record axis separately from
-identity. Do not merge findings across axes or let one axis mask the other.
-Report both gate and input-inspection facts, each axis's counts, and its worst
-issue if any.
+Number each new finding `F<n>`, continuing after the greatest existing `F<n>`. Present the reports under `## Standards` and `## Contracts`, each finding keeping the tag its axis gave it: the axis that found it saw the evidence, and you did not. Merge nothing across axes. End with the `HARD` and `JUDGEMENT` counts and the worst issue within each axis, beside the gate result.
 
-The implementation owner applies every `HARD`, and fixes, declines with a
-reason, or carries as debt every `JUDGEMENT`, recording each disposition under
-`## Audit ledger`. A functional edit after Audit requires affected checks and a
-final Full Gate covering the final functional state, distinguished from the
-original audited head. Audit runs exactly once in this Implement execution;
-applying findings does not authorize rerunning it. Independent Watchdog follows
-the private handoff, and only a human merges.
+## Why two axes
+
+A change can pass one axis and fail the other:
+
+- Code that follows every standard but implements the wrong thing: **Standards pass, Contracts fail.**
+- Code that does exactly what the Contract asked but breaks the project's conventions: **Contracts pass, Standards fail.**
+
+Reporting them separately stops one axis from masking the other.
+
+## Pin the comparison
+
+After the late target integration, the fixed point is `git merge-base <observed-target-sha> HEAD`. When the previously reviewed revision `0000000000000000000000000000000000000002` is an ancestor of `HEAD`, it is the fixed point instead, delimiting this round's delta; otherwise review the full comparison. Either way, keep every prior finding and the completed-review count. The diff command is `git diff <fixed-point>...HEAD`, and the commit list is `git log <fixed-point>..HEAD --oneline`. An empty diff is legal: judge the complete implementation.
+
+## Establish the facts once
+
+1. Run the inspection command with its `--target` replaced by `<observed-target-sha>`; the target it shows here is the preparation target: `skl implement inspect --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --result-directory '/tmp/skl-implement-result' --target '0000000000000000000000000000000000000003'`. Its output is the input-inspection result.
+2. Run the Full Gate once on the integrated candidate: the project's entire test, typecheck and lint suite. Record the commands, head and results.
+
+Check: you hold the Contract documents supplied above, the diff command, the commit list, the gate result and the input-inspection result.
+
+## Dispatch the reviewers
+
+Give each reviewer its brief and everything the check above names, the Contract included. Both reviewers use the recorded gate result. The Standards reviewer retrieves the smell baseline with `skl skill --resource smells.md audit`; both reviewers retrieve the acceptance criteria with `skl skill --resource acceptance.md audit`. Reviewers read and report.
+
+Run the axes at once as fresh-context subagents when you can spawn them. Otherwise run them yourself in sequence, Standards first, finishing its report before starting Contracts.
+
+Aggregate the reports as above. Check: the report carries every axis that ran, its tagged `F<n>` findings and the gate result.
+

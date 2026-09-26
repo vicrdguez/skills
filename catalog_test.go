@@ -46,3 +46,24 @@ func TestProseTemplateSetIsUnambiguous(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestAuditStepIgnoresCapability guards harness-agnostic dispatch: the Audit
+// step renders the same text for every established capability, a branch the
+// golden journey never reaches.
+func TestAuditStepIgnoresCapability(t *testing.T) {
+	var step string
+	for _, capability := range []ExecutionCapability{UnknownCapability, ClaudeAgentReview, PiSubagentReview, SequentialReview} {
+		facts := deliveryImplementFacts("next", "rework")
+		facts.Capability = capability
+		file, data := procedure("audit", InvocationFacts{Delivery: facts})
+		rendered, err := renderDocument(file, data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if step == "" {
+			step = rendered
+		} else if rendered != step {
+			t.Errorf("Audit step for capability %q differs from the unknown-capability rendering", capability)
+		}
+	}
+}

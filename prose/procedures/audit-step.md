@@ -1,20 +1,14 @@
-{{template "audit-intro" .}}Work Item: `{{.Item}}`; source worktree: `{{.Worktree}}`.
-The exact accepted Contract and consumed reports were supplied as labeled data
-in this execution. Use those references, not public descriptions or source
-markers. Refresh the selected Claim and prepared source facts with
-`{{.InspectCommand}}` before Audit, substituting the exact newly integrated
-SHA for its target argument rather than retaining an older preparation target.
+# Audit
 
-After the required late target integration, resolve `git merge-base <recorded-integrated-target-sha> HEAD`.
-That normal PR-base merge-base is the default fixed point. Use a supplied fixed
-point when the invocation establishes one.{{template "audit-comparison" .}}{{if eq .Capability "claude-agents"}}Use the established parallel Agent mechanism: one message with two fresh
-`general-purpose` Agent calls, one per axis.
-{{else if eq .Capability "pi-subagents"}}Use the established Pi asynchronous subagent mechanism to dispatch both axes in
-fresh contexts in parallel; keep their write responsibilities read-only.
-{{else if eq .Capability "sequential"}}Use the established sequential fallback, Standards first and Contracts second,
-keeping each axis's findings separate.
-{{else}}Make one bounded check for a supported helper mechanism. When available,
-dispatch both axes as parallel fresh subagents; otherwise run Standards then
-Contracts sequentially. A harness name alone establishes no capability.
-{{end}}
-{{template "audit-review" .}}
+{{template "craft/audit.md" .}}## Pin the comparison
+
+After the late target integration, the fixed point is `git merge-base <observed-target-sha> HEAD`.{{if and (eq .Procedure "rework") .PreviousReviewed}} When the previously reviewed revision `{{.PreviousReviewed}}` is an ancestor of `HEAD`, it is the fixed point instead, delimiting this round's delta; otherwise review the full comparison. Either way, keep every prior finding and the completed-review count.{{end}}{{template "audit-diff" .}}
+
+## Establish the facts once
+
+1. Run the inspection command with its `--target` replaced by `<observed-target-sha>`; the target it shows here is the preparation target: `{{.InspectCommand}}`. Its output is the input-inspection result.
+2. Run the Full Gate once on the integrated candidate: the project's entire test, typecheck and lint suite. Record the commands, head and results.
+
+Check: you hold the Contract documents supplied above, the diff command, the commit list, the gate result and the input-inspection result.
+
+{{template "audit-dispatch" .}}
