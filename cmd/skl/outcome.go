@@ -32,6 +32,9 @@ type refusalFacts struct {
 	Claim         string
 	StatusCommand string
 	Rerun         string
+	// Stop replaces the rerun: the refusal ends a Supervisor's lane.
+	Stop     bool
+	Previous *ledger.ClaimEnding
 }
 
 // phaseFacts serve the outcomes that concern one delivery phase and nothing
@@ -40,6 +43,7 @@ type phaseFacts struct {
 	Status        string
 	Phase         string
 	StatusCommand string
+	Previous      *ledger.ClaimEnding
 }
 
 type releasedFacts struct {
@@ -119,28 +123,34 @@ func refusalParts(err error) (reason, repair string) {
 func boundCommand(c *cli.Context, path string) string {
 	words := []string{path}
 	for _, flag := range c.Command.Flags {
-		name := flag.Names()[0]
-		if !c.IsSet(name) {
-			continue
-		}
-		if inputs, ok := c.Generic(name).(*rawInputs); ok {
-			for _, input := range *inputs {
-				words = append(words, "--"+name, skilldist.ShellQuote(input))
-			}
-			continue
-		}
-		switch value := c.Value(name).(type) {
-		case bool:
-			if value {
-				words = append(words, "--"+name)
-			}
-		case time.Duration:
-			words = append(words, "--"+name+"="+value.String())
-		default:
-			words = append(words, "--"+name, skilldist.ShellQuote(fmt.Sprint(value)))
-		}
+		words = append(words, flagWords(c, flag.Names()[0])...)
 	}
 	return strings.Join(words, " ")
+}
+
+// flagWords repeats one flag as the caller set it, or nothing when unset.
+func flagWords(c *cli.Context, name string) []string {
+	if !c.IsSet(name) {
+		return nil
+	}
+	if inputs, ok := c.Generic(name).(*rawInputs); ok {
+		var words []string
+		for _, input := range *inputs {
+			words = append(words, "--"+name, skilldist.ShellQuote(input))
+		}
+		return words
+	}
+	switch value := c.Value(name).(type) {
+	case bool:
+		if value {
+			return []string{"--" + name}
+		}
+		return nil
+	case time.Duration:
+		return []string{"--" + name + "=" + value.String()}
+	default:
+		return []string{"--" + name, skilldist.ShellQuote(fmt.Sprint(value))}
+	}
 }
 
 // claimCommand binds one Claim-scoped delivery command.

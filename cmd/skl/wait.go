@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/urfave/cli/v2"
-	"github.com/vicrdguez/skills/workflow"
+	"github.com/vicrdguez/skills/ledger"
 )
 
 type stageApp struct{ *cli.App }
@@ -78,7 +78,7 @@ func waitFlags() []cli.Flag {
 	return flags
 }
 
-func nextWork(ctx context.Context, wait, poll time.Duration, selectWork func() (workflow.ImplementationOutcome, error)) (outcome workflow.ImplementationOutcome, err error) {
+func nextWork(ctx context.Context, wait, poll time.Duration, selectWork func() (ledger.Selection, error)) (selection ledger.Selection, err error) {
 	if wait == 0 {
 		return selectWork()
 	}
@@ -90,18 +90,18 @@ func nextWork(ctx context.Context, wait, poll time.Duration, selectWork func() (
 	deadline := time.Now().Add(wait)
 	for {
 		if err := ctx.Err(); err != nil {
-			return workflow.ImplementationOutcome{}, err
+			return ledger.Selection{}, err
 		}
 		if !time.Now().Before(deadline) {
-			return workflow.ImplementationOutcome{Status: "idle_timeout", Reason: "no claimable work in this queue during the idle window; not global completion"}, nil
+			return ledger.Selection{Status: ledger.IdleTimeout}, nil
 		}
-		outcome, err = selectWork()
+		selection, err = selectWork()
 		// The idle window stops new attempts, never an in-flight Claim.
-		if err != nil || outcome.Status != "no_work" {
-			return outcome, err
+		if err != nil || selection.Status != ledger.NoWork {
+			return selection, err
 		}
 		if err := ctx.Err(); err != nil {
-			return workflow.ImplementationOutcome{}, err
+			return ledger.Selection{}, err
 		}
 		remaining := time.Until(deadline)
 		if remaining > 0 {
@@ -109,7 +109,7 @@ func nextWork(ctx context.Context, wait, poll time.Duration, selectWork func() (
 			select {
 			case <-ctx.Done():
 				timer.Stop()
-				return workflow.ImplementationOutcome{}, ctx.Err()
+				return ledger.Selection{}, ctx.Err()
 			case <-timer.C:
 			}
 		}

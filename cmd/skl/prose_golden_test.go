@@ -342,6 +342,39 @@ func TestAgentProseGoldens(t *testing.T) {
 	worker.out.Reset()
 	err := worker.app.RunContext(interrupted, []string{"skl", "watchdog", "next", "--repo", source, "--wait", "1m"})
 	g.check("outcome-watchdog-next-interrupted", worker.out.String()+err.Error()+"\n")
+
+	// A Supervisor's Dispatches: claimed, stopped on a held Claim, continued
+	// after a handoff into an idle window, an interrupted wait and a new
+	// Dispatch, stopped on a released Claim, and refused.
+	for _, name := range []string{"widget-search", "widget-share"} {
+		if outcome := proposer.accept(t, source, intake(name, contract), issue); outcome.Status != "accepted" {
+			t.Fatalf("accept %s: %s", name, mustJSON(t, outcome))
+		}
+	}
+	dispatched := g.capture("outcome-implement-next-dispatch", worker, "implement", "next", "--dispatch", "--repo", source, "--worker-model", "openai-codex/gpt-6-astra", "--worker-thinking", "high")
+	searchClaim, continuation := proseMatch(t, dispatchClaim, dispatched), proseMatch(t, dispatchContinue, dispatched)
+	g.capture("outcome-implement-next-dispatch-held", worker, "implement", "next", "--dispatch", "--repo", source, "--after", searchClaim)
+	g.run(worker, "implement", "prepare", "--repo", source, "--item", "widget-search/foundation", "--claim", searchClaim)
+	submitted := g.run(worker, "implement", "submit", "--repo", source, "--item", "widget-search/foundation", "--claim", searchClaim,
+		"--head", proseCommit(t, filepath.Join(source, ".worktrees", "widget-search"), "search.txt", "search widgets\n"), "--target", target, "--body", report, "--public-body", public)
+	if !strings.Contains(submitted, "Status: "+ledger.AwaitingReview) {
+		t.Fatalf("submit widget-search:\n%s", submitted)
+	}
+	// Hold the remaining Slice so the continued Dispatch finds no work.
+	shareClaim := proseMatch(t, proseClaimLine, g.run(worker, "implement", "next", "--repo", source))
+	g.capture("outcome-implement-next-dispatch-idle-timeout", worker, "implement", "next", "--dispatch", "--repo", source, "--after", searchClaim, "--wait", "1ms", "--poll", "1ms")
+	interrupted, cancel = context.WithCancel(context.Background())
+	cancel()
+	worker.out.Reset()
+	err = worker.app.RunContext(interrupted, []string{"skl", "implement", "next", "--dispatch", "--repo", source, "--after", searchClaim, "--wait", "1m"})
+	g.check("outcome-implement-next-dispatch-interrupted", worker.out.String()+err.Error()+"\n")
+	g.run(worker, "implement", "release", "--repo", source, "--item", "widget-share/foundation", "--claim", shareClaim)
+	continued := g.capture("outcome-implement-next-dispatch-continued", worker, shellWords(t, continuation)[1:]...)
+	shareClaim = proseMatch(t, dispatchClaim, continued)
+	g.run(worker, "implement", "release", "--repo", source, "--item", "widget-share/foundation", "--claim", shareClaim)
+	g.capture("outcome-implement-next-dispatch-released", worker, "implement", "next", "--dispatch", "--repo", source, "--after", shareClaim)
+	g.capture("outcome-implement-next-dispatch-refused", worker, "implement", "next", "--dispatch", "--repo", source, "--after", "not-a-claim")
+
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	g.capture("outcome-implement-next-unconfigured", worker, "implement", "next", "--repo", source)
 

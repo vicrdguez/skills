@@ -87,6 +87,21 @@ func (s *Store) deliveryState(repository github.RepositoryID, item string) (Slic
 	return state, directory, head, nil
 }
 
+// Selection statuses: work was reserved, none was eligible, or none became
+// eligible during a wait's idle window.
+const (
+	WorkAvailable = "work_available"
+	NoWork        = "no_work"
+	IdleTimeout   = "idle_timeout"
+)
+
+// Selection is the outcome of selecting delivery work. Execution is set
+// exactly when Status is WorkAvailable.
+type Selection struct {
+	Status    string
+	Execution *Execution
+}
+
 // StartDelivery selects and reserves only this Project's work. Network
 // observation precedes the brief local lock; stale known competing history
 // still refuses acquisition even when the network is unavailable.
