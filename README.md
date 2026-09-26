@@ -140,7 +140,7 @@ The point of composing at invocation time is that the worker reads only what app
 
 ## Harnesses
 
-`skl install` puts the workflow into Pi, Codex, Claude Code and OpenCode. Every skill gets a one-line stub that runs `skl skill <name>`. Implement and Watchdog are installed as Harness Adapters in each harness's native entry point (a Pi prompt template, a user-invoked Claude Code skill, an OpenCode command; Codex keeps a stub) and run `skl implement next` or `skl watchdog next`. Changing harness changes nothing about the workflow.
+`skl install` puts the workflow into Pi, Codex, Claude Code and OpenCode. Every skill gets a one-line stub that runs `skl skill <name>`. Implement and Watchdog are installed as Harness Adapters in each harness's native entry point (a Pi prompt template, a user-invoked Claude Code skill, an OpenCode command; Codex keeps a stub) and run `skl implement next` or `skl watchdog next`. A second Implement entry point, `implement-team`, runs team mode, where the worker leads a team of implementer subagents. Changing harness changes nothing about the workflow.
 
 A Supervisor drains a queue by asking for work with `--dispatch`: the engine claims a Slice for a fresh worker session and answers with the command that session runs and the command that continues afterwards, which only proceeds once the ledger records that worker's handoff ([ADR 0010](docs/adr/0010-drive-supervisors-through-dispatch-outcomes.md)).
 
@@ -166,6 +166,8 @@ skl setup    # AGENTS.md workflow block, .gitignore entries, GitHub labels for t
 ```
 
 Rebuild the binary after editing anything under `prose/`; stubs and adapters read the running binary, not the checkout.
+
+To change the model defaults an entry point passes, copy its installed template to a new name and edit the copy; `skl install` only refreshes the files it wrote.
 
 ## Daily use
 

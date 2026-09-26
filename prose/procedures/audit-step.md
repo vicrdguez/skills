@@ -11,4 +11,4 @@ After the late target integration, the fixed point is `git merge-base <observed-
 
 Check: you hold the Contract documents supplied above, the diff command, the commit list, the gate result and the input-inspection result.
 
-{{template "audit-dispatch" .}}
+{{template "audit-dispatch" .Reviewer}}

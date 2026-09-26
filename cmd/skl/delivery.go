@@ -39,6 +39,11 @@ func deliveryCommands(phase string, newBackend backendFactory, stdout io.Writer)
 		if name == "resume" {
 			command.Flags = append(command.Flags, &cli.BoolFlag{Name: "dispatched", Usage: "render the Execution Skill a Dispatch of this Claim stands for"})
 		}
+		// Prepare and inspect print the resume command, so they carry the
+		// choices too.
+		if phase == ledger.ImplementPhase && (name == "next" || name == "resume" || name == "prepare" || name == "inspect") {
+			command.Flags = append(command.Flags, implementFlags()...)
+		}
 		commands = append(commands, command)
 	}
 	return commands
@@ -100,6 +105,10 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 		}
 	} else if item == "" || claim == "" {
 		return refusal(fmt.Errorf("%s requires --item <proposal>/<slice> and the exact --claim <acquisition-commit>", operation))
+	}
+	choices, err := implementChoices(c)
+	if err != nil {
+		return refusal(err)
 	}
 	repository, err := setup.ResolveRepository(c.Path("repo"), c.String("remote"))
 	if err != nil {
@@ -194,11 +203,43 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 	if operation == "resume" && c.Bool("dispatched") {
 		rendered = "next"
 	}
-	packet, err := setup.PresentDelivery(execution, repository, phase, rendered, source, c.Path("result-directory"))
+	packet, err := setup.PresentDelivery(execution, repository, phase, rendered, source, c.Path("result-directory"), choices)
 	if err != nil {
 		return emit(renderingFailedOutput(phase, repository, execution.Item, execution.Claim.Commit, err))
 	}
 	return emit(deliveryOutput{Status: map[string]string{"next": ledger.WorkAvailable, "resume": ledger.WorkAvailable, "prepare": "prepared", "inspect": "inspected"}[operation], Execution: execution, Source: source, Packet: &packet})
+}
+
+// implementFlags choose Implement's mode and the opaque subagent values its
+// Execution Skill renders.
+func implementFlags() []cli.Flag {
+	return []cli.Flag{
+		&cli.StringFlag{Name: "mode", Usage: "Implement mode: standard (default) or team"},
+		&cli.StringFlag{Name: "helper-model", Usage: "opaque model for team-mode implementer subagents"},
+		&cli.StringFlag{Name: "helper-thinking", Usage: "opaque thinking level for team-mode implementer subagents"},
+		&cli.StringFlag{Name: "reviewer-model", Usage: "opaque model for both Audit reviewers"},
+		&cli.StringFlag{Name: "reviewer-thinking", Usage: "opaque thinking level for both Audit reviewers"},
+	}
+}
+
+// implementChoices validates the Implement mode before anything is claimed.
+// An empty value counts as omitted, so an adapter can pass an unfilled slot.
+func implementChoices(c *cli.Context) (setup.ImplementChoices, error) {
+	choices := setup.ImplementChoices{
+		Mode:     c.String("mode"),
+		Helper:   skilldist.SubagentChoice{Model: c.String("helper-model"), Thinking: c.String("helper-thinking")},
+		Reviewer: skilldist.SubagentChoice{Model: c.String("reviewer-model"), Thinking: c.String("reviewer-thinking")},
+	}
+	switch choices.Mode {
+	case "", skilldist.StandardMode:
+		if choices.Helper != (skilldist.SubagentChoice{}) {
+			return choices, fmt.Errorf("--helper-model and --helper-thinking apply only to --mode team")
+		}
+	case skilldist.TeamMode:
+	default:
+		return choices, fmt.Errorf("unknown Implement mode %q; use standard or team", choices.Mode)
+	}
+	return choices, nil
 }
 
 // deliveryJSONRepair is the repair the JSON transport has always carried for

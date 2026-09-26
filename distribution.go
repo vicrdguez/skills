@@ -33,24 +33,83 @@ func ownedMarker(protocol string) []byte {
 //go:embed prose/procedures prose/craft prose/documents prose/outcomes prose/adapters/stub.md prose/adapters/entry.md prose/adapters/stubs
 var embedded embed.FS
 
-// entryPoints are the skills a harness starts as Workflow operations rather
-// than discovers as reusable knowledge.
-var entryPoints = []string{"implement", "watchdog"}
+// adapter is one Harness Adapter: the command it runs and the flags whose
+// values a user passes as its arguments, in order.
+type adapter struct {
+	name    string
+	command string
+	slots   []string
+}
+
+var adapters = []adapter{
+	{"implement", "skl implement next", []string{"reviewer-model", "reviewer-thinking"}},
+	{"implement-team", "skl implement next --mode team", []string{"helper-model", "helper-thinking", "reviewer-model", "reviewer-thinking"}},
+	{"watchdog", "skl watchdog next", nil},
+}
+
+// piDefaults are the values the pi adapters pass for an omitted argument.
+var piDefaults = map[string]string{
+	"helper-model":      "openai-codex/gpt-6-luna",
+	"helper-thinking":   "xhigh",
+	"reviewer-model":    "openai-codex/gpt-6-sol",
+	"reviewer-thinking": "xhigh",
+}
 
 // harness is where skl installs into one supported Agent Harness. A harness
 // with no argument-taking entry-point mechanism leaves entryPoint empty and
-// keeps the Skill Stub of each entry point.
+// keeps a Skill Stub for each adapter, without its slots.
 type harness struct {
 	skills     string
 	entryPoint string
 	entryKeys  []string
+	// argument is the harness's placeholder for an adapter's argument at a
+	// 0-based position.
+	argument func(position int, flag string) string
+	// slotKeys are the frontmatter lines that declare an adapter's arguments.
+	slotKeys func(slots []string) []string
 }
 
 var harnesses = []harness{
-	{".pi/agent/skills", ".pi/agent/prompts/%s.md", []string{"description"}},
-	{".codex/skills", "", nil},
-	{".claude/skills", ".claude/skills/%s/SKILL.md", []string{"name", "description", "disable-model-invocation"}},
-	{".config/opencode/skills", ".config/opencode/commands/%s.md", []string{"description"}},
+	{skills: ".pi/agent/skills", entryPoint: ".pi/agent/prompts/%s.md", entryKeys: []string{"description"},
+		argument: func(position int, flag string) string { return fmt.Sprintf("${%d:-%s}", position+1, piDefaults[flag]) },
+		slotKeys: func(slots []string) []string { return []string{argumentHint(slots)} }},
+	{skills: ".codex/skills"},
+	// Claude Code keeps an unfilled positional placeholder verbatim, and expands
+	// an unfilled named one to nothing.
+	{skills: ".claude/skills", entryPoint: ".claude/skills/%s/SKILL.md", entryKeys: []string{"name", "description", "disable-model-invocation"},
+		argument: func(_ int, flag string) string { return "$" + claudeArgument(flag) },
+		slotKeys: func(slots []string) []string {
+			names := make([]string, len(slots))
+			for i, flag := range slots {
+				names[i] = claudeArgument(flag)
+			}
+			return []string{"arguments: [" + strings.Join(names, ", ") + "]", argumentHint(slots)}
+		}},
+	{skills: ".config/opencode/skills", entryPoint: ".config/opencode/commands/%s.md", entryKeys: []string{"description"},
+		argument: func(position int, _ string) string { return fmt.Sprintf("$%d", position+1) }},
+}
+
+// claudeArgument is the Claude Code argument name of a flag.
+func claudeArgument(flag string) string {
+	return strings.ReplaceAll(flag, "-", "_")
+}
+
+func argumentHint(slots []string) string {
+	return `argument-hint: "[` + strings.Join(slots, "] [") + `]"`
+}
+
+// entry renders an adapter's command and frontmatter for one harness. An
+// unfilled argument passes an empty value, which skl treats as omitted.
+func (target harness) entry(a adapter, frontmatter string) (command, keys string) {
+	command = a.command
+	for position, flag := range a.slots {
+		command += " --" + flag + " '" + target.argument(position, flag) + "'"
+	}
+	var slotKeys []string
+	if len(a.slots) > 0 && target.slotKeys != nil {
+		slotKeys = target.slotKeys(a.slots)
+	}
+	return command, frontmatterKeys(frontmatter, target.entryKeys, slotKeys)
 }
 
 // retiredPiFiles are the Pi runners, loop prompts and queue helper that
@@ -58,10 +117,9 @@ var harnesses = []harness{
 var retiredPiFiles = []string{"prompts/implement-loop.md", "prompts/watchdog-loop.md", "prompts/queue-next.mjs", "agents/implement-runner.md", "agents/watchdog-runner.md"}
 
 type installData struct {
-	Name        string
+	Command     string
 	Protocol    string
 	Frontmatter string
-	EntryPoint  bool
 }
 
 type InstallOutcome struct {
@@ -84,23 +142,29 @@ func Install(home string) (InstallOutcome, error) {
 			return outcome, err
 		}
 		for _, name := range SkillNames() {
-			frontmatter, err := stubFrontmatter(name)
-			if err != nil {
-				return outcome, err
+			if slices.ContainsFunc(adapters, func(a adapter) bool { return a.name == name }) {
+				continue
 			}
-			stubPath := filepath.Join(home, target.skills, name, "SKILL.md")
-			entryPoint := slices.Contains(entryPoints, name)
-			if target.entryPoint == "" || !entryPoint {
-				data := installData{Name: name, Protocol: StubProtocol, Frontmatter: frontmatter, EntryPoint: entryPoint}
-				if err := outcome.write(stubPath, stub, data); err != nil {
-					return outcome, fmt.Errorf("install %s for %s: %w", name, target.skills, err)
+			if err := outcome.writeStub(filepath.Join(home, target.skills, name, "SKILL.md"), stub, name, "skl skill "+name); err != nil {
+				return outcome, fmt.Errorf("install %s for %s: %w", name, target.skills, err)
+			}
+		}
+		for _, a := range adapters {
+			stubPath := filepath.Join(home, target.skills, a.name, "SKILL.md")
+			if target.entryPoint == "" {
+				if err := outcome.writeStub(stubPath, stub, a.name, a.command); err != nil {
+					return outcome, fmt.Errorf("install %s for %s: %w", a.name, target.skills, err)
 				}
 				continue
 			}
-			adapterPath := filepath.Join(home, fmt.Sprintf(target.entryPoint, name))
-			data := installData{Name: name, Protocol: AdapterProtocol, Frontmatter: frontmatterKeys(frontmatter, target.entryKeys)}
-			if err := outcome.write(adapterPath, entry, data); err != nil {
-				return outcome, fmt.Errorf("install %s adapter for %s: %w", name, target.skills, err)
+			frontmatter, err := stubFrontmatter(a.name)
+			if err != nil {
+				return outcome, err
+			}
+			command, keys := target.entry(a, frontmatter)
+			adapterPath := filepath.Join(home, fmt.Sprintf(target.entryPoint, a.name))
+			if err := outcome.write(adapterPath, entry, installData{Command: command, Protocol: AdapterProtocol, Frontmatter: keys}); err != nil {
+				return outcome, fmt.Errorf("install %s adapter for %s: %w", a.name, target.skills, err)
 			}
 			if adapterPath != stubPath {
 				if err := outcome.retireStub(stubPath); err != nil {
@@ -115,6 +179,15 @@ func Install(home string) (InstallOutcome, error) {
 		}
 	}
 	return outcome, nil
+}
+
+// writeStub installs the Skill Stub of name, which runs command.
+func (outcome *InstallOutcome) writeStub(file string, stub *template.Template, name, command string) error {
+	frontmatter, err := stubFrontmatter(name)
+	if err != nil {
+		return err
+	}
+	return outcome.write(file, stub, installData{Command: command, Protocol: StubProtocol, Frontmatter: frontmatter})
 }
 
 // write renders an installed file, replacing an existing one only when skl
@@ -187,8 +260,8 @@ func (outcome *InstallOutcome) retireStub(file string) error {
 	return nil
 }
 
-// stubFrontmatter is the discovery metadata a harness reads from a skill's
-// installed stub.
+// stubFrontmatter is the discovery metadata a harness reads from a skill's or
+// adapter's installed stub.
 func stubFrontmatter(name string) (string, error) {
 	source, err := fs.ReadFile(embedded, path.Join(proseRoot, "adapters/stubs", name+".md"))
 	if err != nil {
@@ -201,14 +274,16 @@ func stubFrontmatter(name string) (string, error) {
 }
 
 // frontmatterKeys keeps only the frontmatter lines a harness's entry point
-// recognizes. Every stub frontmatter key holds a one-line value.
-func frontmatterKeys(frontmatter string, keys []string) string {
-	var kept []string
-	for _, line := range strings.Split(frontmatter, "\n") {
+// recognizes, then adds extra lines. Every stub frontmatter key holds a
+// one-line value.
+func frontmatterKeys(frontmatter string, keys, extra []string) string {
+	lines := strings.Split(frontmatter, "\n")
+	kept := []string{lines[0]}
+	for _, line := range lines[1 : len(lines)-1] {
 		key, _, found := strings.Cut(line, ":")
-		if line == "---" || found && slices.Contains(keys, key) {
+		if found && slices.Contains(keys, key) {
 			kept = append(kept, line)
 		}
 	}
-	return strings.Join(kept, "\n")
+	return strings.Join(append(append(kept, extra...), "---"), "\n")
 }
