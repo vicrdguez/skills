@@ -200,11 +200,11 @@ Tests verify behavior through public interfaces, not implementation details. Cod
 
 Write tests before or after the code, whichever fits the change, and refactor whenever it helps.
 
-See `skl skill --resource tests.md testing` for examples and `skl skill --resource mocking.md testing` for mocking guidelines.
+When writing or judging a test, see `skl skill --resource tests.md testing` for examples. Before substituting a dependency, see `skl skill --resource mocking.md testing` for mocking guidelines.
 
 ## Seams — where tests go
 
-A **seam** is the public boundary you test at: the interface where you observe behavior without reaching inside (full vocabulary in `design`). Tests live at seams.
+A **seam** is where a module's interface lives: the place you observe behavior without reaching inside. Tests live at seams.
 
 Test at the seams the Contract pins. Where the Contract leaves the seam to you, prefer an existing one, and use the highest seam that exposes the promised consequence.
 
@@ -217,7 +217,7 @@ Test at the seams the Contract pins. Where the Contract leaves the seam to you, 
 
 A bug fix's check goes **red on the bug**: it fails on the reported wrong behavior and passes with the fix, in either writing order. A failure from setup, an import or compilation is not red on the bug.
 
-When the original failure can't be reproduced reliably or safely, a faithful isolated reproduction, a captured-trace replay or controlled fault injection can stand in, as long as it keeps the trigger and the observable failure. State in your report what stays unverified. When a material failure has no credible evidence, take it to a human decision.
+When the original failure can't be reproduced reliably or safely, a faithful isolated reproduction, a captured-trace replay or controlled fault injection can stand in, as long as it keeps the trigger and the observable failure. State what stays unverified; a material gap without credible evidence goes to a human decision.
 
 ## Evidence
 
