@@ -47,7 +47,7 @@ func TestSetupMaintainsOnlyOwnedAgentsBlock(t *testing.T) {
 
 func TestRepositoryAgentsCarriesCurrentBlock(t *testing.T) {
 	if agents := readFile(t, filepath.Join("..", "AGENTS.md")); !strings.Contains(agents, setup.AgentsBlock) {
-		t.Fatal("AGENTS.md block differs from what setup writes; rerun skl setup")
+		t.Fatal("AGENTS.md block differs from setup.AgentsBlock; copy it into AGENTS.md")
 	}
 }
 
