@@ -433,7 +433,7 @@ func TerminalSourceWork(s *Store, repository github.RepositoryID) ([]SourceWork,
 				record.Hold = "Superseded work was never merged; its source work is preserved"
 			case state.Claim != nil:
 				record.Hold = "the slice still holds a Claim"
-			case !ValidRecordName(state.Branch):
+			case validBranch(state.Branch) != nil:
 				record.Hold = "no valid owned source branch is recorded"
 			case state.Submission == nil || state.Completion == nil || state.Target == nil ||
 				state.Completion.Submission != *state.Submission || state.Completion.Target != *state.Target ||

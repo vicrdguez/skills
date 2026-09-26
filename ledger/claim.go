@@ -76,7 +76,7 @@ func (s *Store) deliveryState(repository github.RepositoryID, item string) (Slic
 	if err := readJSONAt(s, head, directory+"/state.json", &state); err != nil {
 		return state, "", "", refuse("selected Work Item "+item+" has no readable committed state", "repair the selected record; forge conversations and source markers are not substitutes")
 	}
-	if state.Title == "" || !ValidRecordName(state.Branch) {
+	if state.Title == "" || validBranch(state.Branch) != nil {
 		return state, "", "", refuse("selected Work Item has invalid title or planned branch", "repair the selected source identity with human direction")
 	}
 	switch state.State {

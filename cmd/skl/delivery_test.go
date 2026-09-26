@@ -590,6 +590,37 @@ func TestDeliveryCLINoWorkAndFormats(t *testing.T) {
 	}
 }
 
+// TestDeliveryCLIDeliversSlashedPlannedBranch proves a planned branch that
+// acceptance admits, such as feat/<slice>, is claimable and preparable.
+func TestDeliveryCLIDeliversSlashedPlannedBranch(t *testing.T) {
+	newLedgerFixture(t)
+	source, target := deliverySourceRepo(t)
+	spec := singleSlice(deliveryTestProposal)
+	spec.slices[0].branch = "feat/foundation"
+	if accepted := newLedgerApp(t, newForgeServer(t)).accept(t, source, writeProposal(t, "", spec)); accepted.Status != "accepted" {
+		t.Fatalf("accept slashed branch: %s", mustJSON(t, accepted))
+	}
+	cli := deliveryNoForgeApp(t)
+
+	started, err := cli.deliveryJSON(t, "skl", "implement", "next", "--repo", source, "--format", "json")
+	if err != nil || started.Status != "work_available" || started.Execution == nil {
+		t.Fatalf("implement next = %#v, err=%v", started, err)
+	}
+	prepared, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--item", started.Execution.Item, "--claim", started.Execution.Claim.Commit, "--format", "json")
+	if err != nil || prepared.Status != "prepared" || prepared.Source == nil {
+		t.Fatalf("implement prepare = %#v, err=%v", prepared, err)
+	}
+	if prepared.Source.Head != target {
+		t.Fatalf("prepared head = %s, want %s", prepared.Source.Head, target)
+	}
+	if !strings.HasSuffix(prepared.Source.Worktree, filepath.Join(".worktrees", "feat", "foundation")) {
+		t.Fatalf("worktree = %s, want it under .worktrees/feat/foundation", prepared.Source.Worktree)
+	}
+	if got := deliveryTrimmed(t, prepared.Source.Worktree, "symbolic-ref", "--short", "HEAD"); got != "feat/foundation" {
+		t.Fatalf("prepared worktree is on %q, want feat/foundation", got)
+	}
+}
+
 // TestDeliveryCLIClaimBoundaries proves a released or foreign Claim cannot
 // resume, release, or overwrite a later reservation.
 func TestDeliveryCLIClaimBoundaries(t *testing.T) {
