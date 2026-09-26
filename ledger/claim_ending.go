@@ -22,9 +22,14 @@ type ClaimEnding struct {
 	Ending string `json:"ending"`
 }
 
-// Handoff reports whether the Claim ended in a recorded phase handoff.
+// Handoff reports whether the Claim ended in a recorded phase handoff:
+// Implement's submission or pause, or a Watchdog review's outcome.
 func (e ClaimEnding) Handoff() bool {
-	return e.Ending != ClaimHeld && e.Ending != ClaimReleased
+	switch e.Ending {
+	case AwaitingReview, NeedsHuman, "pass", Rework:
+		return true
+	}
+	return false
 }
 
 var fullCommit = regexp.MustCompile(`^[0-9a-f]{40}$`)

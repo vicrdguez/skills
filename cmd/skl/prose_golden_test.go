@@ -41,7 +41,10 @@ var (
 	proseSHA        = regexp.MustCompile(`\b[0-9a-f]{40}\b`)
 	proseResultDir  = regexp.MustCompile(`skl-(implement|watchdog)-[0-9]+`)
 	proseTimestamp  = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})`)
-	proseResource   = regexp.MustCompile("skl skill --resource ([^<\\s]\\S*)(?: --input [^`\\s]+)* ([a-z-]+)")
+	// A Dispatch's Claim and continue command, as the Supervisor reads them.
+	dispatchClaim    = regexp.MustCompile("is claimed for [A-Za-z ]+ with Claim `([0-9a-f]{40})`")
+	dispatchContinue = regexp.MustCompile("When the subagent returns, run:\n\n`([^`]+)`")
+	proseResource    = regexp.MustCompile("skl skill --resource ([^<\\s]\\S*)(?: --input [^`\\s]+)* ([a-z-]+)")
 )
 
 // proseGoldens compares or rewrites each rendering after replacing the values

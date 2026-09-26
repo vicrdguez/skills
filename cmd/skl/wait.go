@@ -18,8 +18,9 @@ func (app *stageApp) Run(args []string) error {
 }
 
 func (app *stageApp) RunContext(ctx context.Context, args []string) error {
-	// urfave/cli requires values for duration flags. Expand only bare --wait,
-	// leaving all ordinary flag parsing and errors to the CLI library.
+	// urfave/cli requires values for flags that take one. Expand only bare
+	// --wait and --after, leaving all ordinary flag parsing and errors to the
+	// CLI library.
 	args = append([]string(nil), args...)
 	if len(args) >= 3 && (args[1] == "implement" || args[1] == "watchdog") {
 		command := app.Command(args[1]).Command(args[2])
@@ -28,6 +29,12 @@ func (app *stageApp) RunContext(ctx context.Context, args []string) error {
 				arg := args[i]
 				if arg == "--" || !strings.HasPrefix(arg, "-") {
 					break
+				}
+				// A bare --after is an empty continuation reference, which
+				// Dispatch refuses as an Outcome Instruction.
+				if arg == "--after" && (i+1 == len(args) || strings.HasPrefix(args[i+1], "-")) {
+					args[i] = "--after="
+					continue
 				}
 				if arg == "--wait" {
 					next := ""

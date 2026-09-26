@@ -202,7 +202,7 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 	if err != nil {
 		return emit(renderingFailedOutput(phase, repository, execution.Item, execution.Claim.Commit, err))
 	}
-	return emit(deliveryOutput{Status: map[string]string{"next": "work_available", "resume": "work_available", "prepare": "prepared", "inspect": "inspected"}[operation], Execution: execution, Source: source, Packet: &packet})
+	return emit(deliveryOutput{Status: map[string]string{"next": ledger.WorkAvailable, "resume": ledger.WorkAvailable, "prepare": "prepared", "inspect": "inspected"}[operation], Execution: execution, Source: source, Packet: &packet})
 }
 
 // deliveryJSONRepair is the repair the JSON transport has always carried for
