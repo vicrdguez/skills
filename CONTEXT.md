@@ -234,6 +234,14 @@ _Avoid_: Functional code change, blocking finding, review transcript
 One fresh **Agent Worker** context dedicated to one **Work Item**. A **Harness Adapter** may start successive sessions while the **Workflow Engine** continues to report eligible work.
 _Avoid_: Queue, workflow
 
+**Supervisor**:
+An **Agent Harness** conversation that repeatedly performs **Dispatches** for one phase of one **Project**, starting a fresh **Worker Session** for each and following the **Workflow Engine**'s outcomes. It does not perform or judge the dispatched work.
+_Avoid_: Orchestrator, queue runner, loop worker
+
+**Dispatch**:
+A **Work Start** performed for a new **Worker Session** rather than for the caller. It answers with how to start that session and how to continue afterwards. Continuation requires that the dispatched **Claim** ended in a phase handoff; any other ending stops the **Supervisor**.
+_Avoid_: Delegation, retry
+
 **Local Backend**:
 A **Workflow Backend** that supports a complete workflow without a hosted forge.
 _Avoid_: Local Git helper, GitHub cache
