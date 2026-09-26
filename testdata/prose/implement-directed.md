@@ -216,48 +216,40 @@ A `fix_required` outcome retains this Claim and the report: repair the reported 
 
 
 
-# Contract-Grounded Testing
+# Testing
 
-Testing establishes that delivered behavior and architecture satisfy their accepted contract. Choose the construction order, test organization, and verification boundaries that make that evidence credible; no universal test-first chronology or scenario-to-test cardinality is required.
+Tests show that the change keeps its Contract. This is the reference that makes those tests worth keeping: what a good test is, where tests go, the anti-patterns, and what counts as evidence.
 
-When exploring a codebase, read `CONTEXT.md` (if it exists) so test names and interface vocabulary match the project's domain language, and respect applicable ADRs and repository standards.
+When exploring the codebase, read `CONTEXT.md` (if it exists) so test names and interface vocabulary match the project's domain language, and respect ADRs in the area you're touching.
 
-## Verify observable behavior
+## What a good test is
 
-Test through an interface that exposes the promised consequence without reaching through it into incidental implementation details. A suitable existing verification boundary is valid when it can observe the obligation and distinguish a plausible violation; do not add another test layer or redesign the architecture merely to create a preferred seam.
+Tests verify behavior through public interfaces, not implementation details. Code can change entirely; tests shouldn't. A good test reads like a specification — "user can checkout with valid cart" tells you exactly what capability exists — and survives refactors because it doesn't care about internal structure.
 
-A substantial internal module may have its own interface and tests. The question is whether the seam represents behavior callers rely on, not whether it is the topmost interface.
+Write tests before or after the code, whichever fits the change, and refactor whenever it helps.
 
-A strong check:
+When writing or judging a test, see `skl skill --resource tests.md testing` for examples. Before substituting a dependency, see `skl skill --resource mocking.md testing` for mocking guidelines.
 
-- observes an accepted behavior or failure mode;
-- would fail for a plausible implementation that violates it;
-- keeps unrelated setup, imports, and infrastructure from masquerading as behavioral evidence;
-- remains stable when implementation details change without changing behavior.
+## Seams — where tests go
 
-See `skl skill --resource tests.md testing` for examples and test-set assessment, and `skl skill --resource mocking.md testing` for boundary substitutes and controlled alternatives.
+A **seam** is where a module's interface lives: the place you observe behavior without reaching inside. Tests live at seams.
 
-## Ground expected outcomes independently
+Test at the seams the Contract pins. Where the Contract leaves the seam to you, prefer an existing one, and use the highest seam that exposes the promised consequence.
 
-Every expected result needs an independent expectation grounded in an accepted rule, a trusted example or reference, or a justified property. Do not derive the expected value by repeating the production algorithm, copying the template under test, or asserting only that execution occurred.
+## Anti-patterns
 
-When exact examples are unavailable, state the property and why it follows from the contract. Material uncertainty about the promised result is a decision gap, not a reason to weaken the assertion.
+- **Implementation-coupled** — mocks internal collaborators, tests private methods, or verifies through a side channel (querying the database instead of using the interface). The tell: the test breaks when you refactor but behavior hasn't changed.
+- **Tautological** — the assertion recomputes the expected value the way the code does (`expect(add(a, b)).toBe(a + b)`, a snapshot derived by hand the same way, a constant asserted equal to itself). The tell: it passes by construction and can never disagree with the code. Take expected values from an independent source: an accepted rule, a trusted example, or a justified property.
 
-## Establish regression sensitivity
+## Red on the bug
 
-For a bug fix, provide evidence that the regression check detects the reported wrong behavior and passes with the fix. The check may be authored before or after the fix; early reproduction is encouraged because it sharpens diagnosis, but writing order is not an acceptance criterion.
+A bug fix's check goes **red on the bug**: it fails on the reported wrong behavior and passes with the fix, in either writing order. A failure from setup, an import or compilation is not red on the bug.
 
-A failure caused only by unrelated setup, import, compilation, or execution errors does not establish sensitivity to the regression.
+When the original failure can't be reproduced reliably or safely, a faithful isolated reproduction, a captured-trace replay or controlled fault injection can stand in, as long as it keeps the trigger and the observable failure. State what stays unverified; a material gap without credible evidence goes to a human decision.
 
-If the original failure cannot be reproduced reliably or safely, a faithful isolated reproduction, captured-trace replay, or controlled fault injection may establish protection when it preserves the relevant trigger and observable failure. Record the material limitations of that evidence. If material uncertainty remains without credible protection, seek a human decision rather than claim verification or silently carry the gap as debt.
+## Evidence
 
-## Assess the changed test set together
-
-Required behavioral and failure-mode protection matters more than test inventory. Use `skl skill --resource tests.md testing` for the detailed retention, consolidation, and removal guidance; unrelated repository-wide test pruning remains outside the current change unless explicitly accepted.
-
-## Report evidence honestly
-
-Connect the obligations to concrete tests, commands, or appropriate inspection evidence, including results and material limitations. Many obligations may share evidence and one obligation may need several checks. Prose assurance alone is insufficient for ordinary executable behavior, and merely listing a gap does not make it acceptable.
+Map obligations to checks many-to-many: one check can cover several obligations, and one obligation can need several checks. Judge the changed tests as a set. Reuse, strengthen, consolidate or remove checks while every required behavior and failure mode stays protected.
 
 
 # Audit
