@@ -169,8 +169,8 @@ func TestDecisionPartialOutcomesAreItemized(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := packet.Instructions
-	if !strings.Contains(body, "not a successful whole-group decision") ||
-		strings.Contains(body, "Every selected item below is resolved by one committed answer") {
+	if !strings.Contains(body, "Only some answers were recorded") ||
+		strings.Contains(body, "Every selected answer was recorded") {
 		t.Errorf("partial result claims whole-group success:\n%s", body)
 	}
 	for _, want := range []string{
@@ -210,7 +210,7 @@ func TestDecisionRefusalRequiresRenewedDirection(t *testing.T) {
 	}
 	body := packet.Instructions
 	for _, want := range []string{
-		"No selected direction was recorded",
+		"No answer was recorded",
 		"the selected request was replaced even though its question text repeated",
 		"collect renewed human direction against the current request",
 	} {
@@ -244,7 +244,7 @@ func TestDecisionRetirementGuardsPartialDelivery(t *testing.T) {
 		"another slice is still claimed",
 		"release or complete the active slice before retiring",
 		"`repair/active`",
-		"was not retired for the reason above",
+		"The parent is still open",
 	} {
 		if !strings.Contains(refused.Instructions, want) {
 			t.Errorf("guarded retirement is missing %q:\n%s", want, refused.Instructions)
@@ -267,7 +267,7 @@ func TestDecisionRetirementGuardsPartialDelivery(t *testing.T) {
 	for _, want := range []string{
 		"Merged slices preserved: 1",
 		"Superseded slices: 2",
-		"reports partial delivery, not all-delivered completion",
+		"Report it as partial delivery",
 	} {
 		if !strings.Contains(retired.Instructions, want) {
 			t.Errorf("recorded retirement is missing %q:\n%s", want, retired.Instructions)
