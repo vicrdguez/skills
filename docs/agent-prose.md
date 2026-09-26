@@ -35,7 +35,7 @@ Authored prose lives under `prose/`, one directory per kind.
 
 - `prose/procedures/<name>.md` is a Procedure. Delivery continuations are Procedures of their own: `implement-prepare.md`, `implement-inspect.md`, `watchdog-prepare.md` and `watchdog-inspect.md`. `audit-step.md` is the Audit step inside Implement; `audit.md` is standalone Audit. `decision-inbox.md` renders the Decision Inbox and its results; `decision.md` is the standalone retrieval.
 - `prose/procedures/modules/` holds `define` blocks that several Procedures or resources share, such as the source facts every Implement rendering starts with.
-- `prose/craft/<name>.md` is a Craft file. `prose/craft/audit.md` holds the two review axes that both Audit Procedures include.
+- `prose/craft/<name>.md` is a Craft file. `prose/craft/audit.md` holds the two review axes that both Audit Procedures include. `prose/craft/review.md` is the adversarial review method that Watchdog includes, together with Audit's acceptance criteria.
 - `prose/outcomes/<kind>.md` is the Outcome Instruction of one outcome kind, such as `refused.md` or `submitted.md`; `prose/outcomes/modules/` holds the blocks they share. Command code chooses the kind and supplies its facts: the status, bound commands, the refusal's invariant and repair, the Claim state and publication notes. Its only worker-directed text is refusal strings, passed through as data.
 - `prose/<kind>/<name>/` holds the Skill Resources of the skill `<name>`. A resource's name is its path in that directory, so `prose/craft/testing/tests.md` is `skl skill --resource tests.md testing`.
 - `prose/adapters/stub.md` is the stub template, and `prose/adapters/stubs/<name>.md` is each skill's discovery frontmatter. `prose/adapters/agents/` and `prose/adapters/prompts/` are the Pi runner and loop files.
@@ -60,7 +60,7 @@ The report format that `implement-report.md` and `watchdog-report.md` follow is 
 | Negations per 1,000 words | *no*, *not*, *never*, *without*, *cannot*, other negation words and every *n't* contraction. | Naming a forbidden behavior makes that behavior more available to the model. A Procedure that states what to do needs few negations. |
 | Abstract-term density | Terms per 1,000 words that name a policy property instead of an action or object, such as *authority*, *obligation*, *invariant*, *provenance*. | Prose written for humans in a decision record is dense in these terms. A high density shows policy that leaked into agent-visible prose. |
 
-The journey counts the Skill Resources every such run retrieves: Audit's smells and acceptance criteria and the Implement report instructions, then the acceptance criteria again and the Watchdog report instructions. Resources a Procedure only points to, such as the testing references, are left out. The journey members and both word lists live in `tools/prosemetrics/main.go`.
+The journey counts the Skill Resources every such run retrieves: Audit's smells and acceptance criteria and the Implement report instructions, then the Watchdog report instructions. A resource that a rendering of the same phase already carries inline, as Watchdog carries the acceptance criteria, counts only inside that rendering. Resources a Procedure only points to, such as the testing references, are left out. The journey members and both word lists live in `tools/prosemetrics/main.go`.
 
 ## Goldens
 

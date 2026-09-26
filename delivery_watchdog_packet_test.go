@@ -109,7 +109,7 @@ func TestDeliveryWatchdogBindsEachProceeding(t *testing.T) {
 			}
 			for _, fixed := range []string{
 				facts.RequiredHead, facts.RecordedTarget,
-				fmt.Sprintf("Completed reviews: %d; this invocation is review number %d", facts.ReviewCount, facts.ReviewNumber),
+				fmt.Sprintf("Review round: %d", facts.ReviewNumber),
 			} {
 				if !strings.Contains(active, fixed) {
 					t.Errorf("%s instructions omitted fixed review fact %q", tc.name, fixed)
@@ -205,27 +205,33 @@ func TestDeliveryWatchdogReportResource(t *testing.T) {
 	}
 }
 
-// TestDeliveryWatchdogScopeAndFixedIdentity proves the fixed reviewed head,
-// target and completed-review count survive every supplied scope, and that a
-// render made before inspection reports its scope carries the unresolved-scope
-// branch.
+// TestDeliveryWatchdogScopeAndFixedIdentity proves each supplied scope binds
+// only its own comparison, that a render made before inspection reports its
+// scope carries both, and that the fixed reviewed head and target survive.
 func TestDeliveryWatchdogScopeAndFixedIdentity(t *testing.T) {
+	incremental := "git diff " + strings.Repeat("d", 40) + "...HEAD"
+	full := "git diff " + strings.Repeat("b", 40) + "...HEAD"
 	for _, tc := range []struct {
-		scope  string
-		count  uint64
-		marker string
+		scope   string
+		want    []string
+		without string
 	}{
-		{"incremental", 1, "completed-review count (1)"},
-		{"full", 2, "completed-review count (2)"},
-		{"", 1, "## Review scope"},
+		{"incremental", []string{incremental}, full},
+		{"full", []string{full}, incremental},
+		{"", []string{incremental, full}, ""},
 	} {
-		facts := deliveryWatchdogFacts("next", "initial", tc.scope, tc.count)
+		facts := deliveryWatchdogFacts("next", "initial", tc.scope, 1)
 		packet, err := BuildPacket("watchdog", InvocationFacts{Delivery: facts})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(packet.Instructions, tc.marker) {
-			t.Errorf("scope %q is missing %q", tc.scope, tc.marker)
+		for _, comparison := range tc.want {
+			if !strings.Contains(packet.Instructions, comparison) {
+				t.Errorf("scope %q is missing %q", tc.scope, comparison)
+			}
+		}
+		if tc.without != "" && strings.Contains(packet.Instructions, tc.without) {
+			t.Errorf("scope %q also binds %q", tc.scope, tc.without)
 		}
 		if !strings.Contains(packet.Instructions, facts.RequiredHead) || !strings.Contains(packet.Instructions, facts.RecordedTarget) {
 			t.Errorf("scope %q did not retain the fixed reviewed head and target", tc.scope)

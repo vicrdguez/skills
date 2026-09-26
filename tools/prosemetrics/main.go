@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,7 +24,10 @@ const (
 
 // journey is what a worker reads during one initial Implement and one first
 // Watchdog review: the renderings plus the resources those Procedures always
-// retrieve, in reading order. A resource read in both phases counts twice.
+// retrieve, in reading order. A resource read in both phases counts twice. A
+// resource whose text a rendering of the same phase already carries inline is
+// never retrieved in that phase, so it counts only inside that rendering; an
+// outcome ends a phase.
 var journey = []string{
 	"implement-start",
 	"implement-prepare",
@@ -135,6 +139,7 @@ func measureDirectory(dir string) (map[string]counts, error) {
 		return nil, err
 	}
 	measured := map[string]counts{}
+	texts := map[string]string{}
 	for _, path := range goldens {
 		contents, err := os.ReadFile(path)
 		if err != nil {
@@ -143,13 +148,28 @@ func measureDirectory(dir string) (map[string]counts, error) {
 		if fixture := partialFixture(string(contents), excluded); fixture != "" {
 			return nil, fmt.Errorf("%s embeds fixture %q altered, so its words would count as authored prose", path, fixture)
 		}
-		measured[strings.TrimSuffix(filepath.Base(path), ".md")] = measure(string(contents), excluded)
+		name := strings.TrimSuffix(filepath.Base(path), ".md")
+		measured[name] = measure(string(contents), excluded)
+		texts[name] = string(contents)
 	}
 	var total counts
+	var phase []string
 	for _, name := range journey {
 		c, ok := measured[name]
 		if !ok {
 			return nil, fmt.Errorf("journey golden %s.md is missing from %s", name, dir)
+		}
+		switch {
+		case strings.HasPrefix(name, "resource-"):
+			if slices.ContainsFunc(phase, func(rendering string) bool {
+				return strings.Contains(rendering, strings.TrimSpace(texts[name]))
+			}) {
+				continue
+			}
+		case strings.HasPrefix(name, "outcome-"):
+			phase = nil
+		default:
+			phase = append(phase, texts[name])
 		}
 		total = total.add(c)
 	}
