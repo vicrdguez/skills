@@ -1,8 +1,6 @@
 package skills
 
 import (
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -47,25 +45,13 @@ func decisionRequestFacts(project, item string) DecisionRequest {
 	}
 }
 
-func TestDecisionStandaloneRetrievalPointsAtTheInbox(t *testing.T) {
+func TestDecisionStandaloneManifest(t *testing.T) {
 	packet, err := BuildPacket("decision", InvocationFacts{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if packet.Skill != "decision" || len(packet.IncludedSkills) != 0 {
 		t.Fatalf("standalone decision packet = %#v", packet)
-	}
-	for _, want := range []string{
-		"`skl decision inbox`",
-		"`skl skill --resource reference/triage.md decision`",
-		"records no decision",
-	} {
-		if !strings.Contains(packet.Instructions, want) {
-			t.Errorf("standalone retrieval is missing %q:\n%s", want, packet.Instructions)
-		}
-	}
-	if strings.Contains(packet.Instructions, "## Current requests") {
-		t.Error("standalone retrieval rendered a request list without ledger facts")
 	}
 	if !slices.Equal(packet.Resources, []string{"reference/triage.md"}) {
 		t.Errorf("decision resources = %v", packet.Resources)
@@ -88,22 +74,14 @@ func TestDecisionInboxIsLedgerWideAndPreservesRequests(t *testing.T) {
 	}
 	body := packet.Instructions
 	for _, want := range []string{
-		"ledger-wide",
-		"never narrows it",
 		"### repair/fix",
 		"### upgrade/step",
 		"Project: atlas",
 		"Project: beacon",
 		atlas.RequestCommit + ":" + atlas.RequestPath,
 		beacon.RequestCommit + ":" + beacon.RequestPath,
-		"Opaque {{.Worktree}} body must stay data, not template source.",
 		atlas.ApplyCommand,
 		beacon.ApplyCommand,
-		"--route <implement|watchdog|supersede>",
-		"--answer <human-answer-file>",
-		"keep each request's identity",
-		"never invented, guessed, or filled in by inference",
-		"record no decision",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("ledger-wide inbox is missing %q:\n%s", want, body)
@@ -124,20 +102,10 @@ func TestDecisionInboxIsLedgerWideAndPreservesRequests(t *testing.T) {
 	}
 }
 
-// TestDecisionEmptyIsNotUnavailable proves a readable empty inbox, a filtered
-// empty inbox, and an unresolvable ledger render as distinct outcomes.
-func TestDecisionEmptyIsNotUnavailable(t *testing.T) {
-	empty, err := BuildPacket("decision", InvocationFacts{Decision: &DecisionFacts{Status: DecisionEmpty}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(empty.Instructions, "empty inbox") || !strings.Contains(empty.Instructions, "creates no work") {
-		t.Errorf("empty inbox is unclear:\n%s", empty.Instructions)
-	}
-	if strings.Contains(empty.Instructions, "could not be resolved or read") {
-		t.Error("empty inbox was rendered as an unavailable ledger")
-	}
-
+// TestDecisionFilteredEmptyAndUnavailableEchoFacts proves a filtered empty
+// inbox keeps its Project and an unavailable ledger echoes the supplied reason
+// and repair.
+func TestDecisionFilteredEmptyAndUnavailableEchoFacts(t *testing.T) {
 	filtered, err := BuildPacket("decision", InvocationFacts{Decision: &DecisionFacts{
 		Status:  DecisionEmpty,
 		Project: "beacon",
@@ -149,9 +117,6 @@ func TestDecisionEmptyIsNotUnavailable(t *testing.T) {
 		!strings.Contains(filtered.Instructions, "for Project 'beacon'") {
 		t.Errorf("filtered empty inbox lost its explicit scope:\n%s", filtered.Instructions)
 	}
-	if !strings.Contains(filtered.Instructions, "not recorded in the ledger is reported as unavailable") {
-		t.Errorf("filtered empty inbox can silently broaden scope:\n%s", filtered.Instructions)
-	}
 
 	unavailable, err := BuildPacket("decision", InvocationFacts{Decision: &DecisionFacts{
 		Status: DecisionUnavailable,
@@ -162,17 +127,12 @@ func TestDecisionEmptyIsNotUnavailable(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"not an empty inbox",
 		"ledger path is not a usable local Git clone",
 		"restore the configured ledger clone and retry",
-		"$XDG_CONFIG_HOME/skl/config.json",
 	} {
 		if !strings.Contains(unavailable.Instructions, want) {
 			t.Errorf("unavailable ledger is missing %q:\n%s", want, unavailable.Instructions)
 		}
-	}
-	if strings.Contains(unavailable.Instructions, "empty inbox: it creates no work") {
-		t.Error("unavailable ledger was rendered as an empty inbox")
 	}
 }
 
@@ -209,7 +169,8 @@ func TestDecisionPartialOutcomesAreItemized(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := packet.Instructions
-	if !strings.Contains(body, "not a successful whole-group decision") {
+	if !strings.Contains(body, "not a successful whole-group decision") ||
+		strings.Contains(body, "Every selected item below is resolved by one committed answer") {
 		t.Errorf("partial result claims whole-group success:\n%s", body)
 	}
 	for _, want := range []string{
@@ -227,9 +188,6 @@ func TestDecisionPartialOutcomesAreItemized(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("partial outcomes are missing %q:\n%s", want, body)
 		}
-	}
-	if strings.Contains(body, "Every selected item below is resolved by one committed answer") {
-		t.Error("partial result also rendered the fully applied headline")
 	}
 }
 
@@ -255,9 +213,6 @@ func TestDecisionRefusalRequiresRenewedDirection(t *testing.T) {
 		"No selected direction was recorded",
 		"the selected request was replaced even though its question text repeated",
 		"collect renewed human direction against the current request",
-		"renewed proposal and re-slicing",
-		"never amends the Contract",
-		"or authorizes new work",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("refusal result is missing %q:\n%s", want, body)
@@ -290,7 +245,6 @@ func TestDecisionRetirementGuardsPartialDelivery(t *testing.T) {
 		"release or complete the active slice before retiring",
 		"`repair/active`",
 		"was not retired for the reason above",
-		"nothing was released, merged, or silently abandoned",
 	} {
 		if !strings.Contains(refused.Instructions, want) {
 			t.Errorf("guarded retirement is missing %q:\n%s", want, refused.Instructions)
@@ -314,8 +268,6 @@ func TestDecisionRetirementGuardsPartialDelivery(t *testing.T) {
 		"Merged slices preserved: 1",
 		"Superseded slices: 2",
 		"reports partial delivery, not all-delivered completion",
-		"dependents stay blocked",
-		"no archive move, dependency remapping, forge completion observation, or source deletion",
 	} {
 		if !strings.Contains(retired.Instructions, want) {
 			t.Errorf("recorded retirement is missing %q:\n%s", want, retired.Instructions)
@@ -337,54 +289,5 @@ func TestDecisionApplyCommandBindsKnownArguments(t *testing.T) {
 	}
 	if !strings.Contains(DecisionApplyCommand("atlas", "repair/fix", commit, "a path"), "--request-path 'a path'") {
 		t.Error("decision apply command did not quote a path containing spaces")
-	}
-}
-
-// TestDecisionTriageResourceAndInstallation proves the triage rules are
-// retrievable as a static named resource and that installation publishes the
-// decision stub without authored content duplicating into harnesses.
-func TestDecisionTriageResourceAndInstallation(t *testing.T) {
-	resource, err := RenderResource("decision", "reference/triage.md", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		"Group related questions freely",
-		"keep each request's identity, exact reference, commitment, conflict",
-		"never invented, guessed, or filled in by inference",
-		"not authorization",
-		"without a ceremonial second confirmation",
-		"applied`, `already_applied`, `refused`, or `unresolved",
-		"never claim the whole group succeeded",
-		"renewed proposal and re-slicing",
-		"reports partial delivery, never all-delivered completion",
-		"a Superseded blocker is not Merged",
-	} {
-		if !strings.Contains(string(resource), want) {
-			t.Errorf("triage resource is missing %q", want)
-		}
-	}
-	description, err := DescribeResourceInputs("decision", "reference/triage.md")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if description != "reference/triage.md accepts no inputs.\n" {
-		t.Errorf("triage resource unexpectedly parameterized: %q", description)
-	}
-
-	home := t.TempDir()
-	if _, err := Install(home); err != nil {
-		t.Fatal(err)
-	}
-	stubPath := filepath.Join(home, ".pi/agent/skills/decision/SKILL.md")
-	stub, err := os.ReadFile(stubPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(stub), "skl skill decision") || !strings.Contains(string(stub), "skl.stub/v1") {
-		t.Errorf("decision stub does not delegate to the CLI:\n%s", stub)
-	}
-	if !strings.HasPrefix(string(stub), "---\nname: decision\n") {
-		t.Errorf("decision stub lost its frontmatter:\n%s", stub)
 	}
 }

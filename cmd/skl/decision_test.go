@@ -198,8 +198,6 @@ func TestDecisionInboxIsLedgerWideReadOnlyAndBound(t *testing.T) {
 	for _, want := range []string{
 		"Project: widgets", "Project: gadgets",
 		widgetItem, gadgetItem,
-		"--request-commit", "--request-path",
-		"--route <implement|watchdog|supersede>", "--answer <human-answer-file>",
 		"Conflict: the accepted Contract requires an outcome no default satisfies.",
 		"Recommendation: the in-contract option.",
 	} {
@@ -250,13 +248,6 @@ func TestDecisionInboxDistinguishesEmptyAndUnavailable(t *testing.T) {
 	empty := cli.decisionJSON(t, "skl", "decision", "inbox", "--format", "json")
 	if empty.Status != string(skilldist.DecisionEmpty) {
 		t.Fatalf("request-free ledger = %#v, want an empty inbox", empty)
-	}
-	markdown, err := cli.deliveryRun(t, "skl", "decision", "inbox")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(markdown, "empty inbox") || strings.Contains(markdown, "could not be resolved or read") {
-		t.Fatalf("empty inbox rendered indistinctly:\n%s", markdown)
 	}
 
 	unknown := cli.decisionJSON(t, "skl", "decision", "inbox", "--project", "no-such-project", "--format", "json")
@@ -798,13 +789,6 @@ func TestDecisionRetirementGuardsPartialDelivery(t *testing.T) {
 	if retired.Retirement == nil || !retired.Retirement.PartialDelivery {
 		t.Fatalf("retirement claimed full delivery: %#v", retired.Retirement)
 	}
-	markdown, err := cli.deliveryRun(t, "skl", "decision", "retire", "--project", "widgets", "--proposal", "retire-proposal")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(markdown, "reports partial delivery, not all-delivered completion") {
-		t.Fatalf("retirement markdown = %q", markdown)
-	}
 
 	// The dependent remains blocked: the Superseded blocker is not Merged and
 	// retirement remapped nothing.
@@ -815,46 +799,5 @@ func TestDecisionRetirementGuardsPartialDelivery(t *testing.T) {
 	blocked, err := cli.deliveryJSON(t, "skl", "implement", "next", "--repo", dependentSource, "--format", "json")
 	if err != nil || blocked.Status != "no_work" {
 		t.Fatalf("a dependent of superseded work became eligible: %#v %v", blocked, err)
-	}
-}
-
-// TestDecisionStandaloneSkillAndTriageResource covers A3: the conversation
-// skill and its static triage resource retrieve through public skl without
-// ledger facts or forge construction.
-func TestDecisionStandaloneSkillAndTriageResource(t *testing.T) {
-	var output bytes.Buffer
-	app := newApp(func(github.RepositoryID) (setup.Backend, error) {
-		t.Fatal("read-only decision retrieval must not construct a forge")
-		return nil, nil
-	}, bytes.NewReader(nil), &output, &output)
-
-	if err := app.Run([]string{"skl", "skill", "decision"}); err != nil {
-		t.Fatal(err)
-	}
-	standalone := output.String()
-	if !strings.Contains(standalone, "skl decision inbox") || !strings.Contains(standalone, "records no decision") {
-		t.Fatalf("standalone decision retrieval is unclear:\n%s", standalone)
-	}
-	if strings.Contains(standalone, "## Current requests") {
-		t.Error("standalone retrieval rendered a request list without ledger facts")
-	}
-
-	output.Reset()
-	if err := app.Run([]string{"skl", "skill", "--resource", "reference/triage.md", "decision"}); err != nil {
-		t.Fatal(err)
-	}
-	triage := output.String()
-	for _, want := range []string{
-		"only narrowing",
-		"never invented, guessed, or filled in by inference",
-		"not authorization",
-		"without a ceremonial second confirmation",
-		"applied`, `already_applied`, `refused`, or `unresolved",
-		"renewed proposal and re-slicing",
-		"Superseded blocker is not Merged",
-	} {
-		if !strings.Contains(triage, want) {
-			t.Errorf("triage resource is missing %q", want)
-		}
 	}
 }
