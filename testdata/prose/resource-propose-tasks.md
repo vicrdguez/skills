@@ -3,7 +3,7 @@
 <!--
 Group the work by coherent implementation outcome, labelled T<n>. A task tracks
 sequencing, a Dependency or coordination; scenario count, test count and
-construction order create none. Delete this comment in the real file.
+construction order alone create none. Delete this comment in the real file.
 -->
 
 ## Behavioral contract work

@@ -5,16 +5,14 @@ Write a named rule wherever a consequential ambiguity needs a decision. A rule
 governs its whole class of situations, beyond the scenarios beneath it.
 
 Add a scenario only when it tells plausible interpretations of a rule apart.
-An unambiguously implied case needs none. Each scenario:
-- is observable through the interface the slice is verified at, never through
-  incidental implementation state;
+Each scenario:
+- is observable through the interface the slice is verified at;
 - states its precondition with Given, its action with When, and its observable
   outcome with Then, adding And or But for further or unchanged outcomes;
 - considers, where relevant, state and side effects, effects that must not
   happen, and failure, cancellation, retry or partial completion.
 
-Scenarios are readable Gherkin prose, with no .feature files or runner. They
-bind behavior, never tests: one scenario is not one test or one task.
+Scenarios are readable Gherkin prose that bind behavior, not tests or tasks.
 
 Delete this comment in the real file.
 -->

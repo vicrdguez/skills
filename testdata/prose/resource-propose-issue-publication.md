@@ -6,6 +6,8 @@ Write fresh human-facing descriptions of accepted proposal `widget-dashboard` an
 
 Read each slice the publication outcome lists with `skl ledger show --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/<slice>'`. It shows the frozen Contract, current state, Dependencies and attached issues. That evidence stays private.
 
+Check: you have read every listed slice.
+
 ## Write the prose
 
 Write one self-contained Markdown file per slice, plus one parent body when the proposal has several slices, in private temporary files outside the source tree and the ledger clone.

@@ -6,6 +6,8 @@ Write fresh human-facing descriptions of accepted proposal `{{.Proposal}}` and p
 
 Read each slice the publication outcome lists with `skl ledger show --repo {{quote .Repo}} --remote {{quote .Remote}} --item {{quote (print .Proposal "/<slice>")}}`. It shows the frozen Contract, current state, Dependencies and attached issues. That evidence stays private.
 
+Check: you have read every listed slice.
+
 ## Write the prose
 
 Write one self-contained Markdown file per slice, plus one parent body when the proposal has several slices, in private temporary files outside the source tree and the ledger clone.

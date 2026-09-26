@@ -22,7 +22,7 @@ Load the `design` skill, then sketch the seams at which each slice is verified:
 
 - Keep every seam the user deliberately agreed.
 - Where the seam choice was delegated, prefer an existing seam, and use the highest one that exposes the promised consequence.
-- Return a consequential seam that is neither settled nor delegated to the user before drafting.
+- Before drafting, return to the user any consequential seam that is neither settled nor delegated.
 
 Check: every slice has its behavior, its Dependencies and its verification seams.
 
@@ -56,7 +56,7 @@ Write each slice's Contract documents. Acceptance records their exact bytes and 
 | `plan.md` | When the approved design pins architecture. | `skl skill --resource plan.md propose` |
 | `tasks.md` | When sequencing, Dependencies or coordination need explicit tracking. | `skl skill --resource tasks.md propose` |
 
-Keep the set compact. Preserve the approved decisions, and keep incidental sketches, scenario or test counts and a preferred construction order out of the obligations. Give each section a descriptive, unique heading.
+Keep the set compact: preserve the approved decisions, and add no obligation they lack. Give each section a descriptive, unique heading.
 
 Label each independently tracked commitment: `B<n>` for a behavior rule, `A<n>` for an architectural commitment, `T<n>` for a warranted task, `M<n>` for human-owned Manual Verification. Label commitments only, never every paragraph or heading. Each label lives in one document; you assign it, and it stays stable from acceptance on.
 
@@ -82,15 +82,14 @@ Check: every review finding is corrected or resolved by the user.
 
 ## 6. Accept into the Workflow Ledger
 
-1. Run `skl propose cleanup --repo <root>`. Make each repair it reports; it archives finished Proposals and removes safe merged source work itself.
+1. Run `skl propose cleanup --repo <root>` and follow its outcome. It archives finished Proposals and removes safe merged source work itself.
 2. Commit durable `CONTEXT.md` and ADR changes to the target branch.
 3. Prepare one intake directory outside the source tree:
    - `proposal.md`: the durable description of the approved Proposal;
    - `proposal.json`: `{"proposal": "<kebab-name>", "parent_title": "<multi-slice only>", "slices": [{"name": "<slug>", "title": "<issue title>", "branch": "<planned source branch>", "depends": ["<sibling slug or proposals/<proposal>/<slice>"]}]}`;
    - one directory per slice, holding only its Contract documents.
 4. Write a self-contained, human-facing issue body for each slice, plus a parent body for multi-slice work, in private temporary Markdown files.
-5. Run `skl ledger accept --repo <root> --proposal-dir <dir> --issue <slice>=<body-file>`, repeating `--issue` per slice and adding `--parent-body <file>` for multi-slice work. Acceptance records each planned branch; it creates no branch or worktree.
-6. Follow the outcome. On `fix_required`, make the repair and rerun the same command.
-7. Read each slice back with `skl ledger show --repo <root> --item <proposal>/<slice>`. Cite its ledger commit and path when you identify a document exactly.
+5. Run `skl ledger accept --repo <root> --proposal-dir <dir> --issue <slice>=<body-file>`, repeating `--issue` per slice and adding `--parent-body <file>` for multi-slice work, and follow its outcome. Acceptance records each planned branch; it creates no branch or worktree.
+6. Read each slice back with `skl ledger show --repo <root> --item <proposal>/<slice>`. Cite its ledger commit and path when you identify a document exactly.
 
 Check: the readback shows every slice's accepted documents.

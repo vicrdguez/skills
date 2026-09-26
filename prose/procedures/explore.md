@@ -3,7 +3,9 @@ Interview the user relentlessly until you share one understanding of the change.
 ## Start
 
 - When the user supplies the exact path to a `.thinking` artifact, read it as starting context and carry its settled concepts forward unless the project contradicts them. Read only the path the user gives.
-- When the user names a superseded slice, read its Contract with `skl ledger show --item <proposal>/<slice>`, and its reports by adding `--phase implement` and `--phase watchdog`. Keep what the failed attempt established, and reopen the decisions its supersession implicates.
+- When the user names a superseded slice, read its Contract with `skl ledger show --item <proposal>/<slice>`, then its reports by running that command once with `--phase implement` and once with `--phase watchdog`. Keep what the failed attempt established, and reopen the decisions its supersession implicates.
+
+Check: you have read everything the user named.
 
 Use the `domain` guidance below throughout the session: sharpen the project's language and write durable docs as decisions crystallise.
 
