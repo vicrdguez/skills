@@ -102,9 +102,10 @@ func TestDecisionInboxIsLedgerWideAndPreservesRequests(t *testing.T) {
 	}
 }
 
-// TestDecisionEmptyIsNotUnavailable proves a filtered empty inbox keeps its
-// Project and an unavailable ledger echoes the supplied reason and repair.
-func TestDecisionEmptyIsNotUnavailable(t *testing.T) {
+// TestDecisionFilteredEmptyAndUnavailableEchoFacts proves a filtered empty
+// inbox keeps its Project and an unavailable ledger echoes the supplied reason
+// and repair.
+func TestDecisionFilteredEmptyAndUnavailableEchoFacts(t *testing.T) {
 	filtered, err := BuildPacket("decision", InvocationFacts{Decision: &DecisionFacts{
 		Status:  DecisionEmpty,
 		Project: "beacon",
@@ -168,7 +169,8 @@ func TestDecisionPartialOutcomesAreItemized(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := packet.Instructions
-	if !strings.Contains(body, "not a successful whole-group decision") {
+	if !strings.Contains(body, "not a successful whole-group decision") ||
+		strings.Contains(body, "Every selected item below is resolved by one committed answer") {
 		t.Errorf("partial result claims whole-group success:\n%s", body)
 	}
 	for _, want := range []string{

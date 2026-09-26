@@ -454,57 +454,71 @@ func activeDeliveryPacket(t *testing.T, root, phase, operation string, state led
 	return packet
 }
 
-// TestDocumentedResourceCommands runs every `skl skill` command the README
-// documents and every one a rendering emits. The goldens under testdata/prose
-// hold every rendering a worker receives.
+// TestDocumentedResourceCommands runs every `skl skill` command a rendering
+// emits, and every resource command the README documents. The goldens under
+// testdata/prose hold every rendering a worker receives.
 func TestDocumentedResourceCommands(t *testing.T) {
-	sources := map[string]string{"README.md": readRepositoryFile(t, "README.md")}
 	goldens, err := filepath.Glob(filepath.Join(proseDirectory(), "*.md"))
 	if err != nil || len(goldens) == 0 {
 		t.Fatalf("no prose goldens: %v", err)
 	}
 	for _, golden := range goldens {
-		sources["testdata/prose/"+filepath.Base(golden)] = readFile(t, golden)
-	}
-	seen := map[string]bool{}
-	for name, source := range sources {
-		t.Run(name, func(t *testing.T) {
-			for _, chunk := range strings.Split(source, "`") {
-				for _, line := range strings.Split(chunk, "\n") {
-					// The decision resource documents its genuine later value as a
-					// choice; resolve it the way a worker would before running.
-					command := strings.ReplaceAll(strings.TrimSpace(line), "preserve=<true|false>", "preserve=true")
-					if !strings.HasPrefix(command, "skl skill ") || strings.Contains(command, "<") {
-						continue
-					}
-					// The README also names the refused read-only Implement and
-					// Watchdog retrievals; only its resource commands must run.
-					if name == "README.md" && !strings.Contains(command, "--resource") {
-						continue
-					}
-					args := shellArgs(t, command)
-					for _, arg := range args {
-						if name == "README.md" && strings.HasPrefix(arg, "reference/") {
-							seen[arg] = true
-						}
-					}
-					var output bytes.Buffer
-					app := newApp(func(github.RepositoryID) (setup.Backend, error) {
-						t.Fatalf("%s reached the Workflow Backend", command)
-						return nil, nil
-					}, bytes.NewReader(nil), &output, &output)
-					if err := app.Run(args); err != nil {
-						t.Errorf("%s: %v", command, err)
-					}
-				}
+		t.Run(filepath.Base(golden), func(t *testing.T) {
+			for _, command := range skillCommands(readFile(t, golden)) {
+				runSkillCommand(t, command)
 			}
 		})
+	}
+
+	// The README also names the refused read-only Implement and Watchdog
+	// retrievals, so only its resource commands must run.
+	seen := map[string]bool{}
+	for _, command := range skillCommands(readRepositoryFile(t, "README.md")) {
+		if !strings.Contains(command, "--resource") {
+			continue
+		}
+		for _, arg := range runSkillCommand(t, command) {
+			if strings.HasPrefix(arg, "reference/") {
+				seen[arg] = true
+			}
+		}
 	}
 	for _, want := range []string{"reference/ledger-submission.md", "reference/report-schema.md", "reference/ledger-review.md", "reference/DEEPENING.md"} {
 		if !seen[want] {
 			t.Errorf("README lacks a documented command for %s: %v", want, seen)
 		}
 	}
+}
+
+// skillCommands returns the backticked `skl skill` commands in source that
+// carry no placeholder.
+func skillCommands(source string) []string {
+	var commands []string
+	for _, chunk := range strings.Split(source, "`") {
+		for _, line := range strings.Split(chunk, "\n") {
+			command := strings.TrimSpace(line)
+			if strings.HasPrefix(command, "skl skill ") && !strings.Contains(command, "<") {
+				commands = append(commands, command)
+			}
+		}
+	}
+	return commands
+}
+
+// runSkillCommand runs one command as printed, without a Workflow Backend, and
+// returns its resolved arguments.
+func runSkillCommand(t *testing.T, command string) []string {
+	t.Helper()
+	args := shellArgs(t, command)
+	var output bytes.Buffer
+	app := newApp(func(github.RepositoryID) (setup.Backend, error) {
+		t.Fatalf("%s reached the Workflow Backend", command)
+		return nil, nil
+	}, bytes.NewReader(nil), &output, &output)
+	if err := app.Run(args); err != nil {
+		t.Errorf("%s: %v", command, err)
+	}
+	return args
 }
 
 // shellArgs resolves a documented command the way a shell would, so quoted
@@ -1942,6 +1956,18 @@ func TestDeferredResourceCommandsFromParentInstructions(t *testing.T) {
 				t.Fatalf("parent command is not runnable verbatim: %v", args)
 			}
 			instructions := runDeferredCommand(t, command, "", "")
+			// The golden journey renders only the initial report resource, so the
+			// resumed and rework branches keep one marker each.
+			if testCase.resource == "reference/ledger-submission.md" {
+				for procedure, marker := range map[string]string{
+					"resumed": "Identify what was already complete",
+					"rework":  "Preserve every historical",
+				} {
+					if strings.Contains(instructions, marker) != (procedure == testCase.procedure) {
+						t.Errorf("%s resource and the %s marker %q disagree:\n%s", testCase.procedure, procedure, marker, instructions)
+					}
+				}
+			}
 			if !strings.Contains(instructions, "`"+facts.ResultDirectory+"/") {
 				t.Errorf("retrieved resource did not bind the invocation's private directory:\n%s", instructions)
 			}

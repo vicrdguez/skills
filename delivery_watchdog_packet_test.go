@@ -65,10 +65,10 @@ func deliveryWatchdogFacts(operation, procedure, scope string, reviewCount uint6
 	return facts
 }
 
-// TestDeliveryWatchdogSpecializesEachProceeding proves the private-ledger path
+// TestDeliveryWatchdogBindsEachProceeding proves the private-ledger path
 // binds every command and document once and carries the fixed review identity
 // for the initial, repeat, and resumed review.
-func TestDeliveryWatchdogSpecializesEachProceeding(t *testing.T) {
+func TestDeliveryWatchdogBindsEachProceeding(t *testing.T) {
 	cases := []struct {
 		name      string
 		operation string

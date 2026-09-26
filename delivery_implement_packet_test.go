@@ -60,10 +60,10 @@ func deliveryImplementActive(instructions string) string {
 	return instructions
 }
 
-// TestDeliveryImplementSpecializesEachProcedure proves the private-ledger path
+// TestDeliveryImplementBindsEachProcedure proves the private-ledger path
 // binds every command, the recorded target and the frozen Contract once for
 // the initial, resumed, and rework procedures.
-func TestDeliveryImplementSpecializesEachProcedure(t *testing.T) {
+func TestDeliveryImplementBindsEachProcedure(t *testing.T) {
 	for _, procedure := range []string{"initial", "resumed", "rework"} {
 		t.Run(procedure, func(t *testing.T) {
 			packet, err := BuildPacket("implement", InvocationFacts{Delivery: deliveryImplementFacts("next", procedure)})
