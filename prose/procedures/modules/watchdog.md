@@ -14,6 +14,6 @@ Claim: `{{.Claim}}`
 {{end}}{{if .FetchStatus}}Source fetch: {{.FetchStatus}}
 {{end}}{{end}}
 
-{{define "watchdog-incremental"}}`git diff {{.PreviousReviewed}}...HEAD` as a repeat review{{end}}
+{{define "watchdog-incremental"}}`git diff {{.PreviousReviewed}}...HEAD` as a repeat review: verify every still-active finding against the final state, read the diff for regressions, integration effects and false claims in the updated report, and scan the whole change only for the critical class. Assign a new `W<n>` only for a defect the rework introduced or a critical discovery{{end}}
 
 {{define "watchdog-full"}}the complete change, `git diff {{.RecordedTarget}}...HEAD`, against every Contract item{{end}}

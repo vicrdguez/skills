@@ -163,3 +163,25 @@ func TestShorterRenderingShowsReduction(t *testing.T) {
 		t.Errorf("unchanged watchdog-start moved: %+v, baseline %+v", r.Current, r.Baseline)
 	}
 }
+
+// TestInlineResourceCountsOnce guards the journey against double counting:
+// Watchdog carries the acceptance criteria inline, so its phase never
+// retrieves them, while Implement's phase still does.
+func TestInlineResourceCountsOnce(t *testing.T) {
+	dir := copyGoldens(t)
+	if _, err := report(dir, true); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := report(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sum int
+	for _, name := range journey {
+		sum += rowNamed(t, rows, name).Current.Words
+	}
+	acceptance := rowNamed(t, rows, "resource-audit-acceptance").Current.Words
+	if got := rowNamed(t, rows, journeyRow).Current.Words; got != sum-acceptance {
+		t.Errorf("journey = %d words, want %d: every member once, less Watchdog's inline acceptance criteria (%d)", got, sum-acceptance, acceptance)
+	}
+}

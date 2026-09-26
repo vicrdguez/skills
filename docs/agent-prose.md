@@ -60,7 +60,7 @@ The report format that `implement-report.md` and `watchdog-report.md` follow is 
 | Negations per 1,000 words | *no*, *not*, *never*, *without*, *cannot*, other negation words and every *n't* contraction. | Naming a forbidden behavior makes that behavior more available to the model. A Procedure that states what to do needs few negations. |
 | Abstract-term density | Terms per 1,000 words that name a policy property instead of an action or object, such as *authority*, *obligation*, *invariant*, *provenance*. | Prose written for humans in a decision record is dense in these terms. A high density shows policy that leaked into agent-visible prose. |
 
-The journey counts the Skill Resources every such run retrieves: Audit's smells and acceptance criteria and the Implement report instructions, then the acceptance criteria again and the Watchdog report instructions. Resources a Procedure only points to, such as the testing references, are left out. The journey members and both word lists live in `tools/prosemetrics/main.go`.
+The journey counts the Skill Resources every such run retrieves: Audit's smells and acceptance criteria and the Implement report instructions, then the Watchdog report instructions. A resource that a rendering of the same phase already carries inline, as Watchdog carries the acceptance criteria, counts only inside that rendering. Resources a Procedure only points to, such as the testing references, are left out. The journey members and both word lists live in `tools/prosemetrics/main.go`.
 
 ## Goldens
 
