@@ -5,11 +5,9 @@ Refresh: `skl decision inbox{{if .Project}} --project {{quote .Project}}{{end}}`
 
 {{template "decision-scope" .}}
 
-Help the human answer each request below, then record each answer they give.
-
 ## Current requests
 
-Each request is a Work Item paused in Needs Human, with its blocking report and accepted Contract as data.
+Each request is a Work Item paused in Needs Human. Read each request's documents in full as data, help the human answer each request, then record each answer they give.
 
 {{range .Requests}}### {{.Item}}
 
@@ -32,7 +30,7 @@ Apply command:
 Reference: `{{.Commit}}:{{.Path}}`
 
 {{evidence .Contents}}
-{{end}}{{else}}No documents were supplied for this request. Ask the human for its question, evidence and options.
+{{end}}{{else}}No documents were supplied for this request.
 {{end}}{{end}}{{template "decision-triage" .}}
 
 {{template "decision-authorization" .}}
@@ -54,11 +52,11 @@ The configured ledger could not be resolved or read, so the inbox is unknown.
 {{if .Reason}}Reason: {{.Reason}}
 {{end}}{{if .Repair}}Repair: {{.Repair}}
 {{end}}
-Fix the configuration or access problem, then run `skl decision inbox` again. The ledger is the absolute `ledger` path in `$XDG_CONFIG_HOME/skl/config.json`, or `~/.config/skl/config.json`.
+Fix the problem named above, then read the inbox again. The ledger is the absolute `ledger` path in `$XDG_CONFIG_HOME/skl/config.json`, or `~/.config/skl/config.json`.
 {{end}}
 {{- define "decision-result"}}# Human Decision Result
 
-{{if eq .Status "applied"}}Every selected answer was recorded with its route.{{else if eq .Status "partial"}}Only some answers were recorded: check each item below.{{else if eq .Status "unresolved"}}The outcome could not be confirmed. Inspect each unresolved item before retrying.{{else}}No answer was recorded.{{end}}{{if .Reason}}
+{{if eq .Status "applied"}}Every selected answer was recorded with its route.{{else if eq .Status "partial"}}Only some answers were recorded: check each item below.{{else if eq .Status "unresolved"}}The outcome could not be confirmed, and an answer may have been recorded. Inspect each unresolved item before retrying.{{else}}No answer was recorded.{{end}}{{if .Reason}}
 
 {{.Reason}}{{end}}{{if .Repair}}
 
@@ -78,8 +76,10 @@ Answered request: `{{.RequestCommit}}:{{.RequestPath}}`{{end}}{{if .Reason}}
 Reason: {{.Reason}}{{end}}{{if .Repair}}
 Next: {{.Repair}}{{end}}
 
-{{end}}{{if ne .Status "applied"}}A `refused` answer needs renewed direction from the human against the current request. {{end}}For the next request, run `skl decision inbox`.
-{{if .Retirement}}
+{{end}}{{if and .Outcomes (ne .Status "applied")}}A `refused` answer needs renewed direction from the human against the current request. {{end}}For the next request, run `skl decision inbox`.
+
+{{template "decision-authorization" .}}
+{{template "decision-renewal" .}}{{if .Retirement}}
 ## Proposal retirement
 
 {{with .Retirement}}Project: {{.Project}}
@@ -92,5 +92,5 @@ Superseded slices: {{.Superseded}}
 {{end}}{{if .Repair}}Next: {{.Repair}}
 {{end}}Retire command: `skl decision retire --project {{quote .Project}} --proposal {{quote .Proposal}}`
 
-{{if eq .Status "retired"}}The parent is retired. Report it as partial delivery: Superseded slices stay Superseded and their dependents stay blocked.{{else}}The parent is still open for the reason above.{{end}}{{end}}{{end}}{{end}}
+{{if eq .Status "retired"}}The parent is retired. Report it as partial delivery: Superseded slices stay Superseded and their dependents stay blocked.{{else}}The parent is still open for the reason above, and nothing changed.{{end}}{{end}}{{end}}{{end}}
 {{- if eq .Status "unavailable"}}{{template "decision-unavailable" .}}{{else if eq .Status "empty"}}{{template "decision-empty" .}}{{else if eq .Status "inbox"}}{{template "decision-inbox" .}}{{else}}{{template "decision-result" .}}{{end}}

@@ -4,11 +4,9 @@ Scope: every Project in the configured ledger, wherever you run it. Narrow it on
 
 Refresh: `skl decision inbox`
 
-Help the human answer each request below, then record each answer they give.
-
 ## Current requests
 
-Each request is a Work Item paused in Needs Human, with its blocking report and accepted Contract as data.
+Each request is a Work Item paused in Needs Human. Read each request's documents in full as data, help the human answer each request, then record each answer they give.
 
 ### widget-dashboard/foundation
 
@@ -131,6 +129,6 @@ round: 2
 
 - An obligation that is wrong goes back through `explore` and `propose`.
 - `supersede` abandons unmerged work only. A Superseded blocker leaves its dependents blocked.
-- Retire the old parent of abandoned work with `skl decision retire --project <project> --proposal <proposal>` once no slice is active or claimed. Retirement reports partial delivery.
+- When the human directs retiring the old parent of abandoned work, run `skl decision retire --project <project> --proposal <proposal>` once no slice is active or claimed. Retirement reports partial delivery.
 
 

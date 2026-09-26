@@ -2,6 +2,8 @@
 
 These are the rules `skl decision inbox` renders with its requests. Take request facts and apply commands from the inbox.
 
+The inbox spans every Project in the configured ledger, wherever you run it. Narrow it only when the user names a Project, with `--project <name>`.
+
 ## Triage
 
 - Group related questions for the human. Keep each request's identity, exact reference, commitment, conflict, evidence, options, consequences and recommendation with that request.
@@ -31,5 +33,5 @@ These are the rules `skl decision inbox` renders with its requests. Take request
 
 - An obligation that is wrong goes back through `explore` and `propose`.
 - `supersede` abandons unmerged work only. A Superseded blocker leaves its dependents blocked.
-- Retire the old parent of abandoned work with `skl decision retire --project <project> --proposal <proposal>` once no slice is active or claimed. Retirement reports partial delivery.
+- When the human directs retiring the old parent of abandoned work, run `skl decision retire --project <project> --proposal <proposal>` once no slice is active or claimed. Retirement reports partial delivery.
 

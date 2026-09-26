@@ -211,6 +211,7 @@ func TestDecisionRefusalRequiresRenewedDirection(t *testing.T) {
 	body := packet.Instructions
 	for _, want := range []string{
 		"No answer was recorded",
+		"needs renewed direction from the human",
 		"the selected request was replaced even though its question text repeated",
 		"collect renewed human direction against the current request",
 	} {
