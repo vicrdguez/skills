@@ -13,16 +13,12 @@ Hand each patch to its own fresh-context implementer with:
 - the acceptance criteria of its patch;
 - the focused checks it runs.
 
-An implementer writes only inside its ownership and reports its status, the files it changed, the checks it ran and its blockers.
+Each implementer edits only the files it owns and answers with a short report: done or blocked, what it changed, which checks it ran, and what stopped it.
 
-Run patches with disjoint ownership in parallel, and stage a patch after the ones it depends on or overlaps. While patches run, watch only ownership, overlap and the worktree's integrity, and leave each finished patch as it is.
+Run patches with disjoint ownership in parallel, and stage a patch after the ones it depends on or overlaps. While they run, your job is traffic control: confirm each implementer kept to its files and the worktree is sound. Take each finished patch as it is; review and polish wait for Audit, the first look at the whole change.
 
 Check: every patch has reported.
 
 ### Reconcile once
 
-When every patch is in, make one reconciliation pass over the combined change before Audit: fix formatting, compilation and interface failures, reconcile the patches where the combination needs it, and run the focused checks. Send a failure one patch caused back to its implementer as a narrow repair task.
-
-Check: the combined change passes its focused checks.
-
-Audit is the first holistic review of the combined change.
+When every patch is in, make one pass that gets the combined change building and passing: format it, make it compile, fit the interfaces together, settle where the patches disagree, and run the focused checks. Send a failure that traces to one patch back to its implementer as a narrow repair task.

@@ -57,7 +57,7 @@ Show every widget's health on one dashboard page.
 
 ## 1. Prepare
 
-Run `skl implement prepare --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --result-directory '/tmp/skl-implement-result'`. It creates the worktree, or reuses it with its changes, index and commits intact. Then run the inspection command it prints, and work only in `/work/widgets/.worktrees/widget-dashboard`. Continue this Claim later with `skl implement resume --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --result-directory '/tmp/skl-implement-result' --reviewer-model 'openai-codex/gpt-6-sol' --reviewer-thinking 'xhigh'`; release it with `skl implement release --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001'` only to abandon the work.
+Run `skl implement prepare --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --result-directory '/tmp/skl-implement-result' --reviewer-model 'openai-codex/gpt-6-sol' --reviewer-thinking 'xhigh'`. It creates the worktree, or reuses it with its changes, index and commits intact. Then run the inspection command it prints, and work only in `/work/widgets/.worktrees/widget-dashboard`. Continue this Claim later with `skl implement resume --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --result-directory '/tmp/skl-implement-result' --reviewer-model 'openai-codex/gpt-6-sol' --reviewer-thinking 'xhigh'`; release it with `skl implement release --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001'` only to abandon the work.
 
 Check: inspection prints the source head.
 
@@ -188,7 +188,7 @@ After the late target integration, the fixed point is `git merge-base <observed-
 
 ## Establish the facts once
 
-1. Run the inspection command with its `--target` replaced by `<observed-target-sha>`; the target it shows here is the preparation target: `skl implement inspect --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --result-directory '/tmp/skl-implement-result' --target <observed-target-sha>`. Its output is the input-inspection result.
+1. Run the inspection command with its `--target` replaced by `<observed-target-sha>`; the target it shows here is the preparation target: `skl implement inspect --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --result-directory '/tmp/skl-implement-result' --reviewer-model 'openai-codex/gpt-6-sol' --reviewer-thinking 'xhigh' --target <observed-target-sha>`. Its output is the input-inspection result.
 2. Run the Full Gate once on the integrated candidate: the project's entire test, typecheck and lint suite. Record the commands, head and results.
 
 Check: you hold the Contract documents supplied above, the diff command, the commit list, the gate result and the input-inspection result.
@@ -197,7 +197,7 @@ Check: you hold the Contract documents supplied above, the diff command, the com
 
 Give each reviewer its brief and everything the check above names, the Contract included. Both reviewers use the recorded gate result. The Standards reviewer retrieves the smell baseline with `skl skill --resource smells.md audit`; both reviewers retrieve the acceptance criteria with `skl skill --resource acceptance.md audit`. Reviewers read and report.
 
-Run the axes at once as fresh-context subagents when you can spawn them. Run both reviewers with `openai-codex/gpt-6-sol` at `xhigh` thinking. Otherwise run them yourself in sequence, Standards first, finishing its report before starting Contracts.
+Run the axes at once as fresh-context subagents with `openai-codex/gpt-6-sol` at `xhigh` thinking when you can spawn them. Otherwise run them yourself in sequence, Standards first, finishing its report before starting Contracts.
 
 Aggregate the reports as above. Check: the report carries every axis that ran, its tagged `F<n>` findings and the gate result.
 

@@ -47,6 +47,13 @@ func TestImplementChoicesRenderWhereTheyApplyAndCarryThroughResume(t *testing.T)
 		return out.Packet.Facts.Delivery
 	}
 
+	// An explicit standard mode renders exactly what the default renders.
+	plain := cli.dispatchJSON(t, "skl implement next --repo "+source)
+	cli.dispatchRun(t, delivery(plain).ReleaseCommand)
+	explicit := cli.dispatchJSON(t, "skl implement next --repo "+source+" --mode standard")
+	sameRendering(t, explicit.Packet.Instructions, plain.Packet.Instructions)
+	cli.dispatchRun(t, delivery(explicit).ReleaseCommand)
+
 	// Standard mode: a reviewer value renders once, an empty value counts as
 	// omitted, and nothing about helpers renders.
 	started := cli.dispatchJSON(t, "skl implement next --repo "+source+" --reviewer-model openai-codex/gpt-6-sol --reviewer-thinking ''")
@@ -54,8 +61,11 @@ func TestImplementChoicesRenderWhereTheyApplyAndCarryThroughResume(t *testing.T)
 	if facts.Mode != skilldist.StandardMode || facts.Helper != nil || !reflect.DeepEqual(facts.Reviewer, &skilldist.SubagentChoice{Model: "openai-codex/gpt-6-sol"}) {
 		t.Fatalf("standard facts = %s", mustJSON(t, facts))
 	}
-	// Beside the resume command that carries it, the value renders once.
-	prose := strings.ReplaceAll(started.Packet.Instructions, facts.ResumeCommand, "")
+	// Beside the bound commands that carry it, the value renders once.
+	prose := started.Packet.Instructions
+	for _, command := range []string{facts.PrepareCommand, facts.InspectCommand, facts.ResumeCommand} {
+		prose = strings.ReplaceAll(prose, command, "")
+	}
 	if count := strings.Count(prose, "openai-codex/gpt-6-sol"); count != 1 {
 		t.Errorf("the reviewer model renders %d times, want once in the Audit dispatch step", count)
 	}
@@ -68,12 +78,27 @@ func TestImplementChoicesRenderWhereTheyApplyAndCarryThroughResume(t *testing.T)
 	}
 	cli.dispatchRun(t, facts.ReleaseCommand)
 
-	// Team mode: the bound resume command renders the same choices again.
-	team := delivery(cli.dispatchJSON(t, "skl implement next --repo "+source+" --mode team --helper-model openai-codex/gpt-6-luna --helper-thinking xhigh --reviewer-thinking high"))
+	// Team mode without a helper value renders no helper sentence.
+	bare := cli.dispatchJSON(t, "skl implement next --repo "+source+" --mode team")
+	if !strings.Contains(bare.Packet.Instructions, "### Split the work") || strings.Contains(bare.Packet.Instructions, "Run each implementer") {
+		t.Errorf("team mode without a helper value:\n%s", bare.Packet.Instructions)
+	}
+	cli.dispatchRun(t, delivery(bare).ReleaseCommand)
+
+	// Team mode: a thinking value alone renders, and the commands the
+	// Execution Skill binds (prepare, the inspection it prints, and resume)
+	// carry the same choices.
+	started = cli.dispatchJSON(t, "skl implement next --repo "+source+" --mode team --helper-model openai-codex/gpt-6-luna --helper-thinking xhigh --reviewer-thinking high")
+	team := delivery(started)
+	if !strings.Contains(started.Packet.Instructions, "at `high` thinking") {
+		t.Errorf("the reviewer thinking level does not render alone:\n%s", started.Packet.Instructions)
+	}
 	want := skilldist.DeliveryFacts{Mode: skilldist.TeamMode, Helper: &skilldist.SubagentChoice{Model: "openai-codex/gpt-6-luna", Thinking: "xhigh"}, Reviewer: &skilldist.SubagentChoice{Thinking: "high"}}
-	for _, got := range []*skilldist.DeliveryFacts{team, delivery(cli.dispatchJSON(t, team.ResumeCommand))} {
-		if got.Mode != want.Mode || !reflect.DeepEqual(got.Helper, want.Helper) || !reflect.DeepEqual(got.Reviewer, want.Reviewer) {
-			t.Errorf("team facts = %s, want %s", mustJSON(t, got), mustJSON(t, want))
+	prepared := delivery(cli.dispatchJSON(t, team.PrepareCommand))
+	inspected := delivery(cli.dispatchJSON(t, strings.ReplaceAll(prepared.InspectCommand, "<observed-target-sha>", "HEAD")))
+	for name, got := range map[string]*skilldist.DeliveryFacts{"next": team, "prepare": prepared, "inspect": inspected, "resume": delivery(cli.dispatchJSON(t, inspected.ResumeCommand))} {
+		if got.Mode != want.Mode || !reflect.DeepEqual(got.Helper, want.Helper) || !reflect.DeepEqual(got.Reviewer, want.Reviewer) || got.ResumeCommand != team.ResumeCommand {
+			t.Errorf("team %s facts = %s, want %s", name, mustJSON(t, got), mustJSON(t, want))
 		}
 	}
 	cli.dispatchRun(t, team.ReleaseCommand)

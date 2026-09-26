@@ -70,23 +70,28 @@ type harness struct {
 }
 
 var harnesses = []harness{
-	{".pi/agent/skills", ".pi/agent/prompts/%s.md", []string{"description"},
-		func(position int, flag string) string { return fmt.Sprintf("${%d:-%s}", position+1, piDefaults[flag]) },
-		func(slots []string) []string { return []string{argumentHint(slots)} }},
-	{".codex/skills", "", nil, nil, nil},
+	{skills: ".pi/agent/skills", entryPoint: ".pi/agent/prompts/%s.md", entryKeys: []string{"description"},
+		argument: func(position int, flag string) string { return fmt.Sprintf("${%d:-%s}", position+1, piDefaults[flag]) },
+		slotKeys: func(slots []string) []string { return []string{argumentHint(slots)} }},
+	{skills: ".codex/skills"},
 	// Claude Code keeps an unfilled positional placeholder verbatim, and expands
 	// an unfilled named one to nothing.
-	{".claude/skills", ".claude/skills/%s/SKILL.md", []string{"name", "description", "disable-model-invocation"},
-		func(_ int, flag string) string { return "$" + strings.ReplaceAll(flag, "-", "_") },
-		func(slots []string) []string {
+	{skills: ".claude/skills", entryPoint: ".claude/skills/%s/SKILL.md", entryKeys: []string{"name", "description", "disable-model-invocation"},
+		argument: func(_ int, flag string) string { return "$" + claudeArgument(flag) },
+		slotKeys: func(slots []string) []string {
 			names := make([]string, len(slots))
 			for i, flag := range slots {
-				names[i] = strings.ReplaceAll(flag, "-", "_")
+				names[i] = claudeArgument(flag)
 			}
 			return []string{"arguments: [" + strings.Join(names, ", ") + "]", argumentHint(slots)}
 		}},
-	{".config/opencode/skills", ".config/opencode/commands/%s.md", []string{"description"},
-		func(position int, _ string) string { return fmt.Sprintf("$%d", position+1) }, nil},
+	{skills: ".config/opencode/skills", entryPoint: ".config/opencode/commands/%s.md", entryKeys: []string{"description"},
+		argument: func(position int, _ string) string { return fmt.Sprintf("$%d", position+1) }},
+}
+
+// claudeArgument is the Claude Code argument name of a flag.
+func claudeArgument(flag string) string {
+	return strings.ReplaceAll(flag, "-", "_")
 }
 
 func argumentHint(slots []string) string {
@@ -100,12 +105,11 @@ func (target harness) entry(a adapter, frontmatter string) (command, keys string
 	for position, flag := range a.slots {
 		command += " --" + flag + " '" + target.argument(position, flag) + "'"
 	}
-	keys = frontmatterKeys(frontmatter, target.entryKeys)
+	var slotKeys []string
 	if len(a.slots) > 0 && target.slotKeys != nil {
-		lines := strings.Join(target.slotKeys(a.slots), "\n")
-		keys = strings.TrimSuffix(keys, "\n---") + "\n" + lines + "\n---"
+		slotKeys = target.slotKeys(a.slots)
 	}
-	return command, keys
+	return command, frontmatterKeys(frontmatter, target.entryKeys, slotKeys)
 }
 
 // retiredPiFiles are the Pi runners, loop prompts and queue helper that
@@ -270,14 +274,16 @@ func stubFrontmatter(name string) (string, error) {
 }
 
 // frontmatterKeys keeps only the frontmatter lines a harness's entry point
-// recognizes. Every stub frontmatter key holds a one-line value.
-func frontmatterKeys(frontmatter string, keys []string) string {
-	var kept []string
-	for _, line := range strings.Split(frontmatter, "\n") {
+// recognizes, then adds extra lines. Every stub frontmatter key holds a
+// one-line value.
+func frontmatterKeys(frontmatter string, keys, extra []string) string {
+	lines := strings.Split(frontmatter, "\n")
+	kept := []string{lines[0]}
+	for _, line := range lines[1 : len(lines)-1] {
 		key, _, found := strings.Cut(line, ":")
-		if line == "---" || found && slices.Contains(keys, key) {
+		if found && slices.Contains(keys, key) {
 			kept = append(kept, line)
 		}
 	}
-	return strings.Join(kept, "\n")
+	return strings.Join(append(append(kept, extra...), "---"), "\n")
 }

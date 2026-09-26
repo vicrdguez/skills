@@ -57,7 +57,7 @@ Show every widget's health on one dashboard page.
 
 ## 1. Prepare
 
-Run `skl implement prepare --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --result-directory '/tmp/skl-implement-result'`. It creates the worktree, or reuses it with its changes, index and commits intact. Then run the inspection command it prints, and work only in `/work/widgets/.worktrees/widget-dashboard`. Continue this Claim later with `skl implement resume --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --result-directory '/tmp/skl-implement-result' --mode 'team' --helper-model 'openai-codex/gpt-6-luna' --helper-thinking 'xhigh' --reviewer-model 'openai-codex/gpt-6-sol' --reviewer-thinking 'xhigh'`; release it with `skl implement release --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001'` only to abandon the work.
+Run `skl implement prepare --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --result-directory '/tmp/skl-implement-result' --mode 'team' --helper-model 'openai-codex/gpt-6-luna' --helper-thinking 'xhigh' --reviewer-model 'openai-codex/gpt-6-sol' --reviewer-thinking 'xhigh'`. It creates the worktree, or reuses it with its changes, index and commits intact. Then run the inspection command it prints, and work only in `/work/widgets/.worktrees/widget-dashboard`. Continue this Claim later with `skl implement resume --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --result-directory '/tmp/skl-implement-result' --mode 'team' --helper-model 'openai-codex/gpt-6-luna' --helper-thinking 'xhigh' --reviewer-model 'openai-codex/gpt-6-sol' --reviewer-thinking 'xhigh'`; release it with `skl implement release --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001'` only to abandon the work.
 
 Check: inspection prints the source head.
 
@@ -65,7 +65,32 @@ Check: inspection prints the source head.
 
 This Claim already has work. Establish from the branch and the facts above what remains, keep the existing commits and recorded references, and deliver the rest of the Contract. When the branch already merged a target, that SHA stays the cutoff: skip the merge in step 3. When an earlier session's Audit findings are at hand, settle those instead of auditing again.
 
-Build in any order, refactor whenever it helps, and run the typecheck and focused checks as you go. Decide an unspecified detail yourself when every option keeps the Contract, and implement a case the Contract clearly implies. When the Contract leaves a consequential choice open, pause as described below.
+Lead a team of implementer subagents. You keep the Claim and every workflow operation: commits, pushes, `skl` commands, the Audit and the handoff. Run each implementer with `openai-codex/gpt-6-luna` at `xhigh` thinking. Decide an unspecified detail yourself when every option keeps the Contract, and implement a case the Contract clearly implies. When the Contract leaves a consequential choice open, pause as described below.
+
+### Split the work
+
+Read the whole Contract and the architecture it touches first. Then cut the work into cohesive patches, each with the files or modules it owns and the patches it depends on.
+
+Check: every Contract item belongs to a patch with named ownership.
+
+### Run the patches
+
+Hand each patch to its own fresh-context implementer with:
+
+- the worktree;
+- the files or modules it owns;
+- the acceptance criteria of its patch;
+- the focused checks it runs.
+
+Each implementer edits only the files it owns and answers with a short report: done or blocked, what it changed, which checks it ran, and what stopped it.
+
+Run patches with disjoint ownership in parallel, and stage a patch after the ones it depends on or overlaps. While they run, your job is traffic control: confirm each implementer kept to its files and the worktree is sound. Take each finished patch as it is; review and polish wait for Audit, the first look at the whole change.
+
+Check: every patch has reported.
+
+### Reconcile once
+
+When every patch is in, make one pass that gets the combined change building and passing: format it, make it compile, fit the interfaces together, settle where the patches disagree, and run the focused checks. Send a failure that traces to one patch back to its implementer as a narrow repair task.
 
 Check: every `B<n>`, `A<n>` and warranted `T<n>` has evidence, and the focused checks pass.
 
@@ -104,39 +129,6 @@ Check: submit reports the work awaiting review.
 Finish the unblocked work and write the blocking report from the step 5 template. Then pause with `skl implement needs-human --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --body '/tmp/skl-implement-result/implement-report.md' --public-body '/tmp/skl-implement-result/public.md' --head <branch-head> --target <observed-target-sha>`, using the preparation target as `<observed-target-sha>` until step 3 records one. Leave a conflicted merge in place.
 
 Check: the pause reports the work waiting on a human.
-
-## Delegation
-
-Lead a team of fresh-context implementer subagents. You keep the Claim and every workflow operation: commits, pushes, `skl` commands, the Audit and the handoff. Run each implementer with `openai-codex/gpt-6-luna` at `xhigh` thinking.
-
-### Split the work
-
-Read the whole Contract and the architecture it touches first. Then cut the work into cohesive patches, each with the files or modules it owns and the patches it depends on.
-
-Check: every Contract item belongs to a patch with named ownership.
-
-### Run the patches
-
-Hand each patch to its own fresh-context implementer with:
-
-- the worktree;
-- the files or modules it owns;
-- the acceptance criteria of its patch;
-- the focused checks it runs.
-
-An implementer writes only inside its ownership and reports its status, the files it changed, the checks it ran and its blockers.
-
-Run patches with disjoint ownership in parallel, and stage a patch after the ones it depends on or overlaps. While patches run, watch only ownership, overlap and the worktree's integrity, and leave each finished patch as it is.
-
-Check: every patch has reported.
-
-### Reconcile once
-
-When every patch is in, make one reconciliation pass over the combined change before Audit: fix formatting, compilation and interface failures, reconcile the patches where the combination needs it, and run the focused checks. Send a failure one patch caused back to its implementer as a narrow repair task.
-
-Check: the combined change passes its focused checks.
-
-Audit is the first holistic review of the combined change.
 
 
 # Testing
@@ -217,7 +209,7 @@ After the late target integration, the fixed point is `git merge-base <observed-
 
 ## Establish the facts once
 
-1. Run the inspection command with its `--target` replaced by `<observed-target-sha>`; the target it shows here is the preparation target: `skl implement inspect --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --result-directory '/tmp/skl-implement-result' --target <observed-target-sha>`. Its output is the input-inspection result.
+1. Run the inspection command with its `--target` replaced by `<observed-target-sha>`; the target it shows here is the preparation target: `skl implement inspect --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --result-directory '/tmp/skl-implement-result' --mode 'team' --helper-model 'openai-codex/gpt-6-luna' --helper-thinking 'xhigh' --reviewer-model 'openai-codex/gpt-6-sol' --reviewer-thinking 'xhigh' --target <observed-target-sha>`. Its output is the input-inspection result.
 2. Run the Full Gate once on the integrated candidate: the project's entire test, typecheck and lint suite. Record the commands, head and results.
 
 Check: you hold the Contract documents supplied above, the diff command, the commit list, the gate result and the input-inspection result.
@@ -226,7 +218,7 @@ Check: you hold the Contract documents supplied above, the diff command, the com
 
 Give each reviewer its brief and everything the check above names, the Contract included. Both reviewers use the recorded gate result. The Standards reviewer retrieves the smell baseline with `skl skill --resource smells.md audit`; both reviewers retrieve the acceptance criteria with `skl skill --resource acceptance.md audit`. Reviewers read and report.
 
-Run the axes at once as fresh-context subagents when you can spawn them. Run both reviewers with `openai-codex/gpt-6-sol` at `xhigh` thinking. Otherwise run them yourself in sequence, Standards first, finishing its report before starting Contracts.
+Run the axes at once as fresh-context subagents with `openai-codex/gpt-6-sol` at `xhigh` thinking when you can spawn them. Otherwise run them yourself in sequence, Standards first, finishing its report before starting Contracts.
 
 Aggregate the reports as above. Check: the report carries every axis that ran, its tagged `F<n>` findings and the gate result.
 

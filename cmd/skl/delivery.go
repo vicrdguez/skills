@@ -39,7 +39,9 @@ func deliveryCommands(phase string, newBackend backendFactory, stdout io.Writer)
 		if name == "resume" {
 			command.Flags = append(command.Flags, &cli.BoolFlag{Name: "dispatched", Usage: "render the Execution Skill a Dispatch of this Claim stands for"})
 		}
-		if phase == ledger.ImplementPhase && (name == "next" || name == "resume") {
+		// Prepare and inspect print the resume command, so they carry the
+		// choices too.
+		if phase == ledger.ImplementPhase && (name == "next" || name == "resume" || name == "prepare" || name == "inspect") {
 			command.Flags = append(command.Flags, implementFlags()...)
 		}
 		commands = append(commands, command)

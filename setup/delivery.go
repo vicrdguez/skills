@@ -20,7 +20,8 @@ type ImplementChoices struct {
 	Reviewer skilldist.SubagentChoice
 }
 
-// flags repeats the supplied choices for the resume command.
+// flags repeats the supplied choices for the commands that render or print a
+// later Implement continuation.
 func (choices ImplementChoices) flags() string {
 	var words []string
 	add := func(flag, value string) {
@@ -98,6 +99,8 @@ func PresentDelivery(e *ledger.Execution, repository RepositoryContext, phase, o
 	f.InspectCommand += " --result-directory " + q(directory)
 	if phase == ledger.ImplementPhase {
 		f.Mode, f.Helper, f.Reviewer = cmp.Or(choices.Mode, skilldist.StandardMode), supplied(choices.Helper), supplied(choices.Reviewer)
+		f.PrepareCommand += choices.flags()
+		f.InspectCommand += choices.flags()
 		f.ResumeCommand += choices.flags()
 	}
 	target := f.RecordedTarget

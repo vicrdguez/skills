@@ -14,3 +14,5 @@ Claim: `{{.Claim}}`
 {{end}}{{end}}
 
 {{define "subagent-choice"}}{{with .Model}} with `{{.}}`{{end}}{{with .Thinking}} at `{{.}}` thinking{{end}}{{end}}
+
+{{define "implement-judgment"}}Decide an unspecified detail yourself when every option keeps the Contract, and implement a case the Contract clearly implies. When the Contract leaves a consequential choice open, pause as described below.{{end}}
