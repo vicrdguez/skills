@@ -271,9 +271,9 @@ go install ./cmd/skl
 skl install
 ```
 
-`skl install` refreshes owned Skill Stubs in Pi, Codex, Claude Code, and OpenCode, plus Pi-only prompts, runners, and the retained queue helper, without touching unrelated user files. It removes only marker-owned legacy `tdd/SKILL.md` stubs now that `testing` is canonical. OpenCode receives independent stubs at `~/.config/opencode/skills/<name>/SKILL.md`, not links to another harness or the authoring tree.
+`skl install` refreshes owned Skill Stubs and Harness Adapters in Pi, Codex, Claude Code, and OpenCode without touching unrelated user files. It removes only marker-owned retired files: legacy `tdd/SKILL.md` stubs now that `testing` is canonical, the earlier Pi runners, loop prompts and queue helper, and the Implement and Watchdog stubs an adapter replaces. OpenCode receives independent stubs at `~/.config/opencode/skills/<name>/SKILL.md`, not links to another harness or the authoring tree.
 
-Direct Implement and Watchdog stubs run their respective `next` commands. Plain `skl skill implement` and `skl skill watchdog` refuse read-only retrieval because no Work Item would be selected or claimed. Named resources remain retrievable. Independent skills use `skl skill <name>` or `skl skill --format json <name>`; flags precede the skill name.
+Implement and Watchdog are Harness Adapters in each harness's native entry-point mechanism: the `/implement` and `/watchdog` prompt templates in `~/.pi/agent/prompts/`, user-invoked skills in `~/.claude/skills/`, and commands in `~/.config/opencode/commands/`. Codex has no entry point that takes arguments, so it keeps the Implement and Watchdog stubs. Each runs its `next` command. Plain `skl skill implement` and `skl skill watchdog` refuse read-only retrieval because no Work Item would be selected or claimed. Named resources remain retrievable. Independent skills use `skl skill <name>` or `skl skill --format json <name>`; flags precede the skill name.
 
 For a one-time OpenCode cutover, install the new binary and stubs before removing obsolete Pi skill-directory or raw-source entries from OpenCode's `skills.paths`. Preserve unrelated settings and other skills. The installer does not edit discovery settings. Restart OpenCode and confirm the native stubs load without claiming work.
 
@@ -303,20 +303,3 @@ skl propose publish --repo <path> --target main \
 ```
 
 Omit parent and repeated slice/dependency flags for a single slice. For ledger-adopted projects, `skl propose cleanup` instead archives whole terminal, unclaimed Proposals and removes only safe merged local source work from recorded ledger facts; current Propose runs it before `skl ledger accept`. New delivery requires ledger acceptance rather than falling back to source artifacts.
-
-## Pi entrypoints
-
-Installed Pi adapters use [pi-subagents](https://github.com/nicobailon/pi-subagents). Install it separately with `pi install npm:pi-subagents` to launch one-item runners.
-
-Both marker-owned queue prompts remain disabled. `skl install` replaces older owned copies while preserving user-owned prompts. `/implement-loop` directs the worker to `skl implement next` or explicit resume; `/watchdog-loop` directs independent review to `skl watchdog next`, explicit resume, or a fresh one-item runner. Runners report verified outcomes or unresolved failures in normal Markdown.
-
-| Agent | Model | Thinking | Fallback |
-|---|---|---|---|
-| `implement-runner` | `openai-codex/gpt-5.6-sol` | medium | `openai-codex/gpt-5.6-terra:high` |
-| `watchdog-runner` | `openai-codex/gpt-5.6-sol` | high | `openai-codex/gpt-5.6-terra:high` |
-
-A one-item invocation may choose its model explicitly:
-
-```text
-/run watchdog-runner[model=openai-codex/gpt-5.6-sol:xhigh] "Follow the Watchdog Execution Skill for one Work Item and report the verified result."
-```

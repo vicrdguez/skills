@@ -413,16 +413,22 @@ func TestAgentProseGoldens(t *testing.T) {
 	g.capture("resource-watchdog-ledger-review", worker, "skill", "--resource", "ledger-review.md",
 		"--input", "result_directory="+reviewResult, "--input", "round=1", "--input", "reviewed_head="+head, "watchdog")
 
-	// Installed stubs and runner files, and the AGENTS.md block setup writes.
+	// Installed stubs and Harness Adapters, and the AGENTS.md block setup
+	// writes. Codex keeps every stub, including Implement's and Watchdog's.
 	home := t.TempDir()
 	if _, err := skilldist.Install(home); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range skilldist.SkillNames() {
-		g.check("stub-"+name, readFileString(t, filepath.Join(home, ".claude", "skills", name, "SKILL.md")))
+		g.check("stub-"+name, readFileString(t, filepath.Join(home, ".codex", "skills", name, "SKILL.md")))
 	}
-	for _, file := range []string{"agents/implement-runner.md", "agents/watchdog-runner.md", "prompts/implement-loop.md", "prompts/watchdog-loop.md"} {
-		g.check("installed-pi-"+strings.TrimSuffix(filepath.Base(file), ".md"), readFileString(t, filepath.Join(home, ".pi", "agent", file)))
+	for harness, location := range entryPoints {
+		if harness == "codex" {
+			continue
+		}
+		for _, operation := range []string{"implement", "watchdog"} {
+			g.check("adapter-"+harness+"-"+operation, readFileString(t, filepath.Join(home, fmt.Sprintf(location, operation))))
+		}
 	}
 	g.check("setup-agents-block", setup.AgentsBlock)
 

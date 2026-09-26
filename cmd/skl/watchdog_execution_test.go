@@ -2,8 +2,6 @@ package main
 
 import (
 	"bytes"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -25,25 +23,6 @@ func TestPlainWatchdogSkillRetrievalRequiresSelectedWork(t *testing.T) {
 				t.Fatalf("refusal selected work or rendered instructions: calls=%d output=%s", backendCalls, &output)
 			}
 		})
-	}
-}
-
-func TestInstallDirectWatchdogStubsForSupportedHarnesses(t *testing.T) {
-	home := t.TempDir()
-	var output bytes.Buffer
-	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return nil, nil }, bytes.NewReader(nil), &output, &output, home)
-	if err := app.Run([]string{"skl", "install"}); err != nil {
-		t.Fatal(err)
-	}
-	for _, harness := range []string{".pi/agent/skills", ".codex/skills", ".claude/skills", ".config/opencode/skills"} {
-		path := filepath.Join(home, harness, "watchdog", "SKILL.md")
-		contents, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(string(contents), "skl watchdog next") || strings.Contains(string(contents), "skl skill watchdog") {
-			t.Errorf("Watchdog stub is not direct: %s", path)
-		}
 	}
 }
 

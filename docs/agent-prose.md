@@ -38,7 +38,7 @@ Authored prose lives under `prose/`, one directory per kind.
 - `prose/craft/<name>.md` is a Craft file. `prose/craft/audit.md` holds the two review axes that both Audit Procedures include. `prose/craft/review.md` is the adversarial review method that Watchdog includes, together with Audit's acceptance criteria.
 - `prose/outcomes/<kind>.md` is the Outcome Instruction of one outcome kind, such as `refused.md` or `submitted.md`; `prose/outcomes/modules/` holds the blocks they share. Command code chooses the kind and supplies its facts: the status, bound commands, the refusal's invariant and repair, the Claim state and publication notes. Its only worker-directed text is refusal strings, passed through as data.
 - `prose/<kind>/<name>/` holds the Skill Resources of the skill `<name>`. A resource's name is its path in that directory, so `prose/craft/testing/tests.md` is `skl skill --resource tests.md testing`.
-- `prose/adapters/stub.md` is the stub template, and `prose/adapters/stubs/<name>.md` is each skill's discovery frontmatter. `prose/adapters/agents/` and `prose/adapters/prompts/` are the Pi runner and loop files.
+- `prose/adapters/stub.md` is the stub template, and `prose/adapters/stubs/<name>.md` is each skill's discovery frontmatter. `prose/adapters/entry.md` is the Implement and Watchdog Harness Adapter. `skl install` renders it into each harness's native entry point: a pi prompt template, a Claude Code skill only the user invokes, and an OpenCode command. Each gets the frontmatter keys its harness recognizes. Codex has no entry point that takes arguments, so it keeps the stubs.
 
 Every file in `prose/procedures/`, `prose/craft/`, `prose/documents/` and `prose/outcomes/` parses into one template set, named by its path under `prose/`. A file includes another with `{{template "craft/audit.md" .}}`, and a shared block by its defined name. `catalog.go` maps each skill name to its definition and resource directory, lists the Craft and Procedures each Procedure composes, and selects the continuation file for an invocation.
 
@@ -70,7 +70,7 @@ The journey counts the Skill Resources every such run retrieves: Audit's smells 
 - standalone skills, the Decision Inbox and its results;
 - every Skill Resource a rendering tells the worker to retrieve;
 - every CLI outcome on the ledger path;
-- the installed stubs and runner files;
+- the installed stubs and Harness Adapters;
 - the `AGENTS.md` block that setup writes.
 
 The CLI renders a Watchdog review before inspection resolves its scope, so its incremental and full sections never reach a worker through `skl`. `watchdog-repeat-incremental` and `watchdog-repeat-full` render those sections from the same Claim's facts with the scope inspection reported; every other golden is CLI output.

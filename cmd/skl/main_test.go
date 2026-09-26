@@ -539,7 +539,7 @@ func TestInstallSupportedSkillStubs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	wantSkills := []string{"audit", "brainstorm", "decision", "design", "domain", "explore", "implement", "propose", "shape", "testing", "watchdog", "writing-for-agents"}
+	wantSkills := []string{"audit", "brainstorm", "decision", "design", "domain", "explore", "propose", "shape", "testing", "writing-for-agents"}
 	for _, harness := range []string{".pi/agent/skills", ".codex/skills", ".claude/skills", ".config/opencode/skills"} {
 		for _, name := range wantSkills {
 			path := filepath.Join(root, harness, name, "SKILL.md")
@@ -567,7 +567,7 @@ func TestInstallSupportedSkillStubs(t *testing.T) {
 		}
 	}
 	entries, err := os.ReadDir(filepath.Join(root, ".config/opencode"))
-	if err != nil || len(entries) != 1 || entries[0].Name() != "skills" || !entries[0].IsDir() {
+	if err != nil || len(entries) != 2 || entries[0].Name() != "commands" || entries[1].Name() != "skills" || !entries[0].IsDir() || !entries[1].IsDir() {
 		t.Fatalf("unexpected OpenCode configuration or adapters: %v: %v", entries, err)
 	}
 	entries, err = os.ReadDir(filepath.Join(root, ".config/opencode/skills"))
@@ -628,7 +628,7 @@ func TestInstallRefreshesOnlyOwnedStubs(t *testing.T) {
 			}
 			if harness == ".config/opencode/skills" {
 				entries, err := os.ReadDir(filepath.Join(root, ".config/opencode"))
-				if err != nil || len(entries) != 1 || entries[0].Name() != "skills" {
+				if err != nil || len(entries) != 2 || entries[0].Name() != "commands" || entries[1].Name() != "skills" || !entries[0].IsDir() || !entries[1].IsDir() {
 					t.Fatalf("reinstallation wrote OpenCode configuration: %v: %v", entries, err)
 				}
 			}
@@ -734,7 +734,7 @@ func TestInstallPreservesOpenCodeSkillsAndConfiguration(t *testing.T) {
 			}
 		}
 		for _, name := range skilldist.SkillNames() {
-			if name == "audit" {
+			if name == "audit" || name == "implement" || name == "watchdog" {
 				continue
 			}
 			got := readFile(t, filepath.Join(root, ".config/opencode/skills", name, "SKILL.md"))
