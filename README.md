@@ -108,6 +108,21 @@ skl ledger show --repo <source-repository> --item <proposal>/<slice> --phase wat
 
 The first command returns the committed current report references and explicitly marks absent phases. Add `--phase implement` or `--phase watchdog` to retrieve that current report's original document; readback remains available even at Ready for Merge or while a later Claim exists. The report frontmatter retains exact consumed-input references. Follow its ledger references to earlier rounds with `skl ledger show --commit <ledger-commit> --path <ledger-path>`; source SHAs in `source` metadata identify source revisions, not ledger documents. Exact references are never replaced with newer content. Inspection is read-only and is not an approval gate.
 
+### Browse the ledger
+
+`skl browse` opens a terminal browser over the configured ledger: Projects, their Proposals, and each Slice's lifecycle, Claim, dependencies, branch, and attachments. It starts at the Project of the current checkout when exactly one Project records its repository, otherwise at the overview; `--project <name>` selects the starting Project explicitly. Press `s` to switch Projects, `a` to include archived Proposals, and `i` or `p` to open a Slice's recorded issue or pull request in your browser (`i` on a Proposal opens its parent issue).
+
+The same facts are available without a terminal UI:
+
+```sh
+skl browse projects [--include-archived]
+skl browse project --project <name> [--include-archived]
+skl browse proposal --project <name> --proposal <proposal>
+skl browse slice --project <name> --item <proposal>/<slice>
+```
+
+Every view reads one committed ledger revision and never fetches, contacts a forge, or changes Workflow State, so it can lag a merge that `skl status` has not yet observed. A Claim is shown as a reservation, not as a running worker. Unreadable records are diagnosed where they occur and mark the affected summaries incomplete; the rest stays browsable.
+
 ## Implement a Work Item
 
 ```sh
