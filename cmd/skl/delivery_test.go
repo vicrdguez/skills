@@ -721,10 +721,10 @@ func TestDeliveryCLIRefusalsPreserveClaim(t *testing.T) {
 		t.Fatalf("markdown wrong-target submit: %v", err)
 	}
 	refused := regexp.MustCompile(`(?m)^Refused: (.+)$`).FindStringSubmatch(text)
-	if refused == nil || !strings.HasPrefix(wrong.Reason, refused[1]) {
+	if refused == nil || refused[1] != wrong.Reason {
 		t.Fatalf("markdown refusal does not state the refused invariant %q:\n%s", wrong.Reason, text)
 	}
-	if !strings.Contains(text, "Your Claim `"+claim+"` is kept.") {
+	if !strings.Contains(text, "`"+claim+"` is kept") || strings.Contains(text, "changed no Claim") {
 		t.Fatalf("markdown refusal does not keep the verified Claim:\n%s", text)
 	}
 	rerun := regexp.MustCompile("`(skl implement submit [^`]*)`").FindStringSubmatch(text)
