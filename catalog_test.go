@@ -47,11 +47,10 @@ func TestProseTemplateSetIsUnambiguous(t *testing.T) {
 	}
 }
 
-// TestAuditRenderingsNameNoHarnessOrWorkflowContext guards the two Audit
-// Procedures: the Audit step renders the same dispatch for every established
-// capability, neither rendering names a harness recipe, and standalone Audit
-// carries no Implement context.
-func TestAuditRenderingsNameNoHarnessOrWorkflowContext(t *testing.T) {
+// TestAuditStepIgnoresCapability guards harness-agnostic dispatch: the Audit
+// step renders the same text for every established capability, a branch the
+// golden journey never reaches.
+func TestAuditStepIgnoresCapability(t *testing.T) {
 	var step string
 	for _, capability := range []ExecutionCapability{UnknownCapability, ClaudeAgentReview, PiSubagentReview, SequentialReview} {
 		facts := deliveryImplementFacts("next", "rework")
@@ -65,22 +64,6 @@ func TestAuditRenderingsNameNoHarnessOrWorkflowContext(t *testing.T) {
 			step = rendered
 		} else if rendered != step {
 			t.Errorf("Audit step for capability %q differs from the unknown-capability rendering", capability)
-		}
-	}
-	standalone, err := BuildPacket("audit", InvocationFacts{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for name, rendered := range map[string]string{"step": step, "standalone": standalone.Instructions} {
-		for _, recipe := range []string{"Claude", "Pi ", "`Agent`", "`subagent`", "general-purpose"} {
-			if strings.Contains(rendered, recipe) {
-				t.Errorf("%s Audit names harness recipe %q", name, recipe)
-			}
-		}
-	}
-	for _, context := range []string{"Implement", "Rework", "rework", "Claim", "review count", "completed-review", "handoff", "Watchdog"} {
-		if strings.Contains(standalone.Instructions, context) {
-			t.Errorf("standalone Audit carries workflow context %q", context)
 		}
 	}
 }

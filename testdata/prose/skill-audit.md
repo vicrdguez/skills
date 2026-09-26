@@ -36,7 +36,7 @@ Reporting them separately stops one axis from masking the other.
 
 ## Pin the comparison
 
-Use the fixed point the user gave: a commit, branch, tag or merge-base. When none was given, ask for one. Resolve it with `git rev-parse <fixed-point>` before going further. The diff command is `git diff <fixed-point>...HEAD`, and the commit list is `git log <fixed-point>..HEAD --oneline`. When the diff is empty, tell the user and stop.
+Use the fixed point the user gave: a commit, branch, tag or merge-base. When none was given, ask for one. Resolve it with `git rev-parse <fixed-point>` before going further. The diff command is `git diff <fixed-point>...HEAD`, and the commit list is `git log <fixed-point>..HEAD --oneline`. An empty diff is legal: judge the complete implementation.
 
 ## Find the Contract
 
@@ -44,13 +44,13 @@ When the branch belongs to a ledger Work Item, read its Contract with `skl ledge
 
 ## Run the gate once
 
-Run the project's full test, typecheck and lint suite once and record the commands, head and results. Reviewers use this result and do not rerun it.
+Run the project's full test, typecheck and lint suite once and record the commands, head and results.
 
 Check: you hold the diff command, the commit list, the gate result and the Contract, or the note that there is none.
 
 ## Dispatch the reviewers
 
-Give each reviewer its brief and the facts you recorded. The Standards reviewer retrieves the smell baseline with `skl skill --resource smells.md audit`; both reviewers retrieve the acceptance criteria with `skl skill --resource acceptance.md audit`. Reviewers read and report; they edit nothing.
+Give each reviewer its brief and everything the check above names, the Contract included. Both reviewers use the recorded gate result. The Standards reviewer retrieves the smell baseline with `skl skill --resource smells.md audit`; both reviewers retrieve the acceptance criteria with `skl skill --resource acceptance.md audit`. Reviewers read and report.
 
 Run the axes at once as fresh-context subagents when you can spawn them. Otherwise run them yourself in sequence, Standards first, finishing its report before starting Contracts.
 

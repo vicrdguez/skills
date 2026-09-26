@@ -2,7 +2,7 @@
 
 {{template "craft/audit.md" .}}## Pin the comparison
 
-Use the fixed point the user gave: a commit, branch, tag or merge-base. When none was given, ask for one. Resolve it with `git rev-parse <fixed-point>` before going further. The diff command is `git diff <fixed-point>...HEAD`, and the commit list is `git log <fixed-point>..HEAD --oneline`. When the diff is empty, tell the user and stop.
+Use the fixed point the user gave: a commit, branch, tag or merge-base. When none was given, ask for one. Resolve it with `git rev-parse <fixed-point>` before going further.{{template "audit-diff" .}}
 
 ## Find the Contract
 
@@ -10,7 +10,7 @@ When the branch belongs to a ledger Work Item, read its Contract with `skl ledge
 
 ## Run the gate once
 
-Run the project's full test, typecheck and lint suite once and record the commands, head and results. Reviewers use this result and do not rerun it.
+Run the project's full test, typecheck and lint suite once and record the commands, head and results.
 
 Check: you hold the diff command, the commit list, the gate result and the Contract, or the note that there is none.
 
