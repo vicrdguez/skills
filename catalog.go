@@ -150,7 +150,6 @@ var skills = map[string]skill{
 // text on every run.
 var composition = map[string][]string{
 	"explore":   {"domain"},
-	"propose":   {"design", "testing"},
 	"implement": {"testing", "audit"},
 }
 
