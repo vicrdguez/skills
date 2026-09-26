@@ -451,7 +451,7 @@ func primaryWorktree(root string) (string, error) {
 }
 
 func artifactBaseline(root, slug, head string) (string, error) {
-	history, err := InspectLedger(root, head, slug, ArtifactEndpoints{}, InspectArtifacts)
+	history, err := InspectLedger(root, head, slug)
 	if err != nil {
 		return "", err
 	}

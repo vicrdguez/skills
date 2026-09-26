@@ -7,9 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
-	skilldist "github.com/vicrdguez/skills"
 	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/workflow"
 )
@@ -20,17 +18,6 @@ type reviewSummaryMetadata struct {
 	ReviewNumber uint64 `json:"review_number"`
 	Verdict      string `json:"verdict"`
 	FinalHead    string `json:"final_head,omitempty"`
-}
-
-func reviewSummaryBody(comment skilldist.ReviewComment) (string, error) {
-	if comment.ReviewNumber == 0 || comment.Verdict != "rework" && comment.Verdict != "pass" && comment.Verdict != "needs-human" {
-		return "", fmt.Errorf("invalid review number or verdict")
-	}
-	metadata, err := json.Marshal(reviewSummaryMetadata{ReviewNumber: comment.ReviewNumber, Verdict: comment.Verdict, FinalHead: comment.FinalHead})
-	if err != nil {
-		return "", err
-	}
-	return reviewSummaryPrefix + string(metadata) + "\n-->\n" + comment.Body, nil
 }
 
 func parseReviewSummary(body string) (reviewSummaryMetadata, string, bool) {
@@ -137,10 +124,6 @@ func (b *GitHubBackend) issueClaimAcquiredAt(ctx context.Context, repository git
 	return claimAcquiredAt, nil
 }
 
-func (b *GitHubBackend) AnchorSide(side string) bool {
-	return side == "LEFT" || side == "RIGHT"
-}
-
 func (b *GitHubBackend) ReviewSubmission(ctx context.Context, id workflow.SubmissionID) (workflow.Submission, error) {
 	if err := b.requireRepository(); err != nil {
 		return workflow.Submission{}, err
@@ -191,125 +174,4 @@ func (b *GitHubBackend) ReviewSubmission(ctx context.Context, id workflow.Submis
 		}
 	}
 	return result, nil
-}
-
-func (b *GitHubBackend) PublishReview(ctx context.Context, item workflow.ImplementationItem, comments []skilldist.ReviewComment, guard func() error) error {
-	if err := b.requireRepository(); err != nil {
-		return err
-	}
-	repository := b.repository
-	if item.Submission == nil {
-		return fmt.Errorf("review requires a Submission")
-	}
-	itemNumber, number, err := githubImplementationNumbers(item)
-	if err != nil {
-		return err
-	}
-	checkHead := guard
-	guard = func() error {
-		if err := checkHead(); err != nil {
-			return err
-		}
-		return b.verifySubmissionOwnership(ctx, itemNumber, number)
-	}
-	for _, comment := range comments {
-		if err := guard(); err != nil {
-			return err
-		}
-		if comment.Path == "" {
-			if comment.Verdict != "" {
-				if err := b.publishReviewSummary(ctx, repository, number, comment); err != nil {
-					return err
-				}
-				continue
-			}
-			if err := b.implementationComment(ctx, repository, number, comment.Body, ""); err != nil {
-				return err
-			}
-			continue
-		}
-		stream := fmt.Sprintf("/pulls/%d/comments", number)
-		published := func() (bool, error) {
-			current, err := b.implementationComments(ctx, repository, stream)
-			for _, c := range current {
-				if c.EvidenceAuthorized && c.Body == comment.Body && c.Commit == comment.Commit && c.Path == comment.Path && c.Line == comment.Line && c.Side == comment.Side && afterClaim(comment.ClaimAcquiredAt, c.CreatedAt) {
-					return true, err
-				}
-			}
-			return false, err
-		}
-		if found, err := published(); err != nil {
-			return err
-		} else if found {
-			continue
-		}
-		writeErr := b.request(ctx, http.MethodPost, b.repositoryPath(repository)+stream, map[string]any{"body": comment.Body, "commit_id": comment.Commit, "path": comment.Path, "line": comment.Line, "side": comment.Side}, nil)
-		if found, err := published(); err != nil {
-			return err
-		} else if !found {
-			if writeErr != nil {
-				return writeErr
-			}
-			return fmt.Errorf("inline publication not observed; retry the same finding")
-		}
-	}
-	return guard()
-}
-
-func (b *GitHubBackend) publishReviewSummary(ctx context.Context, repository github.RepositoryID, number int, wanted skilldist.ReviewComment) error {
-	body, err := reviewSummaryBody(wanted)
-	if err != nil {
-		return err
-	}
-	path := b.repositoryPath(repository) + fmt.Sprintf("/pulls/%d/reviews", number)
-	published := func() (int, error) {
-		type review struct {
-			Body        string `json:"body"`
-			Commit      string `json:"commit_id"`
-			State       string `json:"state"`
-			SubmittedAt string `json:"submitted_at"`
-			Association string `json:"author_association"`
-		}
-		matches := 0
-		for page := 1; ; page++ {
-			var reviews []review
-			if err := b.request(ctx, http.MethodGet, path+fmt.Sprintf("?per_page=100&page=%d", page), nil, &reviews); err != nil {
-				return 0, err
-			}
-			for _, review := range reviews {
-				if trustedMetadata(skilldist.ReviewComment{Association: review.Association}) && review.Body == body && review.Commit == wanted.Commit && review.State == "COMMENTED" && afterClaim(wanted.ClaimAcquiredAt, review.SubmittedAt) {
-					matches++
-				}
-			}
-			if len(reviews) < 100 {
-				return matches, nil
-			}
-		}
-	}
-	if found, err := published(); err != nil || found == 1 {
-		return err
-	} else if found > 1 {
-		return fmt.Errorf("multiple exact review summary receipts observed; inspect before retrying")
-	}
-	writeErr := b.request(ctx, http.MethodPost, path, map[string]string{"body": body, "commit_id": wanted.Commit, "event": "COMMENT"}, nil)
-	if found, err := published(); err != nil {
-		return err
-	} else if found == 1 {
-		return nil
-	} else if found > 1 {
-		return fmt.Errorf("multiple exact review summary receipts observed after publication; inspect before retrying")
-	}
-	if writeErr != nil {
-		return writeErr
-	}
-	return fmt.Errorf("review summary publication not observed; retry the same fixed-number command")
-}
-
-func afterClaim(claimedAt, createdAt string) bool {
-	if claimedAt == "" {
-		return true
-	}
-	claim, claimErr := time.Parse(time.RFC3339Nano, claimedAt)
-	created, createdErr := time.Parse(time.RFC3339Nano, createdAt)
-	return claimErr == nil && createdErr == nil && claim.Before(created)
 }

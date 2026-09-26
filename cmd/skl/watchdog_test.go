@@ -2,28 +2,11 @@ package main
 
 import (
 	"context"
-
 	"fmt"
-
 	"slices"
-	"strconv"
 
-	skilldist "github.com/vicrdguez/skills"
-
-	"github.com/vicrdguez/skills/setup"
 	"github.com/vicrdguez/skills/workflow"
 )
-
-func (b *implementationMemory) SubmissionBodyMatches(id workflow.WorkItemID, actual, supplied string) (bool, error) {
-	if _, err := strconv.Atoi(string(id)); err == nil {
-		return (&setup.GitHubBackend{}).SubmissionBodyMatches(id, actual, supplied)
-	}
-	return actual == supplied, nil
-}
-
-func (b *implementationMemory) AnchorSide(side string) bool {
-	return (&setup.GitHubBackend{}).AnchorSide(side)
-}
 
 func (b *implementationMemory) ReviewSubmission(_ context.Context, id workflow.SubmissionID) (workflow.Submission, error) {
 	b.reviewSubmissionCalls++
@@ -45,30 +28,7 @@ func (b *implementationMemory) ReviewSubmission(_ context.Context, id workflow.S
 	return workflow.Submission{}, fmt.Errorf("missing Submission")
 }
 
-func (b *implementationMemory) PublishReview(_ context.Context, item workflow.ImplementationItem, comments []skilldist.ReviewComment, guard func() error) error {
-	if err := guard(); err != nil {
-		return err
-	}
-	for i := range b.work {
-		if b.work[i].ID == item.ID {
-			for _, c := range comments {
-				c.EvidenceAuthorized = true
-				if c.CreatedAt == "" {
-					c.CreatedAt = b.reviewTime()
-				}
-				if !slices.Contains(b.work[i].Submission.Comments, c) {
-					b.work[i].Submission.Comments = append(b.work[i].Submission.Comments, c)
-				}
-			}
-		}
-	}
-	return nil
-}
-
 func (b *implementationMemory) CompleteReview(_ context.Context, item workflow.ImplementationItem, target workflow.State, guard func() error) error {
-	if b.beforeTransition != nil {
-		b.beforeTransition()
-	}
 	if err := guard(); err != nil {
 		return err
 	}
@@ -85,9 +45,6 @@ func (b *implementationMemory) CompleteReview(_ context.Context, item workflow.I
 			b.work[i].Submission.ClaimAcquiredAt = ""
 			b.work[i] = workflow.ReconcileImplementation(b.work[i])
 		}
-	}
-	if b.afterCompletion != nil {
-		b.afterCompletion()
 	}
 	return nil
 }

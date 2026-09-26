@@ -129,7 +129,7 @@ func TestStatusRefusesPendingPassForNonMainSubmission(t *testing.T) {
 	if err := app.Run([]string{"skl", "status", "--repo", proposalRepository(t)}); err != nil {
 		t.Fatalf("repairable refusal exited with an error: %v", err)
 	}
-	var result setup.ImplementationOutput
+	var result workflow.ImplementationOutcome
 	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestStatusRefusesClaimLossDuringPartialPass(t *testing.T) {
 	if err := app.Run([]string{"skl", "status", "--repo", proposalRepository(t)}); err != nil {
 		t.Fatalf("status: %v %s", err, &output)
 	}
-	var got setup.ImplementationOutput
+	var got workflow.ImplementationOutcome
 	if err := json.Unmarshal(output.Bytes(), &got); err != nil || got.Status != "fix_required" || !strings.Contains(got.Reason, "changed during status") || b.work[0].Submission.PendingReview != workflow.ReadyForMerge || b.work[0].Submission.Claimed {
 		t.Fatalf("Claim loss completed the partial pass or fabricated a Claim: %v %s", err, &output)
 	}
@@ -245,7 +245,7 @@ func TestStatusRecoversOnlyTheCandidateAcceptedByInterruptedPassThroughGitHub(t 
 					t.Fatalf("unchanged candidate did not recover: %v %s labels=%v", err, &output, f.forge.labels)
 				}
 			} else {
-				var got setup.ImplementationOutput
+				var got workflow.ImplementationOutcome
 				if err := json.Unmarshal(output.Bytes(), &got); err != nil || got.Status != "fix_required" || !strings.Contains(got.Reason, "interrupted pass") {
 					t.Fatalf("unsafe recovery was not refused: %v %s", err, &output)
 				}

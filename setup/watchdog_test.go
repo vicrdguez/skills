@@ -10,21 +10,13 @@ import (
 	"strings"
 	"testing"
 
-	skilldist "github.com/vicrdguez/skills"
 	"github.com/vicrdguez/skills/workflow"
 )
 
-func TestGitHubWatchdogClaimsSubmissionAndReadsReviewFacts(t *testing.T) {
-	labels := []string{"review"}
-	var metadata []map[string]any
-	posts := 0
+func TestGitHubStatusReadsReviewFacts(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets")
-		ls := []map[string]string{}
-		for _, label := range labels {
-			ls = append(ls, map[string]string{"name": label})
-		}
-		pull := map[string]any{"number": 11, "state": "open", "created_at": "2026-01-01", "labels": ls, "body": "review me\n\nCloses #7\n", "head": map[string]any{"ref": "widget", "sha": "fixed", "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": "main"}}
+		pull := map[string]any{"number": 11, "state": "open", "created_at": "2026-01-01", "labels": []map[string]string{{"name": "review"}}, "body": "review me\n\nCloses #7\n", "head": map[string]any{"ref": "widget", "sha": "fixed", "repo": map[string]string{"full_name": "acme/widgets"}}, "base": map[string]string{"ref": "main"}}
 		var result any = []any{}
 		switch path {
 		case "/graphql":
@@ -41,24 +33,6 @@ func TestGitHubWatchdogClaimsSubmissionAndReadsReviewFacts(t *testing.T) {
 		case "/issues/7":
 			result = map[string]any{"number": 7, "state": "open", "body": "Branch: `widget`\n"}
 		case "/issues/7/comments":
-			if r.Method == "POST" {
-				var p map[string]any
-				json.NewDecoder(r.Body).Decode(&p)
-				p["author_association"] = "OWNER"
-				metadata = append(metadata, p)
-				posts++
-				http.Error(w, "lost response", 500)
-				return
-			}
-			result = metadata
-		case "/issues/11/labels":
-			var p struct {
-				Labels []string `json:"labels"`
-			}
-			json.NewDecoder(r.Body).Decode(&p)
-			labels = append(labels, p.Labels...)
-			http.Error(w, "lost response", 500)
-			return
 		case "/issues/11/comments":
 			result = []any{map[string]any{"body": "raw human", "author_association": "OWNER"}}
 		case "/issues/11/timeline":
@@ -87,63 +61,6 @@ func TestGitHubWatchdogClaimsSubmissionAndReadsReviewFacts(t *testing.T) {
 	item := items[0]
 	if item.ID != "7" || item.Order != 7 || item.Submission.ID != "11" || item.Submission.CreatedAt != "2026-01-01" || len(item.Submission.Comments) != 3 {
 		t.Fatalf("review facts: %#v", item.Submission)
-	}
-	candidate := workflow.QueueCandidate{SubmissionID: "11", Number: 11}
-	if _, err := b.ClaimSelected(ctx, candidate, item); err == nil || !strings.Contains(err.Error(), "Claim response was uncertain") {
-		t.Fatalf("uncertain acquisition lacked explicit recovery: %v", err)
-	}
-	if _, err := b.ClaimSelected(ctx, candidate, item); err == nil || !strings.Contains(err.Error(), "already carries") {
-		t.Fatalf("second Claim accepted: %v", err)
-	}
-	items, err = b.ImplementationItems(ctx)
-	if err != nil || !items[0].Claimed || !slices.Contains(labels, "review") || posts != 0 {
-		t.Fatalf("claim: %#v %v labels=%v posts=%d", items, err, labels, posts)
-	}
-}
-
-func TestGitHubWatchdogPublishesOpaqueAnchorsOnceAfterLostResponse(t *testing.T) {
-	var summaries, inlines []map[string]any
-	posts := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var stream *[]map[string]any
-		switch r.URL.Path {
-		case "/graphql":
-			fmt.Fprint(w, `{"data":{"repository":{"issue":{"closedByPullRequestsReferences":{"nodes":[{"number":11,"repository":{"nameWithOwner":"acme/widgets"}}]}}}}}`)
-			return
-		case "/repos/acme/widgets/pulls/11":
-			fmt.Fprint(w, `{"number":11,"state":"open","body":"Closes #7","head":{"ref":"widget","sha":"fixed","repo":{"full_name":"acme/widgets"}}}`)
-			return
-		case "/repos/acme/widgets/issues/11/comments":
-			stream = &summaries
-		case "/repos/acme/widgets/pulls/11/comments":
-			stream = &inlines
-		default:
-			t.Errorf("unexpected %s", r.URL)
-			http.NotFound(w, r)
-			return
-		}
-		if r.Method == "POST" {
-			var p map[string]any
-			json.NewDecoder(r.Body).Decode(&p)
-			p["author_association"] = "OWNER"
-			*stream = append(*stream, p)
-			posts++
-			http.Error(w, "lost response", 500)
-			return
-		}
-		json.NewEncoder(w).Encode(*stream)
-	}))
-	defer server.Close()
-	b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
-	item := workflow.ImplementationItem{ID: "7", Submission: &workflow.Submission{ID: "11", Head: "fixed"}}
-	comments := []skilldist.ReviewComment{{Body: "opaque summary\x00", Commit: "fixed"}, {Body: "W1 [ not Markdown", Commit: "fixed", Path: "main.go", Line: 12, Side: "RIGHT"}}
-	for range 2 {
-		if err := b.PublishReview(context.Background(), item, comments, func() error { return nil }); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if posts != 2 || len(summaries) != 1 || len(inlines) != 1 || inlines[0]["commit_id"] != "fixed" || inlines[0]["line"] != float64(12) || inlines[0]["side"] != "RIGHT" || inlines[0]["body"] != comments[1].Body {
-		t.Fatalf("transport posts=%d summaries=%v inlines=%v", posts, summaries, inlines)
 	}
 }
 
@@ -255,7 +172,7 @@ func TestGitHubWatchdogCompletesReviewWithoutClosingSource(t *testing.T) {
 	}
 }
 
-func TestGitHubWatchdogLeavesStaleSyncUntilImplementationHandoff(t *testing.T) {
+func TestGitHubStatusObservesSynchronization(t *testing.T) {
 	labels := []string{"rework", "sync", "wip"}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets")
@@ -302,12 +219,6 @@ func TestGitHubWatchdogLeavesStaleSyncUntilImplementationHandoff(t *testing.T) {
 	items, err := b.ImplementationItems(context.Background())
 	if err != nil || len(items) != 1 || !items[0].Synchronization || !slices.Contains(labels, "sync") {
 		t.Fatalf("sync: %#v %v %v", items, err, labels)
-	}
-	if err := b.AwaitImplementationReview(context.Background(), items[0], func() error { return nil }); err != nil {
-		t.Fatal(err)
-	}
-	if slices.Contains(labels, "sync") || !slices.Contains(labels, "review") {
-		t.Fatalf("synchronization leaked into next review: %v", labels)
 	}
 }
 
@@ -693,14 +604,6 @@ func TestGitHubReviewRecoverySourceDeletionFailsUnapplied(t *testing.T) {
 	items, err = b.ImplementationItems(ctx)
 	if err != nil || len(items) != 1 || items[0].Problem != "" || items[0].Claimed || items[0].State != workflow.ReadyForMerge || sourcePaused || deletes != 2 || !slices.Equal(labels, []string{"done"}) {
 		t.Fatalf("retry incomplete: %#v %v labels=%v paused=%t deletes=%d", items, err, labels, sourcePaused, deletes)
-	}
-}
-
-func TestGitHubBackendAnchorSideAcceptsNativeSides(t *testing.T) {
-	for side, accepted := range map[string]bool{"LEFT": true, "RIGHT": true, "MIDDLE": false, "": false, "left": false, "right": false} {
-		if got := (&GitHubBackend{}).AnchorSide(side); got != accepted {
-			t.Errorf("AnchorSide(%q) = %t, want %t", side, got, accepted)
-		}
 	}
 }
 
