@@ -2,7 +2,6 @@ package workflow
 
 import (
 	"context"
-	"strings"
 
 	skilldist "github.com/vicrdguez/skills"
 )
@@ -170,5 +169,5 @@ func (observation LifecycleObservation) state() (State, string) {
 }
 
 func validConventionalBranch(root, branch string) bool {
-	return branch != "" && gitOK(root, "check-ref-format", "--branch", branch) == nil && !strings.Contains(branch, "/")
+	return branch != "" && gitOK(root, "check-ref-format", "--branch", branch) == nil
 }

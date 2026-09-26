@@ -540,6 +540,25 @@ func TestLedgerCleanupRemovesOnlySafeMergedSourceWork(t *testing.T) {
 	}
 }
 
+func TestLedgerCleanupRemovesMergedSlashedBranch(t *testing.T) {
+	fixture := newLedgerFixture(t)
+	root := sourceRepository(t, "acme", "widgets")
+	spec := cleanupSpec("done", "core")
+	spec.slices[0].branch = "feat/done-core"
+	if outcome := newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", spec)); outcome.Status != "accepted" {
+		t.Fatalf("accept: %s", mustJSON(t, outcome))
+	}
+	statusRecord(t, fixture.clone, "done", "core", merged(cleanupWorktree(t, root, "feat/done-core")))
+
+	outcome := runCleanup(t, offlineForge(t), root)
+	if strings.Join(outcome.Source.Removed, " ") != "feat/done-core" {
+		t.Fatalf("slashed merged branch not removed: %s", mustJSON(t, outcome))
+	}
+	if gitRefExists(root, "refs/heads/feat/done-core") || exists(t, root, ".worktrees/feat/done-core") {
+		t.Fatal("slashed branch local work remains")
+	}
+}
+
 func TestCompletionObservationDoesNotArchive(t *testing.T) {
 	fixture := newLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
