@@ -1,11 +1,17 @@
-{{template "audit-intro" .}}Use the caller's exact Contract references or supplied Contract documents.
-For ledger-managed work, retrieve them through `skl ledger show --repo <source-repository> --item <proposal>/<slice>`
-or its supplied exact commit/path command. Ask for missing originating context;
-report an unavailable Contracts axis explicitly rather than inventing obligations.
+# Audit
 
-Use the caller's specified fixed point (commit, branch, tag, or merge-base),
-resolved to its full commit identity. Ask if no comparison was supplied;
-standalone Audit does not authorize source fetching or merging.{{template "audit-comparison" .}}Use supported parallel fresh subagents when available; otherwise perform
-Standards then Contracts sequentially. Keep the two judgments independent.
+{{template "craft/audit.md" .}}## Pin the comparison
 
-{{template "audit-review" .}}
+Use the fixed point the user gave: a commit, branch, tag or merge-base. When none was given, ask for one. Resolve it with `git rev-parse <fixed-point>` before going further. The diff command is `git diff <fixed-point>...HEAD`, and the commit list is `git log <fixed-point>..HEAD --oneline`. When the diff is empty, tell the user and stop.
+
+## Find the Contract
+
+When the branch belongs to a ledger Work Item, read its Contract with `skl ledger show --item <proposal>/<slice>`. Otherwise use the issue or path the user supplies. When there is no Contract, skip the Contracts axis and say so in the report.
+
+## Run the gate once
+
+Run the project's full test, typecheck and lint suite once and record the commands, head and results. Reviewers use this result and do not rerun it.
+
+Check: you hold the diff command, the commit list, the gate result and the Contract, or the note that there is none.
+
+{{template "audit-dispatch" .}}
