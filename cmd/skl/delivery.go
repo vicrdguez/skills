@@ -66,17 +66,19 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 	}
 	emit := func(out deliveryOutput) error { return renderDelivery(stdout, format, phase, operation, out) }
 	item, claim := c.String("item"), c.String("claim")
-	// Every refusal before acquisition leaves the worker without a Claim; once
-	// a Claim is named, a refusal changes nothing about it.
-	claimState := claimKept
+	// Every refusal before acquisition leaves the worker without a Claim. A
+	// named Claim is reported kept only once the ledger confirms it current;
+	// until then the refusal only leaves it unchanged.
+	claimState := claimUnchanged
 	if operation == "next" {
 		claimState = claimNone
 	}
+	verified := func() { claimState = claimKept }
 	statusCmd := ""
 	refusal := func(err error) error {
 		reason, repair := refusalParts(err)
 		facts := refusalFacts{Status: "fix_required", Reason: reason, Repair: repair, ClaimState: claimState, Claim: claim, StatusCommand: statusCmd, Rerun: boundCommand(c, "skl "+phase+" "+operation)}
-		return emit(deliveryOutput{Status: "fix_required", Reason: err.Error(), Repair: "preserve source progress and Result Documents; use the exact existing Claim reference when retrying or resuming", kind: "refused", facts: facts})
+		return emit(deliveryOutput{Status: "fix_required", Reason: err.Error(), Repair: deliveryJSONRepair, kind: "refused", facts: facts})
 	}
 	if c.NArg() != 0 {
 		return refusal(fmt.Errorf("delivery commands take flags, not positional arguments"))
@@ -100,7 +102,7 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 		return refusal(err)
 	}
 	if operation == "submit" || operation == "needs-human" {
-		return submitDelivery(c, phase, operation, repository, store, newBackend, emit, refusal)
+		return submitDelivery(c, phase, operation, repository, store, newBackend, emit, refusal, verified)
 	}
 	var execution *ledger.Execution
 	if operation == "next" {
@@ -130,18 +132,19 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 			return refusal(err)
 		}
 		if execution == nil {
-			return emit(deliveryOutput{Status: outcome.Status, Reason: outcome.Reason, kind: strings.ReplaceAll(outcome.Status, "_", "-"), facts: phaseFacts{Status: outcome.Status, Phase: phase}})
+			return emit(deliveryOutput{Status: outcome.Status, Reason: outcome.Reason, kind: selectionKinds[outcome.Status], facts: phaseFacts{Status: outcome.Status, Phase: phase}})
 		}
 	} else if operation == "release" {
 		if err := ledger.ReleaseDelivery(store, repository.Repository, item, phase, claim); err != nil {
 			return refusal(err)
 		}
-		return emit(deliveryOutput{Status: "released", Reason: "the exact reservation was released; source progress and lifecycle eligibility were preserved", kind: "released", facts: releasedFacts{Status: "released", Phase: phase, Item: item, Claim: claim}})
+		return emit(deliveryOutput{Status: "released", Reason: "the exact reservation was released; source progress and lifecycle eligibility were preserved", kind: "released", facts: releasedFacts{Status: "released", Phase: phase, Item: item, Claim: claim, Next: nextInvocation(phase, repository)}})
 	} else {
 		execution, err = ledger.ResumeDelivery(store, repository.Repository, item, phase, claim)
 		if err != nil {
 			return refusal(err)
 		}
+		verified()
 	}
 	var source *workflow.DeliverySource
 	required, target, previous := deliverySourceInputs(execution, phase)
@@ -163,16 +166,28 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 	}
 	packet, err := setup.PresentDelivery(execution, repository, phase, operation, capability, source, c.Path("result-directory"))
 	if err != nil {
-		acquired := execution.Claim.Commit
-		return emit(deliveryOutput{
-			Status: "fix_required", Reason: fmt.Sprintf("Claim %s remains acquired for %s, but execution rendering failed: %v", acquired, execution.Item, err),
-			Repair: "preserve source progress and Result Documents; use the exact existing Claim reference when retrying or resuming",
-			kind:   "rendering-failed",
-			facts: renderingFailedFacts{Status: "fix_required", Phase: phase, Item: execution.Item, Claim: acquired, Reason: err.Error(),
-				Resume: claimCommand(phase, "resume", repository, execution.Item, acquired), Release: claimCommand(phase, "release", repository, execution.Item, acquired)},
-		})
+		return emit(renderingFailedOutput(phase, repository, execution.Item, execution.Claim.Commit, err))
 	}
 	return emit(deliveryOutput{Status: map[string]string{"next": "work_available", "resume": "work_available", "prepare": "prepared", "inspect": "inspected"}[operation], Execution: execution, Source: source, Packet: &packet})
+}
+
+// deliveryJSONRepair is the repair the JSON transport has always carried for
+// a delivery refusal. Markdown shows each refusal's own repair instead.
+const deliveryJSONRepair = "preserve source progress and Result Documents; use the exact existing Claim reference when retrying or resuming"
+
+// selectionKinds maps an empty selection's status to its outcome kind.
+var selectionKinds = map[string]string{"no_work": "no-work", "idle_timeout": "idle-timeout"}
+
+// renderingFailedOutput reports an acquired Claim whose Execution Skill failed
+// to render.
+func renderingFailedOutput(phase string, repository setup.RepositoryContext, item, claim string, err error) deliveryOutput {
+	return deliveryOutput{
+		Status: "fix_required", Reason: fmt.Sprintf("Claim %s remains acquired for %s, but execution rendering failed: %v", claim, item, err),
+		Repair: deliveryJSONRepair,
+		kind:   "rendering-failed",
+		facts: renderingFailedFacts{Status: "fix_required", Phase: phase, Item: item, Claim: claim, Reason: err.Error(),
+			Resume: claimCommand(phase, "resume", repository, item, claim), Release: claimCommand(phase, "release", repository, item, claim)},
+	}
 }
 
 func requiredForInspection(phase, head string) string {
@@ -192,7 +207,7 @@ func deliverySourceInputs(e *ledger.Execution, phase string) (head, target, prev
 	return
 }
 
-func submitDelivery(c *cli.Context, phase, operation string, repository setup.RepositoryContext, store *ledger.Store, newBackend backendFactory, emit func(deliveryOutput) error, refusal func(error) error) error {
+func submitDelivery(c *cli.Context, phase, operation string, repository setup.RepositoryContext, store *ledger.Store, newBackend backendFactory, emit func(deliveryOutput) error, refusal func(error) error, verified func()) error {
 	body, err := os.ReadFile(c.Path("body"))
 	if err != nil {
 		return refusal(fmt.Errorf("read private phase Result Document: %w", err))
@@ -220,6 +235,7 @@ func submitDelivery(c *cli.Context, phase, operation string, repository setup.Re
 	e, activeErr := ledger.ResumeDelivery(store, repository.Repository, c.String("item"), phase, c.String("claim"))
 	source := ledger.SourceRevisions{Head: c.String("head"), Target: c.String("target")}
 	if activeErr == nil {
+		verified()
 		if phase == ledger.WatchdogPhase {
 			if e.Implement == nil {
 				return refusal(fmt.Errorf("review requires its fixed implementation report"))

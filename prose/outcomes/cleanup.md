@@ -19,4 +19,4 @@ Removed local source work: {{.}}{{end}}{{range .Preserved}}
 Preserved local source work: {{.Branch}}: {{.Reason}}{{end}}{{range .Failed}}
 Source removal failed: {{.Branch}}: {{.Reason}}{{end}}{{end}}
 
-{{if eq .Status "fix_required"}}Make each repair, then rerun `{{.Rerun}}`.{{else}}Continue with your next step.{{end}}
+{{if eq .Status "fix_required"}}Make each repair, then rerun `{{.Rerun}}`.{{else}}Cleanup is complete: report what it archived and removed to the user.{{end}}

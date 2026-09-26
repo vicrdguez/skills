@@ -4,4 +4,4 @@ Nothing needed cleanup.
 
 Kept active proposal: widget-dashboard: active slices: foundation (ready_for_implementation)
 
-Continue with your next step.
+Cleanup is complete: report what it archived and removed to the user.

@@ -422,6 +422,10 @@ type proposalFacts struct {
 	Bookkeeping       string
 	Slices            []sliceFacts
 	Authoring         *proseAuthoring
+	// Unpublished reports a surface that is not current; Publish presents
+	// the current issue view later.
+	Unpublished bool
+	Publish     string
 }
 
 type sliceFacts struct {
@@ -450,7 +454,13 @@ func proposalFactsOf(repository setup.RepositoryContext, acceptance *ledger.Acce
 		facts.Bookkeeping = noteWord(acceptance.BookkeepingStatus)
 	}
 	q := skilldist.ShellQuote
+	facts.Publish = "skl ledger publish --repo " + q(repository.Root) + " --remote " + q(repository.Remote) + " --proposal " + q(acceptance.Proposal)
+	current := func(note *ledger.PublicationNote) bool {
+		return note == nil || note.Status == ledger.IssueCreated || note.Status == ledger.IssueUpdated
+	}
+	facts.Unpublished = acceptance.ParentTitle != "" && (acceptance.ParentIssue == nil || !current(acceptance.ParentNote))
 	for _, slice := range acceptance.Slices {
+		facts.Unpublished = facts.Unpublished || slice.Issue == nil || !current(slice.IssueStatus)
 		view := sliceFacts{
 			Name: slice.Name, Title: slice.Title, Branch: slice.Branch, Dependencies: slice.Dependencies,
 			Issue:    attachmentWord(slice.Issue, slice.IssueStatus),

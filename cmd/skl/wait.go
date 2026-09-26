@@ -84,7 +84,7 @@ func nextWork(ctx context.Context, wait, poll time.Duration, selectWork func() (
 	}
 	defer func() {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			err = fmt.Errorf("queue waiting interrupted: %w", err)
+			err = fmt.Errorf("queue waiting interrupted; a Claim may have been acquired: %w", err)
 		}
 	}()
 	deadline := time.Now().Add(wait)

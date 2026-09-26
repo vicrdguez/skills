@@ -19,6 +19,7 @@ const (
 	claimKept      = "kept"
 	claimNone      = "none"
 	claimUncertain = "uncertain"
+	claimUnchanged = "unchanged"
 )
 
 // refusalFacts are what the refused outcome renders: the refusal's own
@@ -46,6 +47,7 @@ type releasedFacts struct {
 	Phase  string
 	Item   string
 	Claim  string
+	Next   string
 }
 
 type renderingFailedFacts struct {
@@ -147,8 +149,14 @@ func claimCommand(phase, operation string, repository setup.RepositoryContext, i
 	return fmt.Sprintf("skl %s %s --repo %s --remote %s --item %s --claim %s", phase, operation, q(repository.Root), q(repository.Remote), q(item), q(claim))
 }
 
-// statusCommand binds the command that shows which Work Items hold a Claim.
+// statusInvocation binds the command that shows which Work Items hold a Claim.
 func statusInvocation(repository setup.RepositoryContext) string {
 	q := skilldist.ShellQuote
 	return fmt.Sprintf("skl status --repo %s --remote %s", q(repository.Root), q(repository.Remote))
+}
+
+// nextInvocation binds the command that selects the phase's next Work Item.
+func nextInvocation(phase string, repository setup.RepositoryContext) string {
+	q := skilldist.ShellQuote
+	return fmt.Sprintf("skl %s next --repo %s --remote %s", phase, q(repository.Root), q(repository.Remote))
 }
