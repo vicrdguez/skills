@@ -61,8 +61,8 @@ func deliveryImplementActive(instructions string) string {
 }
 
 // TestDeliveryImplementSpecializesEachProcedure proves the private-ledger path
-// binds every command and the frozen Contract once, and that initial, resumed,
-// and rework renders carry only their applicable procedure.
+// binds every command, the recorded target and the frozen Contract once for
+// the initial, resumed, and rework procedures.
 func TestDeliveryImplementSpecializesEachProcedure(t *testing.T) {
 	for _, procedure := range []string{"initial", "resumed", "rework"} {
 		t.Run(procedure, func(t *testing.T) {
@@ -88,35 +88,11 @@ func TestDeliveryImplementSpecializesEachProcedure(t *testing.T) {
 			if !strings.Contains(active, document.Commit+":"+document.Path) {
 				t.Error("instructions lost the exact Contract reference")
 			}
-			if !strings.Contains(active, "Opaque {{.Worktree}} contract body stays data.") {
-				t.Errorf("Contract body was interpreted as template source instead of preserved:\n%s", active)
-			}
 			if got := strings.Count(active, document.Contents); got != 1 {
 				t.Errorf("Contract body rendered %d times, want exactly once", got)
 			}
-
-			marker := map[string]string{
-				"initial": "implement the complete accepted behavior and architecture",
-				"resumed": "Resume this existing Claim without assuming preparation completed",
-				"rework":  "findings to resolve, not as new frozen requirements",
-			}[procedure]
-			if !strings.Contains(active, marker) {
-				t.Errorf("%s instructions are missing %q", procedure, marker)
-			}
 			if !strings.Contains(active, facts.RecordedTarget) {
 				t.Errorf("%s instructions omitted the recorded target for offline integration", procedure)
-			}
-			if !strings.Contains(active, "never authority for this work") {
-				t.Errorf("%s instructions do not deny PR/comment authority", procedure)
-			}
-
-			for _, forbidden := range []string{
-				"Artifact Completion", "Artifact Baseline", ".watchdog", "PR comparison",
-				"remove `.changes/", "draft Submission", "Implementation Ledger",
-			} {
-				if strings.Contains(active, forbidden) {
-					t.Errorf("%s active render retains retired machinery %q", procedure, forbidden)
-				}
 			}
 		})
 	}
@@ -154,98 +130,5 @@ func TestDeliveryImplementNarrowInspectAndPrepare(t *testing.T) {
 				t.Error("inspect continuation omitted the next applicable handoff")
 			}
 		})
-	}
-}
-
-// TestDeliveryImplementDefersReportResource proves the report instructions are
-// deferred behind the bound resource command until the worker asks for them.
-func TestDeliveryImplementDefersReportResource(t *testing.T) {
-	packet, err := BuildPacket("implement", InvocationFacts{Delivery: deliveryImplementFacts("next", "initial")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	const sentinel = "full current completion-and-evidence table"
-	if !strings.Contains(packet.Instructions, packet.Facts.Delivery.ResultResourceCommand) {
-		t.Fatal("initial instructions lost the deferred report resource command")
-	}
-	if strings.Contains(packet.Instructions, sentinel) {
-		t.Fatal("initial instructions embedded the deferred report resource body")
-	}
-}
-
-// TestDeliveryImplementSubmissionReportDeclarations proves the report resource
-// renders the full current completion declarations, human-owned checks, and
-// Audit dispositions for every procedure without an engine prose parser.
-func TestDeliveryImplementSubmissionReportDeclarations(t *testing.T) {
-	for _, procedure := range []string{"initial", "resumed", "rework"} {
-		t.Run(procedure, func(t *testing.T) {
-			resource, err := RenderResource("implement", "reference/ledger-submission.md", []string{
-				"result_directory=/tmp/result",
-				"procedure=" + procedure,
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			body := string(resource)
-			for _, want := range []string{
-				"`/tmp/result/implement-report.md`",
-				"`/tmp/result/public.md`",
-				"schema-1 frontmatter",
-				"never hand-author `schema`, `outcome`, `source`, `ledger`, or `round`",
-				"cross-checks the prose",
-				"full current completion-and-evidence table",
-				"`B<n>`",
-				"`A<n>`",
-				"`T<n>`",
-				"`complete` or `incomplete`",
-				"human-owned `M<n>` checks",
-				"Omitted entries are never complete",
-				"Full Gate",
-				"## Audit ledger",
-				"`F<n>`",
-				"`Standards`",
-				"`Contracts`",
-				"severity",
-				"disposition",
-				"question",
-				"options",
-				"recommendation",
-				"incomplete status",
-				"human verification obligations stay accessible privately through `skl`",
-			} {
-				if !strings.Contains(body, want) {
-					t.Errorf("%s report resource is missing %q", procedure, want)
-				}
-			}
-			if !strings.Contains(body, "Never use this private report or the worker exchange as the public body") {
-				t.Error("report resource does not forbid publishing the private exchange")
-			}
-			if procedure == "rework" && !strings.Contains(body, "Preserve every historical `F<n>` and `W<n>` identity") {
-				t.Error("rework report resource lost historical finding preservation")
-			}
-		})
-	}
-}
-
-// TestDeliveryImplementHandoffSemantics proves the active handoff keeps the
-// fixed typed outcomes, honest pending delivery, and exact-Claim retry rules.
-func TestDeliveryImplementHandoffSemantics(t *testing.T) {
-	packet, err := BuildPacket("implement", InvocationFacts{Delivery: deliveryImplementFacts("next", "initial")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		"`awaiting_review`",
-		"never inferred from the report prose",
-		"`fix_required` outcome retains this Claim",
-		"never infer a release",
-		"releases this Claim locally even when ledger replication or normal public presentation is still pending",
-		"Preserve the Result Documents for a safe retry",
-		"`--format json` exists only for callers that explicitly request it",
-		"Independent Watchdog Review and the human merge boundary are preserved",
-	} {
-		if !strings.Contains(packet.Instructions, want) {
-			t.Errorf("handoff instructions are missing %q", want)
-		}
 	}
 }

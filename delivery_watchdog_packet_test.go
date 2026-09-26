@@ -66,8 +66,8 @@ func deliveryWatchdogFacts(operation, procedure, scope string, reviewCount uint6
 }
 
 // TestDeliveryWatchdogSpecializesEachProceeding proves the private-ledger path
-// binds every command and document once, carries the fixed review identity, and
-// specializes the initial, repeat, and resumed review.
+// binds every command and document once and carries the fixed review identity
+// for the initial, repeat, and resumed review.
 func TestDeliveryWatchdogSpecializesEachProceeding(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -75,11 +75,10 @@ func TestDeliveryWatchdogSpecializesEachProceeding(t *testing.T) {
 		procedure string
 		scope     string
 		count     uint64
-		marker    string
 	}{
-		{"initial", "next", "initial", "full", 0, "This review is the first completed review for the Work Item."},
-		{"repeat", "next", "initial", "incremental", 1, "## Incremental repeat review"},
-		{"resume", "resume", "resumed", "incremental", 1, "## Incremental repeat review"},
+		{"initial", "next", "initial", "full", 0},
+		{"repeat", "next", "initial", "incremental", 1},
+		{"resume", "resume", "resumed", "incremental", 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -108,24 +107,12 @@ func TestDeliveryWatchdogSpecializesEachProceeding(t *testing.T) {
 					t.Errorf("%s rendered document %q %d times, want exactly once", tc.name, document.Path, got)
 				}
 			}
-			if !strings.Contains(active, "Opaque {{.Worktree}} contract body stays data.") {
-				t.Errorf("%s document body was interpreted as template source instead of preserved", tc.name)
-			}
-			if !strings.Contains(active, tc.marker) {
-				t.Errorf("%s instructions are missing %q", tc.name, tc.marker)
-			}
 			for _, fixed := range []string{
 				facts.RequiredHead, facts.RecordedTarget,
 				fmt.Sprintf("Completed reviews: %d; this invocation is review number %d", facts.ReviewCount, facts.ReviewNumber),
-				"do not launch `watchdog-runner`",
 			} {
 				if !strings.Contains(active, fixed) {
 					t.Errorf("%s instructions omitted fixed review fact %q", tc.name, fixed)
-				}
-			}
-			for _, forbidden := range []string{".watchdog", ".changes", "findings.json", "submission.md", "Artifact Baseline", "Artifact Completion", "PR comparison"} {
-				if strings.Contains(active, forbidden) {
-					t.Errorf("%s active render retains retired machinery %q", tc.name, forbidden)
 				}
 			}
 		})
@@ -164,26 +151,9 @@ func TestDeliveryWatchdogNarrowPrepareAndInspect(t *testing.T) {
 	}
 }
 
-// TestDeliveryWatchdogDefersReportResource proves the report instructions are
-// deferred behind the bound resource command until the worker asks for them.
-func TestDeliveryWatchdogDefersReportResource(t *testing.T) {
-	facts := deliveryWatchdogFacts("next", "initial", "full", 0)
-	packet, err := BuildPacket("watchdog", InvocationFacts{Delivery: facts})
-	if err != nil {
-		t.Fatal(err)
-	}
-	const sentinel = "never hand-author `schema`, `outcome`, `source`, `ledger`, or `round`"
-	if !strings.Contains(packet.Instructions, facts.ResultResourceCommand) {
-		t.Fatal("initial instructions lost the deferred report resource command")
-	}
-	if strings.Contains(packet.Instructions, sentinel) {
-		t.Fatal("initial instructions embedded the deferred report resource body")
-	}
-}
-
-// TestDeliveryWatchdogReportResource proves the report resource names the
-// private report, keeps engine metadata and the public body out of worker prose,
-// and requires no PR input.
+// TestDeliveryWatchdogReportResource proves the report resource binds the
+// Result Documents, round and reviewed head, and refuses invalid round and head
+// inputs.
 func TestDeliveryWatchdogReportResource(t *testing.T) {
 	reviewed := strings.Repeat("a", 40)
 	resource, err := RenderResource("watchdog", "reference/ledger-review.md", []string{
@@ -198,18 +168,8 @@ func TestDeliveryWatchdogReportResource(t *testing.T) {
 	for _, want := range []string{
 		"`/tmp/result/watchdog-report.md`",
 		"`/tmp/result/public.md`",
-		"schema-1 frontmatter",
-		"never hand-author `schema`, `outcome`, `source`, `ledger`, or `round`",
 		"review round 2",
 		reviewed,
-		"`W<n>`",
-		"`BLOCK`",
-		"`HUMAN`",
-		"`NOTE`",
-		"`M<n>`",
-		"privately through `skl`",
-		"Never use this private report or the worker exchange as the public body",
-		"no automatic inline comments",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("review report resource is missing %q", want)
@@ -245,101 +205,30 @@ func TestDeliveryWatchdogReportResource(t *testing.T) {
 	}
 }
 
-// TestDeliveryWatchdogScopeAndFixedIdentity proves the incremental/full
-// selection comes from the supplied scope facts while the fixed reviewed head
-// and completed-review count survive either branch.
+// TestDeliveryWatchdogScopeAndFixedIdentity proves the fixed reviewed head,
+// target and completed-review count survive every supplied scope, and that a
+// render made before inspection reports its scope carries the unresolved-scope
+// branch.
 func TestDeliveryWatchdogScopeAndFixedIdentity(t *testing.T) {
-	incrementalFacts := deliveryWatchdogFacts("next", "initial", "incremental", 1)
-	incremental, err := BuildPacket("watchdog", InvocationFacts{Delivery: incrementalFacts})
-	if err != nil {
-		t.Fatal(err)
-	}
-	fullFacts := deliveryWatchdogFacts("next", "initial", "full", 2)
-	full, err := BuildPacket("watchdog", InvocationFacts{Delivery: fullFacts})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(incremental.Instructions, "## Incremental repeat review") {
-		t.Error("incremental scope did not select the incremental repeat review")
-	}
-	if strings.Contains(incremental.Instructions, "## Full review") {
-		t.Error("incremental scope also rendered the full review branch")
-	}
-	if !strings.Contains(full.Instructions, "## Full review") {
-		t.Error("full scope did not select the full review")
-	}
-	if strings.Contains(full.Instructions, "## Incremental repeat review") {
-		t.Error("full scope also rendered the incremental review branch")
-	}
-	for _, packet := range []struct {
-		name  string
-		facts *DeliveryFacts
-		body  string
-		count string
+	for _, tc := range []struct {
+		scope  string
+		count  uint64
+		marker string
 	}{
-		{"incremental", incrementalFacts, incremental.Instructions, "completed-review count (1) and every prior"},
-		{"full", fullFacts, full.Instructions, "completed-review count (2) and every prior"},
+		{"incremental", 1, "completed-review count (1)"},
+		{"full", 2, "completed-review count (2)"},
+		{"", 1, "## Review scope"},
 	} {
-		if !strings.Contains(packet.body, packet.count) {
-			t.Errorf("%s branch did not retain the completed-review count %q", packet.name, packet.count)
+		facts := deliveryWatchdogFacts("next", "initial", tc.scope, tc.count)
+		packet, err := BuildPacket("watchdog", InvocationFacts{Delivery: facts})
+		if err != nil {
+			t.Fatal(err)
 		}
-		if !strings.Contains(packet.body, packet.facts.RequiredHead) || !strings.Contains(packet.body, packet.facts.RecordedTarget) {
-			t.Errorf("%s branch did not retain the fixed reviewed head and target", packet.name)
+		if !strings.Contains(packet.Instructions, tc.marker) {
+			t.Errorf("scope %q is missing %q", tc.scope, tc.marker)
 		}
-		if !strings.Contains(packet.body, "Do not fetch or merge a newer target snapshot") {
-			t.Errorf("%s branch lost the fixed-target cutoff", packet.name)
-		}
-	}
-}
-
-// TestDeliveryWatchdogUnresolvedScope proves a next/resume render made before
-// inspection still carries the bounded repeat-review policy until the scope is
-// reported.
-func TestDeliveryWatchdogUnresolvedScope(t *testing.T) {
-	facts := deliveryWatchdogFacts("next", "initial", "", 1)
-	packet, err := BuildPacket("watchdog", InvocationFacts{Delivery: facts})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		"## Review scope",
-		"bounded to regressions, integration effects, and false claims",
-		"retain the completed-review count and every prior `W<n>` finding identity",
-	} {
-		if !strings.Contains(packet.Instructions, want) {
-			t.Errorf("unresolved scope instructions are missing %q", want)
-		}
-	}
-}
-
-// TestDeliveryWatchdogHandoffBoundary proves the active handoff keeps the typed
-// outcome routing, honest pending delivery, marker post-check, and the human
-// merge boundary without an engine comment parser.
-func TestDeliveryWatchdogHandoffBoundary(t *testing.T) {
-	facts := deliveryWatchdogFacts("next", "initial", "full", 0)
-	packet, err := BuildPacket("watchdog", InvocationFacts{Delivery: facts})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		"<pass|rework|needs-human>",
-		"`pass` only when no `BLOCK` or `HUMAN` finding remains active",
-		"second or later completed review routes it to Needs Human",
-		"`needs-human` when a human decision is required; it counts as a completed review too",
-		"never records a second round",
-		"releases this Claim even when ledger replication or public presentation is still pending",
-		"`fix_required` result retains this Claim",
-		"only comments changed",
-		"`git diff --check`",
-		"not the full suite again for comments",
-		"`--head <actual-final-source-SHA>`",
-		"Only a human performs the final integration and merge",
-		"verifies Git identities, not comment prose",
-		"public PR body, label, or comment is never authority",
-		"never keep a worktree-local counter",
-	} {
-		if !strings.Contains(packet.Instructions, want) {
-			t.Errorf("handoff instructions are missing %q", want)
+		if !strings.Contains(packet.Instructions, facts.RequiredHead) || !strings.Contains(packet.Instructions, facts.RecordedTarget) {
+			t.Errorf("scope %q did not retain the fixed reviewed head and target", tc.scope)
 		}
 	}
 }

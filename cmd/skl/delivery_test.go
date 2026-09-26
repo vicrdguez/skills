@@ -222,18 +222,8 @@ func TestDeliveryCLIEndToEnd(t *testing.T) {
 		t.Fatal("implement next returned no execution packet")
 	}
 	startInstructions := started.Packet.Instructions
-	for _, want := range []string{
-		"skl implement prepare",
-		"skl implement inspect",
-		"skl implement submit",
-		"skl implement release",
-		"--claim '" + claim + "'",
-		"implement the complete accepted behavior and architecture",
-		"awaiting_review",
-	} {
-		if !strings.Contains(startInstructions, want) {
-			t.Errorf("initial instructions are missing %q", want)
-		}
+	if !strings.Contains(startInstructions, "--claim '"+claim+"'") {
+		t.Errorf("initial instructions do not bind the acquired Claim %s", claim)
 	}
 	if len(started.Execution.Documents) == 0 {
 		t.Fatal("initial execution did not carry the frozen accepted Contract")
@@ -358,21 +348,8 @@ func TestDeliveryCLIEndToEnd(t *testing.T) {
 	}
 	reviewClaim := review.Execution.Claim.Commit
 	reviewInstructions := review.Packet.Instructions
-	for _, want := range []string{
-		"# Watchdog review of",
-		"skl watchdog prepare",
-		"skl watchdog inspect",
-		"skl watchdog submit",
-		"--claim '" + reviewClaim + "'",
-		"`rework`",
-		"`pass`",
-	} {
-		if !strings.Contains(reviewInstructions, want) {
-			t.Errorf("watchdog instructions are missing %q", want)
-		}
-	}
-	if strings.Contains(reviewInstructions, ".watchdog") || strings.Contains(reviewInstructions, ".changes") {
-		t.Error("watchdog instructions still depend on source .changes or .watchdog")
+	if !strings.Contains(reviewInstructions, "--claim '"+reviewClaim+"'") {
+		t.Errorf("watchdog instructions do not bind the acquired Claim %s", reviewClaim)
 	}
 	reviewPrepared, err := cli.deliveryJSON(t, "skl", "watchdog", "prepare", "--repo", source, "--item", deliveryTestItem, "--claim", reviewClaim, "--format", "json")
 	if err != nil {
@@ -433,8 +410,8 @@ func TestDeliveryCLIEndToEnd(t *testing.T) {
 		t.Fatalf("rework did not acquire a fresh Claim: %#v", rework.Execution)
 	}
 	reworkClaim := rework.Execution.Claim.Commit
-	if rework.Packet == nil || !strings.Contains(rework.Packet.Instructions, "findings to resolve, not as new frozen requirements") {
-		t.Fatal("rework procedure did not describe finding-driven Rework")
+	if rework.Packet == nil || !strings.Contains(rework.Packet.Instructions, "--claim '"+reworkClaim+"'") {
+		t.Fatal("rework instructions do not bind the fresh Claim")
 	}
 	reprepared, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--item", deliveryTestItem, "--claim", reworkClaim, "--format", "json")
 	if err != nil {

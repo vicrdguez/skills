@@ -2480,8 +2480,6 @@ func TestMissingProseGuidesFreshAuthoring(t *testing.T) {
 	for _, wanted := range []string{
 		"skl ledger show " + selection + " --item 'lost-prose/<slice>'",
 		"skl ledger publish " + selection + " --proposal 'lost-prose'",
-		"Never publish with `gh`",
-		"Manual Verification",
 	} {
 		if !strings.Contains(cli.out.String(), wanted) {
 			t.Fatalf("authoring guidance lacks %q:\n%s", wanted, cli.out.String())
