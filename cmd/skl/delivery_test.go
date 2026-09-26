@@ -590,6 +590,12 @@ func TestDeliveryCLINoWorkAndFormats(t *testing.T) {
 	if after := ledgerSnapshot(t, fixture.clone); after != before {
 		t.Fatal("unknown output format acquired a Claim or mutated the ledger")
 	}
+	if _, err := cli.deliveryRun(t, "skl", "implement", "next", "--repo", source, "--capability", "pi-subagents"); err == nil {
+		t.Fatal("the retired --capability flag was accepted")
+	}
+	if after := ledgerSnapshot(t, fixture.clone); after != before {
+		t.Fatal("the retired --capability flag acquired a Claim or mutated the ledger")
+	}
 }
 
 // TestDeliveryCLIDeliversSlashedPlannedBranch proves a planned branch that

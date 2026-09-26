@@ -41,7 +41,6 @@ func deliveryImplementFacts(operation, procedure string) *DeliveryFacts {
 		SourceTarget:     strings.Repeat("f", 40),
 		ReviewScope:      "incremental",
 		FetchStatus:      "local: origin fetch failed (offline); using available local source inputs",
-		Capability:       PiSubagentReview,
 		Documents: []ledger.ContractDocument{{
 			Commit:   strings.Repeat("1", 40),
 			Path:     "projects/payments/proposals/add-refunds/refund/behavior.md",

@@ -145,7 +145,7 @@ func TestDispatchAnswersWithCommandsAndTheWorkerGetsNextsSkill(t *testing.T) {
 	}
 
 	// B1/B2: the dispatch claims, and answers with commands only.
-	dispatch := cli.dispatchRun(t, "skl implement next --dispatch --repo "+source+" --remote origin --capability sequential --wait=2m --poll=5s --worker-model openai-codex/gpt-6-astra --worker-thinking high")
+	dispatch := cli.dispatchRun(t, "skl implement next --dispatch --repo "+source+" --remote origin --wait=2m --poll=5s --worker-model openai-codex/gpt-6-astra --worker-thinking high")
 	state := deliveryPersistedState(t, fixture.clone)
 	if state.Claim == nil || state.Claim.Phase != ledger.ImplementPhase {
 		t.Fatalf("dispatch did not claim the Slice: %#v", state)
@@ -156,8 +156,8 @@ func TestDispatchAnswersWithCommandsAndTheWorkerGetsNextsSkill(t *testing.T) {
 			t.Errorf("dispatch output carries the Execution Skill (%q):\n%s", skill, dispatch)
 		}
 	}
-	wantWorker := "skl implement resume --repo '" + root + "' --remote 'origin' --item '" + deliveryTestItem + "' --claim '" + claim + "' --dispatched --capability 'sequential'"
-	wantContinue := "skl implement next --repo '" + root + "' --remote 'origin' --capability 'sequential' --wait=2m0s --poll=5s --dispatch --after '" + claim + "' --worker-model 'openai-codex/gpt-6-astra' --worker-thinking 'high'"
+	wantWorker := "skl implement resume --repo '" + root + "' --remote 'origin' --item '" + deliveryTestItem + "' --claim '" + claim + "' --dispatched"
+	wantContinue := "skl implement next --repo '" + root + "' --remote 'origin' --wait=2m0s --poll=5s --dispatch --after '" + claim + "' --worker-model 'openai-codex/gpt-6-astra' --worker-thinking 'high'"
 	for _, want := range []string{"`openai-codex/gpt-6-astra`", "`high`", "`" + wantWorker + "`", "`" + wantContinue + "`"} {
 		if !strings.Contains(dispatch, want) {
 			t.Errorf("dispatch output lacks %s:\n%s", want, dispatch)
@@ -167,7 +167,7 @@ func TestDispatchAnswersWithCommandsAndTheWorkerGetsNextsSkill(t *testing.T) {
 	// B3: the worker receives the initial Procedure next would have returned.
 	dispatchedSkill := cli.dispatchRun(t, wantWorker)
 	cli.dispatchRun(t, "skl implement release --repo "+source+" --item "+deliveryTestItem+" --claim "+claim)
-	ordinary := cli.dispatchJSON(t, "skl implement next --repo "+source+" --capability sequential")
+	ordinary := cli.dispatchJSON(t, "skl implement next --repo "+source+"")
 	if ordinary.Packet == nil || ordinary.Packet.Facts.Delivery.Procedure != "initial" {
 		t.Fatalf("ordinary next: %s", mustJSON(t, ordinary))
 	}
