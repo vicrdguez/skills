@@ -1,5 +1,10 @@
 [tools]
+codex = "latest"
+go = "latest"
 herdr = "latest"
+
+[env]
+GOBIN = "{{ env.HOME }}/.local/bin"
 
 [tasks.prose-metrics]
 description = "Print agent-prose metrics for testdata/prose goldens beside the committed baseline"
