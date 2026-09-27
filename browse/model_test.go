@@ -292,6 +292,37 @@ func TestBrowserSelectsEarlierReportVersionAndReturnsToCurrentContext(t *testing
 	}
 }
 
+func TestBrowserFindsReportHistoryWhenLatestReportWasRemoved(t *testing.T) {
+	var root string
+	fixtureLedger(t, func(directory string) {
+		root = directory
+		write(t, directory, "projects/widgets/proposals/orders/cancel/implement-report.md", "Older implementation reasoning.\n")
+	})
+	if err := os.Remove(filepath.Join(root, "projects/widgets/proposals/orders/cancel/implement-report.md")); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-q", "-m", "remove latest report")
+	store, err := ledger.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := store.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &session{t: t, model: browse.New(snapshot, browse.Options{Project: "widgets"})}
+	s.send(tea.WindowSizeMsg{Width: 120, Height: 40})
+	s.press("enter", "down", "enter", "d", "down", "down", "down", "down")
+	s.shows("Implementation report versions", "no latest report")
+	s.press("enter")
+	s.shows("implement report versions (2)")
+	s.press("enter")
+	s.shows("HISTORICAL", "The recorded implementation evidence is readable", "current lifecycle: Awaiting Review")
+	s.press("esc", "esc")
+	s.shows("Implementation report versions")
+}
+
 func TestBrowserFollowsDecisionAndClaimReferencesWithoutChangingSliceContext(t *testing.T) {
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 100, Height: 50})

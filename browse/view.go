@@ -291,13 +291,18 @@ func (m Model) listContent() (context []string, title string, rows []string, cur
 			for _, document := range m.documents.Documents {
 				rows = append(rows, documentLabel(document))
 			}
-			if len(rows) > 0 {
+			if m.documents.Slice != "" {
+				rows = append(rows, "Implementation report versions", "Watchdog report versions")
+			}
+			if cursor < len(m.documents.Documents) {
 				document := m.documents.Documents[cursor]
 				selected = []string{documentSummary(document), "Exact ledger identity: " + document.Reference.Commit + ":" + document.Reference.Path}
 				if len(document.Diagnostics) > 0 {
 					selected = append(selected, diagnosticLines(document.Diagnostics)...)
 				}
 				selected = append(selected, "Enter reads this committed document; d opens this set's diagnostics.")
+			} else if len(rows) > 0 {
+				selected = []string{"Enter discovers this phase's locally available content versions, even when no latest report exists."}
 			}
 		}
 	case versionsScreen:

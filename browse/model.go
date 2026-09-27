@@ -165,6 +165,7 @@ type Model struct {
 	referencesFromDoc      bool
 	referenceHistory       []referenceFrame
 	versions               *ledger.ReportVersions
+	versionsReturn         screen
 	renderProblem          string
 
 	width, height int
@@ -387,7 +388,11 @@ func (m Model) rows() int {
 		}
 	case documentsScreen:
 		if m.documents != nil {
-			return len(m.documents.Documents)
+			count := len(m.documents.Documents)
+			if m.documents.Slice != "" {
+				count += 2 // Each phase history remains accessible if its latest report is absent.
+			}
+			return count
 		}
 	case referencesScreen:
 		return len(m.references)
@@ -541,7 +546,15 @@ func (m *Model) enter() {
 		m.project, m.proposal, m.item, m.archived = chosen.project, chosen.match.Proposal, chosen.match.Item, chosen.match.Archived
 		m.screen, m.parent[sliceScreen], m.relation = sliceScreen, resultsScreen, 0
 	case documentsScreen:
-		m.openDocument(m.documents.Documents[selected])
+		if selected < len(m.documents.Documents) {
+			m.openDocument(m.documents.Documents[selected])
+		} else {
+			phase := ledger.ImplementPhase
+			if selected > len(m.documents.Documents) {
+				phase = ledger.WatchdogPhase
+			}
+			m.openVersionsFor(m.project, m.item, phase, m.archived)
+		}
 		return
 	case referencesScreen:
 		m.followReference(m.references[selected].Reference)
@@ -600,7 +613,7 @@ func (m *Model) back() {
 		m.screen = m.docContext
 		m.failure = nil
 	case versionsScreen:
-		m.screen = documentScreen
+		m.screen = m.versionsReturn
 	case referencesScreen:
 		if len(m.referenceHistory) > 0 {
 			previous := m.referenceHistory[len(m.referenceHistory)-1]

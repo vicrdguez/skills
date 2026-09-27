@@ -120,13 +120,18 @@ func (m *Model) openVersions() {
 	if m.currentDocument.Kind == ledger.WatchdogReportDocumentKind {
 		phase = ledger.WatchdogPhase
 	}
-	versions, err := m.snapshot.VersionsAt(m.currentDocument.Project,
-		m.currentDocument.Proposal+"/"+m.currentDocument.Slice, phase, m.archived)
+	m.openVersionsFor(m.currentDocument.Project, m.currentDocument.Proposal+"/"+m.currentDocument.Slice,
+		phase, strings.Contains(m.currentDocument.Reference.Path, "/archive/"))
+}
+
+func (m *Model) openVersionsFor(project, item, phase string, archived bool) {
+	versions, err := m.snapshot.VersionsAt(project, item, phase, archived)
 	if err != nil {
 		m.status = "Cannot discover report versions: " + err.Error()
 		return
 	}
 	m.versions = versions
+	m.versionsReturn = m.screen
 	m.cursor[versionsScreen] = 0
 	m.screen = versionsScreen
 	m.status = ""
