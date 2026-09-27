@@ -77,7 +77,7 @@ What this buys:
 - **Exact references.** Every report records the ledger commits and source revisions it consumed, and `skl ledger show` reads any of them back as they were.
 - **Review from evidence.** Watchdog reads the frozen Contract and the implementation report, never the chat that produced the code.
 - **One inbox across projects.** Every Slice waiting on a human decision shows up in `skl decision inbox`, whichever project it belongs to.
-- **Browsable history.** `skl browse` walks projects, proposals and slices from committed records, without a forge ([ADR 0009](docs/adr/0009-separate-ledger-browsing-from-workflow-observation.md)).
+- **Browsable history.** `skl browse` walks projects, proposals and slices from committed records, without a forge ([ADR 0009](docs/adr/0009-separate-ledger-browsing-from-workflow-observation.md)). Follow dependencies and the slices they block across proposals and archives, then return to your previous browsing context.
 
 ## What an Execution Skill looks like
 

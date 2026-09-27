@@ -22,7 +22,8 @@ func browseFixture(t *testing.T) *ledgerFixture {
 		"projects/widgets/proposals/orders/proposal.json": `{"accepted": "2024-01-01T00:00:00Z", "parent_title": "Order cancellation"}`,
 		"projects/widgets/proposals/orders/cancel/state.json": `{"state": "awaiting_review", "title": "Cancel orders", "branch": "feat/cancel",
 			"issue": {"repository": "acme/widgets", "number": 11},
-			"claim": {"phase": "watchdog", "basis": "3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c", "inputs": {"contract": []}}}`,
+			"claim": {"phase": "watchdog", "basis": "3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c", "inputs": {"contract": []}},
+			"dependencies": ["proposals/legacy/old"]}`,
 		"projects/widgets/archive/legacy/proposal.json":      `{"accepted": "2023-01-01T00:00:00Z"}`,
 		"projects/widgets/archive/legacy/old/state.json":     `{"state": "superseded", "title": "Old work", "branch": "old"}`,
 		"projects/gadgets/project.json":                      `{"repository": "acme/gadgets"}`,
@@ -88,6 +89,13 @@ func TestBrowseQueriesReadCommittedRecordsWithoutSideEffects(t *testing.T) {
 	if slice.Slice.Lifecycle != "awaiting_review" || slice.Slice.Claim == nil || slice.Slice.Claim.Phase != "watchdog" || slice.Slice.Issue.Number != 11 {
 		t.Fatalf("slice = %+v", slice.Slice)
 	}
+	if dependencies := slice.Slice.Dependencies; len(dependencies) != 1 || dependencies[0].Item != "legacy/old" || !dependencies[0].Archived || dependencies[0].Lifecycle != "superseded" || dependencies[0].Satisfied {
+		t.Fatalf("a Superseded archived blocker is recorded but never satisfies the dependency: %+v", dependencies)
+	}
+	blocker := browseQuery(t, app, output, "slice", "--project", "widgets", "--item", "legacy/old")
+	if blocks := blocker.Slice.Blocks; blocks.Incomplete || len(blocks.Slices) != 1 || blocks.Slices[0].Item != "orders/cancel" || blocks.Slices[0].Lifecycle != "awaiting_review" {
+		t.Fatalf("the archived blocker's reverse dependencies = %+v", blocks)
+	}
 	refused := browseQuery(t, app, output, "slice", "--project", "widgets", "--item", "orders/refund")
 	if refused.Status != "fix_required" || !strings.Contains(refused.Reason, "orders/refund") || refused.Repair == "" {
 		t.Fatalf("unknown slice = %+v", refused)
@@ -97,7 +105,8 @@ func TestBrowseQueriesReadCommittedRecordsWithoutSideEffects(t *testing.T) {
 	if err := app.Run([]string{"skl", "browse", "slice", "--project", "widgets", "--item", "orders/cancel"}); err != nil {
 		t.Fatal(err)
 	}
-	for _, fact := range []string{"Lifecycle: Awaiting Review", "Claim: watchdog reservation", "Issue: acme/widgets#11"} {
+	for _, fact := range []string{"Lifecycle: Awaiting Review", "Claim: watchdog reservation", "Issue: acme/widgets#11",
+		"Depends on: legacy/old [archived] — Old work (Superseded; unsatisfied until Merged)", "Blocks: none"} {
 		if !strings.Contains(output.String(), fact) {
 			t.Fatalf("markdown lacks %q:\n%s", fact, output)
 		}

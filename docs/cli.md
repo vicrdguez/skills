@@ -97,12 +97,16 @@ skl decision retire --project <p> --proposal <proposal>
 
 `skl browse` opens a terminal browser over the ledger: Projects, their Proposals, and each Slice's state, Claim, dependencies, branch and attachments. It starts at the current checkout's Project when there is exactly one. Keys: `s` switches Project, `a` includes archived Proposals, `i` and `p` open the recorded issue or pull request.
 
+A Slice shows both Depends on and Blocks relationships, including targets in other or archived Proposals. `tab` / `shift+tab` select a relationship, `enter` opens it without changing archive visibility, and `esc` restores the previous browsing context.
+
 ```sh
 skl browse projects [--include-archived]
 skl browse project --project <name> [--include-archived]
 skl browse proposal --project <name> --proposal <proposal>
 skl browse slice --project <name> --item <proposal>/<slice>
 ```
+
+`skl browse slice` exposes both relationship directions. Only a Merged blocker satisfies a dependency. Missing or unreadable targets remain explicitly unresolved; reverse-dependency results disclose when unreadable records make them incomplete.
 
 Every view reads one committed ledger revision, never fetches or contacts a forge, and changes nothing. A Claim is shown as a reservation, not as a running worker.
 

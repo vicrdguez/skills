@@ -2,6 +2,7 @@ package browse
 
 import (
 	"fmt"
+	"maps"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -33,15 +34,15 @@ type Options struct {
 }
 
 type keyMap struct {
-	Up, Down, Enter, Back, Projects, Archived, Issue, PullRequest, Help, Quit key.Binding
+	Up, Down, Enter, Back, Next, Previous, Projects, Archived, Issue, PullRequest, Help, Quit key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Enter, k.Back, k.Projects, k.Help, k.Archived, k.Issue, k.PullRequest, k.Quit}
+	return []key.Binding{k.Enter, k.Back, k.Projects, k.Help, k.Next, k.Archived, k.Issue, k.PullRequest, k.Quit}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Up, k.Down, k.Enter, k.Back}, {k.Projects, k.Archived}, {k.Issue, k.PullRequest}, {k.Help, k.Quit}}
+	return [][]key.Binding{{k.Up, k.Down, k.Enter, k.Back}, {k.Next, k.Previous}, {k.Projects, k.Archived}, {k.Issue, k.PullRequest}, {k.Help, k.Quit}}
 }
 
 func newKeyMap() keyMap {
@@ -50,6 +51,8 @@ func newKeyMap() keyMap {
 		Down:        key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),
 		Enter:       key.NewBinding(key.WithKeys("enter", "right", "l"), key.WithHelp("enter", "open")),
 		Back:        key.NewBinding(key.WithKeys("esc", "backspace", "left", "h"), key.WithHelp("esc", "back")),
+		Next:        key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next relation")),
+		Previous:    key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "previous relation")),
 		Projects:    key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "switch project")),
 		Archived:    key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "toggle archived")),
 		Issue:       key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "open issue")),
@@ -68,12 +71,12 @@ type Model struct {
 	help     help.Model
 	detail   viewport.Model
 
-	screen          screen
-	includeArchived bool
-	project         string
-	proposal        string
-	item            string
-	cursor          map[screen]int
+	location
+	// selectedRow is the detail row where the selected relationship starts.
+	selectedRow int
+	// history holds the browsing context each followed relationship left,
+	// most recent last; back restores it.
+	history []frame
 
 	overview  *ledger.Overview
 	inventory *ledger.ProjectInventory
@@ -83,6 +86,26 @@ type Model struct {
 
 	width, height int
 	status        string
+}
+
+// location is the browsing context: the screen, its selections, and the
+// archive choice.
+type location struct {
+	screen          screen
+	includeArchived bool
+	project         string
+	proposal        string
+	item            string
+	cursor          map[screen]int
+	// relation selects the current Slice's followable relationship.
+	relation int
+}
+
+// frame is the browsing context restored by navigating back from a followed
+// relationship, with the Slice detail's scroll offset.
+type frame struct {
+	location
+	offset int
 }
 
 // openedMsg reports the outcome of one explicit external-browser request.
@@ -95,7 +118,7 @@ type openedMsg struct {
 func New(snapshot *ledger.Snapshot, options Options) Model {
 	model := Model{
 		snapshot: snapshot, open: options.Open, keys: newKeyMap(), help: help.New(),
-		detail: viewport.New(80, 10), cursor: map[screen]int{},
+		detail: viewport.New(80, 10), location: location{cursor: map[screen]int{}},
 		width: 80, height: 24, status: options.Notice,
 	}
 	model.help.Width = model.width
@@ -144,6 +167,12 @@ func (m Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.detail.PageUp()
 	case msg.String() == "pgdown" && m.screen == sliceScreen:
 		m.detail.PageDown()
+	case key.Matches(msg, m.keys.Next) && m.screen == sliceScreen:
+		m.selectRelation(1)
+	case key.Matches(msg, m.keys.Previous) && m.screen == sliceScreen:
+		m.selectRelation(-1)
+	case key.Matches(msg, m.keys.Enter) && m.screen == sliceScreen:
+		m.follow()
 	case key.Matches(msg, m.keys.Enter):
 		m.enter()
 	case key.Matches(msg, m.keys.Back):
@@ -212,13 +241,23 @@ func (m *Model) enter() {
 		m.screen = proposalScreen
 	case proposalScreen:
 		m.item = m.members.Slices[selected].Item
-		m.screen = sliceScreen
+		m.screen, m.relation = sliceScreen, 0
 	}
 	m.status = ""
 	m.load()
 }
 
+// back restores the context a followed relationship left, or otherwise
+// returns to the parent screen.
 func (m *Model) back() {
+	if count := len(m.history); count > 0 {
+		previous := m.history[count-1]
+		m.history = m.history[:count-1]
+		m.location, m.status = previous.location, "Returned to "+previous.item
+		m.load()
+		m.detail.SetYOffset(previous.offset)
+		return
+	}
 	if m.screen == overviewScreen {
 		return
 	}
@@ -227,9 +266,52 @@ func (m *Model) back() {
 	m.load()
 }
 
+// selectRelation moves the relationship selection of the current Slice,
+// keeping the selected line in view.
+func (m *Model) selectRelation(delta int) {
+	count := len(m.relations())
+	if count == 0 {
+		m.status = "This Slice records no relationship to follow"
+		return
+	}
+	m.relation = (m.relation + delta + count) % count
+	m.layoutDetail()
+	if m.selectedRow < m.detail.YOffset || m.selectedRow >= m.detail.YOffset+m.detail.Height {
+		m.detail.SetYOffset(m.selectedRow)
+	}
+}
+
+// follow opens the selected relationship's Slice in its own Proposal,
+// keeping the archive choice, and remembers the context to return to.
+func (m *Model) follow() {
+	relations := m.relations()
+	if len(relations) == 0 {
+		m.status = "This Slice records no relationship to follow"
+		return
+	}
+	previous := frame{location: m.location, offset: m.detail.YOffset}
+	previous.cursor = maps.Clone(m.cursor)
+	m.history = append(m.history, previous)
+	from := m.item
+	m.item = relations[m.relation].item
+	m.proposal, _, _ = strings.Cut(m.item, "/")
+	m.relation, m.status = 0, "Followed from "+from+"; esc returns"
+	m.load()
+}
+
+// relations lists the current Slice's followable relationships.
+func (m Model) relations() []relation {
+	if m.screen != sliceScreen || m.slice == nil || m.failure != nil {
+		return nil
+	}
+	_, relations := sliceLines(m.slice)
+	return relations
+}
+
 // switchProject returns to the overview with the current Project selected.
+// Followed relationships are left behind.
 func (m *Model) switchProject() {
-	m.screen, m.status = overviewScreen, ""
+	m.screen, m.status, m.history = overviewScreen, "", nil
 	m.load()
 	if m.overview == nil {
 		return
