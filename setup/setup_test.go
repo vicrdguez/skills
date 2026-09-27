@@ -1,7 +1,6 @@
 package setup_test
 
 import (
-	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,23 +10,6 @@ import (
 	"github.com/vicrdguez/skills/setup"
 )
 
-type recordingBackend struct {
-	validated int
-	prepared  int
-	ready     bool
-}
-
-func (b *recordingBackend) Validate(context.Context) (string, error) {
-	b.validated++
-	return "main", nil
-}
-
-func (b *recordingBackend) Prepare(context.Context) error {
-	b.prepared++
-	b.ready = true
-	return nil
-}
-
 func TestSetupMaintainsOnlyOwnedAgentsBlock(t *testing.T) {
 	root := newRepository(t)
 	agentsPath := filepath.Join(root, "AGENTS.md")
@@ -36,7 +18,7 @@ func TestSetupMaintainsOnlyOwnedAgentsBlock(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := setup.Run(context.Background(), setup.Request{Location: root}, &recordingBackend{}); err != nil {
+	if _, err := setup.Run(setup.Request{Location: root}); err != nil {
 		t.Fatal(err)
 	}
 	want := "user before\n" + setup.AgentsBlock + "user after\n"
@@ -65,14 +47,9 @@ func TestSetupRefusesMalformedAgentsOwnershipMarkers(t *testing.T) {
 			if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			backend := &recordingBackend{}
-
-			_, err := setup.Run(context.Background(), setup.Request{Location: root}, backend)
+			_, err := setup.Run(setup.Request{Location: root})
 			if err == nil || !strings.Contains(err.Error(), "malformed workflow markers") {
 				t.Fatalf("error = %v", err)
-			}
-			if backend.validated != 0 || backend.prepared != 0 {
-				t.Fatalf("backend mutated: %#v", backend)
 			}
 			if got := readFile(t, path); got != original {
 				t.Fatalf("AGENTS.md = %q", got)
@@ -92,14 +69,9 @@ func TestSetupRefusesOwnedFileSymlinksBeforeMutation(t *testing.T) {
 			if err := os.Symlink(outside, filepath.Join(root, name)); err != nil {
 				t.Fatal(err)
 			}
-			backend := &recordingBackend{}
-
-			_, err := setup.Run(context.Background(), setup.Request{Location: root}, backend)
+			_, err := setup.Run(setup.Request{Location: root})
 			if err == nil || !strings.Contains(err.Error(), "must not be a symlink") {
 				t.Fatalf("error = %v", err)
-			}
-			if backend.validated != 0 || backend.prepared != 0 {
-				t.Fatalf("backend mutated: %#v", backend)
 			}
 			if got := readFile(t, outside); got != "keep me\n" {
 				t.Fatalf("outside file = %q", got)
@@ -129,13 +101,13 @@ func TestSetupOffersSafeClaudeSymlinkMigration(t *testing.T) {
 				}
 			}
 			prompted := false
-			_, err := setup.Run(context.Background(), setup.Request{
+			_, err := setup.Run(setup.Request{
 				Location: root,
 				Confirm: func(string) (bool, error) {
 					prompted = true
 					return test.accept, nil
 				},
-			}, &recordingBackend{})
+			})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -169,7 +141,7 @@ func TestSetupRetiresLegacySetupArtifacts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := setup.Run(context.Background(), setup.Request{Location: root}, &recordingBackend{}); err != nil {
+	if _, err := setup.Run(setup.Request{Location: root}); err != nil {
 		t.Fatal(err)
 	}
 	if got := readFile(t, gitignore); got != "dist/\n*.log\n.worktrees/\n" {
@@ -192,21 +164,17 @@ func TestSetupBoundPreparationRepeatsWithoutDrift(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	backend := &recordingBackend{}
 	request := setup.Request{Location: root, Confirm: func(string) (bool, error) {
 		t.Fatal("must not offer to replace substantive CLAUDE.md")
 		return false, nil
 	}}
 	for run := 1; run <= 2; run++ {
-		outcome, err := setup.Run(context.Background(), request, backend)
+		outcome, err := setup.Run(request)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if want := (setup.Outcome{Root: root, TargetBranch: "main"}); outcome != want {
+		if want := (setup.Outcome{Root: root}); outcome != want {
 			t.Fatalf("outcome = %#v, want %#v", outcome, want)
-		}
-		if !backend.ready || backend.validated != run || backend.prepared != run {
-			t.Fatalf("backend not prepared on run %d: %#v", run, backend)
 		}
 		for name, want := range map[string]string{
 			"AGENTS.md":  "Keep repository guidance.\n" + setup.AgentsBlock + "Keep local conventions.\n",

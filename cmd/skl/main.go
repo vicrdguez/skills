@@ -166,20 +166,11 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 		Name: "setup",
 		Flags: []cli.Flag{
 			&cli.PathFlag{Name: "repo"},
-			&cli.StringFlag{Name: "remote"},
 		},
 		Action: func(command *cli.Context) error {
-			repository, err := setup.ResolveRepository(command.Path("repo"), command.String("remote"))
-			if err != nil {
-				return err
-			}
-			backend, err := newBackend(repository.Repository)
-			if err != nil {
-				return err
-			}
 			reader := bufio.NewReader(stdin)
-			outcome, err := setup.Run(command.Context, setup.Request{
-				Location: repository.Root,
+			outcome, err := setup.Run(setup.Request{
+				Location: command.Path("repo"),
 				Confirm: func(prompt string) (bool, error) {
 					if _, err := fmt.Fprint(stdout, prompt); err != nil {
 						return false, err
@@ -190,11 +181,11 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 					}
 					return strings.EqualFold(strings.TrimSpace(answer), "y"), err
 				},
-			}, backend)
+			})
 			if err != nil {
 				return err
 			}
-			_, err = fmt.Fprintf(stdout, "Prepared %s for GitHub workflow on %s.\n", outcome.Root, outcome.TargetBranch)
+			_, err = fmt.Fprintf(stdout, "Prepared local workflow guidance in %s.\n", outcome.Root)
 			return err
 		},
 	}}
