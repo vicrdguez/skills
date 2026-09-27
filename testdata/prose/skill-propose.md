@@ -60,7 +60,7 @@ Keep the set compact: carry the approved responsibilities, architectural consequ
 
 Label each independently tracked commitment: `B<n>` for a behavior rule, `A<n>` for an architectural commitment, `T<n>` for a warranted task, `M<n>` for human-owned Manual Verification. Label commitments only, never every paragraph or heading. Each label lives in one document; you assign it, and it stays stable from acceptance on.
 
-An unambiguously implied case needs no text of its own. Check a proposed elaboration by its consequences, including those of inherited mechanisms it relies on: an internal helper preserving agreed behavior stays delegated, while pending metadata that starts blocking later work or requires recovery needs human agreement even if storage was approved. If the approved sources leave that choice unsettled, return it to the user before acceptance; silence delegates nothing.
+An unambiguously implied case needs no text of its own. Compare elaborations, including inherited mechanisms they rely on, with the approved consequences. Delegate internal helpers that preserve them; return new blocking or recovery duties to the user before acceptance when the approved sources leave them unsettled. Silence delegates nothing.
 
 If writing the Contracts changes a slice boundary or Dependency, explain the discovery and return to step 3 with the revised breakdown. Faithful elaboration needs no renewed approval; a changed obligation needs human agreement even within an unchanged slice.
 
