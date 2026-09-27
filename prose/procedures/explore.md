@@ -1,4 +1,4 @@
-Interview the user relentlessly until you share one understanding of the change. Map it as a **design tree**: every decision branches into the decisions that hang off it.
+Interview the user until you share one understanding of the change. Map its consequential decisions as a **design tree**: each choice branches into the choices that hang off it.
 
 ## Start
 
@@ -27,17 +27,19 @@ The **frontier** is every decision whose prerequisites are settled: the question
 
 Wait for the answers, recompute the frontier, and ask the next round. A question that depends on another question still open belongs to a later round.
 
-Facts are yours to find; decisions are the user's. When a question needs a fact from the environment, dispatch a sub-agent to find it, and meanwhile ask the rest of the frontier: only the questions downstream of that fact wait for it. Put every decision to the user and wait for their answer.
+Facts are yours to find; consequential decisions are the user's. Distinguish choices within accepted behavior, architecture and standards from choices that change what state may authorize, how long it persists, coordination, recovery, blocking conditions or who owns a responsibility. These are clues to consequences, not a mechanism checklist: private placement, small size or reuse of a dependency does not settle them. Inspect an inherited mechanism's consequential effects when the change relies on or extends them; leave unrelated inherited code alone. For example, permission to store pending-work metadata still leaves open whether an abandoned attempt may block later work and who recovers it. Present that trade-off for human resolution; leave interchangeable internal collections and helpers to implementation.
 
-Check: the frontier is empty. Every branch is visited and nothing is silently assumed.
+When a question needs a fact from the environment, dispatch a sub-agent to find it, and meanwhile ask the rest of the frontier: only the questions downstream of that fact wait for it. Put each consequential decision to the user and wait for their answer.
+
+Check: the consequential frontier is empty, with the approved choices and delegated details distinguishable.
 
 ## Recap and approval
 
 Present one final recap that separates:
 
-- consequential rules the change must preserve;
-- architectural commitments and who owns each responsibility;
-- choices deliberately delegated to implementation.
+- consequential rules the change must preserve, including accepted limitations;
+- architectural commitments, operational consequences and who owns each responsibility;
+- choices deliberately delegated to implementation within those bounds.
 
 Name the ADRs and other decisions that carry them. Ask the user to correct or confirm the recap. A correction updates the tree and the recap; ask again. Confirmation approves the meaning of the whole Proposal.
 
