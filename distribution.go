@@ -21,7 +21,7 @@ const (
 var (
 	stubMarker    = ownedMarker(StubProtocol)
 	adapterMarker = ownedMarker(AdapterProtocol)
-	// piMarker owned the Pi runners and queue helper that
+	// piMarker owned the Pi runners, loop prompts and queue helper that
 	// Harness Adapters replace.
 	piMarker = []byte("skl-owned: skl.pi/v1")
 )
@@ -113,27 +113,32 @@ func argumentHint(slots []string) string {
 	return `argument-hint: "[` + strings.Join(slots, "] [") + `]"`
 }
 
-// entry renders an adapter's command and frontmatter for one harness. An
-// unfilled argument passes an empty value, which skl treats as omitted.
-func (target harness) entry(a adapter, frontmatter string) (command, keys string) {
+// entry renders an adapter's command, argument slots and frontmatter. Loop
+// values stay outside the shell command so the Supervisor can quote each
+// supplied value as one opaque argument and omit blank slots.
+func (target harness) entry(a adapter, frontmatter string) (command, keys, arguments string) {
 	command = a.command
 	for position, flag := range a.slots {
 		fallback := piDefaults[flag]
 		if a.loop {
 			fallback = a.defaults[flag]
 		}
-		command += " --" + flag + " '" + target.argument(position, flag, fallback) + "'"
+		value := target.argument(position, flag, fallback)
+		if a.loop {
+			arguments += "- --" + flag + ": " + value + "\n"
+		} else {
+			command += " --" + flag + " '" + value + "'"
+		}
 	}
 	var slotKeys []string
 	if len(a.slots) > 0 && target.slotKeys != nil {
 		slotKeys = target.slotKeys(a.slots)
 	}
-	return command, frontmatterKeys(frontmatter, target.entryKeys, slotKeys)
+	return command, frontmatterKeys(frontmatter, target.entryKeys, slotKeys), arguments
 }
 
 // retiredPiFiles are the Pi runners and queue helper earlier installations
-// wrote. Old loop prompts occupy adapter locations and remain untouched unless
-// they carry the current adapter marker.
+// wrote. Old owned loop prompts are replaced in place by the new adapters.
 var retiredPiFiles = []string{"prompts/queue-next.mjs", "agents/implement-runner.md", "agents/watchdog-runner.md"}
 
 type installData struct {
@@ -141,6 +146,8 @@ type installData struct {
 	Protocol    string
 	Frontmatter string
 	Loop        bool
+	Arguments   string
+	LegacyOwner []byte
 }
 
 type InstallOutcome struct {
@@ -186,9 +193,13 @@ func Install(home string) (InstallOutcome, error) {
 			if err != nil {
 				return outcome, err
 			}
-			command, keys := target.entry(a, frontmatter)
+			command, keys, arguments := target.entry(a, frontmatter)
 			adapterPath := filepath.Join(home, fmt.Sprintf(target.entryPoint, a.name))
-			if err := outcome.write(adapterPath, entry, installData{Command: command, Protocol: AdapterProtocol, Frontmatter: keys, Loop: a.loop}); err != nil {
+			data := installData{Command: command, Protocol: AdapterProtocol, Frontmatter: keys, Loop: a.loop, Arguments: arguments}
+			if a.loop && target.skills == ".pi/agent/skills" {
+				data.LegacyOwner = piMarker
+			}
+			if err := outcome.write(adapterPath, entry, data); err != nil {
 				return outcome, fmt.Errorf("install %s adapter for %s: %w", a.name, target.skills, err)
 			}
 			if adapterPath != stubPath {
@@ -222,7 +233,8 @@ func (outcome *InstallOutcome) write(file string, tmpl *template.Template, data 
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	if err == nil && !bytes.Contains(current, stubMarker) && !bytes.Contains(current, adapterMarker) {
+	if err == nil && !bytes.Contains(current, stubMarker) && !bytes.Contains(current, adapterMarker) &&
+		(len(data.LegacyOwner) == 0 || !bytes.Contains(current, data.LegacyOwner)) {
 		outcome.Unchanged++
 		return nil
 	}
