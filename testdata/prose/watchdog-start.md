@@ -159,7 +159,7 @@ Judge behavioral conformance, architectural conformance, and local implementatio
 - **Architectural conformance** — the implementation honors accepted module, interface, seam, ownership, and other plan commitments.
 - **Local implementation quality** — changed code follows mandatory standards and avoids concrete maintainability, security, accessibility, reliability, and compatibility harm.
 
-For added or materially extended behavior, inspect its effects on authority, persistence lifetime, coordination, recovery duties, blocking and ownership. Follow an inherited mechanism's effects where the change relies on them; its existence, location and passing tests cannot settle a new consequence. Leave unrelated inherited code outside scope. Implementations preserving explicitly agreed consequences retain freedom of representation; a different design preference is not a finding.
+For added or materially extended behavior, inspect its effects on authority, persistence lifetime, coordination, recovery duties, blocking and ownership. Follow an inherited mechanism's effects where the change relies on them; its existence, private location, small size and passing tests cannot settle a new consequence. Leave unrelated inherited code outside scope. Implementations preserving explicitly agreed consequences retain freedom of representation; a different design preference is not a finding.
 
 A green suite is relevant evidence, not proof of all three concerns.
 
