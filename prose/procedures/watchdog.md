@@ -35,9 +35,9 @@ Check: you hold the gate result and a judgement on every Contract item and every
 
 A finding keeps its Work-Item-local `W<n>` across rounds: list resolved ones as resolved, and number new ones after the greatest. Each finding has one disposition, `BLOCK`, `HUMAN` or `NOTE`, and states:
 
-- **Source**: the Contract obligation, project or language rule, or concrete hazard it comes from.
-- **Evidence**: what goes wrong, and where.
-- **Required outcome**: the observable result that resolves it, not an implementation.
+- **Source**: the violated Contract obligation, project or language rule, concrete hazard, or relevant Contract boundaries for a missing architectural agreement.
+- **Evidence**: what goes wrong and where; for missing agreement, name the unsettled choice and its consequences.
+- **Required outcome**: the accepted result for a violation, or human resolution of an open choice within the frozen Contract, rather than a prescribed implementation.
 
 ## Verdict
 

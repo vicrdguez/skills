@@ -10,6 +10,8 @@ Judge behavioral conformance, architectural conformance, and local implementatio
 - **Architectural conformance** — the implementation honors accepted module, interface, seam, ownership, and other plan commitments.
 - **Local implementation quality** — changed code follows mandatory standards and avoids concrete maintainability, security, accessibility, reliability, and compatibility harm.
 
+For added or materially extended behavior, inspect its effects on authority, persistence lifetime, coordination, recovery duties, blocking and ownership. Follow an inherited mechanism's effects where the change relies on them; its existence, location and passing tests cannot settle a new consequence. Leave unrelated inherited code outside scope. Implementations preserving explicitly agreed consequences retain freedom of representation; a different design preference is not a finding.
+
 A green suite is relevant evidence, not proof of all three concerns.
 
 ## Account for obligations with credible evidence
@@ -22,8 +24,10 @@ Assess changed tests together. Reuse, strengthening, consolidation, or removal i
 
 ## Classify findings by consequence
 
-A concrete contractual violation, material risk, or specific evidence gap can block even when all existing checks pass. An evidence-gap finding names the obligation, the plausible violation, and why existing evidence does not distinguish it. Merely wanting a different test organization, abstraction, or implementation is not an evidence gap.
+A concrete contractual violation, unresolved consequential architectural choice, material risk, or specific evidence gap can block even when all existing checks pass. An evidence-gap finding names the obligation, the plausible violation, and why existing evidence does not distinguish it. Merely wanting a different test organization, abstraction, or implementation is not an evidence gap.
 
 An equally valid implementation that satisfies the frozen behavior, architecture, and mandatory standards is not a finding. A reviewer's preference alone neither blocks nor needs a Debt Marker. A concrete nonblocking shortcoming may be recorded as judgement or debt when it states the actual maintenance or product consequence.
 
-During Audit, tag contractual violations, material risks, and specific evidence gaps as `HARD`; tag concrete nonblocking quality debt as `JUDGEMENT`. During Watchdog Review, map active blocking defects to `BLOCK`, unresolved consequential decisions to `HUMAN`, and safe actionable debt to `NOTE` under Watchdog's own disposition and authorization rules.
+For a violated obligation, identify the accepted commitment and required outcome. For a missing agreement, name the choice, its consequences, supporting evidence and the relevant Contract boundaries, even if no Contract sentence prohibits the choice. A suggested repair or accepted finding disposition cannot supply agreement. Resolve open choices with the human within the frozen Contract; changing accepted obligations requires renewed proposal.
+
+During Audit, tag contractual violations, unresolved consequential choices, material risks, and specific evidence gaps as `HARD`; tag concrete nonblocking quality debt as `JUDGEMENT`. During Watchdog Review, map active blocking defects to `BLOCK`, unresolved consequential decisions to `HUMAN`, and safe actionable debt to `NOTE` under Watchdog's own disposition and authorization rules.

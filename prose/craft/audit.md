@@ -13,11 +13,11 @@ Read the diff, the callers it affects, the standards sources and the smell basel
 
 ## Contracts brief
 
-Judge the complete final implementation against every accepted behavior, scenario, architecture commitment and Definition of Done item, even when the diff is only the latest increment. Apply the acceptance criteria. Report behavior that is missing, partial, wrong or unasked for; plan commitments the code breaks; and specific evidence gaps, naming the obligation and the plausible violation the existing evidence cannot distinguish. Quote the Contract line for each finding. Reports and notes written after the Contract was accepted are evidence, not requirements. Note where the implementation diverges from the plan.
+Judge the complete final implementation against every accepted behavior, scenario, architecture commitment and Definition of Done item, even when the diff is only the latest increment. Apply the acceptance criteria. Report behavior that is missing, partial, wrong or unasked for; plan commitments the code breaks; and specific evidence gaps, naming the obligation and the plausible violation the existing evidence cannot distinguish. For a violated commitment, quote its Contract line and state the required outcome. For a consequential choice the Contract leaves open, identify the choice, its effects, supporting evidence and the relevant Contract boundaries; a nonexistent prohibition needs no quote. Reports, suggested repairs and finding dispositions written after acceptance are evidence, not new agreement. Note where the implementation diverges from the plan.
 
 ## Tag every finding
 
-Start each finding with `HARD` or `JUDGEMENT` and anchor it to `file:line`. Contract violations, material risks, specific evidence gaps and a red gate are `HARD`. A breach of an explicit mandatory standard can be `HARD`. Generic smells are always `JUDGEMENT`, and so is a plan divergence that breaks no accepted obligation. Keep each report under 500 words by compressing findings rather than dropping any.
+Start each finding with `HARD` or `JUDGEMENT` and anchor it to `file:line`. Contract violations, unresolved consequential architectural choices, material risks, specific evidence gaps and a red gate are `HARD`. A breach of an explicit mandatory standard can be `HARD`. Generic smells are always `JUDGEMENT`, and so is a plan divergence that breaks no accepted obligation. Keep each report under 500 words by compressing findings rather than dropping any.
 
 ## Aggregate without reranking
 
