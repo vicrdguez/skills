@@ -27,7 +27,7 @@ func (m Model) View() string {
 	switch {
 	case m.failure != nil:
 		body = wrap(warningStyle.Render("! Unable to show this view: "+m.failure.Error()), m.width)
-	case m.screen == sliceScreen:
+	case m.screen == sliceScreen || m.screen == diagnosticsScreen:
 		body = m.detail.View()
 	default:
 		body = m.listBody(height)
@@ -46,6 +46,13 @@ func (m *Model) layoutDetail() {
 	if m.screen == sliceScreen && m.slice != nil {
 		m.detail.SetContent(wrap(strings.Join(SliceLines(m.slice), "\n"), m.width))
 	}
+	if m.screen == diagnosticsScreen && m.search != nil {
+		var lines []string
+		for _, diagnostic := range m.resultDiagnostics() {
+			lines = append(lines, warningStyle.Render(DiagnosticText(diagnostic)))
+		}
+		m.detail.SetContent(wrap(strings.Join(lines, "\n"), m.width))
+	}
 }
 
 func (m Model) header() string {
@@ -55,6 +62,8 @@ func (m Model) header() string {
 		path = []string{"Find slices", "Facts"}
 	case m.screen == resultsScreen:
 		path = []string{"Find slices"}
+	case m.screen == diagnosticsScreen:
+		path = []string{"Find slices", "Diagnostics"}
 	case m.finding():
 		path = []string{"Find slices", m.project, m.item}
 	default:
@@ -79,7 +88,7 @@ func (m Model) header() string {
 		revision = revision[:12]
 	}
 	facts := "committed ledger " + revision + " · " + archived
-	if m.screen == sliceScreen && m.detail.TotalLineCount() > m.detail.Height {
+	if (m.screen == sliceScreen || m.screen == diagnosticsScreen) && m.detail.TotalLineCount() > m.detail.Height {
 		facts += fmt.Sprintf(" · scrolled %d%%", int(m.detail.ScrollPercent()*100))
 	}
 	return truncate(titleStyle.Render("skl browse › "+strings.Join(path, " › ")), m.width) + "\n" +
@@ -215,13 +224,8 @@ func (m Model) listContent() (context []string, title string, rows []string, cur
 		selected = []string{"Finds: " + SelectionText(factOptions[cursor].apply(m.search.Query))}
 	case resultsScreen:
 		context = m.findingContext()
-		for _, diagnostic := range m.search.Diagnostics {
-			context = append(context, warningStyle.Render(DiagnosticText(diagnostic)))
-		}
-		for _, project := range m.search.Projects {
-			for _, diagnostic := range project.Diagnostics {
-				context = append(context, warningStyle.Render(DiagnosticText(diagnostic)))
-			}
+		if count := len(m.resultDiagnostics()); count > 0 {
+			context = append(context, warningStyle.Render(fmt.Sprintf("! %d diagnostics · d to inspect", count)))
 		}
 		title = fmt.Sprintf("Slices (%d)", m.search.Matched)
 		if m.search.Undecided > 0 {
@@ -246,9 +250,25 @@ func (m Model) listContent() (context []string, title string, rows []string, cur
 	return context, title, rows, cursorRow, selected, empty
 }
 
+// resultDiagnostics lists membership uncertainty separately from the
+// result list, so long diagnostic sets cannot hide selectable Slices.
+func (m Model) resultDiagnostics() []ledger.Diagnostic {
+	diagnostics := append([]ledger.Diagnostic(nil), m.search.Diagnostics...)
+	for _, project := range m.search.Projects {
+		diagnostics = append(diagnostics, project.Diagnostics...)
+	}
+	return diagnostics
+}
+
 // findingContext states the current selection and its result.
 func (m Model) findingContext() []string {
 	result := ResultText(m.search)
+	if m.screen == resultsScreen && m.width < 60 && m.height < 20 {
+		result = fmt.Sprintf("%d matched, %d undecided", m.search.Matched, m.search.Undecided)
+		if m.search.Incomplete {
+			result += "; incomplete"
+		}
+	}
 	if m.search.Incomplete {
 		result = warningStyle.Render("! " + result)
 	}

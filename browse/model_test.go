@@ -5,6 +5,7 @@ package browse_test
 // committed ledger fixture.
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,7 +38,7 @@ func git(t *testing.T, root string, args ...string) {
 
 // fixtureLedger commits two Projects: widgets with an attached, watchdog
 // claimed Slice and an archived Proposal, and gadgets with one Slice.
-func fixtureLedger(t *testing.T) *ledger.Snapshot {
+func fixtureLedger(t *testing.T, extras ...func(string)) *ledger.Snapshot {
 	t.Helper()
 	root := t.TempDir()
 	git(t, root, "init", "-q", "-b", "main")
@@ -55,6 +56,9 @@ func fixtureLedger(t *testing.T) *ledger.Snapshot {
 	write(t, root, "projects/gadgets/project.json", `{"repository": "acme/gadgets"}`)
 	write(t, root, "projects/gadgets/proposals/tools/proposal.json", `{"accepted": "2024-01-01T00:00:00Z"}`)
 	write(t, root, "projects/gadgets/proposals/tools/hammer/state.json", `{"state": "rework", "title": "Hammer", "branch": "hammer"}`)
+	for _, extra := range extras {
+		extra(root)
+	}
 	git(t, root, "add", "-A")
 	git(t, root, "commit", "-q", "-m", "records")
 	store, err := ledger.Open(root)
@@ -74,9 +78,9 @@ type session struct {
 	opened []string
 }
 
-func start(t *testing.T, project string) *session {
+func start(t *testing.T, project string, extras ...func(string)) *session {
 	s := &session{t: t}
-	s.model = browse.New(fixtureLedger(t), browse.Options{Project: project, Open: func(url string) error {
+	s.model = browse.New(fixtureLedger(t, extras...), browse.Options{Project: project, Open: func(url string) error {
 		s.opened = append(s.opened, url)
 		return nil
 	}})
@@ -299,6 +303,46 @@ func TestBrowserTellsEmptyResultsFromUnknownOnes(t *testing.T) {
 func TestBrowserFitsFindingScreens(t *testing.T) {
 	for _, s := range fits(t, [][]string{{"f"}, {"enter"}, {"w", "g"}, {"/", "orders"}, {"enter"}}) {
 		s.shows("Find slices", "Finding:", "> ")
+	}
+}
+
+func TestBrowserReturnsToOriginalSliceAfterFindingFromDetail(t *testing.T) {
+	s := start(t, "widgets")
+	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})
+	s.press("enter", "down", "enter")
+	s.shows("skl browse › Projects › widgets › orders › cancel", "Slice: orders/cancel")
+	s.press("/", "refund", "enter", "enter")
+	s.shows("skl browse › Find slices › widgets › orders/refund", "Slice: orders/refund")
+	s.press("esc")
+	s.shows("Finding:", "orders/refund")
+	s.press("esc")
+	s.shows("skl browse › Projects › widgets › orders › cancel", "Slice: orders/cancel")
+	s.press("esc")
+	s.shows("skl browse › Projects › widgets › orders", "Slices (3)")
+	s.press("esc")
+	s.shows("skl browse › Projects › widgets", "Proposals (1)")
+}
+
+func TestBrowserKeepsHealthyResultsVisibleWithManyMembershipDiagnostics(t *testing.T) {
+	for _, size := range []tea.WindowSizeMsg{{Width: 40, Height: 14}, {Width: 140, Height: 30}} {
+		s := start(t, "widgets", func(root string) {
+			for i := 0; i < 30; i++ {
+				write(t, root, fmt.Sprintf("projects/widgets/proposals/orders/Bad Name %02d/state.json", i), `{}`)
+			}
+		})
+		s.send(size)
+		s.press("/", "cancel", "enter")
+		s.shows("orders/cancel", "> ", "incomplete", "diagnostic")
+		s.press("d")
+		s.shows("Diagnostics", "Bad Name 00")
+		for i := 0; i < 20; i++ {
+			s.press("pgdown")
+		}
+		s.shows("Bad Name 29")
+		s.press("esc")
+		s.shows("orders/cancel", "> ")
+		s.press("enter")
+		s.shows("Slice: orders/cancel", "Lifecycle: Awaiting Review")
 	}
 }
 

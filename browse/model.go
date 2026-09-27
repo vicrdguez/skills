@@ -22,6 +22,7 @@ const (
 	sliceScreen
 	factsScreen
 	resultsScreen
+	diagnosticsScreen
 )
 
 // factOption is one navigable lifecycle or Claim fact of the facts screen.
@@ -75,7 +76,7 @@ type Options struct {
 }
 
 type keyMap struct {
-	Up, Down, Enter, Back, Projects, Archived, Search, Facts, Group, Scope, Issue, PullRequest, Help, Quit key.Binding
+	Up, Down, Enter, Back, Projects, Archived, Search, Facts, Group, Scope, Diagnostics, Issue, PullRequest, Help, Quit key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
@@ -83,7 +84,7 @@ func (k keyMap) ShortHelp() []key.Binding {
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Up, k.Down, k.Enter, k.Back}, {k.Projects, k.Archived}, {k.Search, k.Facts, k.Group, k.Scope}, {k.Issue, k.PullRequest}, {k.Help, k.Quit}}
+	return [][]key.Binding{{k.Up, k.Down, k.Enter, k.Back}, {k.Projects, k.Archived}, {k.Search, k.Facts, k.Group, k.Scope, k.Diagnostics}, {k.Issue, k.PullRequest}, {k.Help, k.Quit}}
 }
 
 func newKeyMap() keyMap {
@@ -98,6 +99,7 @@ func newKeyMap() keyMap {
 		Facts:       key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "find by lifecycle or claim")),
 		Group:       key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "group by proposal/lifecycle")),
 		Scope:       key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "project/every project")),
+		Diagnostics: key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "result diagnostics")),
 		Issue:       key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "open issue")),
 		PullRequest: key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "open PR")),
 		Help:        key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
@@ -124,9 +126,9 @@ type Model struct {
 	// from finding.
 	parent map[screen]screen
 
-	// context is the hierarchy's Project and Proposal while a found Slice
-	// from elsewhere is open.
-	context [2]string
+	// context is the hierarchy's Project, Proposal and Slice while a found
+	// Slice is open. The original Slice detail is restored on leaving finding.
+	context [3]string
 	// query is the session's Slice selection; typing holds its name search
 	// while it is edited.
 	query  ledger.SliceQuery
@@ -202,9 +204,9 @@ func (m Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.move(-1)
 	case key.Matches(msg, m.keys.Down):
 		m.move(1)
-	case msg.String() == "pgup" && m.screen == sliceScreen:
+	case msg.String() == "pgup" && (m.screen == sliceScreen || m.screen == diagnosticsScreen):
 		m.detail.PageUp()
-	case msg.String() == "pgdown" && m.screen == sliceScreen:
+	case msg.String() == "pgdown" && (m.screen == sliceScreen || m.screen == diagnosticsScreen):
 		m.detail.PageDown()
 	case key.Matches(msg, m.keys.Enter):
 		m.enter()
@@ -234,6 +236,10 @@ func (m Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.load()
 	case key.Matches(msg, m.keys.Scope) && finding:
 		m.toggleScope()
+	case key.Matches(msg, m.keys.Diagnostics) && m.screen == resultsScreen:
+		m.screen = diagnosticsScreen
+		m.layoutDetail()
+		m.detail.GotoTop()
 	case key.Matches(msg, m.keys.Issue):
 		return m, m.openAttachment(true)
 	case key.Matches(msg, m.keys.PullRequest):
@@ -243,7 +249,7 @@ func (m Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) move(delta int) {
-	if m.screen == sliceScreen {
+	if m.screen == sliceScreen || m.screen == diagnosticsScreen {
 		if delta < 0 {
 			m.detail.LineUp(1)
 		} else {
@@ -329,7 +335,7 @@ func (m Model) typeSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // finding reports whether the current screen belongs to finding: the facts,
 // the results, or a Slice opened from the results.
 func (m Model) finding() bool {
-	return m.screen == factsScreen || m.screen == resultsScreen || (m.screen == sliceScreen && m.parent[sliceScreen] == resultsScreen)
+	return m.screen == factsScreen || m.screen == resultsScreen || m.screen == diagnosticsScreen || (m.screen == sliceScreen && m.parent[sliceScreen] == resultsScreen)
 }
 
 // find opens target within finding. Finding started from the hierarchy
@@ -338,9 +344,10 @@ func (m Model) finding() bool {
 func (m *Model) find(target screen) {
 	finding := m.finding()
 	if m.screen == sliceScreen && finding {
-		m.project, m.proposal = m.context[0], m.context[1]
+		m.project, m.proposal, m.item = m.context[0], m.context[1], m.context[2]
 	}
 	if !finding {
+		m.context = [3]string{m.project, m.proposal, m.item}
 		m.parent[resultsScreen] = m.screen
 		m.query.Project = ""
 		if m.screen != overviewScreen {
@@ -397,7 +404,6 @@ func (m *Model) enter() {
 		m.screen, m.cursor[resultsScreen] = resultsScreen, 0
 	case resultsScreen:
 		chosen := m.results()[selected]
-		m.context = [2]string{m.project, m.proposal}
 		m.project, m.proposal, m.item = chosen.project, chosen.match.Proposal, chosen.match.Item
 		m.screen, m.parent[sliceScreen] = sliceScreen, resultsScreen
 	}
@@ -409,9 +415,15 @@ func (m *Model) back() {
 	switch m.screen {
 	case overviewScreen:
 		return
+	case diagnosticsScreen:
+		m.screen = resultsScreen
 	case sliceScreen, factsScreen, resultsScreen:
 		if m.screen == sliceScreen && m.parent[sliceScreen] == resultsScreen {
-			m.project, m.proposal = m.context[0], m.context[1]
+			m.project, m.proposal, m.item = m.context[0], m.context[1], m.context[2]
+		}
+		if m.screen == resultsScreen && m.parent[resultsScreen] == sliceScreen {
+			m.project, m.proposal, m.item = m.context[0], m.context[1], m.context[2]
+			m.parent[sliceScreen] = proposalScreen
 		}
 		m.screen = m.parent[m.screen]
 	default:
@@ -447,7 +459,7 @@ func (m *Model) load() {
 		m.members, m.failure = m.snapshot.Proposal(m.project, m.proposal)
 	case sliceScreen:
 		m.slice, m.failure = m.snapshot.Slice(m.project, m.item)
-	case factsScreen, resultsScreen:
+	case factsScreen, resultsScreen, diagnosticsScreen:
 		m.query.IncludeArchived = m.includeArchived
 		m.search, m.failure = m.snapshot.FindSlices(m.query)
 	}

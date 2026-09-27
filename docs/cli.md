@@ -95,7 +95,7 @@ skl decision retire --project <p> --proposal <proposal>
 
 `skl browse` opens a terminal browser over the ledger: Projects, their Proposals, and each Slice's state, Claim, dependencies, branch and attachments. It starts at the current checkout's Project when there is exactly one. Keys: `s` switches Project, `a` includes archived Proposals, `i` and `p` open the recorded issue or pull request.
 
-To find Slices, `f` picks a lifecycle or Claim from the counted facts of the current Project (every Project from the overview), and `/` searches Project, Proposal and Slice names and Slice titles. The criteria narrow the same results together. In the results, `w` switches between the current Project and every Project, `g` groups by Proposal or lifecycle, and `enter` opens the Slice. Slices whose unreadable records leave a criterion undecided are listed apart, never counted as matches.
+To find Slices, `f` picks a lifecycle or Claim from the counted facts of the current Project (every Project from the overview), and `/` searches Project, Proposal and Slice names and Slice titles. The criteria narrow the same results together. In the results, `w` switches between the current Project and every Project, `g` groups by Proposal or lifecycle, `d` opens scrollable membership diagnostics (`esc` returns to results), and `enter` opens the Slice. Slices whose unreadable records leave a criterion undecided are listed apart, never counted as matches.
 
 ```sh
 skl browse projects [--include-archived]
