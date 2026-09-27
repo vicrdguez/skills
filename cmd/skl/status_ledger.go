@@ -23,42 +23,11 @@ func ledgerStatus(command *cli.Context, store *ledger.Store, repository github.R
 	if err != nil {
 		return renderLedgerRefusal(output, format, err)
 	}
-	var forge ledger.CompletionForge
-	var backendError error
-	needsForge := false
-	// Only a nonterminal, attached item needs a forge read. Stored facts and
-	// records lacking an attachment remain locally readable while offline.
-	for _, item := range items {
-		state, _, err := ledger.CompletionStatus(store, repository, []string{item}, false, nil)
-		if err != nil {
-			return renderLedgerRefusal(output, format, err)
-		}
-		if state[0].Submission != nil && state[0].State != ledger.Merged && state[0].State != ledger.Superseded {
-			needsForge = true
-		}
+	refreshed, err := refreshCompletions(command.Context, store, repository, items, newBackend)
+	if err != nil {
+		return renderLedgerRefusal(output, format, err)
 	}
-	if needsForge {
-		backend, err := newBackend(repository)
-		if err != nil {
-			backendError = err
-		} else {
-			forge, _ = backend.(ledger.CompletionForge)
-			if forge == nil {
-				backendError = fmt.Errorf("the forge adapter cannot observe an attached Submission")
-			}
-		}
-	}
-	problems := make(map[string]string)
-	for _, item := range items {
-		_, err := ledger.ObserveCompletion(command.Context, store, repository, item, forge)
-		if err != nil {
-			if backendError != nil && strings.Contains(err.Error(), "forge observation is unavailable") {
-				problems[item] = backendError.Error()
-			} else {
-				problems[item] = err.Error()
-			}
-		}
-	}
+	problems := refreshed.Problems
 	if selected == "" {
 		// Refresh project membership after network reads; a concurrently
 		// accepted child must not be omitted from parent accounting.
