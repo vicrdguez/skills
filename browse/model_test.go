@@ -272,6 +272,26 @@ func TestBrowserReadsReportsFollowsExactHistoricalReferencesAndPreservesScroll(t
 	}
 }
 
+func TestBrowserSelectsEarlierReportVersionAndReturnsToCurrentContext(t *testing.T) {
+	s := start(t, "widgets", func(root string) {
+		write(t, root, "projects/widgets/proposals/orders/cancel/implement-report.md", "---\nschema: 88\n---\nOlder recorded reasoning.\n")
+	})
+	s.send(tea.WindowSizeMsg{Width: 120, Height: 40})
+	s.press("enter", "down", "enter", "d", "down", "down", "enter")
+	s.shows("Latest implementation report", "current lifecycle: Awaiting Review")
+	s.press("v")
+	s.shows("report versions (2)", "awaiting_review", "Exact ledger version:")
+	s.press("down", "enter")
+	s.shows("HISTORICAL", "Older recorded reasoning", "Metadata diagnostic", "current lifecycle: Awaiting Review")
+	s.send(tea.WindowSizeMsg{Width: 84, Height: 19})
+	s.shows("HISTORICAL", "current committed ledger")
+	s.press("esc")
+	s.shows("current document", "current lifecycle: Awaiting Review", "awaiting_review")
+	if len(s.opened) != 0 {
+		t.Fatalf("version navigation opened external URLs: %v", s.opened)
+	}
+}
+
 func TestBrowserFollowsDecisionAndClaimReferencesWithoutChangingSliceContext(t *testing.T) {
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 100, Height: 50})

@@ -15,6 +15,7 @@ type documentFrame struct {
 	viewport          viewport.Model
 	screen            screen
 	returnScreen      screen
+	fromVersion       bool
 	renderProblem     string
 	references        []ledger.LabeledReference
 	referenceOrigin   screen
@@ -107,6 +108,38 @@ func (m *Model) openDocument(document ledger.Document) {
 	m.docViewport = viewport.New(m.width, m.bodyHeight(m.header(), m.footer()))
 	m.layoutDetail()
 	m.docViewport.GotoTop()
+}
+
+func (m *Model) openVersions() {
+	if m.screen != documentScreen || m.currentDocument == nil ||
+		(m.currentDocument.Kind != ledger.ImplementReportDocumentKind && m.currentDocument.Kind != ledger.WatchdogReportDocumentKind) {
+		m.status = "Open a report to browse its versions"
+		return
+	}
+	phase := ledger.ImplementPhase
+	if m.currentDocument.Kind == ledger.WatchdogReportDocumentKind {
+		phase = ledger.WatchdogPhase
+	}
+	versions, err := m.snapshot.VersionsAt(m.currentDocument.Project,
+		m.currentDocument.Proposal+"/"+m.currentDocument.Slice, phase, m.archived)
+	if err != nil {
+		m.status = "Cannot discover report versions: " + err.Error()
+		return
+	}
+	m.versions = versions
+	m.cursor[versionsScreen] = 0
+	m.screen = versionsScreen
+	m.status = ""
+	m.layoutDetail()
+}
+
+func (m *Model) followVersion(reference ledger.Reference) {
+	m.followReference(reference)
+	if m.screen == documentScreen && len(m.documentHistory) > 0 {
+		m.documentReturn = versionsScreen
+		m.documentHistory[len(m.documentHistory)-1].fromVersion = true
+		m.layoutDetail()
+	}
 }
 
 func (m *Model) followReference(reference ledger.Reference) {

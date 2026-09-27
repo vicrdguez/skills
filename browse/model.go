@@ -26,6 +26,7 @@ const (
 	diagnosticsScreen
 	documentsScreen
 	referencesScreen
+	versionsScreen
 	documentScreen
 )
 
@@ -80,15 +81,15 @@ type Options struct {
 }
 
 type keyMap struct {
-	Up, Down, Enter, Back, Next, Previous, Projects, Archived, Search, Facts, Group, Scope, Diagnostics, Documents, References, Issue, PullRequest, Help, Quit key.Binding
+	Up, Down, Enter, Back, Next, Previous, Projects, Archived, Search, Facts, Group, Scope, Diagnostics, Documents, References, Versions, Issue, PullRequest, Help, Quit key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Enter, k.Back, k.Documents, k.References, k.Projects, k.Help, k.Next, k.Archived, k.Issue, k.PullRequest, k.Quit, k.Search, k.Facts}
+	return []key.Binding{k.Enter, k.Back, k.Documents, k.References, k.Versions, k.Projects, k.Help, k.Next, k.Archived, k.Issue, k.PullRequest, k.Quit, k.Search, k.Facts}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Up, k.Down, k.Enter, k.Back}, {k.Next, k.Previous}, {k.Projects, k.Archived}, {k.Search, k.Facts, k.Group, k.Scope, k.Diagnostics}, {k.Documents, k.References}, {k.Issue, k.PullRequest}, {k.Help, k.Quit}}
+	return [][]key.Binding{{k.Up, k.Down, k.Enter, k.Back}, {k.Next, k.Previous}, {k.Projects, k.Archived}, {k.Search, k.Facts, k.Group, k.Scope, k.Diagnostics}, {k.Documents, k.References, k.Versions}, {k.Issue, k.PullRequest}, {k.Help, k.Quit}}
 }
 
 func newKeyMap() keyMap {
@@ -103,6 +104,7 @@ func newKeyMap() keyMap {
 		Archived:    key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "toggle archived")),
 		Documents:   key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "documents")),
 		References:  key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "references")),
+		Versions:    key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "report versions")),
 		Search:      key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search names")),
 		Facts:       key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "find by lifecycle or claim")),
 		Group:       key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "group by proposal/lifecycle")),
@@ -162,6 +164,7 @@ type Model struct {
 	referenceOrigin        screen
 	referencesFromDoc      bool
 	referenceHistory       []referenceFrame
+	versions               *ledger.ReportVersions
 	renderProblem          string
 
 	width, height int
@@ -329,6 +332,8 @@ func (m Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.openDocuments()
 	case key.Matches(msg, m.keys.References):
 		m.openReferences()
+	case key.Matches(msg, m.keys.Versions):
+		m.openVersions()
 	}
 	return m, nil
 }
@@ -386,6 +391,10 @@ func (m Model) rows() int {
 		}
 	case referencesScreen:
 		return len(m.references)
+	case versionsScreen:
+		if m.versions != nil {
+			return len(m.versions.Versions)
+		}
 	}
 	return 0
 }
@@ -453,7 +462,7 @@ func (m Model) isFindingScreen(screen screen) bool {
 
 func isDocumentOverlay(screen screen) bool {
 	switch screen {
-	case documentsScreen, referencesScreen, documentScreen:
+	case documentsScreen, referencesScreen, versionsScreen, documentScreen:
 		return true
 	default:
 		return false
@@ -537,6 +546,9 @@ func (m *Model) enter() {
 	case referencesScreen:
 		m.followReference(m.references[selected].Reference)
 		return
+	case versionsScreen:
+		m.followVersion(m.versions.Versions[selected].Reference)
+		return
 	}
 	m.status = ""
 	m.load()
@@ -587,6 +599,8 @@ func (m *Model) back() {
 	case documentsScreen:
 		m.screen = m.docContext
 		m.failure = nil
+	case versionsScreen:
+		m.screen = documentScreen
 	case referencesScreen:
 		if len(m.referenceHistory) > 0 {
 			previous := m.referenceHistory[len(m.referenceHistory)-1]
@@ -614,7 +628,7 @@ func (m *Model) back() {
 			m.cursor[referencesScreen] = frame.referenceCursor
 			m.referenceHistory = append([]referenceFrame(nil), frame.referenceHistory...)
 			if frame.hasDocument {
-				if count := len(m.referenceHistory); count > 0 {
+				if count := len(m.referenceHistory); count > 0 && !frame.fromVersion {
 					previous := m.referenceHistory[count-1]
 					m.referenceHistory = m.referenceHistory[:count-1]
 					m.restoreReferenceFrame(previous)
@@ -695,7 +709,7 @@ func (m *Model) switchProject() {
 	m.screen, m.status, m.history = overviewScreen, "", nil
 	m.contextHistory = nil
 	m.docContext, m.documents, m.currentDocument = overviewScreen, nil, nil
-	m.documentHistory, m.references, m.referenceHistory = nil, nil, nil
+	m.documentHistory, m.references, m.referenceHistory, m.versions = nil, nil, nil, nil
 	m.referenceOrigin, m.referencesFromDoc = overviewScreen, false
 	m.load()
 	if m.overview == nil {

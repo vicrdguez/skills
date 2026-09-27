@@ -124,6 +124,8 @@ func (m Model) header() string {
 	switch m.screen {
 	case documentsScreen:
 		path = append(path, "documents")
+	case versionsScreen:
+		path = append(path, "report versions")
 	case referencesScreen:
 		if m.referencesFromDoc && m.currentDocument != nil {
 			path = append(path, documentLabel(*m.currentDocument))
@@ -296,6 +298,32 @@ func (m Model) listContent() (context []string, title string, rows []string, cur
 					selected = append(selected, diagnosticLines(document.Diagnostics)...)
 				}
 				selected = append(selected, "Enter reads this committed document; d opens this set's diagnostics.")
+			}
+		}
+	case versionsScreen:
+		context = []string{"Report content changes · newest first · exact ledger references; current Slice facts remain at the snapshot revision."}
+		if m.versions != nil {
+			if m.versions.Incomplete {
+				context = append(context, warningStyle.Render("! Local history incomplete: "+m.versions.Diagnostics[0].Problem))
+			} else if len(m.versions.Diagnostics) > 0 {
+				context = append(context, warningStyle.Render(fmt.Sprintf("! %d version metadata diagnostics; select a version for details", len(m.versions.Diagnostics))))
+			}
+			title = fmt.Sprintf("%s report versions (%d)", m.versions.Phase, len(m.versions.Versions))
+			empty = "No locally available report content versions."
+			for _, version := range m.versions.Versions {
+				label := version.Reference.Commit[:min(12, len(version.Reference.Commit))]
+				if version.Report != nil {
+					label += " · " + version.Report.Outcome
+					if version.Report.Round != 0 {
+						label += fmt.Sprintf(" · round %d", version.Report.Round)
+					}
+				}
+				rows = append(rows, label+" · "+version.Reference.Path)
+			}
+			if len(rows) > 0 {
+				version := m.versions.Versions[cursor]
+				selected = []string{"Exact ledger version: " + version.Reference.Commit + ":" + version.Reference.Path, "Enter reads this version; esc returns to the open report."}
+				selected = append(selected, diagnosticLines(version.Diagnostics)...)
 			}
 		}
 	case referencesScreen:
