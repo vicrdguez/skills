@@ -28,15 +28,10 @@ What is mine is the rest: the engine, the private ledger, Claims, Watchdog Revie
 
 Each stage is a skill, entered cold and left behind at handoff. `propose` is the exception: it runs in the same session as `explore`.
 
-```mermaid
-flowchart LR
-    explore[explore] --> propose[propose] --> implement[implement] --> watchdog[watchdog]
-    watchdog -->|pass| merge([human merge])
-    watchdog -->|first failed review| implement
-    implement -->|blocked decision| human[needs-human]
-    watchdog -->|blocked decision / later failed review| human
-    human -->|renewed proposal| explore
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/change-flow-dark.svg">
+  <img alt="explore and propose run in one session, then implement, watchdog and a human merge each start cold. Watchdog sends a first failed review back to implement. A blocked decision, or a later failed review, needs a human, whose renewed proposal returns to explore." src="docs/diagrams/change-flow.svg" width="960">
+</picture>
 
 | Stage | What it hands off |
 |---|---|
