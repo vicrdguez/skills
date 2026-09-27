@@ -155,7 +155,7 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 				}
 				return err
 			},
-		}, cleanupCommand(newBackend, stdout)},
+		}, cleanupCommand(stdout)},
 	}, {
 		Name:        "implement",
 		Subcommands: deliveryCommands("implement", newBackend, stdout),

@@ -235,7 +235,7 @@ func TestGitHubBackendNormalizesProposalState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 1 || items[0].ID != "17" || !items[0].Ready || items[0].Merged || items[0].Parent != "10" || !slices.Equal(items[0].Blockers, []workflow.WorkItemID{"16"}) {
+	if len(items) != 1 || items[0].ID != "17" || !items[0].Ready || items[0].Parent != "10" || !slices.Equal(items[0].Blockers, []workflow.WorkItemID{"16"}) {
 		t.Fatalf("items = %#v", items)
 	}
 }
@@ -276,151 +276,6 @@ func TestGitHubBackendReconcilesDeclaredFallback(t *testing.T) {
 			}
 			if err != nil || len(items) != 2 || items[1].Body != wantBody || !slices.Equal(items[1].Blockers, test.blockers) {
 				t.Fatalf("normalized records = %#v, %v; want body %q blockers %v", items, err, wantBody, test.blockers)
-			}
-		})
-	}
-}
-
-func TestGitHubBackendReportsOnlyCommitClosedWorkflowItemsAsMerged(t *testing.T) {
-	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
-		switch request.URL.Path {
-		case "/repos/acme/widgets/issues":
-			return jsonResponse(http.StatusOK, `[
-				{"id":501,"number":17,"title":"merged","state":"closed","labels":[]},
-				{"id":502,"number":18,"title":"manual","state":"closed","labels":[{"name":"done"}]},
-				{"id":503,"number":19,"title":"unrelated","state":"closed","labels":[]}
-			]`), nil
-		case "/repos/acme/widgets/issues/17/timeline":
-			return jsonResponse(http.StatusOK, `[{"event":"labeled","label":{"name":"ready"}},{"event":"labeled","label":{"name":"wip"}},{"event":"unlabeled","label":{"name":"ready"}},{"event":"unlabeled","label":{"name":"wip"}},{"event":"closed","commit_id":"abc123"}]`), nil
-		case "/repos/acme/widgets/issues/18/timeline":
-			return jsonResponse(http.StatusOK, `[{"event":"closed","commit_id":null}]`), nil
-		case "/repos/acme/widgets/issues/19/timeline":
-			return jsonResponse(http.StatusOK, `[{"event":"closed","commit_id":"def456"}]`), nil
-		case "/repos/acme/widgets/commits/abc123/pulls":
-			return jsonResponse(http.StatusOK, `[]`), nil
-		default:
-			t.Fatalf("unexpected request: %s", request.URL.Path)
-			return nil, nil
-		}
-	})}
-	backend := NewGitHubBackend("https://api.github.test", "secret", client)
-
-	backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
-	items, err := backend.ListMergedWorkItems(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(items) != 1 || items[0].Title != "merged" || !items[0].Merged {
-		t.Fatalf("items = %#v", items)
-	}
-}
-
-func TestGitHubBackendReadsMergedLifecycleAcrossTimelinePages(t *testing.T) {
-	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
-		switch request.URL.Path {
-		case "/repos/acme/widgets/issues":
-			return jsonResponse(http.StatusOK, `[{"number":17,"title":"merged","state":"closed","labels":[]}]`), nil
-		case "/repos/acme/widgets/commits/abc123/pulls":
-			return jsonResponse(http.StatusOK, `[{"body":"Closes #17\n","merged_at":"2026-09-02T16:57:13Z","merge_commit_sha":"abc123","head":{"ref":"merged","sha":"accepted","repo":{"full_name":"acme/widgets"}}}]`), nil
-		case "/repos/acme/widgets/issues/17/timeline":
-			if request.URL.Query().Get("page") == "2" {
-				return jsonResponse(http.StatusOK, `[{"event":"referenced","commit_id":"abc123"}]`), nil
-			}
-			return jsonResponse(http.StatusOK, `[{"event":"labeled","label":{"name":"ready"}}`+strings.Repeat(`,{"event":"commented"}`, 97)+`,{"event":"unlabeled","label":{"name":"ready"}},{"event":"closed","commit_id":null}]`), nil
-		default:
-			t.Fatalf("unexpected request: %s", request.URL)
-			return nil, nil
-		}
-	})}
-	backend := NewGitHubBackend("https://api.github.test", "secret", client)
-	backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
-	items, err := backend.ListMergedWorkItems(context.Background())
-	if err != nil || len(items) != 1 || items[0].ID != "17" || !items[0].Merged || items[0].AcceptedHead != "accepted" {
-		t.Fatalf("Merged lifecycle = %#v, %v", items, err)
-	}
-}
-
-func TestGitHubBackendIdentifiesAcceptedSubmissionHead(t *testing.T) {
-	accepted := `{"body":"Closes #17\n","merged_at":"2026-09-07T10:00:00Z","merge_commit_sha":"squash","head":{"ref":"slice","sha":"accepted","repo":{"full_name":"acme/widgets"}}}`
-	for _, test := range []struct{ name, pulls, want string }{
-		{"accepted squash", "[" + accepted + "]", "accepted"},
-		{"unknown", `[]`, ""},
-		{"ambiguous", "[" + accepted + "," + accepted + "]", ""},
-		{"unmerged", `[{"body":"Closes #17\n","merge_commit_sha":"squash","head":{"ref":"slice","sha":"unaccepted","repo":{"full_name":"acme/widgets"}}}]`, ""},
-		{"renamed branch", `[{"body":"Closes #17\n","merged_at":"2026-09-07T10:00:00Z","merge_commit_sha":"squash","head":{"ref":"other","sha":"unaccepted","repo":{"full_name":"acme/widgets"}}}]`, "unaccepted"},
-		{"other merge", `[{"body":"Closes #17\n","merged_at":"2026-09-07T10:00:00Z","merge_commit_sha":"other","head":{"ref":"slice","sha":"unaccepted","repo":{"full_name":"acme/widgets"}}}]`, ""},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
-				switch request.URL.Path {
-				case "/repos/acme/widgets/issues":
-					return jsonResponse(http.StatusOK, `[{"number":17,"title":"slice","state":"closed","labels":[{"name":"ready"}]}]`), nil
-				case "/repos/acme/widgets/issues/17/timeline":
-					return jsonResponse(http.StatusOK, `[{"event":"closed","commit_id":"squash"}]`), nil
-				case "/repos/acme/widgets/commits/squash/pulls":
-					return jsonResponse(http.StatusOK, test.pulls), nil
-				default:
-					t.Fatalf("unexpected request: %s", request.URL)
-					return nil, nil
-				}
-			})}
-			backend := NewGitHubBackend("https://api.github.test", "secret", client)
-			backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
-			items, err := backend.ListMergedWorkItems(context.Background())
-			if err != nil || len(items) != 1 || items[0].AcceptedHead != test.want {
-				t.Fatalf("accepted Submission = %#v, %v; want %q", items, err, test.want)
-			}
-		})
-	}
-}
-
-func TestGitHubBackendRecognizesCloseBeforeMerge(t *testing.T) {
-	accepted := `{"body":"Closes #17\n","merged_at":"2026-09-02T16:57:13Z","merge_commit_sha":"squash","head":{"ref":"slice","sha":"accepted","repo":{"full_name":"acme/widgets"}}}`
-	for _, test := range []struct {
-		name, pulls, wantHead, wantBranch string
-		wantItems                         int
-	}{
-		{"merged after handoff", "[" + accepted + "]", "accepted", "slice", 1},
-		{"merely closed", `[]`, "", "", 0},
-		{"unmerged submission", `[{"body":"Closes #17\n","merge_commit_sha":"squash","head":{"ref":"slice","sha":"accepted","repo":{"full_name":"acme/widgets"}}}]`, "", "", 0},
-		{"renamed submission", `[{"body":"Closes #17\n","merged_at":"2026-09-02T16:57:13Z","merge_commit_sha":"squash","head":{"ref":"other","sha":"accepted","repo":{"full_name":"acme/widgets"}}}]`, "accepted", "other", 1},
-		{"ambiguous submissions", "[" + accepted + "," + accepted + "]", "", "", 1},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
-				if request.Method != http.MethodGet {
-					t.Fatalf("cleanup discovery mutated GitHub: %s", request.Method)
-				}
-				switch request.URL.Path {
-				case "/repos/acme/widgets/issues":
-					return jsonResponse(http.StatusOK, `[{"number":17,"title":"slice","state":"closed","labels":[]}]`), nil
-				case "/repos/acme/widgets/issues/17/timeline":
-					return jsonResponse(http.StatusOK, `[
-						{"event":"labeled","label":{"name":"ready"}},
-						{"event":"labeled","label":{"name":"wip"}},
-						{"event":"referenced","commit_id":"implementation"},
-						{"event":"cross-referenced","source":{"issue":{"number":9,"pull_request":{}}}},
-						{"event":"unlabeled","label":{"name":"ready"}},
-						{"event":"unlabeled","label":{"name":"wip"}},
-						{"event":"closed","commit_id":null,"created_at":"2026-09-02T16:44:42Z"},
-						{"event":"referenced","commit_id":"squash","created_at":"2026-09-02T16:57:14Z"},
-						{"event":"referenced","commit_id":"squash","created_at":"2026-09-02T16:57:15Z"}
-					]`), nil
-				case "/repos/acme/widgets/commits/squash/pulls":
-					return jsonResponse(http.StatusOK, test.pulls), nil
-				default:
-					t.Fatalf("unexpected request: %s", request.URL)
-					return nil, nil
-				}
-			})}
-			backend := NewGitHubBackend("https://api.github.test", "secret", client)
-			backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
-			items, err := backend.ListMergedWorkItems(context.Background())
-			if err != nil || len(items) != test.wantItems {
-				t.Fatalf("Merged Work Items = %#v, %v; want %d", items, err, test.wantItems)
-			}
-			if len(items) == 1 && (!items[0].Merged || items[0].ID != "17" || items[0].Branch != test.wantBranch || items[0].AcceptedHead != test.wantHead) {
-				t.Fatalf("accepted Submission = %#v; want head %q branch %q", items[0], test.wantHead, test.wantBranch)
 			}
 		})
 	}
@@ -470,7 +325,6 @@ func TestGitHubBackendRefusesUnboundOperations(t *testing.T) {
 			_, err := backend.FindWorkItems(ctx, nil, nil)
 			return err
 		},
-		"ListMergedWorkItems": func() error { _, err := backend.ListMergedWorkItems(ctx); return err },
 		"CreateWorkItem": func() error {
 			_, err := backend.CreateWorkItem(ctx, workflow.WorkItem{Title: "slice"})
 			return err

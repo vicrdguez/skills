@@ -70,6 +70,51 @@ func runCleanup(t *testing.T, cli ledgerCLI, root string) cleanupOutcome {
 	return outcome
 }
 
+func TestCleanupRequiresAcceptedLedgerBeforeTouchingSourceWork(t *testing.T) {
+	fixture := newLedgerFixture(t)
+	root := sourceRepository(t, "acme", "widgets")
+	accepted := cleanupWorktree(t, root, "merged-source")
+	path := filepath.Join(root, ".worktrees", "merged-source")
+	// A local branch that looks ready for the old GitHub cleanup path is not
+	// evidence of acceptance into the Workflow Ledger.
+	sourceBefore := ledgerSnapshot(t, root)
+	for _, scenario := range []struct {
+		name, guidance string
+		configure      func(*testing.T)
+	}{
+		{"missing configuration", "configure", func(t *testing.T) {
+			if err := os.Remove(filepath.Join(fixture.config, "skl", "config.json")); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"unadopted Project", "accept", func(*testing.T) {}},
+		{"malformed configuration", "repair", func(t *testing.T) { fixture.misconfigure(t, "{broken") }},
+		{"unusable ledger clone", "repair", func(t *testing.T) {
+			fixture.misconfigure(t, `{"ledger": "`+t.TempDir()+`"}`)
+		}},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			fixture.selectWithXDG(t)
+			scenario.configure(t)
+			cli := offlineForge(t)
+			cli.out.Reset()
+			if err := cli.app.Run([]string{"skl", "propose", "cleanup", "--repo", root, "--format", "json"}); err != nil {
+				t.Fatal(err)
+			}
+			var outcome ledgerOutcome
+			if err := json.Unmarshal(cli.out.Bytes(), &outcome); err != nil {
+				t.Fatal(err)
+			}
+			if outcome.Status != "fix_required" || !strings.Contains(outcome.Repair, scenario.guidance) || outcome.Reason == "" {
+				t.Fatalf("missing actionable refusal: %s", cli.out.String())
+			}
+			if ledgerSnapshot(t, root) != sourceBefore || !exists(t, root, ".worktrees/merged-source") || strings.TrimSpace(runGitOutput(t, path, "rev-parse", "HEAD")) != accepted {
+				t.Fatal("cleanup changed unaccepted source work")
+			}
+		})
+	}
+}
+
 func ledgerTree(t *testing.T, clone, revision, path string) string {
 	t.Helper()
 	return strings.TrimSpace(runGitOutput(t, clone, "rev-parse", revision+":"+path))
@@ -537,6 +582,29 @@ func TestLedgerCleanupRemovesOnlySafeMergedSourceWork(t *testing.T) {
 	}
 	if !exists(t, fixture.clone, "projects/widgets/proposals/active/pending/state.json") {
 		t.Fatal("proposal with an active sibling left the proposals directory")
+	}
+}
+
+func TestLedgerCleanupPreservesLocalCommitsAfterAcceptedHead(t *testing.T) {
+	fixture := newLedgerFixture(t)
+	root := sourceRepository(t, "acme", "widgets")
+	if outcome := newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", cleanupSpec("done", "core"))); outcome.Status != "accepted" {
+		t.Fatalf("accept: %s", mustJSON(t, outcome))
+	}
+	accepted := cleanupWorktree(t, root, "done-core")
+	path := filepath.Join(root, ".worktrees", "done-core")
+	writeFile(t, filepath.Join(path, "local.txt"), "user work after merge\n")
+	runGit(t, path, "add", "local.txt")
+	runGit(t, path, "commit", "-qm", "keep user work")
+	local := strings.TrimSpace(runGitOutput(t, path, "rev-parse", "HEAD"))
+	statusRecord(t, fixture.clone, "done", "core", merged(accepted))
+
+	outcome := runCleanup(t, offlineForge(t), root)
+	if !archivedNames(outcome)["done"] || outcome.Source == nil || len(outcome.Source.Removed) != 0 || len(outcome.Source.Preserved) != 1 || outcome.Source.Preserved[0].Branch != "done-core" {
+		t.Fatalf("archival and local work preservation were not independent: %s", mustJSON(t, outcome))
+	}
+	if !exists(t, root, ".worktrees/done-core/local.txt") || !gitRefExists(root, "refs/heads/done-core") || strings.TrimSpace(runGitOutput(t, path, "rev-parse", "HEAD")) != local {
+		t.Fatal("archival removed user commits")
 	}
 }
 

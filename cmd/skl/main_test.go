@@ -67,16 +67,6 @@ func (b *memoryBackend) FindWorkItems(_ context.Context, prepared []workflow.Wor
 	return found, nil
 }
 
-func (b *memoryBackend) ListMergedWorkItems(context.Context) ([]workflow.WorkItem, error) {
-	var merged []workflow.WorkItem
-	for _, item := range b.items {
-		if item.Merged {
-			merged = append(merged, item)
-		}
-	}
-	return merged, nil
-}
-
 func (b *memoryBackend) CreateWorkItem(_ context.Context, item workflow.WorkItem) (workflow.WorkItem, error) {
 	item.ID = workflow.WorkItemID(fmt.Sprintf("work-%d", len(b.items)+1))
 	b.items = append(b.items, item)
@@ -1352,119 +1342,6 @@ func TestContradictoryDependenciesStopBeforeMutation(t *testing.T) {
 	}
 	if !strings.HasPrefix(output.String(), "needs_human\n") || len(backend.children)+len(backend.blocks) != 0 {
 		t.Fatalf("contradictory retry mutated backend: output=%q backend=%#v", output.String(), backend)
-	}
-}
-
-func TestCleanOnlySafeMergedWorktrees(t *testing.T) {
-	root := proposalRepository(t)
-	worktrees := filepath.Join(root, ".worktrees")
-	for _, slug := range []string{"merged-clean", "merged-dirty", "unrelated"} {
-		runGit(t, root, "worktree", "add", filepath.Join(worktrees, slug), "-b", slug, "main")
-	}
-	unexpected := filepath.Join(root, "elsewhere")
-	runGit(t, root, "worktree", "add", unexpected, "-b", "merged-unexpected", "main")
-	if err := os.WriteFile(filepath.Join(worktrees, "merged-dirty", "local.txt"), []byte("keep\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	for _, slug := range []string{"merged-clean", "merged-dirty", "merged-unexpected", "unrelated"} {
-		runGit(t, root, "update-ref", "refs/remotes/origin/"+slug, "refs/heads/"+slug)
-	}
-	accepted := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "main"))
-	backend := &memoryBackend{items: []workflow.WorkItem{
-		{ID: "work-1", Title: "merged-clean", Branch: "merged-clean", Merged: true, AcceptedHead: accepted},
-		{ID: "work-2", Title: "merged-dirty", Branch: "merged-dirty", Merged: true, AcceptedHead: accepted},
-		{ID: "work-3", Title: "merged-unexpected", Branch: "merged-unexpected", Merged: true, AcceptedHead: accepted},
-	}}
-	var output bytes.Buffer
-	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
-
-	if err := app.Run([]string{"skl", "propose", "cleanup", "--repo", root}); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := os.Stat(filepath.Join(worktrees, "merged-clean")); !os.IsNotExist(err) {
-		t.Fatalf("clean merged worktree remains: %v", err)
-	}
-	if gitRefExists(root, "refs/heads/merged-clean") {
-		t.Fatal("clean merged branch remains")
-	}
-	for _, path := range []string{filepath.Join(worktrees, "merged-dirty"), unexpected, filepath.Join(worktrees, "unrelated")} {
-		if _, err := os.Stat(path); err != nil {
-			t.Fatalf("preserved worktree %s: %v", path, err)
-		}
-	}
-	for _, slug := range []string{"merged-clean", "merged-dirty", "merged-unexpected", "unrelated"} {
-		if !gitRefExists(root, "refs/remotes/origin/"+slug) {
-			t.Fatalf("remote branch %s removed", slug)
-		}
-	}
-	if got := output.String(); !strings.Contains(got, "removed merged-clean") || !strings.Contains(got, "preserved merged-dirty") || !strings.Contains(got, "preserved merged-unexpected") {
-		t.Fatalf("cleanup report = %q", got)
-	}
-}
-
-func TestCleanMergedBranchWithPrunedUpstream(t *testing.T) {
-	root := proposalRepository(t)
-	path := filepath.Join(root, ".worktrees", "squashed")
-	runGit(t, root, "worktree", "add", path, "-b", "squashed", "main")
-	if err := os.WriteFile(filepath.Join(path, "README.md"), []byte("accepted change\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runGit(t, path, "commit", "-am", "slice change")
-	runGit(t, root, "update-ref", "refs/remotes/origin/squashed", "refs/heads/squashed")
-	runGit(t, root, "branch", "--set-upstream-to=origin/squashed", "squashed")
-	runGit(t, root, "update-ref", "-d", "refs/remotes/origin/squashed")
-	// A squash puts the same change on main without the slice commit's ancestry.
-	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("accepted change\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runGit(t, root, "commit", "-am", "accepted squash")
-	backend := &memoryBackend{items: []workflow.WorkItem{{Title: "squashed", Branch: "squashed", Merged: true, AcceptedHead: strings.TrimSpace(runGitOutput(t, path, "rev-parse", "HEAD"))}}}
-	var output bytes.Buffer
-	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
-	for range 2 {
-		if err := app.Run([]string{"skl", "propose", "cleanup", "--repo", root}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) || gitRefExists(root, "refs/heads/squashed") {
-		t.Fatalf("Merged local state remains: worktree error=%v", err)
-	}
-	if !strings.Contains(output.String(), "removed squashed") {
-		t.Fatalf("cleanup report = %q", output.String())
-	}
-}
-
-func TestCleanupPreservesUnacceptedLocalHead(t *testing.T) {
-	for _, evidence := range []string{"extra local commit", "unknown accepted head"} {
-		t.Run(evidence, func(t *testing.T) {
-			root := proposalRepository(t)
-			path := filepath.Join(root, ".worktrees", "merged")
-			runGit(t, root, "worktree", "add", path, "-b", "merged", "main")
-			accepted := strings.TrimSpace(runGitOutput(t, path, "rev-parse", "HEAD"))
-			if evidence == "extra local commit" {
-				if err := os.WriteFile(filepath.Join(path, "local.txt"), []byte("user work\n"), 0o644); err != nil {
-					t.Fatal(err)
-				}
-				runGit(t, path, "add", "local.txt")
-				runGit(t, path, "commit", "-m", "user work after merge")
-			} else {
-				accepted = ""
-			}
-			head := runGitOutput(t, path, "rev-parse", "HEAD")
-			backend := &memoryBackend{items: []workflow.WorkItem{{Title: "merged", Branch: "merged", Merged: true, AcceptedHead: accepted}}}
-			var output bytes.Buffer
-			app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
-			if err := app.Run([]string{"skl", "propose", "cleanup", "--repo", root}); err != nil {
-				t.Fatal(err)
-			}
-			if !gitRefExists(root, "refs/heads/merged") {
-				t.Fatal("cleanup deleted an unaccepted local head")
-			}
-			if got := runGitOutput(t, path, "rev-parse", "HEAD"); got != head || output.String() != "preserved merged\n" {
-				t.Fatalf("head=%q report=%q", got, output.String())
-			}
-		})
 	}
 }
 
