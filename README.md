@@ -137,7 +137,17 @@ The point of composing at invocation time is that the worker reads only what app
 
 `skl install` puts the workflow into Pi, Codex, Claude Code and OpenCode. Every skill gets a one-line stub that runs `skl skill <name>`. Implement and Watchdog are installed as Harness Adapters in each harness's native entry point (a Pi prompt template, a user-invoked Claude Code skill, an OpenCode command; Codex keeps a stub) and run `skl implement next` or `skl watchdog next`. A second Implement entry point, `implement-team`, runs team mode, where the worker leads a team of implementer subagents. Changing harness changes nothing about the workflow.
 
-A Supervisor drains a queue by asking for work with `--dispatch`: the engine claims a Slice for a fresh worker session and answers with the command that session runs and the command that continues afterwards, which only proceeds once the ledger records that worker's handoff ([ADR 0010](docs/adr/0010-drive-supervisors-through-dispatch-outcomes.md)).
+A Supervisor drains a queue by asking for work with `--dispatch --wait`: the engine claims a Slice for a fresh worker session and answers with the command that session runs and the command that continues afterwards (`skl <phase> next --dispatch --wait --after <claim>`). Continuation only proceeds once the ledger records that worker's handoff ([ADR 0010](docs/adr/0010-drive-supervisors-through-dispatch-outcomes.md)).
+
+Pi and OpenCode install `implement-loop` (standard Implement), `implement-team-loop` (team Implement) and `watchdog-loop` entry points. Each starts Dispatch and follows its Outcome Instructions until one says to stop. All accept worker model and thinking arguments; the Implement loops also accept reviewer arguments, and team mode accepts helper arguments. Supplied values override the defaults; OpenCode leaves every slot to the harness default.
+
+| Pi loop | Worker model / thinking | Helper model / thinking | Audit reviewer model / thinking |
+|---|---|---|---|
+| `implement-loop` | `openai-codex/gpt-6-sol` / `xhigh` | — | `openai-codex/gpt-6-astra` / `low` |
+| `implement-team-loop` | `openai-codex/gpt-6-sol` / `xhigh` | `openai-codex/gpt-6-luna` / `xhigh` | `openai-codex/gpt-6-sol` / `xhigh` |
+| `watchdog-loop` | `openai-codex/gpt-6-astra` / `high` | — | — |
+
+Run one Supervisor per phase per Project. Configure the harness to allow subagent depth **2**: the Supervisor dispatches a worker, and that worker's Audit dispatches reviewers. `skl install` does not configure harness subagent depth.
 
 ## Install
 

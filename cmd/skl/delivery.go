@@ -138,7 +138,32 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 			}
 			continued = &ending
 		}
+		selectionAttempted := false
 		selection, err := nextWork(c.Context, c.Duration("wait"), c.Duration("poll"), func() (ledger.Selection, error) {
+			selectionAttempted = false
+			if err := c.Context.Err(); err != nil {
+				return ledger.Selection{}, err
+			}
+			items, err := ledger.StatusItems(store, repository.Repository, "")
+			if err != nil {
+				return ledger.Selection{}, err
+			}
+			refreshed, err := refreshCompletions(c.Context, store, repository.Repository, items, newBackend)
+			if err != nil {
+				return ledger.Selection{}, err
+			}
+			if err := c.Context.Err(); err != nil {
+				return ledger.Selection{}, err
+			}
+			for _, item := range items {
+				if observationError := refreshed.ObservationErrors[item]; observationError != nil && completionRefreshIntegrityError(item, observationError, refreshed.ForgeReadFailures[item]) {
+					return ledger.Selection{}, observationError
+				}
+			}
+			if err := c.Context.Err(); err != nil {
+				return ledger.Selection{}, err
+			}
+			selectionAttempted = true
 			execution, err := ledger.StartDeliveryContext(c.Context, store, repository.Repository, phase)
 			if execution == nil {
 				return ledger.Selection{Status: ledger.NoWork}, err
@@ -156,7 +181,7 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 				return err
 			}
 			var refused *ledger.Refusal
-			if !errors.As(err, &refused) {
+			if selectionAttempted && !errors.As(err, &refused) {
 				// Selection can fail after its acquisition commit.
 				claimState, statusCmd = claimUncertain, statusInvocation(repository)
 			}

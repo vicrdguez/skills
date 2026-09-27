@@ -32,7 +32,12 @@ func TestCommandSignals(t *testing.T) {
 				root := proposalRepository(t)
 				ledgerRoot := ""
 				if tc.args[0] != "setup" {
-					ledgerRoot = newLedgerFixture(t).clone
+					fixture := newLedgerFixture(t)
+					ledgerRoot = fixture.clone
+					accepted := newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", singleSlice("signal")))
+					if accepted.Status != "accepted" {
+						t.Fatalf("accept signal Project: %s", mustJSON(t, accepted))
+					}
 				}
 				args := append([]string{"-test.run=^TestCommandSignalProcess$", "--"}, tc.args...)
 				args = append(args, "--repo", root)

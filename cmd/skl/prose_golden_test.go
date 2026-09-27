@@ -431,7 +431,11 @@ func TestAgentProseGoldens(t *testing.T) {
 		if harness == "codex" {
 			continue
 		}
-		for _, operation := range []string{"implement", "implement-team", "watchdog"} {
+		operations := []string{"implement", "implement-team", "watchdog"}
+		if harness == "pi" || harness == "opencode" {
+			operations = append(operations, "implement-loop", "implement-team-loop", "watchdog-loop")
+		}
+		for _, operation := range operations {
 			g.check("adapter-"+harness+"-"+operation, readFileString(t, filepath.Join(home, fmt.Sprintf(location, operation))))
 		}
 	}

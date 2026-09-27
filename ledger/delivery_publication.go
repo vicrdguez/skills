@@ -52,6 +52,7 @@ type CurrentResult struct {
 	Branch     string           `json:"branch"`
 	Approved   bool             `json:"approved"`
 	Submission *ForgeAttachment `json:"submission,omitempty"`
+	Issue      *ForgeAttachment `json:"issue,omitempty"`
 	Claimed    bool             `json:"claimed,omitempty"`
 
 	title, contents string
@@ -72,7 +73,7 @@ func SelectCurrentResult(s *Store, repository github.RepositoryID, item string) 
 	if err != nil {
 		return CurrentResult{}, refuse("Work Item "+item+" has no committed phase result to present", "complete an implementation handoff before presenting a pull request")
 	}
-	result := CurrentResult{Item: item, Lifecycle: state.State, Phase: ImplementPhase, Report: Reference{Commit: head, Path: implementPath}, Branch: state.Branch, Submission: state.Submission, Claimed: state.Claim != nil, title: state.Title, contents: implementation}
+	result := CurrentResult{Item: item, Lifecycle: state.State, Phase: ImplementPhase, Report: Reference{Commit: head, Path: implementPath}, Branch: state.Branch, Submission: state.Submission, Issue: state.Issue, Claimed: state.Claim != nil, title: state.Title, contents: implementation}
 	reviewPath := directory + "/" + WatchdogPhase + "-report.md"
 	if review, err := showPath(s, head, reviewPath); err == nil {
 		parsed, _, err := ParseReport(WatchdogPhase, []byte(review))
@@ -111,6 +112,9 @@ func (r CurrentResult) superseded(s *Store, repository github.RepositoryID) erro
 	}
 	if current.Phase != r.Phase || current.Lifecycle != r.Lifecycle || current.contents != r.contents {
 		return refuse("a later local "+current.Phase+" result supersedes the selected "+r.Phase+" result", "present the current view with public prose authored for it")
+	}
+	if !sameAttachment(current.Issue, r.Issue) {
+		return refuse("the recorded issue attachment changed since this result was selected", "select the current view again to present it with the recorded issue's footer")
 	}
 	return nil
 }
@@ -193,6 +197,9 @@ func presentSelected(ctx context.Context, s *Store, repository github.Repository
 	number := 0
 	if selected.Submission != nil {
 		number = selected.Submission.Number
+	}
+	if selected.Issue != nil {
+		body += fmt.Sprintf("\n\nCloses #%d", selected.Issue.Number)
 	}
 	presented, err := forge.PresentPull(ctx, PullPresentation{Number: number, Title: selected.title, Body: body, Branch: selected.Branch, Head: selected.Source.Head, Approved: selected.Approved, Current: current})
 	if err != nil {
