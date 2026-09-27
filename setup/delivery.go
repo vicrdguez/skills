@@ -1,18 +1,56 @@
 package setup
 
 import (
+	"cmp"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	skilldist "github.com/vicrdguez/skills"
 	"github.com/vicrdguez/skills/ledger"
 	"github.com/vicrdguez/skills/workflow"
 )
 
+// ImplementChoices are an Implement invocation's mode and its opaque subagent
+// values. An empty value is omitted.
+type ImplementChoices struct {
+	Mode     string
+	Helper   skilldist.SubagentChoice
+	Reviewer skilldist.SubagentChoice
+}
+
+// flags repeats the supplied choices for the commands that render or print a
+// later Implement continuation.
+func (choices ImplementChoices) flags() string {
+	var words []string
+	add := func(flag, value string) {
+		if value != "" {
+			words = append(words, " --"+flag+" "+skilldist.ShellQuote(value))
+		}
+	}
+	if choices.Mode == skilldist.TeamMode {
+		add("mode", choices.Mode)
+	}
+	add("helper-model", choices.Helper.Model)
+	add("helper-thinking", choices.Helper.Thinking)
+	add("reviewer-model", choices.Reviewer.Model)
+	add("reviewer-thinking", choices.Reviewer.Thinking)
+	return strings.Join(words, "")
+}
+
+// supplied is the choice to render, or nil when it carries no value.
+func supplied(choice skilldist.SubagentChoice) *skilldist.SubagentChoice {
+	if choice == (skilldist.SubagentChoice{}) {
+		return nil
+	}
+	return &choice
+}
+
 // PresentDelivery binds known commands and evidence without exposing private
 // storage navigation or asking workers to choose an engine-resolvable procedure.
-func PresentDelivery(e *ledger.Execution, repository RepositoryContext, phase, operation string, source *workflow.DeliverySource, directory string) (skilldist.Packet, error) {
+// Implement renders and resumes with choices; Watchdog takes none.
+func PresentDelivery(e *ledger.Execution, repository RepositoryContext, phase, operation string, source *workflow.DeliverySource, directory string, choices ImplementChoices) (skilldist.Packet, error) {
 	worktree, err := workflow.DeliveryWorktree(repository.Root, e.State.Branch)
 	if err != nil {
 		return skilldist.Packet{}, err
@@ -59,6 +97,12 @@ func PresentDelivery(e *ledger.Execution, repository RepositoryContext, phase, o
 	f.PrepareCommand += " --result-directory " + q(directory)
 	f.ResumeCommand += " --result-directory " + q(directory)
 	f.InspectCommand += " --result-directory " + q(directory)
+	if phase == ledger.ImplementPhase {
+		f.Mode, f.Helper, f.Reviewer = cmp.Or(choices.Mode, skilldist.StandardMode), supplied(choices.Helper), supplied(choices.Reviewer)
+		f.PrepareCommand += choices.flags()
+		f.InspectCommand += choices.flags()
+		f.ResumeCommand += choices.flags()
+	}
 	target := f.RecordedTarget
 	if source != nil {
 		target = source.Target

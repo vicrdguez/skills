@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="352" viewBox="0 0 960 352" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title>How a change flows through skl</title>
+  <desc>explore and propose run in one session, then implement, watchdog and a human merge each start cold. Watchdog sends a first failed review back to implement. A blocked decision, or a later failed review, needs a human, whose renewed proposal returns to explore.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9.5" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+      <path d="M0 0.8 L9.5 5 L0 9.2 Z" fill="#57606a"/>
+    </marker>
+  </defs>
+
+  <!-- session grouping -->
+  <rect x="34" y="90" width="352" height="92" rx="12" fill="none" stroke="#8c959f" stroke-width="1.25" stroke-dasharray="5 4"/>
+  <text x="40" y="81" font-size="12" fill="#57606a">one session</text>
+
+  <!-- edges -->
+  <g fill="none" stroke="#57606a" stroke-width="1.5" marker-end="url(#arrow)" stroke-linecap="round" stroke-linejoin="round">
+    <!-- forward -->
+    <path d="M191 136 H228"/>
+    <path d="M371 136 H408"/>
+    <path d="M551 136 H588"/>
+    <path d="M731 136 H768"/>
+    <!-- watchdog -> implement: first failed review -->
+    <path d="M660 109 V64 Q660 56 652 56 H488 Q480 56 480 64 V107"/>
+    <!-- implement -> needs-human: blocked decision -->
+    <path d="M480 163 V268 Q480 276 488 276 H497"/>
+    <!-- watchdog -> needs-human: blocked decision / later failed review -->
+    <path d="M660 163 V268 Q660 276 652 276 H643"/>
+    <!-- needs-human -> explore: renewed proposal -->
+    <path d="M570 303 V322 Q570 330 562 330 H128 Q120 330 120 322 V165"/>
+  </g>
+
+  <!-- edge labels -->
+  <g font-size="12.5" fill="#57606a">
+    <text x="749" y="126" text-anchor="middle">pass</text>
+    <text x="570" y="47" text-anchor="middle">first failed review</text>
+    <text x="471" y="222" text-anchor="end">blocked decision</text>
+    <text x="669" y="214">blocked decision, or</text>
+    <text x="669" y="231">later failed review</text>
+    <text x="345" y="321" text-anchor="middle">renewed proposal</text>
+  </g>
+
+  <!-- agent stages -->
+  <g stroke="#54aeff" stroke-width="1.5">
+    <rect x="50" y="110" width="140" height="52" rx="8" fill="#ddf4ff"/>
+    <rect x="230" y="110" width="140" height="52" rx="8" fill="#ddf4ff"/>
+    <rect x="410" y="110" width="140" height="52" rx="8" fill="#ddf4ff"/>
+    <rect x="590" y="110" width="140" height="52" rx="8" fill="#ddf4ff"/>
+  </g>
+  <g font-size="15" font-weight="600" fill="#1f2328" text-anchor="middle">
+    <text x="120" y="141">explore</text>
+    <text x="300" y="141">propose</text>
+    <text x="480" y="141">implement</text>
+    <text x="660" y="141">watchdog</text>
+  </g>
+
+  <!-- human nodes -->
+  <g stroke="#d4a72c" stroke-width="1.5" fill="#fff8c5">
+    <rect x="770" y="110" width="140" height="52" rx="26"/>
+    <rect x="500" y="250" width="140" height="52" rx="26"/>
+  </g>
+  <g fill="#1f2328" text-anchor="middle">
+    <text x="840" y="141" font-size="15" font-weight="600">human merge</text>
+    <text x="570" y="272" font-size="15" font-weight="600">needs-human</text>
+    <text x="570" y="290" font-size="11.5" fill="#57606a">skl decision inbox</text>
+  </g>
+</svg>
