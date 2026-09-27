@@ -31,7 +31,7 @@ A backend-specific representation of canonical **Workflow State**, such as label
 _Avoid_: Workflow state, source of workflow semantics
 
 **Setup**:
-The deterministic operation that associates a **Consumer Repository** with its **Project** and prepares the guidance needed to participate in the **Workflow**.
+The deterministic operation that prepares local guidance in a **Consumer Repository** for participation in the **Workflow**. Setup is distinct from ledger configuration and **Project** adoption.
 _Avoid_: Agent skill, workflow definition
 
 **Adoption**:
