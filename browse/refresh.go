@@ -68,6 +68,8 @@ func (m *Model) preserveSelection(previous Model, at screen) {
 	m.selectionMissing = "Selected " + identity + " is no longer available in these results; move to select another"
 }
 
+// The query API currently exposes missing-record refusals by invariant text;
+// these prefixes must change with its wording until it exposes a category.
 func missingRecord(err error) bool {
 	var refusal *ledger.Refusal
 	if !errors.As(err, &refusal) {
@@ -121,9 +123,11 @@ func (m *Model) publish(snapshot *ledger.Snapshot) {
 			staged.documents = nil
 			staged.selectionMissing = "Document selection is no longer available at the new ledger revision"
 		}
-		if m.screen == documentsScreen && staged.documents != nil {
+		if staged.documents != nil {
+			// The viewer and its references can outlive their return-list row.
 			staged.screen = documentsScreen
 			staged.preserveSelection(previous, documentsScreen)
+			staged.screen = at
 		}
 	}
 	if at == sliceScreen && staged.failure == nil {
@@ -142,22 +146,36 @@ func (m *Model) publish(snapshot *ledger.Snapshot) {
 		}
 	}
 	staged.screen = m.screen
-	if m.screen == referencesScreen && !m.referencesFromDoc && m.referenceOrigin == sliceScreen {
-		staged.references = nil
-		if staged.slice != nil && staged.slice.Claim != nil {
-			staged.references = []ledger.LabeledReference{{Label: "current Claim state", Reference: staged.slice.Claim.Reference}}
-		}
-		staged.cursor[referencesScreen] = 0
-	}
+	staged.refreshCurrentReferences()
 	if overlay {
+		if at == sliceScreen && m.screen != diagnosticsScreen {
+			staged.detail.SetYOffset(previous.detail.YOffset)
+		}
 		// Keep an exact opened document's rendered text, selection and scroll.
 		staged.docViewport = previous.docViewport
 		staged.renderProblem = previous.renderProblem
 		staged.failure = nil
 		staged.newerDocument = staged.documentHasNewerVersion()
 	}
+	if m.screen == diagnosticsScreen {
+		staged.layoutDetail()
+		staged.detail.SetYOffset(previous.detail.YOffset)
+	}
 	staged.refreshFailure = nil
 	*m = staged
+}
+
+// A current Claim reference is a fact of the selected snapshot, not of the
+// pinned document or the return frame that originally opened it.
+func (m *Model) refreshCurrentReferences() {
+	if m.referencesFromDoc || m.referenceOrigin != sliceScreen {
+		return
+	}
+	m.references = nil
+	if m.slice != nil && m.slice.Claim != nil {
+		m.references = []ledger.LabeledReference{{Label: "current Claim state", Reference: m.slice.Claim.Reference}}
+	}
+	m.cursor[referencesScreen] = 0
 }
 
 func (m Model) documentHasNewerVersion() bool {

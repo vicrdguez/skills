@@ -291,6 +291,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refreshFailure = msg.err
 			return m, nil
 		}
+		// Commands can execute in a different order from issuance or delivery.
+		// Check the committed HEAD at publication, not the request number alone.
+		current, err := m.snapshot.CurrentRevision()
+		if err != nil {
+			m.refreshFailure = err
+			return m, nil
+		}
+		if msg.snapshot.Revision != current {
+			return m, m.requestRefresh()
+		}
 		m.refreshFailure = nil
 		if msg.snapshot.Revision != m.snapshot.Revision {
 			m.publish(msg.snapshot)
@@ -308,11 +318,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if key.Matches(msg, m.keys.Refresh) {
-		return m, m.requestRefresh()
-	}
 	if m.typing != nil {
 		return m.typeSearch(msg)
+	}
+	if key.Matches(msg, m.keys.Refresh) {
+		return m, m.requestRefresh()
 	}
 	finding := m.finding()
 	documentOverlay := isDocumentOverlay(m.screen) || (m.screen == diagnosticsScreen && m.diagnosticReturn == documentsScreen)
@@ -670,6 +680,7 @@ func (m *Model) back() {
 			m.referenceOrigin, m.referencesFromDoc = frame.referenceOrigin, frame.referencesFromDoc
 			m.cursor[referencesScreen] = frame.referenceCursor
 			m.referenceHistory = append([]referenceFrame(nil), frame.referenceHistory...)
+			m.refreshCurrentReferences()
 			if frame.hasDocument {
 				if count := len(m.referenceHistory); count > 0 {
 					previous := m.referenceHistory[count-1]
@@ -688,13 +699,17 @@ func (m *Model) back() {
 		m.failure = nil
 	}
 
-	if fromDocumentOverlay || isDocumentOverlay(m.screen) {
+	if isDocumentOverlay(m.screen) || (fromDocumentOverlay && m.screen == diagnosticsScreen) {
 		m.layoutDetail()
 		return
 	}
 	previous := *m
 	previous.cursor = maps.Clone(m.cursor)
+	offset := m.detail.YOffset
 	m.load()
+	if fromDocumentOverlay && m.screen == sliceScreen {
+		m.detail.SetYOffset(offset)
+	}
 	if wasSlice && m.screen == resultsScreen {
 		m.preserveSelection(previous, resultsScreen)
 	}

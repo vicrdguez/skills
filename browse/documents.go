@@ -95,6 +95,7 @@ func (m *Model) restoreReferenceFrame(frame referenceFrame) {
 	m.references = append([]ledger.LabeledReference(nil), frame.references...)
 	m.referenceOrigin, m.referencesFromDoc = frame.origin, frame.fromDocument
 	m.cursor[referencesScreen] = frame.cursor
+	m.refreshCurrentReferences()
 }
 
 func (m *Model) openDocument(document ledger.Document) {

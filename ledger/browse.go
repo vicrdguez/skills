@@ -214,6 +214,10 @@ type sliceTree struct {
 // boundary used by CLI queries. The previous Snapshot remains valid.
 func (v *Snapshot) Refresh() (*Snapshot, error) { return v.store.Snapshot() }
 
+// CurrentRevision checks the local committed HEAD without reading working-tree
+// edits. A browser uses it before publishing a completed asynchronous read.
+func (v *Snapshot) CurrentRevision() (string, error) { return v.store.head() }
+
 // Snapshot selects the ledger's current committed revision and its record
 // tree. Failure to read the ledger itself is an error; damaged records are
 // diagnosed by the queries instead.
