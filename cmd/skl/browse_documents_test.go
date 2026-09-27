@@ -43,6 +43,10 @@ func newBrowseDocumentsFixture(t *testing.T) browseDocumentsFixture {
 		"projects/widgets/archive/legacy/proposal.md":                 "# Legacy proposal\n\nArchived proposal description.\n",
 		"projects/widgets/archive/legacy/old/intent.md":               "# Legacy intent\n\nArchived accepted intent.\n",
 		"projects/widgets/archive/legacy/old/behavior.md":             "# Legacy behavior\n\nArchived accepted behavior.\n",
+		"projects/widgets/archive/orders/proposal.md":                 "# Archived orders\n\nArchived same-name Proposal.\n",
+		"projects/widgets/archive/orders/cancel/intent.md":            "# Archived cancellation intent\n\nArchived same-name Slice.\n",
+		"projects/widgets/archive/orders/cancel/behavior.md":          "# Archived cancellation behavior\n\nArchived behavior.\n",
+		"projects/widgets/archive/orders/cancel/state.json":           `{"state":"merged","title":"Archived cancellation"}`,
 		"projects/gadgets/proposals/tools/hammer/intent.md":           "# Hammer intent\n\nAccepted tools intent.\n",
 		"projects/gadgets/proposals/tools/hammer/behavior.md":         "# Hammer behavior\n\nAccepted tools behavior.\n",
 		"projects/gadgets/proposals/tools/hammer/implement-report.md": "---\nschema: not-an-integer\noutcome: pass\n---\n# Still readable\n\nMalformed metadata must not hide these bytes.\n",
@@ -150,10 +154,20 @@ func TestBrowseDocumentsExposeCurrentAndArchivedEvidenceReadOnly(t *testing.T) {
 		!hasDocument(proposal.Documents.Documents, ledger.ContractDocumentKind, "projects/widgets/proposals/orders/cancel/plan.md") {
 		t.Fatalf("Proposal discovery omitted its description or accepted plan: %+v", proposal.Documents.Documents)
 	}
+	archivedSameName := browseDocumentsJSON(t, app, output, "documents", "--project", "widgets", "--proposal", "orders", "--archived")
+	if archivedSameName.Status != "shown" || archivedSameName.Documents == nil || !archivedSameName.Documents.Archived ||
+		!hasDocument(archivedSameName.Documents.Documents, ledger.ProposalDocumentKind, "projects/widgets/archive/orders/proposal.md") {
+		t.Fatalf("--archived did not select the same-name archived Proposal: %+v", archivedSameName)
+	}
 
 	current := browseDocumentsJSON(t, app, output, "documents", "--project", "widgets", "--item", "orders/cancel")
 	if current.Status != "shown" || current.Documents == nil || current.Documents.Revision != fixture.currentRevision || current.Documents.Slice != "cancel" {
 		t.Fatalf("current Slice documents = %+v", current)
+	}
+	archivedSameNameSlice := browseDocumentsJSON(t, app, output, "documents", "--project", "widgets", "--item", "orders/cancel", "--archived")
+	if archivedSameNameSlice.Status != "shown" || archivedSameNameSlice.Documents == nil || !archivedSameNameSlice.Documents.Archived ||
+		!hasDocument(archivedSameNameSlice.Documents.Documents, ledger.ContractDocumentKind, "projects/widgets/archive/orders/cancel/intent.md") {
+		t.Fatalf("--archived did not select the same-name archived Slice: %+v", archivedSameNameSlice)
 	}
 	if !hasDocument(current.Documents.Documents, ledger.ImplementReportDocumentKind, fixture.implementPath) ||
 		!hasDocument(current.Documents.Documents, ledger.WatchdogReportDocumentKind, "projects/widgets/proposals/orders/cancel/watchdog-report.md") ||

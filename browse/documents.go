@@ -23,13 +23,13 @@ func (m *Model) openDocuments() {
 			return
 		}
 		m.docContext = proposalScreen
-		m.documents, m.failure = m.snapshot.ProposalDocuments(m.project, m.proposal)
+		m.documents, m.failure = m.snapshot.ProposalDocumentsAt(m.project, m.proposal, m.archived)
 	case sliceScreen:
 		if m.slice == nil {
 			return
 		}
 		m.docContext = sliceScreen
-		m.documents, m.failure = m.snapshot.SliceDocuments(m.project, m.item)
+		m.documents, m.failure = m.snapshot.SliceDocumentsAt(m.project, m.item, m.archived)
 	default:
 		m.status = "Open documents from a Proposal or Slice"
 		return

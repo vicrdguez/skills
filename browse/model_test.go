@@ -5,6 +5,7 @@ package browse_test
 // committed ledger fixture.
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -45,8 +46,9 @@ func gitOutput(t *testing.T, root string, args ...string) string {
 }
 
 // fixtureLedger commits two Projects: widgets with an attached, watchdog
-// claimed Slice and an archived Proposal, and gadgets with one Slice.
-func fixtureLedger(t *testing.T) *ledger.Snapshot {
+// claimed Slice that depends on a Slice of an archived Proposal and blocks a
+// sibling, and gadgets with one Slice.
+func fixtureLedger(t *testing.T, extras ...func(string)) *ledger.Snapshot {
 	t.Helper()
 	root := t.TempDir()
 	git(t, root, "init", "-q", "-b", "main")
@@ -62,10 +64,11 @@ func fixtureLedger(t *testing.T) *ledger.Snapshot {
 	write(t, root, "projects/widgets/proposals/orders/refund/behavior.md", "# Behavior\n")
 	write(t, root, "projects/widgets/proposals/orders/broken/intent.md", "# Intent\n")
 	write(t, root, "projects/widgets/proposals/orders/broken/behavior.md", "# Behavior\n")
-	write(t, root, "projects/widgets/proposals/orders/cancel/state.json", `{"state": "ready_for_implementation", "title": "Cancel orders", "branch": "feat/cancel",
-		"issue": {"repository": "acme/widgets", "number": 11}, "submission": {"repository": "acme/widgets", "number": 12}, "decision": true,
-		"dependencies": ["orders/refund"], "claim": {"phase": "watchdog", "basis": "3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c", "inputs": {"contract": []}}}`)
-	write(t, root, "projects/widgets/proposals/orders/refund/state.json", `{"state": "ready_for_implementation", "title": "Refund orders", "branch": "feat/refund"}`)
+	write(t, root, cancelPath+"/state.json", `{"state": "ready_for_implementation", "title": "Cancel orders", "branch": "feat/cancel",
+		"issue": {"repository": "acme/widgets", "number": 11}, "submission": {"repository": "acme/widgets", "number": 12},
+		"dependencies": ["proposals/legacy/old"], "claim": {"phase": "watchdog", "basis": "3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c", "inputs": {"contract": []}}}`)
+	write(t, root, "projects/widgets/proposals/orders/refund/state.json", `{"state": "ready_for_implementation", "title": "Refund orders", "branch": "feat/refund",
+		"dependencies": ["proposals/orders/cancel", "proposals/gone/missing"]}`)
 	write(t, root, "projects/widgets/proposals/orders/broken/state.json", `{broken`)
 	write(t, root, "projects/widgets/archive/legacy/proposal.json", `{"accepted": "2023-01-01T00:00:00Z"}`)
 	write(t, root, "projects/widgets/archive/legacy/proposal.md", "# Legacy proposal\n\nArchived description.\n")
@@ -78,6 +81,9 @@ func fixtureLedger(t *testing.T) *ledger.Snapshot {
 	write(t, root, "projects/gadgets/proposals/tools/hammer/state.json", `{"state": "rework", "title": "Hammer", "branch": "hammer"}`)
 	write(t, root, "projects/gadgets/proposals/tools/hammer/intent.md", "# Intent\n")
 	write(t, root, "projects/gadgets/proposals/tools/hammer/behavior.md", "# Behavior\n")
+	for _, extra := range extras {
+		extra(root)
+	}
 	git(t, root, "add", "-A")
 	git(t, root, "commit", "-q", "-m", "accepted records")
 	base := gitOutput(t, root, "rev-parse", "HEAD")
@@ -85,7 +91,7 @@ func fixtureLedger(t *testing.T) *ledger.Snapshot {
 	contractRef := []ledger.Reference{{Commit: base, Path: cancelPath + "/intent.md"}, {Commit: base, Path: cancelPath + "/behavior.md"}}
 	write(t, root, cancelPath+"/state.json", `{"state": "awaiting_review", "title": "Cancel orders", "branch": "feat/cancel",
 		"issue": {"repository": "acme/widgets", "number": 11}, "submission": {"repository": "acme/widgets", "number": 12}, "decision": true,
-		"dependencies": ["orders/refund"], "claim": {"phase": "watchdog", "basis": "3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c", "inputs": {"contract": []}}}`)
+		"dependencies": ["proposals/legacy/old"], "claim": {"phase": "watchdog", "basis": "3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c", "inputs": {"contract": []}}}`)
 	implementation, err := ledger.FormatReport(ledger.ImplementPhase, ledger.Report{
 		Schema: 1, Outcome: "awaiting_review",
 		Source: ledger.SourceRevisions{Head: strings.Repeat("a", 40), Target: strings.Repeat("b", 40)},
@@ -125,9 +131,9 @@ type session struct {
 	opened []string
 }
 
-func start(t *testing.T, project string) *session {
+func start(t *testing.T, project string, extras ...func(string)) *session {
 	s := &session{t: t}
-	s.model = browse.New(fixtureLedger(t), browse.Options{Project: project, Open: func(url string) error {
+	s.model = browse.New(fixtureLedger(t, extras...), browse.Options{Project: project, Open: func(url string) error {
 		s.opened = append(s.opened, url)
 		return nil
 	}})
@@ -146,6 +152,8 @@ func (s *session) press(keys ...string) {
 			msg = tea.KeyMsg{Type: tea.KeyEsc}
 		case "down":
 			msg = tea.KeyMsg{Type: tea.KeyDown}
+		case "tab":
+			msg = tea.KeyMsg{Type: tea.KeyTab}
 		default:
 			msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(name)}
 		}
@@ -245,7 +253,7 @@ func TestBrowserReadsReportsFollowsExactHistoricalReferencesAndPreservesScroll(t
 	s.shows("Exact ledger reference unavailable", strings.Repeat("c", 40), "watchdog-report.md", "no substitute was opened")
 	s.hides("Watchdog bytes remain readable")
 	s.press("esc", "r", "enter")
-	s.shows("HISTORICAL", "current lifecycle: Awaiting Review", "current Claim: watchdog reservation", "current Dependencies: orders/refund (Ready for Implementation)")
+	s.shows("HISTORICAL", "current lifecycle: Awaiting Review", "current Claim: watchdog reservation", "current Dependencies: legacy/old (Merged)")
 	s.send(tea.KeyMsg{Type: tea.KeyPgDown})
 	s.shows("ready_for_implementation")
 	s.press("esc")
@@ -273,9 +281,9 @@ func TestBrowserFollowsDecisionAndClaimReferencesWithoutChangingSliceContext(t *
 	s.press("esc", "esc", "esc")
 	s.shows("Slice: orders/cancel", "Lifecycle: Awaiting Review", "Claim state reference:")
 	s.press("r", "enter")
-	s.shows("projects/widgets/proposals/orders/cancel/state.json", "lifecycle: Awaiting Review", "current Claim: watchdog reservation", "Dependencies: orders/refund (Ready for Implementation)")
+	s.shows("projects/widgets/proposals/orders/cancel/state.json", "lifecycle: Awaiting Review", "current Claim: watchdog reservation", "Dependencies: legacy/old (Merged)")
 	s.press("esc", "esc")
-	s.shows("Slice: orders/cancel", "Lifecycle: Awaiting Review", "Depends on: orders/refund (Ready for Implementation)")
+	s.shows("Slice: orders/cancel", "Lifecycle: Awaiting Review", "Depends on: legacy/old [archived] — Old work (Merged; satisfied)")
 }
 
 func TestBrowserReadsArchivedDocumentsAndNamesAbsentOptionalRecords(t *testing.T) {
@@ -311,11 +319,15 @@ func TestBrowserOpensRecordedAttachmentsOnlyOnExplicitAction(t *testing.T) {
 	s.shows("No recorded pull request attachment to open")
 }
 
-func TestBrowserFitsNarrowAndWideTerminals(t *testing.T) {
+// fits presses each key sequence in turn at both terminal sizes and fails
+// when a view overflows the terminal.
+func fits(t *testing.T, sequences [][]string) []*session {
+	t.Helper()
+	var sessions []*session
 	for _, size := range []tea.WindowSizeMsg{{Width: 40, Height: 14}, {Width: 140, Height: 30}} {
 		s := start(t, "widgets")
 		s.send(size)
-		for _, keys := range [][]string{nil, {"enter"}, {"down", "enter"}} {
+		for _, keys := range sequences {
 			s.press(keys...)
 			view := s.model.View()
 			if height := lipgloss.Height(view); height > size.Height {
@@ -327,6 +339,278 @@ func TestBrowserFitsNarrowAndWideTerminals(t *testing.T) {
 				}
 			}
 		}
+		sessions = append(sessions, s)
+	}
+	return sessions
+}
+
+func TestBrowserFitsNarrowAndWideTerminals(t *testing.T) {
+	for _, s := range fits(t, [][]string{nil, {"enter"}, {"down", "enter"}}) {
 		s.shows("Slice: orders/cancel")
+	}
+}
+
+func downs(count int) []string {
+	return strings.Fields(strings.Repeat("down ", count))
+}
+
+func TestBrowserNavigatesFromClaimFactToSlices(t *testing.T) {
+	s := start(t, "widgets")
+	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})
+	s.press("f")
+	s.shows("skl browse › Find slices › Facts", "✓ Any lifecycle (3)", "Awaiting Review (1)", "watchdog claim (1)", "unclaimed (1)",
+		"! Counted only under Any: 1 with unknown lifecycle, 1 with unknown claim")
+
+	s.press(downs(10)...)
+	s.shows("Finds: any lifecycle · watchdog claim in Project widgets")
+	s.press("enter")
+	s.shows("skl browse › Find slices", "Finding: any lifecycle · watchdog claim in Project widgets",
+		"Proposal orders", "orders/cancel — Awaiting Review · watchdog claim — Cancel orders",
+		"Undecided: unknown facts", "! orders/broken — lifecycle unknown · claim unknown",
+		"! 1 matching slice; 1 undecided by unknown facts; incomplete")
+	s.hides("orders/refund", "tools/hammer")
+
+	s.press("enter")
+	s.shows("skl browse › Find slices › widgets › orders/cancel", "Lifecycle: Awaiting Review", "Claim: watchdog reservation")
+	s.press("esc")
+	s.shows("Finding: any lifecycle · watchdog claim")
+	s.press("esc")
+	s.shows("skl browse › Projects › widgets", "Proposals (1)")
+}
+
+func TestBrowserCombinesNameSearchWithFactsScopeAndGrouping(t *testing.T) {
+	s := start(t, "widgets")
+	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})
+	s.press("/", "q", "u", "i", "t")
+	s.shows("Search names: quit█")
+	s.press("esc")
+	s.hides("Search names:")
+
+	s.press("/", "ORDERS", "enter")
+	s.shows(`Finding: any lifecycle · any claim · name contains "ORDERS" in Project widgets`, "3 matching slices", "orders/refund")
+	s.press("f", "down", "enter")
+	s.shows(`Finding: Ready for Implementation · any claim · name contains "ORDERS"`, "orders/refund — Ready for Implementation · unclaimed",
+		"! orders/broken", "1 matching slice; 1 undecided")
+	s.hides("orders/cancel")
+
+	s.press("/", "hammer", "enter")
+	s.shows(`Finding: Ready for Implementation · any claim · name contains "hammer" in Project widgets`, "No Slice is known to match; 1 undecided by unknown facts")
+	s.press("w")
+	s.shows("in every Project", "No Slice is known to match")
+	s.hides("tools/hammer")
+	s.press("f", "k", "enter")
+	s.shows("any lifecycle · any claim", "gadgets · Proposal tools", "tools/hammer — Rework · unclaimed — Hammer", "widgets · Undecided")
+	s.hides("orders/refund")
+	s.press("g")
+	s.shows("grouped by lifecycle", "gadgets · Rework", "widgets · Undecided")
+	s.press("enter")
+	s.shows("skl browse › Find slices › gadgets › tools/hammer", "Lifecycle: Rework")
+}
+
+func TestBrowserTellsEmptyResultsFromUnknownOnes(t *testing.T) {
+	s := start(t, "gadgets")
+	s.press("/", "zzz", "enter")
+	s.shows("No Slice matches this selection.")
+	s.hides("incomplete")
+
+	s.press("w")
+	s.shows("No Slice is known to match; 1 undecided by unknown facts; incomplete", "widgets · Undecided", "orders/broken")
+	s.press("a", "/", "old", "enter")
+	s.shows("archived shown", "legacy/old [archived] — Merged · unclaimed — Old work")
+}
+
+func TestBrowserFitsFindingScreens(t *testing.T) {
+	for _, s := range fits(t, [][]string{{"f"}, {"enter"}, {"w", "g"}, {"/", "orders"}, {"enter"}}) {
+		s.shows("Find slices", "Finding:", "> ")
+	}
+}
+
+func TestBrowserReturnsToOriginalSliceAfterFindingFromDetail(t *testing.T) {
+	s := start(t, "widgets")
+	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})
+	s.press("enter", "down", "enter")
+	s.shows("skl browse › Projects › widgets › orders › cancel", "Slice: orders/cancel")
+	s.press("/", "refund", "enter", "enter")
+	s.shows("skl browse › Find slices › widgets › orders/refund", "Slice: orders/refund")
+	s.press("esc")
+	s.shows("Finding:", "orders/refund")
+	s.press("esc")
+	s.shows("skl browse › Projects › widgets › orders › cancel", "Slice: orders/cancel")
+	s.press("esc")
+	s.shows("skl browse › Projects › widgets › orders", "Slices (3)")
+	s.press("esc")
+	s.shows("skl browse › Projects › widgets", "Proposals (1)")
+}
+
+func TestBrowserKeepsHealthyResultsVisibleWithManyMembershipDiagnostics(t *testing.T) {
+	for _, size := range []tea.WindowSizeMsg{{Width: 40, Height: 14}, {Width: 140, Height: 30}} {
+		s := start(t, "widgets", func(root string) {
+			for i := 0; i < 30; i++ {
+				write(t, root, fmt.Sprintf("projects/widgets/proposals/orders/Bad Name %02d/state.json", i), `{}`)
+			}
+		})
+		s.send(size)
+		s.press("/", "cancel", "enter")
+		s.shows("orders/cancel", "> ", "incomplete", "diagnostic")
+		s.press("d")
+		s.shows("Diagnostics", "Bad Name 00")
+		for i := 0; i < 20; i++ {
+			s.press("pgdown")
+		}
+		s.shows("Bad Name 29")
+		s.press("esc")
+		s.shows("orders/cancel", "> ")
+		s.press("enter")
+		s.shows("Slice: orders/cancel", "Lifecycle: Awaiting Review")
+	}
+}
+
+func TestBrowserOpensTheSelectedArchivedSliceWhenNamesCollide(t *testing.T) {
+	s := start(t, "widgets", func(root string) {
+		write(t, root, "projects/widgets/archive/orders/proposal.json", `{"accepted": "2023-01-01T00:00:00Z"}`)
+		write(t, root, "projects/widgets/archive/orders/cancel/state.json", `{"state": "merged", "title": "Archived cancellation", "branch": "old-cancel"}`)
+		write(t, root, "projects/widgets/archive/orders/cancel/intent.md", "# Intent\n\nArchived cancellation intent.\n")
+		write(t, root, "projects/widgets/archive/orders/cancel/behavior.md", "# Behavior\n\nArchived cancellation behavior.\n")
+	})
+	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})
+	s.press("a", "/", "Archived cancellation", "enter")
+	s.shows("Proposal orders [archived]", "orders/cancel [archived] — Merged")
+	s.press("enter")
+	s.shows("Slice: orders/cancel", "Title: Archived cancellation", "Location: archived proposal", "Lifecycle: Merged")
+	s.press("d", "enter")
+	s.shows("Find slices › widgets › orders/cancel", "intent.md — accepted contract", "Archived cancellation intent")
+	s.hides("Cancellation intent.")
+	s.press("esc", "esc")
+	s.shows("Slice: orders/cancel", "Title: Archived cancellation", "Lifecycle: Merged")
+	s.press("esc", "esc")
+	s.shows("skl browse › Projects › widgets", "archived shown", "Proposals (3)")
+	s.press("down", "down", "enter")
+	s.shows("Proposal orders [archived]", "Slices (1)")
+	s.press("enter")
+	s.shows("Title: Archived cancellation", "Lifecycle: Merged")
+}
+
+func TestBrowserKeepsItsContextAfterOpeningAResultElsewhere(t *testing.T) {
+	s := start(t, "widgets")
+	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})
+	s.press("enter", "/", "hammer", "enter")
+	s.shows(`name contains "hammer" in Project widgets`)
+	s.press("w", "enter")
+	s.shows("skl browse › Find slices › gadgets › tools/hammer", "Lifecycle: Rework")
+	s.press("f")
+	s.shows("skl browse › Find slices › Facts")
+	s.press("esc")
+	s.shows(`name contains "hammer" in every Project`, "tools/hammer")
+	s.press("w")
+	s.shows(`name contains "hammer" in Project widgets`)
+	s.press("esc")
+	s.shows("skl browse › Projects › widgets › orders", "Slices (3)")
+}
+
+func TestBrowserKeepsArchiveVisibilityWhenLeavingFinding(t *testing.T) {
+	s := start(t, "widgets")
+	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})
+	s.press("/", "old", "enter", "a", "enter")
+	s.shows("Slice: legacy/old", "Location: archived proposal")
+	s.press("esc", "esc")
+	s.shows("skl browse › Projects › widgets", "archived shown", "Proposals (2)", "legacy [archived]")
+}
+
+func TestBrowserFindsFromRelatedSliceAndRestoresBothHistories(t *testing.T) {
+	s := start(t, "widgets")
+	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})
+	s.press("enter", "down", "enter", "enter")
+	s.shows("skl browse › Projects › widgets › legacy › old", "Location: archived proposal")
+
+	// Cancelling the fact picker must not consume the relationship history.
+	s.press("f", "esc")
+	s.shows("skl browse › Projects › widgets › legacy › old")
+	s.press("/", "refund", "enter", "d", "esc")
+	s.shows("Finding:", "orders/refund")
+	s.press("enter", "enter")
+	s.shows("skl browse › Find slices › widgets › orders/cancel")
+	s.press("esc")
+	s.shows("skl browse › Find slices › widgets › orders/refund")
+	s.press("esc")
+	s.shows("Finding:", "orders/refund")
+	s.press("esc")
+	s.shows("skl browse › Projects › widgets › legacy › old", "Location: archived proposal")
+	s.press("esc")
+	s.shows("skl browse › Projects › widgets › orders › cancel", "> Depends on: legacy/old")
+	s.press("esc")
+	s.shows("Slices (3)", "> cancel — Awaiting Review")
+}
+
+func TestBrowserFollowsArchivedRelationshipsFromResultsWhenNamesCollide(t *testing.T) {
+	s := start(t, "widgets", func(root string) {
+		write(t, root, "projects/widgets/archive/orders/proposal.json", `{"accepted": "2023-01-01T00:00:00Z"}`)
+		write(t, root, "projects/widgets/archive/orders/refund/state.json", `{"state": "merged", "title": "Archived refund", "branch": "old-refund", "dependencies": ["proposals/legacy/old"]}`)
+	})
+	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})
+	s.press("/", "cancel", "enter", "enter", "enter")
+	s.shows("skl browse › Find slices › widgets › legacy/old", "archived hidden", "Blocks: orders/refund [archived]")
+	s.press("tab", "enter")
+	s.shows("Slice: orders/refund", "Title: Archived refund", "Location: archived proposal", "Lifecycle: Merged")
+	s.press("esc")
+	s.shows("Slice: legacy/old", "> Blocks: orders/refund [archived]")
+	s.press("esc")
+	s.shows("skl browse › Find slices › widgets › orders/cancel")
+	s.press("esc")
+	s.shows("Finding:", "orders/cancel")
+	s.press("esc")
+	s.shows("skl browse › Projects › widgets", "Proposals (1)")
+}
+
+func TestBrowserReopensFactsFromRelatedResultWithoutKeepingItsHistory(t *testing.T) {
+	s := start(t, "widgets")
+	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})
+	s.press("/", "cancel", "enter", "enter", "enter", "f")
+	s.shows("Find slices › Facts")
+	s.press("esc")
+	s.shows("Finding:", "orders/cancel")
+	s.press("enter", "esc")
+	s.shows("Finding:", "orders/cancel")
+	s.press("esc")
+	s.shows("skl browse › Projects › widgets", "Proposals (1)")
+}
+
+func TestBrowserFollowsRelationshipsAndRestoresContext(t *testing.T) {
+	s := start(t, "widgets")
+	s.send(tea.WindowSizeMsg{Width: 120, Height: 40})
+	s.press("enter", "down", "enter")
+	s.shows("Slice: orders/cancel", "archived hidden",
+		"> Depends on: legacy/old [archived] — Old work (Merged; satisfied)",
+		"  Blocks: orders/refund — Refund orders (Ready for Implementation)")
+
+	s.press("enter")
+	s.shows("skl browse › Projects › widgets › legacy › old", "archived hidden", "Slice: legacy/old",
+		"Location: archived proposal", "Lifecycle: Merged", "> Blocks: orders/cancel — Cancel orders (Awaiting Review)")
+	s.press("d", "enter")
+	s.shows("intent.md — accepted contract")
+	s.press("esc", "esc")
+	s.shows("skl browse › Projects › widgets › legacy › old", "Slice: legacy/old", "> Blocks: orders/cancel")
+	s.press("a")
+	s.shows("archived shown", "Slice: legacy/old")
+	s.press("esc")
+	s.shows("skl browse › Projects › widgets › orders › cancel", "archived hidden", "> Depends on: legacy/old")
+
+	s.press("tab", "enter")
+	s.shows("Slice: orders/refund", "> Depends on: orders/cancel — Cancel orders (Awaiting Review; unsatisfied until Merged)",
+		"Depends on: gone/missing (unresolved: ",
+		"Blocks incomplete: 1 unreadable or unsupported record may also depend on this Slice",
+		"! slice widgets/orders/broken: state.json is unreadable")
+	s.hides("Blocks: none")
+	s.press("tab")
+	s.shows("> Depends on: orders/cancel")
+	s.press("esc")
+	s.shows("Slice: orders/cancel", "> Blocks: orders/refund")
+
+	s.press("esc")
+	s.shows("Slices (3)", "> cancel — Awaiting Review")
+	s.press("esc")
+	s.shows("Proposals (1)", "archived hidden")
+	s.hides("legacy")
+	if len(s.opened) != 0 {
+		t.Fatalf("following relationships opened links: %v", s.opened)
 	}
 }

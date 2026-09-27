@@ -59,10 +59,20 @@ type DocumentSet struct {
 
 // ProposalDocuments returns the proposal description and the committed
 // documents of each member Slice. Membership and current contents are pinned
-// to this Snapshot's revision; archived Proposals are resolved at that
-// revision and retain their archive paths.
+// to this Snapshot's revision; an active Proposal is preferred when both
+// locations hold the same identity.
 func (v *Snapshot) ProposalDocuments(projectName, proposalName string) (*DocumentSet, error) {
-	project, proposal, err := v.proposal(projectName, proposalName)
+	return v.proposalDocumentsLocated(projectName, proposalName, nil)
+}
+
+// ProposalDocumentsAt selects the recorded location when both active and
+// archived Proposals have the same name.
+func (v *Snapshot) ProposalDocumentsAt(projectName, proposalName string, archived bool) (*DocumentSet, error) {
+	return v.proposalDocumentsLocated(projectName, proposalName, &archived)
+}
+
+func (v *Snapshot) proposalDocumentsLocated(projectName, proposalName string, location *bool) (*DocumentSet, error) {
+	project, proposal, err := v.proposalLocated(projectName, proposalName, location)
 	if err != nil {
 		return nil, err
 	}
@@ -80,8 +90,19 @@ func (v *Snapshot) ProposalDocuments(projectName, proposalName string) (*Documen
 }
 
 // SliceDocuments returns one Slice's accepted content, latest committed
-// phase reports, and active Human Decision at this Snapshot's revision.
+// phase reports, and active Human Decision at this Snapshot's revision. An
+// active Proposal is preferred when both locations hold the same identity.
 func (v *Snapshot) SliceDocuments(projectName, item string) (*DocumentSet, error) {
+	return v.sliceDocumentsLocated(projectName, item, nil)
+}
+
+// SliceDocumentsAt selects the recorded location when active and archived
+// Proposals contain the same Slice identity.
+func (v *Snapshot) SliceDocumentsAt(projectName, item string, archived bool) (*DocumentSet, error) {
+	return v.sliceDocumentsLocated(projectName, item, &archived)
+}
+
+func (v *Snapshot) sliceDocumentsLocated(projectName, item string, location *bool) (*DocumentSet, error) {
 	proposalName, sliceName, found := strings.Cut(item, "/")
 	if !found || !ValidRecordName(proposalName) || !ValidRecordName(sliceName) {
 		return nil, refuse(
@@ -89,7 +110,7 @@ func (v *Snapshot) SliceDocuments(projectName, item string) (*DocumentSet, error
 			"select a Slice listed by its Proposal, such as add-order-cancellation/foundation",
 		)
 	}
-	project, proposal, err := v.proposal(projectName, proposalName)
+	project, proposal, err := v.proposalLocated(projectName, proposalName, location)
 	if err != nil {
 		return nil, err
 	}

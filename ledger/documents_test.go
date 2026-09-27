@@ -144,6 +144,93 @@ func TestSnapshotDocumentsResolveArchivedProposalAndHistoricalPath(t *testing.T)
 	}
 }
 
+func TestSnapshotDocumentsSelectActiveOrArchivedSameName(t *testing.T) {
+	l := newDeliveryLedger(t)
+	l.addProject("widgets", "acme/widgets")
+	l.addSlice("widgets", "orders", "cancel", ledger.ReadyForImplementation, nil, deliveryInitial)
+	l.addFile("projects/widgets/proposals/orders/proposal.md", "active proposal description\n")
+	l.addFile(deliveryContractPath("widgets", "orders/cancel", "intent.md"), "active Slice intent\n")
+	activeRevision := l.commitAll("accept active proposal")
+
+	if err := os.MkdirAll(filepath.Join(l.root, "projects", "widgets", "archive"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	deliveryGit(t, l.root, "mv", "projects/widgets/proposals/orders", "projects/widgets/archive/orders")
+	l.commitAll("archive proposal")
+
+	l.addSlice("widgets", "orders", "cancel", ledger.ReadyForImplementation, nil, deliveryInitial)
+	l.addFile("projects/widgets/proposals/orders/proposal.md", "new active proposal description\n")
+	l.addFile(deliveryContractPath("widgets", "orders/cancel", "intent.md"), "new active Slice intent\n")
+	currentRevision := l.commitAll("record replacement active proposal")
+	snapshot, err := l.store().Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if currentRevision == activeRevision {
+		t.Fatal("fixture did not advance after adding the active replacement")
+	}
+
+	for _, query := range []struct {
+		name     string
+		wantPath string
+		wantText string
+		get      func(bool) (*ledger.DocumentSet, error)
+	}{
+		{
+			name: "Proposal", wantPath: "projects/widgets/proposals/orders/proposal.md", wantText: "new active proposal description",
+			get: func(archived bool) (*ledger.DocumentSet, error) {
+				return snapshot.ProposalDocumentsAt("widgets", "orders", archived)
+			},
+		},
+		{
+			name: "Slice", wantPath: "projects/widgets/proposals/orders/cancel/intent.md", wantText: "new active Slice intent",
+			get: func(archived bool) (*ledger.DocumentSet, error) {
+				return snapshot.SliceDocumentsAt("widgets", "orders/cancel", archived)
+			},
+		},
+	} {
+		t.Run(query.name, func(t *testing.T) {
+			for _, archived := range []bool{false, true} {
+				set, err := query.get(archived)
+				if err != nil {
+					t.Fatalf("query archived=%t documents: %v", archived, err)
+				}
+				wantPath, wantText := query.wantPath, query.wantText
+				if archived {
+					wantPath = strings.Replace(wantPath, "/proposals/", "/archive/", 1)
+					if query.name == "Proposal" {
+						wantText = "active proposal description"
+					} else {
+						wantText = "active Slice intent"
+					}
+				}
+				if set.Archived != archived {
+					t.Fatalf("archived=%t returned set %+v", archived, set)
+				}
+				kind := ledger.ContractDocumentKind
+				if query.name == "Proposal" {
+					kind = ledger.ProposalDocumentKind
+				}
+				document := documentByKind(t, set, kind)
+				if document.Reference != (ledger.Reference{Commit: currentRevision, Path: wantPath}) || !strings.Contains(document.Contents, wantText) {
+					t.Fatalf("archived=%t selected document %+v, want %s containing %q", archived, document, wantPath, wantText)
+				}
+			}
+		})
+	}
+
+	// The long-standing APIs keep active-first fallback behavior, while the
+	// location-specific queries must honor their explicit archived scope.
+	defaultProposal, err := snapshot.ProposalDocuments("widgets", "orders")
+	if err != nil || defaultProposal.Archived {
+		t.Fatalf("default Proposal documents = %+v, %v; want active", defaultProposal, err)
+	}
+	defaultSlice, err := snapshot.SliceDocuments("widgets", "orders/cancel")
+	if err != nil || defaultSlice.Archived {
+		t.Fatalf("default Slice documents = %+v, %v; want active", defaultSlice, err)
+	}
+}
+
 func TestSnapshotDocumentsPreserveMalformedMetadataAndIsolateMissingContent(t *testing.T) {
 	const item = "browse-records/readback"
 	l := newDeliveryLedger(t)

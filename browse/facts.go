@@ -11,24 +11,28 @@ import (
 	"github.com/vicrdguez/skills/ledger"
 )
 
-// lifecycleOrder lists the canonical lifecycles in workflow order with their
-// labels.
-var lifecycleOrder = []struct{ state, label string }{
-	{ledger.ReadyForImplementation, "Ready for Implementation"},
-	{ledger.AwaitingReview, "Awaiting Review"},
-	{ledger.Rework, "Rework"},
-	{ledger.NeedsHuman, "Needs Human"},
-	{ledger.ReadyForMerge, "Ready for Merge"},
-	{ledger.Merged, "Merged"},
-	{ledger.Superseded, "Superseded"},
+// lifecycleLabels name the canonical lifecycles.
+var lifecycleLabels = map[string]string{
+	ledger.ReadyForImplementation: "Ready for Implementation",
+	ledger.AwaitingReview:         "Awaiting Review",
+	ledger.Rework:                 "Rework",
+	ledger.NeedsHuman:             "Needs Human",
+	ledger.ReadyForMerge:          "Ready for Merge",
+	ledger.Merged:                 "Merged",
+	ledger.Superseded:             "Superseded",
+}
+
+// claimLabels name the selectable Claim values.
+var claimLabels = map[string]string{
+	ledger.ImplementPhase: "implement claim",
+	ledger.WatchdogPhase:  "watchdog claim",
+	ledger.ClaimNone:      "unclaimed",
 }
 
 // lifecycleLabel names one recorded lifecycle.
 func lifecycleLabel(state string) string {
-	for _, lifecycle := range lifecycleOrder {
-		if lifecycle.state == state {
-			return lifecycle.label
-		}
+	if label, ok := lifecycleLabels[state]; ok {
+		return label
 	}
 	return "unsupported lifecycle " + strconv.Quote(state)
 }
@@ -37,9 +41,9 @@ func lifecycleLabel(state string) string {
 func tallyText(tally ledger.Tally) string {
 	parts := []string{plural(tally.Slices, "slice")}
 	var lifecycles []string
-	for _, lifecycle := range lifecycleOrder {
-		if count := tally.Lifecycles[lifecycle.state]; count > 0 {
-			lifecycles = append(lifecycles, fmt.Sprintf("%d %s", count, lifecycle.label))
+	for _, lifecycle := range ledger.Lifecycles {
+		if count := tally.Lifecycles[lifecycle]; count > 0 {
+			lifecycles = append(lifecycles, fmt.Sprintf("%d %s", count, lifecycleLabels[lifecycle]))
 		}
 	}
 	if len(lifecycles) > 0 {
@@ -107,13 +111,28 @@ func SliceSummaryLines(slice ledger.SliceSummary) []string {
 
 // SliceLines are the labeled facts of one Slice detail.
 func SliceLines(slice *ledger.SliceDetail) []string {
+	lines, _ := sliceLines(slice)
+	return lines
+}
+
+// relation is one followable relationship line of a Slice detail: its line
+// index and the recorded Slice it opens.
+type relation struct {
+	line     int
+	item     string
+	archived bool
+}
+
+// sliceLines are SliceLines with the followable relationship lines in order.
+func sliceLines(slice *ledger.SliceDetail) ([]string, []relation) {
+	var relations []relation
 	lines := []string{"Slice: " + slice.Item}
 	if slice.Readable {
 		lines = append(lines, "Title: "+slice.Title)
 	}
 	lines = append(lines, "Project: "+slice.Project+" ("+orUnknown(slice.Repository)+")", "Location: "+locationText(slice.Archived, slice.ProposalRetired)+" proposal")
 	if !slice.Readable {
-		lines = append(lines, "Lifecycle: unknown", "Claim: unknown")
+		lines = append(lines, "Lifecycle: unknown", "Claim: unknown", "Dependencies: unknown")
 	} else {
 		lines = append(lines, "Lifecycle: "+lifecycleLabel(slice.Lifecycle))
 		if slice.Claim == nil {
@@ -129,13 +148,30 @@ func SliceLines(slice *ledger.SliceDetail) []string {
 			lines = append(lines, "Dependencies: none")
 		}
 		for _, dependency := range slice.Dependencies {
-			switch {
-			case dependency.Problem != "":
-				lines = append(lines, "Depends on: "+dependency.Item+" (lifecycle unknown: "+dependency.Problem+")")
-			default:
-				lines = append(lines, "Depends on: "+dependency.Item+" ("+lifecycleLabel(dependency.Lifecycle)+")")
+			satisfaction := "unsatisfied until Merged"
+			if dependency.Satisfied {
+				satisfaction = "satisfied"
 			}
+			if dependency.Recorded {
+				relations = append(relations, relation{len(lines), dependency.Item, dependency.Archived})
+			}
+			lines = append(lines, "Depends on: "+relationText(dependency.RelatedSlice, satisfaction))
 		}
+	}
+	for _, blocked := range slice.Blocks.Slices {
+		relations = append(relations, relation{len(lines), blocked.Item, blocked.Archived})
+		lines = append(lines, "Blocks: "+relationText(blocked, ""))
+	}
+	switch {
+	case slice.Blocks.Incomplete:
+		lines = append(lines, "Blocks incomplete: "+incompleteText(slice.Blocks.Diagnostics)+" may also depend on this Slice")
+		for _, diagnostic := range slice.Blocks.Diagnostics {
+			lines = append(lines, DiagnosticText(diagnostic))
+		}
+	case len(slice.Blocks.Slices) == 0:
+		lines = append(lines, "Blocks: none")
+	}
+	if slice.Readable {
 		lines = append(lines, "Issue: "+attachmentText(slice.Issue), "Pull request: "+attachmentText(slice.Submission))
 		if slice.Target != nil {
 			lines = append(lines, "Integration target: "+slice.Target.Repository+" "+slice.Target.Branch)
@@ -158,7 +194,126 @@ func SliceLines(slice *ledger.SliceDetail) []string {
 		}
 	}
 	lines = append(lines, "Parent issue: "+attachmentText(slice.ParentIssue), "Contract documents: "+listText(slice.Documents), "Current reports: "+listText(slice.Reports), "Press d to read Slice documents; r follows the exact Claim state reference.")
-	return append(lines, diagnosticLines(slice.Diagnostics)...)
+	return append(lines, diagnosticLines(slice.Diagnostics)...), relations
+}
+
+// relationText names a related Slice with its recorded state. Qualifier
+// follows a known lifecycle; an unknown one is never read as satisfied.
+func relationText(slice ledger.RelatedSlice, qualifier string) string {
+	text := slice.Item
+	if slice.Archived {
+		text += " [archived]"
+	}
+	if slice.Title != "" {
+		text += " — " + slice.Title
+	}
+	var state string
+	switch {
+	case !slice.Recorded:
+		state = "unresolved: " + slice.Problem
+	case slice.Problem != "":
+		state = "lifecycle unknown: " + slice.Problem
+	default:
+		state = lifecycleLabel(slice.Lifecycle)
+	}
+	if qualifier != "" {
+		state += "; " + qualifier
+	}
+	return text + " (" + state + ")"
+}
+
+// SliceRow is the compact lifecycle and Claim of one labeled Slice.
+func SliceRow(label string, slice ledger.SliceSummary) string {
+	if !slice.Readable {
+		return marked(true, label+" — lifecycle unknown · claim unknown")
+	}
+	claim := "unclaimed"
+	if slice.ClaimPhase != "" {
+		claim = slice.ClaimPhase + " claim"
+	}
+	return marked(len(slice.Diagnostics) > 0, label+" — "+lifecycleLabel(slice.Lifecycle)+" · "+claim)
+}
+
+// MatchRow is one found Slice with its identity and title.
+func MatchRow(match ledger.SliceMatch) string {
+	label := match.Item
+	if match.Archived {
+		label += " [archived]"
+	}
+	row := SliceRow(label, match.SliceSummary)
+	if match.Title != "" {
+		row += " — " + match.Title
+	}
+	return row
+}
+
+// GroupTitle names one group of found Slices.
+func GroupTitle(group ledger.SliceGroup) string {
+	switch {
+	case group.UnknownLifecycle:
+		return "Lifecycle unknown"
+	case group.Lifecycle != "":
+		return lifecycleLabel(group.Lifecycle)
+	case group.Archived:
+		return "Proposal " + group.Proposal + " [archived]"
+	}
+	return "Proposal " + group.Proposal
+}
+
+// UndecidedTitle heads the Slices whose unknown facts leave a criterion
+// undecided.
+const UndecidedTitle = "Undecided: unknown facts may or may not match"
+
+// SelectionText states every criterion and the scope of one query.
+func SelectionText(query ledger.SliceQuery) string {
+	lifecycles := []string{}
+	for _, lifecycle := range query.Lifecycles {
+		lifecycles = append(lifecycles, lifecycleLabel(lifecycle))
+	}
+	claims := []string{}
+	for _, claim := range query.Claims {
+		claims = append(claims, claimLabels[claim])
+	}
+	parts := []string{anyOf(lifecycles, "any lifecycle"), anyOf(claims, "any claim")}
+	if query.Text != "" {
+		parts = append(parts, "name contains "+strconv.Quote(query.Text))
+	}
+	scope := "every Project"
+	if query.Project != "" {
+		scope = "Project " + query.Project
+	}
+	archived := "archived hidden"
+	if query.IncludeArchived {
+		archived = "archived shown"
+	}
+	return strings.Join(parts, " · ") + " in " + scope + " (" + archived + ") · grouped by " + query.GroupBy
+}
+
+// ResultText states how many Slices matched and whether unknown facts keep
+// the result incomplete, so an empty readable result reads differently from
+// one that unreadable records may hide.
+func ResultText(search *ledger.SliceSearch) string {
+	text := plural(search.Matched, "matching slice")
+	switch {
+	case search.Matched == 0 && search.Incomplete:
+		text = "No Slice is known to match"
+	case search.Matched == 0:
+		return "No Slice matches this selection."
+	}
+	if search.Undecided > 0 {
+		text += fmt.Sprintf("; %d undecided by unknown facts", search.Undecided)
+	}
+	if search.Incomplete {
+		text += "; incomplete: unreadable records may hide matches"
+	}
+	return text
+}
+
+func anyOf(values []string, none string) string {
+	if len(values) == 0 {
+		return none
+	}
+	return strings.Join(values, " or ")
 }
 
 // issueURL and pullRequestURL construct GitHub links from a recorded

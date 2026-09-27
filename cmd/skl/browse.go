@@ -33,6 +33,7 @@ type browseOutcome struct {
 	Inventory        *ledger.ProjectInventory `json:"inventory,omitempty"`
 	Proposal         *ledger.ProposalDetail   `json:"proposal,omitempty"`
 	Slice            *ledger.SliceDetail      `json:"slice,omitempty"`
+	Slices           *ledger.SliceSearch      `json:"slices,omitempty"`
 	Documents        *ledger.DocumentSet      `json:"documents,omitempty"`
 	Document         *ledger.Document         `json:"document,omitempty"`
 	SnapshotRevision string                   `json:"snapshot_revision,omitempty"`
@@ -41,6 +42,9 @@ type browseOutcome struct {
 func browseCommand(stdin io.Reader, stdout io.Writer) *cli.Command {
 	projectFlag := func(usage string) cli.Flag { return &cli.StringFlag{Name: "project", Usage: usage} }
 	archivedFlag := &cli.BoolFlag{Name: "include-archived", Usage: "Include archived Proposals"}
+	locationFlag := func() cli.Flag {
+		return &cli.BoolFlag{Name: "archived", Usage: "Select the archived Proposal rather than preferring the active one"}
+	}
 	return &cli.Command{
 		Name:  "browse",
 		Usage: "Browse ledger Projects, Proposals, and Slices from committed records",
@@ -83,28 +87,61 @@ func browseCommand(stdin io.Reader, stdout io.Writer) *cli.Command {
 		}, {
 			Name:  "proposal",
 			Usage: "Show one Proposal, active or archived, with its Slices",
-			Flags: []cli.Flag{projectFlag("Project of the Proposal"), &cli.StringFlag{Name: "proposal"}, implementationFormatFlag()},
+			Flags: []cli.Flag{projectFlag("Project of the Proposal"), &cli.StringFlag{Name: "proposal"}, locationFlag(), implementationFormatFlag()},
 			Action: func(command *cli.Context) error {
 				return runBrowseQuery(command, stdout, func(snapshot *ledger.Snapshot) (browseOutcome, error) {
-					proposal, err := snapshot.Proposal(command.String("project"), command.String("proposal"))
+					var proposal *ledger.ProposalDetail
+					var err error
+					if command.Bool("archived") {
+						proposal, err = snapshot.ProposalAt(command.String("project"), command.String("proposal"), true)
+					} else {
+						proposal, err = snapshot.Proposal(command.String("project"), command.String("proposal"))
+					}
 					return browseOutcome{Proposal: proposal}, err
 				})
 			},
 		}, {
 			Name:  "slice",
 			Usage: "Show every recorded fact of one Slice",
-			Flags: []cli.Flag{projectFlag("Project of the Slice"), &cli.StringFlag{Name: "item", Usage: "Slice identity (<proposal>/<slice>)"}, implementationFormatFlag()},
+			Flags: []cli.Flag{projectFlag("Project of the Slice"), &cli.StringFlag{Name: "item", Usage: "Slice identity (<proposal>/<slice>)"}, locationFlag(), implementationFormatFlag()},
 			Action: func(command *cli.Context) error {
 				return runBrowseQuery(command, stdout, func(snapshot *ledger.Snapshot) (browseOutcome, error) {
-					slice, err := snapshot.Slice(command.String("project"), command.String("item"))
+					var slice *ledger.SliceDetail
+					var err error
+					if command.Bool("archived") {
+						slice, err = snapshot.SliceAt(command.String("project"), command.String("item"), true)
+					} else {
+						slice, err = snapshot.Slice(command.String("project"), command.String("item"))
+					}
 					return browseOutcome{Slice: slice}, err
+				})
+			},
+		}, {
+			Name:  "slices",
+			Usage: "Find Slices by lifecycle, Claim, and name in one Project or every Project",
+			Flags: []cli.Flag{
+				projectFlag("Project to search; every Project when omitted"), archivedFlag,
+				&cli.StringSliceFlag{Name: "lifecycle", Usage: "Select any of these recorded lifecycles (" + strings.Join(ledger.Lifecycles, ", ") + ")"},
+				&cli.StringSliceFlag{Name: "claim", Usage: "Select any of these Claims (" + strings.Join(ledger.Claims, ", ") + ")"},
+				&cli.StringFlag{Name: "search", Usage: "Select Slices whose project/proposal/slice identity or title contains this text"},
+				&cli.StringFlag{Name: "group", Value: ledger.GroupByProposal, Usage: "Group each Project's Slices by " + ledger.GroupByProposal + " or " + ledger.GroupByLifecycle},
+				implementationFormatFlag(),
+			},
+			Action: func(command *cli.Context) error {
+				return runBrowseQuery(command, stdout, func(snapshot *ledger.Snapshot) (browseOutcome, error) {
+					search, err := snapshot.FindSlices(ledger.SliceQuery{
+						Project: command.String("project"), IncludeArchived: command.Bool("include-archived"),
+						Lifecycles: command.StringSlice("lifecycle"), Claims: command.StringSlice("claim"),
+						Text: command.String("search"), GroupBy: command.String("group"),
+					})
+					return browseOutcome{Slices: search}, err
 				})
 			},
 		}, {
 			Name:  "documents",
 			Usage: "Read current committed documents for one Proposal or Slice",
 			Flags: []cli.Flag{
-				projectFlag("Project of the Proposal or Slice"),
+				projectFlag("Project of the Proposal or Slice"), locationFlag(),
 				&cli.StringFlag{Name: "proposal", Usage: "Proposal whose description and Slice documents to read"},
 				&cli.StringFlag{Name: "item", Usage: "Slice identity (<proposal>/<slice>) whose current documents to read"},
 				implementationFormatFlag(),
@@ -118,7 +155,13 @@ func browseCommand(stdin io.Reader, stdout io.Writer) *cli.Command {
 					var documents *ledger.DocumentSet
 					var err error
 					if proposalSet {
-						documents, err = snapshot.ProposalDocuments(command.String("project"), command.String("proposal"))
+						if command.Bool("archived") {
+							documents, err = snapshot.ProposalDocumentsAt(command.String("project"), command.String("proposal"), true)
+						} else {
+							documents, err = snapshot.ProposalDocuments(command.String("project"), command.String("proposal"))
+						}
+					} else if command.Bool("archived") {
+						documents, err = snapshot.SliceDocumentsAt(command.String("project"), command.String("item"), true)
 					} else {
 						documents, err = snapshot.SliceDocuments(command.String("project"), command.String("item"))
 					}
@@ -255,9 +298,7 @@ func renderBrowse(stdout io.Writer, format implementationFormatKind, outcome bro
 	}
 	if overview := outcome.Overview; overview != nil {
 		line("Ledger revision: " + overview.Revision)
-		for _, diagnostic := range overview.Diagnostics {
-			line("- " + browse.DiagnosticText(diagnostic))
-		}
+		list(diagnosticTexts(overview.Diagnostics))
 		if len(overview.Projects) == 0 {
 			line("No Projects are recorded at this revision.")
 		}
@@ -303,6 +344,32 @@ func renderBrowse(stdout io.Writer, format implementationFormatKind, outcome bro
 		}
 		line("Document ledger revision: " + document.Reference.Commit + " (" + identity + ")")
 		renderBrowseDocument(&report, line, document)
+	}
+	if search := outcome.Slices; search != nil {
+		line("Ledger revision: " + search.Revision)
+		line("Selection: " + browse.SelectionText(search.Query))
+		line("Result: " + browse.ResultText(search))
+		list(diagnosticTexts(search.Diagnostics))
+		for _, project := range search.Projects {
+			line("\n## Project " + project.Name + " (" + orUnknown(project.Repository) + ")")
+			if len(project.Diagnostics) > 0 {
+				line("")
+				list(diagnosticTexts(project.Diagnostics))
+			}
+			for _, group := range project.Groups {
+				line("\n### " + browse.GroupTitle(group) + "\n")
+				for _, match := range group.Slices {
+					line("- " + browse.MatchRow(match))
+				}
+			}
+			if len(project.Undecided) > 0 {
+				line("\n### " + browse.UndecidedTitle + "\n")
+				for _, match := range project.Undecided {
+					line("- " + browse.MatchRow(match))
+					list(diagnosticTexts(match.Diagnostics))
+				}
+			}
+		}
 	}
 	_, err := fmt.Fprint(stdout, report.String())
 	return err
@@ -467,4 +534,19 @@ func renderBrowseDocument(report *strings.Builder, line func(string), document *
 		report.WriteByte('\n')
 	}
 	line("")
+}
+
+func diagnosticTexts(diagnostics []ledger.Diagnostic) []string {
+	var texts []string
+	for _, diagnostic := range diagnostics {
+		texts = append(texts, browse.DiagnosticText(diagnostic))
+	}
+	return texts
+}
+
+func orUnknown(value string) string {
+	if value == "" {
+		return "unknown"
+	}
+	return value
 }
