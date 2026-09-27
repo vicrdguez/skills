@@ -46,6 +46,25 @@ type DeliveryFacts struct {
 	ReviewCount           uint64                    `json:"review_count"`
 	ReviewNumber          uint64                    `json:"review_number"`
 	Documents             []ledger.ContractDocument `json:"documents"`
+	// Mode, Helper and Reviewer are the Implement invocation's choices. The
+	// subagent choices are nil when no value was supplied.
+	Mode     string          `json:"mode,omitempty"`
+	Helper   *SubagentChoice `json:"helper,omitempty"`
+	Reviewer *SubagentChoice `json:"reviewer,omitempty"`
+}
+
+// Implement modes. Standard is the default; team replaces the delegation
+// guidance with the team strategy.
+const (
+	StandardMode = "standard"
+	TeamMode     = "team"
+)
+
+// SubagentChoice is an opaque model and thinking level for one kind of
+// subagent. skl renders the values where they apply and never interprets them.
+type SubagentChoice struct {
+	Model    string `json:"model,omitempty"`
+	Thinking string `json:"thinking,omitempty"`
 }
 
 type InvocationFacts struct {

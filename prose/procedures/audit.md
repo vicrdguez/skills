@@ -14,4 +14,4 @@ Run the project's full test, typecheck and lint suite once and record the comman
 
 Check: you hold the diff command, the commit list, the gate result and the Contract, or the note that there is none.
 
-{{template "audit-dispatch" .}}
+{{template "audit-dispatch"}}

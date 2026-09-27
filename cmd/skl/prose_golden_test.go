@@ -227,12 +227,17 @@ func TestAgentProseGoldens(t *testing.T) {
 	g.capture("outcome-watchdog-next-no-work", worker, "watchdog", "next", "--repo", source)
 	released := proseMatch(t, proseClaimLine, g.capture("implement-start", worker, "implement", "next", "--repo", source))
 	g.capture("outcome-implement-release", worker, "implement", "release", "--repo", source, "--item", proseItem, "--claim", released)
-	started := g.run(worker, "implement", "next", "--repo", source)
+	reviewer := []string{"--reviewer-model", "openai-codex/gpt-6-sol", "--reviewer-thinking", "xhigh"}
+	team := append([]string{"--mode", "team", "--helper-model", "openai-codex/gpt-6-luna", "--helper-thinking", "xhigh"}, reviewer...)
+	released = proseMatch(t, proseClaimLine, g.capture("implement-start-reviewer", worker, append([]string{"implement", "next", "--repo", source}, reviewer...)...))
+	g.run(worker, "implement", "release", "--repo", source, "--item", proseItem, "--claim", released)
+	started := g.capture("implement-team-start", worker, append([]string{"implement", "next", "--repo", source}, team...)...)
 	claim, result := proseMatch(t, proseClaimLine, started), proseMatch(t, proseResultLine, started)
 	identity := []string{"--repo", source, "--remote", "origin", "--item", proseItem, "--claim", claim, "--result-directory", result}
 	g.capture("implement-prepare", worker, append([]string{"implement", "prepare"}, identity...)...)
 	g.capture("implement-inspect", worker, append([]string{"implement", "inspect", "--target", target}, identity...)...)
 	g.capture("implement-resume", worker, append([]string{"implement", "resume"}, identity...)...)
+	g.capture("implement-team-resume", worker, append(append([]string{"implement", "resume"}, identity...), team...)...)
 	g.capture("outcome-implement-fix-required", worker, "implement", "resume", "--repo", source, "--item", proseItem, "--claim", released)
 	worktree := filepath.Join(source, ".worktrees", proseProposal)
 	head := proseCommit(t, worktree, "dashboard.txt", "every widget\n")
@@ -419,14 +424,14 @@ func TestAgentProseGoldens(t *testing.T) {
 	if _, err := skilldist.Install(home); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range skilldist.SkillNames() {
+	for _, name := range append(skilldist.SkillNames(), "implement-team") {
 		g.check("stub-"+name, readFileString(t, filepath.Join(home, ".codex", "skills", name, "SKILL.md")))
 	}
 	for harness, location := range entryPoints {
 		if harness == "codex" {
 			continue
 		}
-		for _, operation := range []string{"implement", "watchdog"} {
+		for _, operation := range []string{"implement", "implement-team", "watchdog"} {
 			g.check("adapter-"+harness+"-"+operation, readFileString(t, filepath.Join(home, fmt.Sprintf(location, operation))))
 		}
 	}

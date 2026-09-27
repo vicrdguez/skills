@@ -4,4 +4,4 @@ description: Implement a single claimed change against its accepted behavioral a
 
 <!-- skl-owned: skl.adapter/v1 -->
 
-Run `skl implement next` and follow the Execution Skill it returns.
+Run `skl implement next --reviewer-model '$1' --reviewer-thinking '$2'` and follow the Execution Skill it returns.
