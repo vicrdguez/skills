@@ -65,7 +65,7 @@ func (m *Model) preserveSelection(previous Model, at screen) {
 	}
 	m.cursor[at] = 0
 	m.missingIdentity = identity
-	m.selectionMissing = "Selected " + identity + " is no longer available in this committed view; move to select another"
+	m.selectionMissing = "Selected " + identity + " is no longer available in these results; move to select another"
 }
 
 func missingRecord(err error) bool {
@@ -128,8 +128,27 @@ func (m *Model) publish(snapshot *ledger.Snapshot) {
 	}
 	if at == sliceScreen && staged.failure == nil {
 		staged.detail.SetYOffset(previous.detail.YOffset)
+		if m.parent[sliceScreen] == resultsScreen && m.search != nil {
+			var err error
+			staged.query.IncludeArchived = m.includeArchived
+			staged.search, err = snapshot.FindSlices(staged.query)
+			if err != nil {
+				m.refreshFailure = err
+				return
+			}
+			staged.screen = resultsScreen
+			staged.preserveSelection(previous, resultsScreen)
+			staged.screen = at
+		}
 	}
 	staged.screen = m.screen
+	if m.screen == referencesScreen && !m.referencesFromDoc && m.referenceOrigin == sliceScreen {
+		staged.references = nil
+		if staged.slice != nil && staged.slice.Claim != nil {
+			staged.references = []ledger.LabeledReference{{Label: "current Claim state", Reference: staged.slice.Claim.Reference}}
+		}
+		staged.cursor[referencesScreen] = 0
+	}
 	if overlay {
 		// Keep an exact opened document's rendered text, selection and scroll.
 		staged.docViewport = previous.docViewport

@@ -155,9 +155,9 @@ func (m Model) documentContent(document *ledger.Document, width int) (string, st
 		"Ledger document: "+document.Reference.Commit+":"+document.Reference.Path,
 	)
 	if document.Reference.Commit == m.openedRevision {
-		preamble = append(preamble, "Identity: current snapshot document")
+		preamble = append(preamble, "Identity when opened: current snapshot document")
 	} else {
-		preamble = append(preamble, "Identity: HISTORICAL ledger document; current lifecycle, Claim, and Dependencies remain from the current snapshot")
+		preamble = append(preamble, "Identity when opened: HISTORICAL ledger document; context above describes the ledger when opened, not a historical whole-workflow view")
 	}
 
 	if report := document.Report; report != nil {

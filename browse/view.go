@@ -318,6 +318,8 @@ func (m Model) listContent() (context []string, title string, rows []string, cur
 		if m.referencesFromDoc && m.currentDocument != nil {
 			context = append(context, "From "+documentLabel(*m.currentDocument))
 			context = append(context, diagnosticLines(m.currentDocument.Diagnostics)...)
+		} else if m.slice == nil || m.slice.Claim == nil {
+			context = append(context, "No current Slice Claim at ledger revision "+m.snapshot.Revision)
 		} else {
 			context = append(context, "From the current Slice Claim at ledger revision "+m.snapshot.Revision)
 		}

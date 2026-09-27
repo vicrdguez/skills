@@ -600,6 +600,7 @@ func (m *Model) enter() {
 // screen. Document and reference overlays return without reloading that context.
 func (m *Model) back() {
 	fromDocumentOverlay := isDocumentOverlay(m.screen)
+	wasSlice := m.screen == sliceScreen
 	if count := len(m.history); m.screen == sliceScreen && count > 0 {
 		previous := m.history[count-1]
 		m.history = m.history[:count-1]
@@ -691,7 +692,12 @@ func (m *Model) back() {
 		m.layoutDetail()
 		return
 	}
+	previous := *m
+	previous.cursor = maps.Clone(m.cursor)
 	m.load()
+	if wasSlice && m.screen == resultsScreen {
+		m.preserveSelection(previous, resultsScreen)
+	}
 }
 
 func (m Model) frame() frame {
