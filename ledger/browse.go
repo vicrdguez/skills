@@ -342,7 +342,17 @@ func (v *Snapshot) Project(name string, includeArchived bool) (*ProjectInventory
 // Proposal returns one Proposal, active or archived, with its membership. An
 // active record is preferred when both locations hold the same identity.
 func (v *Snapshot) Proposal(projectName, name string) (*ProposalDetail, error) {
-	project, proposal, err := v.proposal(projectName, name)
+	return v.proposalDetail(projectName, name, nil)
+}
+
+// ProposalAt selects the recorded location when both active and archived
+// Proposals have the same name.
+func (v *Snapshot) ProposalAt(projectName, name string, archived bool) (*ProposalDetail, error) {
+	return v.proposalDetail(projectName, name, &archived)
+}
+
+func (v *Snapshot) proposalDetail(projectName, name string, location *bool) (*ProposalDetail, error) {
+	project, proposal, err := v.proposalLocated(projectName, name, location)
 	if err != nil {
 		return nil, err
 	}
@@ -363,6 +373,16 @@ func (v *Snapshot) Proposal(projectName, name string) (*ProposalDetail, error) {
 // Slice returns every recorded fact of one Slice identified as
 // proposal/slice, with its Dependencies resolved at the same revision.
 func (v *Snapshot) Slice(projectName, item string) (*SliceDetail, error) {
+	return v.sliceDetail(projectName, item, nil)
+}
+
+// SliceAt selects the recorded location when active and archived Proposals
+// contain the same Slice identity.
+func (v *Snapshot) SliceAt(projectName, item string, archived bool) (*SliceDetail, error) {
+	return v.sliceDetail(projectName, item, &archived)
+}
+
+func (v *Snapshot) sliceDetail(projectName, item string, location *bool) (*SliceDetail, error) {
 	proposalName, sliceName, found := strings.Cut(item, "/")
 	if !found || !ValidRecordName(proposalName) || !ValidRecordName(sliceName) {
 		return nil, refuse(
@@ -370,7 +390,7 @@ func (v *Snapshot) Slice(projectName, item string) (*SliceDetail, error) {
 			"select a Slice listed by its Proposal, such as add-order-cancellation/foundation",
 		)
 	}
-	project, proposal, err := v.proposal(projectName, proposalName)
+	project, proposal, err := v.proposalLocated(projectName, proposalName, location)
 	if err != nil {
 		return nil, err
 	}
@@ -472,13 +492,17 @@ func (v *Snapshot) project(name string) (*projectTree, error) {
 }
 
 func (v *Snapshot) proposal(projectName, name string) (*projectTree, *proposalTree, error) {
+	return v.proposalLocated(projectName, name, nil)
+}
+
+func (v *Snapshot) proposalLocated(projectName, name string, location *bool) (*projectTree, *proposalTree, error) {
 	project, err := v.project(projectName)
 	if err != nil {
 		return nil, nil, err
 	}
 	for _, archived := range []bool{false, true} {
 		for _, proposal := range project.proposals {
-			if proposal.name == name && proposal.archived == archived {
+			if proposal.name == name && proposal.archived == archived && (location == nil || *location == archived) {
 				return project, proposal, nil
 			}
 		}

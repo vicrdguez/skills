@@ -120,6 +120,7 @@ type Model struct {
 	includeArchived bool
 	project         string
 	proposal        string
+	archived        bool
 	item            string
 	cursor          map[screen]int
 	// parent is the screen that back returns to from the Slice detail and
@@ -128,7 +129,8 @@ type Model struct {
 
 	// context is the hierarchy's Project, Proposal and Slice while a found
 	// Slice is open. The original Slice detail is restored on leaving finding.
-	context [3]string
+	context         [3]string
+	contextArchived bool
 	// query is the session's Slice selection; typing holds its name search
 	// while it is edited.
 	query  ledger.SliceQuery
@@ -345,9 +347,11 @@ func (m *Model) find(target screen) {
 	finding := m.finding()
 	if m.screen == sliceScreen && finding {
 		m.project, m.proposal, m.item = m.context[0], m.context[1], m.context[2]
+		m.archived = m.contextArchived
 	}
 	if !finding {
 		m.context = [3]string{m.project, m.proposal, m.item}
+		m.contextArchived = m.archived
 		m.parent[resultsScreen] = m.screen
 		m.query.Project = ""
 		if m.screen != overviewScreen {
@@ -388,12 +392,13 @@ func (m *Model) enter() {
 	switch m.screen {
 	case overviewScreen:
 		if name := m.overview.Projects[selected].Name; name != m.project {
-			m.project, m.proposal, m.cursor[projectScreen] = name, "", 0
+			m.project, m.proposal, m.cursor[projectScreen], m.archived = name, "", 0, false
 		}
 		m.screen = projectScreen
 	case projectScreen:
-		if name := m.inventory.Proposals[selected].Name; name != m.proposal {
-			m.proposal, m.cursor[proposalScreen] = name, 0
+		proposal := m.inventory.Proposals[selected]
+		if proposal.Name != m.proposal || proposal.Archived != m.archived {
+			m.proposal, m.archived, m.cursor[proposalScreen] = proposal.Name, proposal.Archived, 0
 		}
 		m.screen = proposalScreen
 	case proposalScreen:
@@ -404,7 +409,7 @@ func (m *Model) enter() {
 		m.screen, m.cursor[resultsScreen] = resultsScreen, 0
 	case resultsScreen:
 		chosen := m.results()[selected]
-		m.project, m.proposal, m.item = chosen.project, chosen.match.Proposal, chosen.match.Item
+		m.project, m.proposal, m.item, m.archived = chosen.project, chosen.match.Proposal, chosen.match.Item, chosen.match.Archived
 		m.screen, m.parent[sliceScreen] = sliceScreen, resultsScreen
 	}
 	m.status = ""
@@ -420,9 +425,11 @@ func (m *Model) back() {
 	case sliceScreen, factsScreen, resultsScreen:
 		if m.screen == sliceScreen && m.parent[sliceScreen] == resultsScreen {
 			m.project, m.proposal, m.item = m.context[0], m.context[1], m.context[2]
+			m.archived = m.contextArchived
 		}
 		if m.screen == resultsScreen && m.parent[resultsScreen] == sliceScreen {
 			m.project, m.proposal, m.item = m.context[0], m.context[1], m.context[2]
+			m.archived = m.contextArchived
 			m.parent[sliceScreen] = proposalScreen
 		}
 		m.screen = m.parent[m.screen]
@@ -456,9 +463,9 @@ func (m *Model) load() {
 	case projectScreen:
 		m.inventory, m.failure = m.snapshot.Project(m.project, m.includeArchived)
 	case proposalScreen:
-		m.members, m.failure = m.snapshot.Proposal(m.project, m.proposal)
+		m.members, m.failure = m.snapshot.ProposalAt(m.project, m.proposal, m.archived)
 	case sliceScreen:
-		m.slice, m.failure = m.snapshot.Slice(m.project, m.item)
+		m.slice, m.failure = m.snapshot.SliceAt(m.project, m.item, m.archived)
 	case factsScreen, resultsScreen, diagnosticsScreen:
 		m.query.IncludeArchived = m.includeArchived
 		m.search, m.failure = m.snapshot.FindSlices(m.query)

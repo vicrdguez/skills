@@ -346,6 +346,23 @@ func TestBrowserKeepsHealthyResultsVisibleWithManyMembershipDiagnostics(t *testi
 	}
 }
 
+func TestBrowserOpensTheSelectedArchivedSliceWhenNamesCollide(t *testing.T) {
+	s := start(t, "widgets", func(root string) {
+		write(t, root, "projects/widgets/archive/orders/proposal.json", `{"accepted": "2023-01-01T00:00:00Z"}`)
+		write(t, root, "projects/widgets/archive/orders/cancel/state.json", `{"state": "merged", "title": "Archived cancellation", "branch": "old-cancel"}`)
+	})
+	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})
+	s.press("a", "/", "Archived cancellation", "enter")
+	s.shows("Proposal orders [archived]", "orders/cancel [archived] — Merged")
+	s.press("enter")
+	s.shows("Slice: orders/cancel", "Title: Archived cancellation", "Location: archived proposal", "Lifecycle: Merged")
+	s.press("esc", "esc")
+	s.press("down", "down", "enter")
+	s.shows("Proposal orders [archived]", "Slices (1)")
+	s.press("enter")
+	s.shows("Title: Archived cancellation", "Lifecycle: Merged")
+}
+
 func TestBrowserKeepsItsContextAfterOpeningAResultElsewhere(t *testing.T) {
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})

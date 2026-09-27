@@ -107,6 +107,28 @@ func TestBrowseQueriesReadCommittedRecordsWithoutSideEffects(t *testing.T) {
 	}
 }
 
+func TestBrowseCLISelectsArchivedLocationWhenNamesCollide(t *testing.T) {
+	fixture := browseFixture(t)
+	writeFile(t, filepath.Join(fixture.clone, "projects/widgets/archive/orders/proposal.json"), `{"accepted":"2023-01-01T00:00:00Z"}`)
+	writeFile(t, filepath.Join(fixture.clone, "projects/widgets/archive/orders/cancel/state.json"), `{"state":"merged","title":"Archived cancellation","branch":"old-cancel"}`)
+	runGit(t, fixture.clone, "add", "-A")
+	runGit(t, fixture.clone, "commit", "-q", "-m", "archived collision")
+	app, output := browseApp(t)
+	found := browseQuery(t, app, output, "slices", "--include-archived", "--search", "Archived cancellation")
+	if found.Slices.Matched != 1 || !found.Slices.Projects[0].Groups[0].Slices[0].Archived {
+		t.Fatalf("archive selection = %+v", found.Slices)
+	}
+	active := browseQuery(t, app, output, "slice", "--project", "widgets", "--item", "orders/cancel")
+	archived := browseQuery(t, app, output, "slice", "--project", "widgets", "--item", "orders/cancel", "--archived")
+	if active.Slice.Archived || active.Slice.Title != "Cancel orders" || !archived.Slice.Archived || archived.Slice.Title != "Archived cancellation" || archived.Slice.Lifecycle != "merged" {
+		t.Fatalf("active = %+v, archived = %+v", active.Slice, archived.Slice)
+	}
+	proposal := browseQuery(t, app, output, "proposal", "--project", "widgets", "--proposal", "orders", "--archived")
+	if !proposal.Proposal.Proposal.Archived || len(proposal.Proposal.Slices) != 1 || proposal.Proposal.Slices[0].Item != "orders/cancel" {
+		t.Fatalf("archived Proposal = %+v", proposal.Proposal)
+	}
+}
+
 func TestBrowseSlicesSelectsByIndependentFacts(t *testing.T) {
 	fixture := browseFixture(t)
 	app, output := browseApp(t)

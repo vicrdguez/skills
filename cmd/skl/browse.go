@@ -39,6 +39,9 @@ type browseOutcome struct {
 func browseCommand(stdin io.Reader, stdout io.Writer) *cli.Command {
 	projectFlag := func(usage string) cli.Flag { return &cli.StringFlag{Name: "project", Usage: usage} }
 	archivedFlag := &cli.BoolFlag{Name: "include-archived", Usage: "Include archived Proposals"}
+	locationFlag := func() cli.Flag {
+		return &cli.BoolFlag{Name: "archived", Usage: "Select the archived Proposal rather than preferring the active one"}
+	}
 	return &cli.Command{
 		Name:  "browse",
 		Usage: "Browse ledger Projects, Proposals, and Slices from committed records",
@@ -81,20 +84,32 @@ func browseCommand(stdin io.Reader, stdout io.Writer) *cli.Command {
 		}, {
 			Name:  "proposal",
 			Usage: "Show one Proposal, active or archived, with its Slices",
-			Flags: []cli.Flag{projectFlag("Project of the Proposal"), &cli.StringFlag{Name: "proposal"}, implementationFormatFlag()},
+			Flags: []cli.Flag{projectFlag("Project of the Proposal"), &cli.StringFlag{Name: "proposal"}, locationFlag(), implementationFormatFlag()},
 			Action: func(command *cli.Context) error {
 				return runBrowseQuery(command, stdout, func(snapshot *ledger.Snapshot) (browseOutcome, error) {
-					proposal, err := snapshot.Proposal(command.String("project"), command.String("proposal"))
+					var proposal *ledger.ProposalDetail
+					var err error
+					if command.Bool("archived") {
+						proposal, err = snapshot.ProposalAt(command.String("project"), command.String("proposal"), true)
+					} else {
+						proposal, err = snapshot.Proposal(command.String("project"), command.String("proposal"))
+					}
 					return browseOutcome{Proposal: proposal}, err
 				})
 			},
 		}, {
 			Name:  "slice",
 			Usage: "Show every recorded fact of one Slice",
-			Flags: []cli.Flag{projectFlag("Project of the Slice"), &cli.StringFlag{Name: "item", Usage: "Slice identity (<proposal>/<slice>)"}, implementationFormatFlag()},
+			Flags: []cli.Flag{projectFlag("Project of the Slice"), &cli.StringFlag{Name: "item", Usage: "Slice identity (<proposal>/<slice>)"}, locationFlag(), implementationFormatFlag()},
 			Action: func(command *cli.Context) error {
 				return runBrowseQuery(command, stdout, func(snapshot *ledger.Snapshot) (browseOutcome, error) {
-					slice, err := snapshot.Slice(command.String("project"), command.String("item"))
+					var slice *ledger.SliceDetail
+					var err error
+					if command.Bool("archived") {
+						slice, err = snapshot.SliceAt(command.String("project"), command.String("item"), true)
+					} else {
+						slice, err = snapshot.Slice(command.String("project"), command.String("item"))
+					}
 					return browseOutcome{Slice: slice}, err
 				})
 			},

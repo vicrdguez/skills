@@ -100,12 +100,12 @@ To find Slices, `f` picks a lifecycle or Claim from the counted facts of the cur
 ```sh
 skl browse projects [--include-archived]
 skl browse project --project <name> [--include-archived]
-skl browse proposal --project <name> --proposal <proposal>
-skl browse slice --project <name> --item <proposal>/<slice>
+skl browse proposal --project <name> --proposal <proposal> [--archived]
+skl browse slice --project <name> --item <proposal>/<slice> [--archived]
 skl browse slices [--project <name>] [--lifecycle <state>]... [--claim implement|watchdog|none]... [--search <text>] [--group proposal|lifecycle] [--include-archived]
 ```
 
-Every view reads one committed ledger revision, never fetches or contacts a forge, and changes nothing. A Claim is shown as a reservation, not as a running worker.
+Detail queries prefer active records when active and archived Proposals share a name; `--archived` explicitly selects the archived one. Every view reads one committed ledger revision, never fetches or contacts a forge, and changes nothing. A Claim is shown as a reservation, not as a running worker.
 
 ## Legacy
 
