@@ -454,7 +454,7 @@ func activeDeliveryPacket(t *testing.T, root, phase, operation string, state led
 }
 
 // TestDocumentedResourceCommands runs every `skl skill` command a rendering
-// emits, and every resource command the README documents. The goldens under
+// emits, and the resource commands in the CLI reference. The goldens under
 // testdata/prose hold every rendering a worker receives.
 func TestDocumentedResourceCommands(t *testing.T) {
 	goldens, err := filepath.Glob(filepath.Join(proseDirectory(), "*.md"))
@@ -469,10 +469,11 @@ func TestDocumentedResourceCommands(t *testing.T) {
 		})
 	}
 
-	// The README also names the refused read-only Implement and Watchdog
-	// retrievals, so only its resource commands must run.
+	// The README links to docs/cli.md for the full command reference.
+	// Execute its concrete resource examples without requiring them to appear
+	// in the README overview as well.
 	seen := map[string]bool{}
-	for _, command := range skillCommands(readRepositoryFile(t, "README.md")) {
+	for _, command := range skillCommands(readRepositoryFile(t, "docs/cli.md")) {
 		if !strings.Contains(command, "--resource") {
 			continue
 		}
@@ -483,7 +484,7 @@ func TestDocumentedResourceCommands(t *testing.T) {
 	}
 	for _, want := range []string{"ledger-submission.md", "ledger-review.md", "DEEPENING.md"} {
 		if !seen[want] {
-			t.Errorf("README lacks a documented command for %s: %v", want, seen)
+			t.Errorf("docs/cli.md lacks a documented command for %s: %v", want, seen)
 		}
 	}
 }
