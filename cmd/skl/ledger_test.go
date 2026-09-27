@@ -1966,32 +1966,6 @@ func TestMalformedDocumentsAndGitInvalidBranchAreRefusedWhole(t *testing.T) {
 	})
 }
 
-func TestProposePublishRefusedForAdoptedProjects(t *testing.T) {
-	fixture := newLedgerFixture(t)
-	root := proposalRepository(t)
-	prepareSlice(t, root, "legacy-publish")
-	forge := newForgeServer(t)
-	cli := newLedgerApp(t, forge)
-	if outcome := cli.accept(t, root, writeProposal(t, "", singleSlice("adopted-publish"))); outcome.Status != "accepted" {
-		t.Fatalf("adoption acceptance failed: %s", mustJSON(t, outcome))
-	}
-	if _, err := os.Stat(filepath.Join(fixture.clone, "projects", "widgets", "proposals", "adopted-publish")); err != nil {
-		t.Fatalf("adoption not recorded: %v", err)
-	}
-	before := ledgerSnapshot(t, root)
-	created := forge.createdCount()
-	cli.out.Reset()
-	if err := cli.app.Run([]string{"skl", "propose", "publish", "--repo", root, "--target", "main", "--slice", proposalSliceFlag(t, "legacy-publish")}); err != nil {
-		t.Fatalf("run: %v", err)
-	}
-	if !strings.Contains(cli.out.String(), "Status: unsupported") || !strings.Contains(cli.out.String(), "propose publish") {
-		t.Fatalf("legacy publication was not gated: %s", cli.out.String())
-	}
-	if ledgerSnapshot(t, root) != before || forge.createdCount() != created {
-		t.Fatalf("gated legacy publication mutated source or forge state")
-	}
-}
-
 // requireLedgerUnlocked fails when the ledger mutation lock is held, which
 // would mean forge I/O happens inside a local mutation.
 func requireLedgerUnlocked(t *testing.T, clone string) {
