@@ -95,16 +95,23 @@ skl decision retire --project <p> --proposal <proposal>
 
 ## Browsing
 
-`skl browse` opens a terminal browser over the ledger: Projects, their Proposals, and each Slice's state, Claim, dependencies, branch and attachments. It starts at the current checkout's Project when there is exactly one. Keys: `s` switches Project, `a` includes archived Proposals, `i` and `p` open the recorded issue or pull request.
+`skl browse` opens a terminal browser over the ledger: Projects, their Proposals, and each Slice's state, Claim, dependencies, branch and attachments. It starts at the current checkout's Project when there is exactly one.
 
 ```sh
 skl browse projects [--include-archived]
 skl browse project --project <name> [--include-archived]
 skl browse proposal --project <name> --proposal <proposal>
 skl browse slice --project <name> --item <proposal>/<slice>
+skl browse documents --project <name> --proposal <proposal>
+skl browse documents --project <name> --item <proposal>/<slice>
+skl browse document --commit <full-ledger-commit> --path <ledger-path>
 ```
 
-Every view reads one committed ledger revision, never fetches or contacts a forge, and changes nothing. A Claim is shown as a reservation, not as a running worker.
+`browse documents` reads the Proposal description and its accepted Slice documents, or the selected Slice's accepted documents, latest committed implementation and Watchdog reports, and current Human Decision. It also returns structured metadata for reports and decisions alongside their Markdown. An absent optional report is marked not yet available; unreadable or malformed records carry diagnostics, while readable document content remains available.
+
+`browse document` follows one exact ledger reference, including a historical commit and the path valid there. It never substitutes the latest version. Output identifies the ledger snapshot and document revisions separately; source-repository revisions in report metadata are labeled separately from ledger references. An unavailable exact reference is reported as unavailable.
+
+Every view reads locally committed ledger records, never fetches or contacts a forge, and changes nothing. A Claim is shown as a reservation, not as a running worker. Markdown is the default transport; add `--format json` for the same facts and document content as structured JSON. Existing `skl ledger show` remains the byte-preserving raw exact-readback command.
 
 ## Legacy
 

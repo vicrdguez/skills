@@ -20,6 +20,9 @@ const (
 	projectScreen
 	proposalScreen
 	sliceScreen
+	documentsScreen
+	referencesScreen
+	documentScreen
 )
 
 // Options are the startup choices of one browsing session.
@@ -33,15 +36,15 @@ type Options struct {
 }
 
 type keyMap struct {
-	Up, Down, Enter, Back, Projects, Archived, Issue, PullRequest, Help, Quit key.Binding
+	Up, Down, Enter, Back, Projects, Archived, Documents, References, Issue, PullRequest, Help, Quit key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Enter, k.Back, k.Projects, k.Help, k.Archived, k.Issue, k.PullRequest, k.Quit}
+	return []key.Binding{k.Enter, k.Back, k.Documents, k.References, k.Projects, k.Help, k.Archived, k.Issue, k.PullRequest, k.Quit}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Up, k.Down, k.Enter, k.Back}, {k.Projects, k.Archived}, {k.Issue, k.PullRequest}, {k.Help, k.Quit}}
+	return [][]key.Binding{{k.Up, k.Down, k.Enter, k.Back}, {k.Documents, k.References, k.Projects, k.Archived}, {k.Issue, k.PullRequest}, {k.Help, k.Quit}}
 }
 
 func newKeyMap() keyMap {
@@ -52,6 +55,8 @@ func newKeyMap() keyMap {
 		Back:        key.NewBinding(key.WithKeys("esc", "backspace", "left", "h"), key.WithHelp("esc", "back")),
 		Projects:    key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "switch project")),
 		Archived:    key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "toggle archived")),
+		Documents:   key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "documents")),
+		References:  key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "references")),
 		Issue:       key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "open issue")),
 		PullRequest: key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "open PR")),
 		Help:        key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
@@ -62,11 +67,12 @@ func newKeyMap() keyMap {
 // Model is one browsing session over a pinned ledger Snapshot. Selection and
 // navigation live only in the running session.
 type Model struct {
-	snapshot *ledger.Snapshot
-	open     func(string) error
-	keys     keyMap
-	help     help.Model
-	detail   viewport.Model
+	snapshot    *ledger.Snapshot
+	open        func(string) error
+	keys        keyMap
+	help        help.Model
+	detail      viewport.Model
+	docViewport viewport.Model
 
 	screen          screen
 	includeArchived bool
@@ -80,6 +86,16 @@ type Model struct {
 	members   *ledger.ProposalDetail
 	slice     *ledger.SliceDetail
 	failure   error
+
+	docContext        screen
+	documents         *ledger.DocumentSet
+	currentDocument   *ledger.Document
+	documentReturn    screen
+	documentHistory   []documentFrame
+	references        []ledger.LabeledReference
+	referenceOrigin   screen
+	referencesFromDoc bool
+	renderProblem     string
 
 	width, height int
 	status        string
@@ -95,7 +111,7 @@ type openedMsg struct {
 func New(snapshot *ledger.Snapshot, options Options) Model {
 	model := Model{
 		snapshot: snapshot, open: options.Open, keys: newKeyMap(), help: help.New(),
-		detail: viewport.New(80, 10), cursor: map[screen]int{},
+		detail: viewport.New(80, 10), docViewport: viewport.New(80, 10), cursor: map[screen]int{},
 		width: 80, height: 24, status: options.Notice,
 	}
 	model.help.Width = model.width
@@ -144,6 +160,10 @@ func (m Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.detail.PageUp()
 	case msg.String() == "pgdown" && m.screen == sliceScreen:
 		m.detail.PageDown()
+	case msg.String() == "pgup" && m.screen == documentScreen:
+		m.docViewport.PageUp()
+	case msg.String() == "pgdown" && m.screen == documentScreen:
+		m.docViewport.PageDown()
 	case key.Matches(msg, m.keys.Enter):
 		m.enter()
 	case key.Matches(msg, m.keys.Back):
@@ -161,16 +181,28 @@ func (m Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.openAttachment(true)
 	case key.Matches(msg, m.keys.PullRequest):
 		return m, m.openAttachment(false)
+	case key.Matches(msg, m.keys.Documents):
+		m.openDocuments()
+	case key.Matches(msg, m.keys.References):
+		m.openReferences()
 	}
 	return m, nil
 }
 
 func (m *Model) move(delta int) {
-	if m.screen == sliceScreen {
+	switch m.screen {
+	case sliceScreen:
 		if delta < 0 {
 			m.detail.LineUp(1)
 		} else {
 			m.detail.LineDown(1)
+		}
+		return
+	case documentScreen:
+		if delta < 0 {
+			m.docViewport.LineUp(1)
+		} else {
+			m.docViewport.LineDown(1)
 		}
 		return
 	}
@@ -183,13 +215,25 @@ func (m *Model) move(delta int) {
 
 // rows counts the selectable entries of the current list screen.
 func (m Model) rows() int {
-	switch {
-	case m.screen == overviewScreen && m.overview != nil:
-		return len(m.overview.Projects)
-	case m.screen == projectScreen && m.inventory != nil:
-		return len(m.inventory.Proposals)
-	case m.screen == proposalScreen && m.members != nil:
-		return len(m.members.Slices)
+	switch m.screen {
+	case overviewScreen:
+		if m.overview != nil {
+			return len(m.overview.Projects)
+		}
+	case projectScreen:
+		if m.inventory != nil {
+			return len(m.inventory.Proposals)
+		}
+	case proposalScreen:
+		if m.members != nil {
+			return len(m.members.Slices)
+		}
+	case documentsScreen:
+		if m.documents != nil {
+			return len(m.documents.Documents)
+		}
+	case referencesScreen:
+		return len(m.references)
 	}
 	return 0
 }
@@ -213,23 +257,60 @@ func (m *Model) enter() {
 	case proposalScreen:
 		m.item = m.members.Slices[selected].Item
 		m.screen = sliceScreen
+	case documentsScreen:
+		m.openDocument(m.documents.Documents[selected])
+		return
+	case referencesScreen:
+		m.followReference(m.references[selected].Reference)
+		return
 	}
 	m.status = ""
 	m.load()
 }
 
 func (m *Model) back() {
-	if m.screen == overviewScreen {
-		return
-	}
-	m.screen--
+	fromOverlay := m.screen >= documentsScreen
 	m.status = ""
-	m.load()
+	switch m.screen {
+	case overviewScreen:
+		return
+	case projectScreen:
+		m.screen = overviewScreen
+	case proposalScreen:
+		m.screen = projectScreen
+	case sliceScreen:
+		m.screen = proposalScreen
+	case documentsScreen:
+		m.screen = m.docContext
+		m.failure = nil
+	case referencesScreen:
+		m.screen = m.referenceOrigin
+		m.failure = nil
+	case documentScreen:
+		if len(m.documentHistory) > 0 {
+			frame := m.documentHistory[len(m.documentHistory)-1]
+			m.documentHistory = m.documentHistory[:len(m.documentHistory)-1]
+			m.currentDocument, m.docViewport = &frame.document, frame.viewport
+			m.documentReturn, m.renderProblem = frame.returnScreen, frame.renderProblem
+			m.screen = documentScreen
+		} else {
+			m.screen = m.documentReturn
+			m.currentDocument, m.renderProblem = nil, ""
+		}
+		m.failure = nil
+	}
+	if !fromOverlay && m.screen <= sliceScreen {
+		m.load()
+	} else {
+		m.layoutDetail()
+	}
 }
 
 // switchProject returns to the overview with the current Project selected.
 func (m *Model) switchProject() {
 	m.screen, m.status = overviewScreen, ""
+	m.docContext, m.documents, m.currentDocument = overviewScreen, nil, nil
+	m.documentHistory, m.references = nil, nil
 	m.load()
 	if m.overview == nil {
 		return
