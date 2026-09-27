@@ -51,10 +51,13 @@ type DocumentAvailability struct {
 // when metadata cannot be interpreted; structured facts
 // and their references are available separately when parsing succeeds.
 type Document struct {
-	Kind        DocumentKind       `json:"kind"`
-	Project     string             `json:"project"`
-	Proposal    string             `json:"proposal"`
-	Slice       string             `json:"slice,omitempty"`
+	Kind     DocumentKind `json:"kind"`
+	Project  string       `json:"project"`
+	Proposal string       `json:"proposal"`
+	Slice    string       `json:"slice,omitempty"`
+	// Archived records the document's location at its exact revision, not
+	// necessarily the location of its current Proposal after archival.
+	Archived    bool               `json:"archived"`
 	Reference   Reference          `json:"reference"`
 	Contents    string             `json:"contents"`
 	Body        string             `json:"body"`
@@ -173,6 +176,7 @@ func (v *Snapshot) Document(reference Reference) (*Document, error) {
 	}
 	document := &Document{
 		Kind: kind, Project: project, Proposal: proposal, Slice: slice,
+		Archived:  strings.Split(reference.Path, "/")[2] == archiveRoot,
 		Reference: Reference{Commit: contents.Commit, Path: contents.Path},
 		Contents:  contents.Contents,
 		Body:      contents.Contents,

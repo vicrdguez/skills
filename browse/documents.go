@@ -123,8 +123,14 @@ func (m *Model) openVersions() {
 	if m.currentDocument.Kind == ledger.WatchdogReportDocumentKind {
 		phase = ledger.WatchdogPhase
 	}
+	archived := m.archived
+	if m.documentReturn == referencesScreen {
+		// A followed reference can point outside the current Slice. Its
+		// record location comes from the exact document, not that Slice.
+		archived = m.currentDocument.Archived
+	}
 	m.openVersionsFor(m.currentDocument.Project, m.currentDocument.Proposal+"/"+m.currentDocument.Slice,
-		phase, m.archived)
+		phase, archived)
 }
 
 func (m *Model) openVersionsFor(project, item, phase string, archived bool) {
