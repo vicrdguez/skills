@@ -113,6 +113,9 @@ func (r CurrentResult) superseded(s *Store, repository github.RepositoryID) erro
 	if current.Phase != r.Phase || current.Lifecycle != r.Lifecycle || current.contents != r.contents {
 		return refuse("a later local "+current.Phase+" result supersedes the selected "+r.Phase+" result", "present the current view with public prose authored for it")
 	}
+	if !sameAttachment(current.Issue, r.Issue) {
+		return refuse("the recorded issue attachment changed since this result was selected", "select the current view again to present it with the recorded issue's footer")
+	}
 	return nil
 }
 

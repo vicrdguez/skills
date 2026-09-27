@@ -302,6 +302,32 @@ func TestDeliveryPublicationAddsRecordedIssueFooter(t *testing.T) {
 	}
 }
 
+// A selection made before an issue was recorded cannot publish a body that
+// silently omits the issue's closing reference after that attachment arrives.
+func TestDeliveryPublicationRefreshesSelectionAfterIssueAttachment(t *testing.T) {
+	l, source, store, _ := deliveryPublicationFixture(t)
+	selected := deliverySelect(t, store)
+	state := l.committedState(deliveryPublicationProject, deliveryPublicationSlice, deliveryPublicationBranch)
+	state.Issue = &ledger.ForgeAttachment{Repository: "acme/widgets", Number: 110}
+	l.commitState(deliveryPublicationProject, deliveryPublicationSlice, deliveryPublicationBranch, state)
+
+	stale := &deliveryForgeStub{number: 42}
+	presentation := ledger.PresentCurrent(context.Background(), store, deliveryWidgets(), source.root, source.remote, selected, "Summary.", stale)
+	if presentation.Publication.Status != ledger.IssuePending || len(stale.calls()) != 0 {
+		t.Fatalf("stale issue selection was presented: %#v, calls=%#v", presentation.Publication, stale.calls())
+	}
+
+	fresh := &deliveryForgeStub{number: 42}
+	presentation = ledger.PresentCurrent(context.Background(), store, deliveryWidgets(), source.root, source.remote, deliverySelect(t, store), "Summary.", fresh)
+	if presentation.Publication.Status != ledger.PullPresented {
+		t.Fatalf("reselected publication = %#v", presentation.Publication)
+	}
+	deliveryWantPresentation(t, fresh, deliveryPublicFields{
+		Title: deliveryPublicationBranch, Body: "Summary.\n\nCloses #110",
+		Branch: deliveryPublicationBranch, Head: source.head,
+	})
+}
+
 func TestDeliveryPublicationDoesNotRewriteWorkerClosingReferences(t *testing.T) {
 	_, source, store, result := deliveryPublicationFixtureWithIssue(t, &ledger.ForgeAttachment{Repository: "acme/widgets", Number: 110})
 	forge := &deliveryForgeStub{number: 42}
