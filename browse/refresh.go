@@ -51,7 +51,7 @@ func locationKey(archived bool) string {
 
 func (m *Model) preserveSelection(previous Model, at screen) {
 	identity := previous.selectedIdentity(at)
-	if previous.selectionMissing != "" && previous.missingIdentity != "" {
+	if previous.missingScreen == at && previous.missingIdentity != "" {
 		identity = previous.missingIdentity
 	}
 	if identity == "" {
@@ -65,6 +65,7 @@ func (m *Model) preserveSelection(previous Model, at screen) {
 	}
 	m.cursor[at] = 0
 	m.missingIdentity = identity
+	m.missingScreen = at
 	m.selectionMissing = "Selected " + identity + " is no longer available in these results; move to select another"
 }
 
@@ -88,7 +89,7 @@ func (m *Model) publish(snapshot *ledger.Snapshot) {
 	staged := *m
 	staged.cursor = maps.Clone(m.cursor)
 	staged.snapshot = snapshot
-	staged.selectionMissing, staged.missingIdentity = "", ""
+	staged.selectionMissing, staged.missingIdentity, staged.missingScreen = "", "", 0
 	at := m.screen
 	overlay := isDocumentOverlay(at) || (at == diagnosticsScreen && m.diagnosticReturn == documentsScreen)
 	if overlay {
@@ -104,6 +105,7 @@ func (m *Model) publish(snapshot *ledger.Snapshot) {
 	}
 	if staged.failure != nil {
 		staged.selectionMissing = "Selected entity is no longer available at the new ledger revision; go back to choose another"
+		staged.missingScreen = at
 		staged.overview, staged.inventory, staged.members, staged.slice, staged.search, staged.documents = nil, nil, nil, nil, nil, nil
 	} else if at == overviewScreen || at == projectScreen || at == proposalScreen || at == resultsScreen {
 		staged.preserveSelection(previous, at)
@@ -122,6 +124,7 @@ func (m *Model) publish(snapshot *ledger.Snapshot) {
 		if err != nil {
 			staged.documents = nil
 			staged.selectionMissing = "Document selection is no longer available at the new ledger revision"
+			staged.missingScreen = documentsScreen
 		}
 		if staged.documents != nil {
 			// The viewer and its references can outlive their return-list row.

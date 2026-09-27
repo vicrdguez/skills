@@ -175,6 +175,7 @@ type Model struct {
 	refreshFailure   error
 	selectionMissing string
 	missingIdentity  string
+	missingScreen    screen
 	newerDocument    bool
 
 	width, height int
@@ -611,6 +612,10 @@ func (m *Model) enter() {
 func (m *Model) back() {
 	fromDocumentOverlay := isDocumentOverlay(m.screen)
 	wasSlice := m.screen == sliceScreen
+	selectedResult := ""
+	if wasSlice && m.parent[sliceScreen] == resultsScreen {
+		selectedResult = m.project + "/" + m.item + locationKey(m.archived)
+	}
 	if count := len(m.history); m.screen == sliceScreen && count > 0 {
 		previous := m.history[count-1]
 		m.history = m.history[:count-1]
@@ -711,6 +716,8 @@ func (m *Model) back() {
 		m.detail.SetYOffset(offset)
 	}
 	if wasSlice && m.screen == resultsScreen {
+		previous.missingIdentity = selectedResult
+		previous.missingScreen = resultsScreen
 		m.preserveSelection(previous, resultsScreen)
 	}
 }

@@ -112,6 +112,21 @@ func TestCurrentClaimReferencesStayCurrentWhenLeavingExactDocument(t *testing.T)
 	s.hides("current Claim state")
 }
 
+func TestDocumentReturnKeepsMissingFilteredSliceIdentity(t *testing.T) {
+	s := start(t, "widgets")
+	s.send(tea.WindowSizeMsg{Width: 120, Height: 40})
+	s.press("f", "down", "down", "enter", "enter", "d", "down", "down", "enter")
+	s.shows("The recorded implementation evidence is readable")
+	changeFixture(t, s.root, "projects/widgets/proposals/orders/cancel/state.json", `"state": "awaiting_review"`, `"state": "rework"`)
+	commitFixture(t, s.root, "selected slice leaves filtered results")
+	s.press("R", "R", "esc", "esc")
+	s.shows("Slice: orders/cancel", "Lifecycle: Rework")
+	s.press("esc")
+	s.shows("Finding: Awaiting Review", "no longer available")
+	s.press("enter")
+	s.hides("Slice: orders/broken")
+}
+
 func TestSearchAcceptsCapitalRefreshKeyAsText(t *testing.T) {
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 120, Height: 40})
