@@ -2,8 +2,11 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -46,17 +49,17 @@ func TestInstallWritesImplementAndWatchdogEntryPointsForEachHarness(t *testing.T
 	installInto(t, home)
 	first := map[string]string{}
 	for harness, location := range entryPoints {
-		for _, operation := range []string{"implement", "watchdog"} {
+		for _, operation := range []string{"implement", "implement-team", "watchdog"} {
 			path := filepath.Join(home, strings.ReplaceAll(location, "%s", operation))
 			entry := readFile(t, path)
-			if !strings.Contains(entry, "skl "+operation+" next") || !strings.Contains(entry, "<!-- skl-owned: skl.") {
+			if !strings.Contains(entry, "skl "+strings.TrimSuffix(operation, "-team")+" next") || !strings.Contains(entry, "<!-- skl-owned: skl.") {
 				t.Errorf("%s %s entry point does not start the owned operation:\n%s", harness, operation, entry)
 			}
 			first[path] = entry
 		}
 	}
 	for _, replaced := range []string{".pi/agent/skills", ".config/opencode/skills"} {
-		for _, operation := range []string{"implement", "watchdog"} {
+		for _, operation := range []string{"implement", "implement-team", "watchdog"} {
 			if _, err := os.Stat(filepath.Join(home, replaced, operation)); !os.IsNotExist(err) {
 				t.Errorf("%s still installs a %s stub beside its entry point: %v", replaced, operation, err)
 			}
@@ -67,6 +70,48 @@ func TestInstallWritesImplementAndWatchdogEntryPointsForEachHarness(t *testing.T
 	for path, want := range first {
 		if got := readFile(t, path); got != want {
 			t.Errorf("reinstall changed %s:\n%s", path, got)
+		}
+	}
+}
+
+// invokedCommand is the command an entry point runs when the user passes no
+// arguments, expanded as each harness documents its placeholders: pi fills
+// ${N:-default} with its default, and every other placeholder is empty.
+func invokedCommand(t *testing.T, entry string) []string {
+	t.Helper()
+	command := regexp.MustCompile("Run `([^`]+)`").FindStringSubmatch(entry)
+	if command == nil {
+		t.Fatalf("entry point runs no command:\n%s", entry)
+	}
+	expanded := regexp.MustCompile(`\$\{\d+:-([^}]*)\}`).ReplaceAllString(command[1], "$1")
+	return shellWords(t, regexp.MustCompile(`\$\w+`).ReplaceAllString(expanded, ""))
+}
+
+func TestInstallPassesEachModeAndItsSlotsWithPiDefaults(t *testing.T) {
+	home := t.TempDir()
+	installInto(t, home)
+	const sol, luna = "openai-codex/gpt-6-sol", "openai-codex/gpt-6-luna"
+	piDefaults := map[string][]string{
+		"implement":      {"--reviewer-model", sol, "--reviewer-thinking", "xhigh"},
+		"implement-team": {"--mode", "team", "--helper-model", luna, "--helper-thinking", "xhigh", "--reviewer-model", sol, "--reviewer-thinking", "xhigh"},
+	}
+	empty := map[string][]string{
+		"implement":      {"--reviewer-model", "", "--reviewer-thinking", ""},
+		"implement-team": {"--mode", "team", "--helper-model", "", "--helper-thinking", "", "--reviewer-model", "", "--reviewer-thinking", ""},
+	}
+	// Codex keeps stubs, which pass the mode without slots.
+	stubs := map[string][]string{"implement-team": {"--mode", "team"}}
+	for harness, location := range entryPoints {
+		for _, operation := range []string{"implement", "implement-team"} {
+			entry := readFile(t, filepath.Join(home, fmt.Sprintf(location, operation)))
+			slots := map[string]map[string][]string{"pi": piDefaults, "codex": stubs}[harness]
+			if slots == nil {
+				slots = empty
+			}
+			want := append([]string{"skl", "implement", "next"}, slots[operation]...)
+			if got := invokedCommand(t, entry); !slices.Equal(got, want) {
+				t.Errorf("%s %s runs %q, want %q", harness, operation, got, want)
+			}
 		}
 	}
 }

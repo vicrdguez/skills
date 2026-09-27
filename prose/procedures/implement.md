@@ -28,8 +28,10 @@ Check: inspection prints the source head.
 {{else if eq .Procedure "rework"}}Resolve each active finding in the reports above against the Contract, keeping the rest of the change and its tests intact. Keep every `F<n>` and `W<n>` number. For each finding, note the commit that resolves it and the check that tells the fix from the reported failure. For nonblocking debt, add a Debt Marker: a short, self-contained code comment with no PR number or finding ID.
 {{else}}Deliver every behavior, scenario and architecture commitment in the Contract, each with evidence: a test, a command or an inspection.
 {{end}}
-Build in any order, refactor whenever it helps, and run the typecheck and focused checks as you go. Decide an unspecified detail yourself when every option keeps the Contract, and implement a case the Contract clearly implies. When the Contract leaves a consequential choice open, pause as described below.
+{{if eq .Mode "team"}}Lead a team of implementer subagents. You keep the Claim and every workflow operation: commits, pushes, `skl` commands, the Audit and the handoff.{{with .Helper}} Run each implementer{{template "subagent-choice" .}}.{{end}} {{template "implement-judgment"}}
 
+{{template "craft/team.md" .}}{{else}}Build in any order, refactor whenever it helps, and run the typecheck and focused checks as you go. {{template "implement-judgment"}}
+{{end}}
 Check: {{if eq .Procedure "rework"}}every active finding has its resolving commit and distinguishing check{{else}}every `B<n>`, `A<n>` and warranted `T<n>` has evidence{{end}}, and the focused checks pass.
 
 ## 3. Integrate the target
@@ -67,7 +69,8 @@ Check: submit reports the work awaiting review.
 Finish the unblocked work and write the blocking report from the step 5 template. Then pause with `{{.PauseCommand}}`, using the preparation target as `<observed-target-sha>` until step 3 records one. Leave a conflicted merge in place.
 
 Check: the pause reports the work waiting on a human.
-
+{{if ne .Mode "team"}}
 ## Delegation
 
 When you can spawn fresh-context subagents, you may give them bounded implementation or testing work whose writes do not overlap; otherwise work serially. Brief each one fully: the assignment, the worktree, the Contract items it serves, the standards, the checks it runs and the files it may write. Helpers return their changes, evidence and limitations. You keep the Claim: integrate and verify every contribution, and submit alone. Helper checks are input; the integrated checks, the Full Gate and Audit still run over the combined work.
+{{end -}}
