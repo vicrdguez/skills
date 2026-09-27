@@ -95,7 +95,7 @@ skl decision retire --project <p> --proposal <proposal>
 
 ## Browsing
 
-`skl browse` opens a terminal browser over the ledger: Projects, their Proposals, and each Slice's state, Claim, dependencies, branch and attachments. It starts at the current checkout's Project when there is exactly one. Keys: `s` switches Project, `a` includes archived Proposals, `i` and `p` open the recorded issue or pull request.
+`skl browse` opens a terminal browser over the ledger: Projects, their Proposals, and each Slice's state, Claim, dependencies, branch and attachments. It starts at the current checkout's Project when there is exactly one.
 
 To find Slices, `f` picks a lifecycle or Claim from the counted facts of the current Project (every Project from the overview), and `/` searches Project, Proposal and Slice names and Slice titles. The criteria narrow the same results together. In the results, `w` switches between the current Project and every Project, `g` groups by Proposal or lifecycle, `d` opens scrollable membership diagnostics (`esc` returns to results), and `enter` opens the Slice. Slices whose unreadable records leave a criterion undecided are listed apart, never counted as matches.
 
@@ -107,13 +107,18 @@ skl browse project --project <name> [--include-archived]
 skl browse proposal --project <name> --proposal <proposal> [--archived]
 skl browse slice --project <name> --item <proposal>/<slice> [--archived]
 skl browse slices [--project <name>] [--lifecycle <state>]... [--claim implement|watchdog|none]... [--search <text>] [--group proposal|lifecycle] [--include-archived]
+skl browse documents --project <name> --proposal <proposal> [--archived]
+skl browse documents --project <name> --item <proposal>/<slice> [--archived]
+skl browse document --commit <full-ledger-commit> --path <ledger-path>
 ```
 
-Detail queries prefer active records when active and archived Proposals share a name; `--archived` explicitly selects the archived one.
+Detail queries prefer active records when active and archived Proposals share a name; `--archived` explicitly selects the archived one. `browse slice` exposes both relationship directions. Only a Merged blocker satisfies a dependency. Missing or unreadable targets remain explicitly unresolved; reverse-dependency results disclose when unreadable records make them incomplete.
 
-`skl browse slice` exposes both relationship directions. Only a Merged blocker satisfies a dependency. Missing or unreadable targets remain explicitly unresolved; reverse-dependency results disclose when unreadable records make them incomplete.
+`browse documents` reads the Proposal description and its accepted Slice documents, or the selected Slice's accepted documents, latest committed implementation and Watchdog reports, and current Human Decision. It also returns structured metadata for reports and decisions alongside their Markdown. An absent optional report is marked not yet available; unreadable or malformed records carry diagnostics, while readable document content remains available. Its `--archived` flag selects the archived Proposal when an active one shares its name.
 
-Every view reads one committed ledger revision, never fetches or contacts a forge, and changes nothing. A Claim is shown as a reservation, not as a running worker.
+`browse document` follows one exact ledger reference, including a historical commit and the path valid there. It never substitutes the latest version. Output identifies the ledger snapshot and document revisions separately; source-repository revisions in report metadata are labeled separately from ledger references. An unavailable exact reference is reported as unavailable.
+
+Every view reads one committed ledger revision, never fetches or contacts a forge, and changes nothing. A Claim is shown as a reservation, not as a running worker. Markdown is the default transport; add `--format json` for the same facts and document content as structured JSON. Existing `skl ledger show` remains the byte-preserving raw exact-readback command.
 
 ## Legacy
 

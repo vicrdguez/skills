@@ -26,14 +26,17 @@ import (
 // browseOutcome is the query transport: the established status, an
 // actionable reason for refusals, and one typed query result.
 type browseOutcome struct {
-	Status    string                   `json:"status"`
-	Reason    string                   `json:"reason,omitempty"`
-	Repair    string                   `json:"repair,omitempty"`
-	Overview  *ledger.Overview         `json:"overview,omitempty"`
-	Inventory *ledger.ProjectInventory `json:"inventory,omitempty"`
-	Proposal  *ledger.ProposalDetail   `json:"proposal,omitempty"`
-	Slice     *ledger.SliceDetail      `json:"slice,omitempty"`
-	Slices    *ledger.SliceSearch      `json:"slices,omitempty"`
+	Status           string                   `json:"status"`
+	Reason           string                   `json:"reason,omitempty"`
+	Repair           string                   `json:"repair,omitempty"`
+	Overview         *ledger.Overview         `json:"overview,omitempty"`
+	Inventory        *ledger.ProjectInventory `json:"inventory,omitempty"`
+	Proposal         *ledger.ProposalDetail   `json:"proposal,omitempty"`
+	Slice            *ledger.SliceDetail      `json:"slice,omitempty"`
+	Slices           *ledger.SliceSearch      `json:"slices,omitempty"`
+	Documents        *ledger.DocumentSet      `json:"documents,omitempty"`
+	Document         *ledger.Document         `json:"document,omitempty"`
+	SnapshotRevision string                   `json:"snapshot_revision,omitempty"`
 }
 
 func browseCommand(stdin io.Reader, stdout io.Writer) *cli.Command {
@@ -132,6 +135,55 @@ func browseCommand(stdin io.Reader, stdout io.Writer) *cli.Command {
 						Text: command.String("search"), GroupBy: command.String("group"),
 					})
 					return browseOutcome{Slices: search}, err
+				})
+			},
+		}, {
+			Name:  "documents",
+			Usage: "Read current committed documents for one Proposal or Slice",
+			Flags: []cli.Flag{
+				projectFlag("Project of the Proposal or Slice"), locationFlag(),
+				&cli.StringFlag{Name: "proposal", Usage: "Proposal whose description and Slice documents to read"},
+				&cli.StringFlag{Name: "item", Usage: "Slice identity (<proposal>/<slice>) whose current documents to read"},
+				implementationFormatFlag(),
+			},
+			Action: func(command *cli.Context) error {
+				return runBrowseQuery(command, stdout, func(snapshot *ledger.Snapshot) (browseOutcome, error) {
+					proposalSet, itemSet := command.IsSet("proposal"), command.IsSet("item")
+					if proposalSet == itemSet {
+						return browseOutcome{}, errors.New("browse documents requires exactly one of --proposal or --item")
+					}
+					var documents *ledger.DocumentSet
+					var err error
+					if proposalSet {
+						if command.Bool("archived") {
+							documents, err = snapshot.ProposalDocumentsAt(command.String("project"), command.String("proposal"), true)
+						} else {
+							documents, err = snapshot.ProposalDocuments(command.String("project"), command.String("proposal"))
+						}
+					} else if command.Bool("archived") {
+						documents, err = snapshot.SliceDocumentsAt(command.String("project"), command.String("item"), true)
+					} else {
+						documents, err = snapshot.SliceDocuments(command.String("project"), command.String("item"))
+					}
+					return browseOutcome{Documents: documents}, err
+				})
+			},
+		}, {
+			Name:  "document",
+			Usage: "Read one exact current or historical ledger document reference",
+			Flags: []cli.Flag{
+				&cli.StringFlag{Name: "commit", Usage: "Full ledger commit containing the exact document"},
+				&cli.StringFlag{Name: "path", Usage: "Ledger-relative document path at --commit"},
+				implementationFormatFlag(),
+			},
+			Action: func(command *cli.Context) error {
+				return runBrowseQuery(command, stdout, func(snapshot *ledger.Snapshot) (browseOutcome, error) {
+					commit, path := command.String("commit"), command.String("path")
+					if commit == "" || path == "" {
+						return browseOutcome{}, errors.New("browse document requires both --commit (full ledger SHA) and --path for an exact document reference")
+					}
+					document, err := snapshot.Document(ledger.Reference{Commit: commit, Path: path})
+					return browseOutcome{Document: document, SnapshotRevision: snapshot.Revision}, err
 				})
 			},
 		}},
@@ -281,6 +333,18 @@ func renderBrowse(stdout io.Writer, format implementationFormatKind, outcome bro
 		line("\n## Slice " + slice.Project + "/" + slice.Item + "\n")
 		list(browse.SliceLines(slice))
 	}
+	if documents := outcome.Documents; documents != nil {
+		renderBrowseDocuments(&report, line, documents)
+	}
+	if document := outcome.Document; document != nil {
+		line("Ledger snapshot revision: " + outcome.SnapshotRevision)
+		identity := "current snapshot"
+		if document.Reference.Commit != outcome.SnapshotRevision {
+			identity = "historical document; current Slice facts remain at the snapshot revision"
+		}
+		line("Document ledger revision: " + document.Reference.Commit + " (" + identity + ")")
+		renderBrowseDocument(&report, line, document)
+	}
 	if search := outcome.Slices; search != nil {
 		line("Ledger revision: " + search.Revision)
 		line("Selection: " + browse.SelectionText(search.Query))
@@ -309,6 +373,140 @@ func renderBrowse(stdout io.Writer, format implementationFormatKind, outcome bro
 	}
 	_, err := fmt.Fprint(stdout, report.String())
 	return err
+}
+
+func renderBrowseDocuments(report *strings.Builder, line func(string), set *ledger.DocumentSet) {
+	line("Ledger revision: " + set.Revision)
+	context := "Proposal " + set.Project + "/" + set.Proposal
+	if set.Slice != "" {
+		context += " / Slice " + set.Slice
+	}
+	if set.Archived {
+		context += " (archived)"
+	}
+	line("Context: " + context)
+	if set.Incomplete {
+		line("Record completeness: incomplete")
+	} else {
+		line("Record completeness: complete")
+	}
+	documentDiagnostics := make(map[ledger.Diagnostic]bool)
+	for _, document := range set.Documents {
+		for _, diagnostic := range document.Diagnostics {
+			documentDiagnostics[diagnostic] = true
+		}
+	}
+	for _, diagnostic := range set.Diagnostics {
+		if !documentDiagnostics[diagnostic] {
+			line("Diagnostic: " + browse.DiagnosticText(diagnostic))
+		}
+	}
+	renderReportAvailability(line, set)
+	if len(set.Documents) == 0 {
+		line("No documents are readable for this selection.")
+	}
+	for index := range set.Documents {
+		renderBrowseDocument(report, line, &set.Documents[index])
+	}
+}
+
+func renderReportAvailability(line func(string), set *ledger.DocumentSet) {
+	for _, availability := range set.Availability {
+		if availability.Kind == ledger.DecisionDocumentKind {
+			status := "unknown; see diagnostic"
+			switch availability.Status {
+			case ledger.DocumentAvailable:
+				status = "active"
+				if availability.Reference != nil {
+					status += " at " + availability.Reference.Commit + ":" + availability.Reference.Path
+				}
+			case ledger.DocumentAbsent:
+				status = "not yet available"
+			case ledger.DocumentUnavailable:
+				status = "unavailable; see diagnostic"
+			}
+			line("Human Decision availability for " + availability.Slice + " — " + status)
+			continue
+		}
+
+		phase := ""
+		switch availability.Kind {
+		case ledger.ImplementReportDocumentKind:
+			phase = ledger.ImplementPhase
+		case ledger.WatchdogReportDocumentKind:
+			phase = ledger.WatchdogPhase
+		default:
+			continue
+		}
+		status := "unknown; see diagnostic"
+		switch availability.Status {
+		case ledger.DocumentAvailable:
+			status = "available"
+			if availability.Reference != nil {
+				status += " at " + availability.Reference.Commit + ":" + availability.Reference.Path
+			}
+		case ledger.DocumentAbsent:
+			status = "not yet available"
+		case ledger.DocumentUnavailable:
+			status = "unavailable; see diagnostic"
+		}
+		line("Report availability: " + phase + " for " + availability.Slice + " — " + status)
+	}
+}
+
+func renderBrowseDocument(report *strings.Builder, line func(string), document *ledger.Document) {
+	line("\n## " + document.Reference.Path + "\n")
+	line("Document kind: " + string(document.Kind))
+	line("Ledger document reference: " + document.Reference.Commit + ":" + document.Reference.Path)
+	if metadata := document.Report; metadata != nil {
+		line("Report metadata: schema " + strconv.Itoa(metadata.Schema) + ", outcome " + metadata.Outcome)
+		if metadata.Round != 0 {
+			line("Watchdog round: " + strconv.FormatUint(metadata.Round, 10))
+		}
+		if metadata.Source.Head != "" || metadata.Source.Target != "" || metadata.Source.Reviewed != "" {
+			line("Source repository revisions (not ledger revisions):")
+			if metadata.Source.Head != "" {
+				line("- Source head: " + metadata.Source.Head)
+			}
+			if metadata.Source.Target != "" {
+				line("- Source target: " + metadata.Source.Target)
+			}
+			if metadata.Source.Reviewed != "" {
+				line("- Source reviewed: " + metadata.Source.Reviewed)
+			}
+		}
+		if len(document.References) > 0 {
+			line("Consumed ledger references:")
+			for _, reference := range document.References {
+				line("- " + reference.Label + ": " + reference.Reference.Commit + ":" + reference.Reference.Path)
+			}
+		}
+	}
+	if claim := document.Claim; claim != nil {
+		line("Claim metadata: phase " + claim.Phase + ", basis (ledger revision) " + claim.Basis)
+		if len(document.References) > 0 {
+			line("Claim input ledger references:")
+			for _, reference := range document.References {
+				line("- " + reference.Label + ": " + reference.Reference.Commit + ":" + reference.Reference.Path)
+			}
+		}
+	}
+	if metadata := document.Decision; metadata != nil {
+		line("Human Decision metadata: schema " + strconv.Itoa(metadata.Schema))
+		line("- Project: " + metadata.Project)
+		line("- Slice: " + metadata.Item)
+		line("- Route: " + metadata.Route)
+		line("- Answered request (ledger reference): " + metadata.AnsweredRequest.Commit + ":" + metadata.AnsweredRequest.Path)
+	}
+	for _, diagnostic := range document.Diagnostics {
+		line("Diagnostic: " + browse.DiagnosticText(diagnostic))
+	}
+	line("\nContent:\n")
+	report.WriteString(document.Contents)
+	if !strings.HasSuffix(document.Contents, "\n") {
+		report.WriteByte('\n')
+	}
+	line("")
 }
 
 func diagnosticTexts(diagnostics []ledger.Diagnostic) []string {

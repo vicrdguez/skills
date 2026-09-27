@@ -24,6 +24,9 @@ const (
 	factsScreen
 	resultsScreen
 	diagnosticsScreen
+	documentsScreen
+	referencesScreen
+	documentScreen
 )
 
 // factOption is one navigable lifecycle or Claim fact of the facts screen.
@@ -77,15 +80,15 @@ type Options struct {
 }
 
 type keyMap struct {
-	Up, Down, Enter, Back, Next, Previous, Projects, Archived, Search, Facts, Group, Scope, Diagnostics, Issue, PullRequest, Help, Quit key.Binding
+	Up, Down, Enter, Back, Next, Previous, Projects, Archived, Search, Facts, Group, Scope, Diagnostics, Documents, References, Issue, PullRequest, Help, Quit key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Enter, k.Back, k.Projects, k.Help, k.Next, k.Archived, k.Issue, k.PullRequest, k.Quit, k.Search, k.Facts}
+	return []key.Binding{k.Enter, k.Back, k.Documents, k.References, k.Projects, k.Help, k.Next, k.Archived, k.Issue, k.PullRequest, k.Quit, k.Search, k.Facts}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Up, k.Down, k.Enter, k.Back}, {k.Next, k.Previous}, {k.Projects, k.Archived}, {k.Search, k.Facts, k.Group, k.Scope, k.Diagnostics}, {k.Issue, k.PullRequest}, {k.Help, k.Quit}}
+	return [][]key.Binding{{k.Up, k.Down, k.Enter, k.Back}, {k.Next, k.Previous}, {k.Projects, k.Archived}, {k.Search, k.Facts, k.Group, k.Scope, k.Diagnostics}, {k.Documents, k.References}, {k.Issue, k.PullRequest}, {k.Help, k.Quit}}
 }
 
 func newKeyMap() keyMap {
@@ -98,6 +101,8 @@ func newKeyMap() keyMap {
 		Previous:    key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "previous relation")),
 		Projects:    key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "switch project")),
 		Archived:    key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "toggle archived")),
+		Documents:   key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "documents")),
+		References:  key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "references")),
 		Search:      key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search names")),
 		Facts:       key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "find by lifecycle or claim")),
 		Group:       key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "group by proposal/lifecycle")),
@@ -113,11 +118,12 @@ func newKeyMap() keyMap {
 // Model is one browsing session over a pinned ledger Snapshot. Selection and
 // navigation live only in the running session.
 type Model struct {
-	snapshot *ledger.Snapshot
-	open     func(string) error
-	keys     keyMap
-	help     help.Model
-	detail   viewport.Model
+	snapshot    *ledger.Snapshot
+	open        func(string) error
+	keys        keyMap
+	help        help.Model
+	detail      viewport.Model
+	docViewport viewport.Model
 
 	location
 	// selectedRow is the detail row where the selected relationship starts.
@@ -145,6 +151,19 @@ type Model struct {
 	search    *ledger.SliceSearch
 	failure   error
 
+	docContext             screen
+	documents              *ledger.DocumentSet
+	diagnosticReturn       screen
+	diagnosticOriginDetail viewport.Model
+	currentDocument        *ledger.Document
+	documentReturn         screen
+	documentHistory        []documentFrame
+	references             []ledger.LabeledReference
+	referenceOrigin        screen
+	referencesFromDoc      bool
+	referenceHistory       []referenceFrame
+	renderProblem          string
+
 	width, height int
 	status        string
 }
@@ -170,6 +189,14 @@ type frame struct {
 	offset int
 }
 
+type referenceFrame struct {
+	references   []ledger.LabeledReference
+	origin       screen
+	fromDocument bool
+	cursor       int
+	returnScreen screen
+}
+
 // openedMsg reports the outcome of one explicit external-browser request.
 type openedMsg struct {
 	url string
@@ -180,9 +207,10 @@ type openedMsg struct {
 func New(snapshot *ledger.Snapshot, options Options) Model {
 	model := Model{
 		snapshot: snapshot, open: options.Open, keys: newKeyMap(), help: help.New(),
-		detail: viewport.New(80, 10), location: location{cursor: map[screen]int{}},
-		parent: map[screen]screen{sliceScreen: proposalScreen},
-		width:  80, height: 24, status: options.Notice,
+		detail: viewport.New(80, 10), docViewport: viewport.New(80, 10),
+		location: location{cursor: map[screen]int{}},
+		parent:   map[screen]screen{sliceScreen: proposalScreen},
+		width:    80, height: 24, status: options.Notice,
 	}
 	model.help.Width = model.width
 	if model.open == nil {
@@ -193,6 +221,20 @@ func New(snapshot *ledger.Snapshot, options Options) Model {
 	}
 	model.load()
 	return model
+}
+
+func (m Model) helpKeys() keyMap {
+	keys := m.keys
+	keys.Diagnostics.SetEnabled(false)
+	switch m.screen {
+	case resultsScreen:
+		keys.Documents = key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "result diagnostics"))
+	case documentsScreen:
+		keys.Documents = key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "diagnostics"))
+	case diagnosticsScreen:
+		keys.Documents.SetEnabled(false)
+	}
+	return keys
 }
 
 func (m Model) Init() tea.Cmd { return nil }
@@ -220,6 +262,7 @@ func (m Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.typeSearch(msg)
 	}
 	finding := m.finding()
+	documentOverlay := isDocumentOverlay(m.screen) || (m.screen == diagnosticsScreen && m.diagnosticReturn == documentsScreen)
 	switch {
 	case key.Matches(msg, m.keys.Quit):
 		return m, tea.Quit
@@ -234,6 +277,10 @@ func (m Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.detail.PageUp()
 	case msg.String() == "pgdown" && (m.screen == sliceScreen || m.screen == diagnosticsScreen):
 		m.detail.PageDown()
+	case msg.String() == "pgup" && m.screen == documentScreen:
+		m.docViewport.PageUp()
+	case msg.String() == "pgdown" && m.screen == documentScreen:
+		m.docViewport.PageDown()
 	case key.Matches(msg, m.keys.Next) && m.screen == sliceScreen:
 		m.selectRelation(1)
 	case key.Matches(msg, m.keys.Previous) && m.screen == sliceScreen:
@@ -246,18 +293,18 @@ func (m Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.back()
 	case key.Matches(msg, m.keys.Projects):
 		m.switchProject()
-	case key.Matches(msg, m.keys.Archived):
+	case key.Matches(msg, m.keys.Archived) && !documentOverlay:
 		m.includeArchived = !m.includeArchived
 		m.status = "Archived proposals hidden"
 		if m.includeArchived {
 			m.status = "Archived proposals shown"
 		}
 		m.load()
-	case key.Matches(msg, m.keys.Search):
+	case key.Matches(msg, m.keys.Search) && !documentOverlay:
 		text := ""
 		m.typing = &text
 		m.layoutDetail()
-	case key.Matches(msg, m.keys.Facts):
+	case key.Matches(msg, m.keys.Facts) && !documentOverlay:
 		m.find(factsScreen)
 	case key.Matches(msg, m.keys.Group) && finding:
 		m.query.GroupBy = ledger.GroupByLifecycle
@@ -268,7 +315,9 @@ func (m Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.load()
 	case key.Matches(msg, m.keys.Scope) && finding:
 		m.toggleScope()
-	case key.Matches(msg, m.keys.Diagnostics) && m.screen == resultsScreen:
+	case key.Matches(msg, m.keys.Diagnostics) && (m.screen == resultsScreen || m.screen == documentsScreen):
+		m.diagnosticReturn = m.screen
+		m.diagnosticOriginDetail = m.detail
 		m.screen = diagnosticsScreen
 		m.layoutDetail()
 		m.detail.GotoTop()
@@ -276,16 +325,28 @@ func (m Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.openAttachment(true)
 	case key.Matches(msg, m.keys.PullRequest):
 		return m, m.openAttachment(false)
+	case key.Matches(msg, m.keys.Documents):
+		m.openDocuments()
+	case key.Matches(msg, m.keys.References):
+		m.openReferences()
 	}
 	return m, nil
 }
 
 func (m *Model) move(delta int) {
-	if m.screen == sliceScreen || m.screen == diagnosticsScreen {
+	switch m.screen {
+	case sliceScreen, diagnosticsScreen:
 		if delta < 0 {
 			m.detail.LineUp(1)
 		} else {
 			m.detail.LineDown(1)
+		}
+		return
+	case documentScreen:
+		if delta < 0 {
+			m.docViewport.LineUp(1)
+		} else {
+			m.docViewport.LineDown(1)
 		}
 		return
 	}
@@ -298,17 +359,33 @@ func (m *Model) move(delta int) {
 
 // rows counts the selectable entries of the current list screen.
 func (m Model) rows() int {
-	switch {
-	case m.screen == overviewScreen && m.overview != nil:
-		return len(m.overview.Projects)
-	case m.screen == projectScreen && m.inventory != nil:
-		return len(m.inventory.Proposals)
-	case m.screen == proposalScreen && m.members != nil:
-		return len(m.members.Slices)
-	case m.screen == factsScreen && m.search != nil:
-		return len(factOptions)
-	case m.screen == resultsScreen && m.search != nil:
-		return len(m.results())
+	switch m.screen {
+	case overviewScreen:
+		if m.overview != nil {
+			return len(m.overview.Projects)
+		}
+	case projectScreen:
+		if m.inventory != nil {
+			return len(m.inventory.Proposals)
+		}
+	case proposalScreen:
+		if m.members != nil {
+			return len(m.members.Slices)
+		}
+	case factsScreen:
+		if m.search != nil {
+			return len(factOptions)
+		}
+	case resultsScreen:
+		if m.search != nil {
+			return len(m.results())
+		}
+	case documentsScreen:
+		if m.documents != nil {
+			return len(m.documents.Documents)
+		}
+	case referencesScreen:
+		return len(m.references)
 	}
 	return 0
 }
@@ -367,7 +444,20 @@ func (m Model) typeSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // finding reports whether the current screen belongs to finding: the facts,
 // the results, or a Slice opened from the results.
 func (m Model) finding() bool {
-	return m.screen == factsScreen || m.screen == resultsScreen || m.screen == diagnosticsScreen || (m.screen == sliceScreen && m.parent[sliceScreen] == resultsScreen)
+	return m.isFindingScreen(m.screen)
+}
+
+func (m Model) isFindingScreen(screen screen) bool {
+	return screen == factsScreen || screen == resultsScreen || (screen == diagnosticsScreen && m.diagnosticReturn == resultsScreen) || (screen == sliceScreen && m.parent[sliceScreen] == resultsScreen)
+}
+
+func isDocumentOverlay(screen screen) bool {
+	switch screen {
+	case documentsScreen, referencesScreen, documentScreen:
+		return true
+	default:
+		return false
+	}
 }
 
 // find opens target within finding. Finding started from the hierarchy
@@ -441,14 +531,21 @@ func (m *Model) enter() {
 		chosen := m.results()[selected]
 		m.project, m.proposal, m.item, m.archived = chosen.project, chosen.match.Proposal, chosen.match.Item, chosen.match.Archived
 		m.screen, m.parent[sliceScreen], m.relation = sliceScreen, resultsScreen, 0
+	case documentsScreen:
+		m.openDocument(m.documents.Documents[selected])
+		return
+	case referencesScreen:
+		m.followReference(m.references[selected].Reference)
+		return
 	}
 	m.status = ""
 	m.load()
 }
 
-// back restores the context a followed relationship left, or otherwise
-// returns to the parent screen.
+// back restores relationship or finding context before leaving the current
+// screen. Document and reference overlays return without reloading that context.
 func (m *Model) back() {
+	fromDocumentOverlay := isDocumentOverlay(m.screen)
 	if count := len(m.history); m.screen == sliceScreen && count > 0 {
 		previous := m.history[count-1]
 		m.history = m.history[:count-1]
@@ -468,20 +565,75 @@ func (m *Model) back() {
 		m.detail.SetYOffset(m.context.offset)
 		return
 	}
+
+	m.status = ""
 	switch m.screen {
 	case overviewScreen:
 		return
-	case diagnosticsScreen:
-		m.screen = resultsScreen
-	case sliceScreen, factsScreen, resultsScreen:
-		if m.screen == sliceScreen && m.parent[sliceScreen] == resultsScreen {
+	case projectScreen:
+		m.screen = overviewScreen
+	case proposalScreen:
+		m.screen = projectScreen
+	case sliceScreen:
+		if m.parent[sliceScreen] == resultsScreen {
 			m.restoreFindingIdentity()
 		}
+		m.screen = m.parent[sliceScreen]
+	case diagnosticsScreen:
+		m.screen = m.diagnosticReturn
+		m.detail = m.diagnosticOriginDetail
+	case factsScreen, resultsScreen:
 		m.screen = m.parent[m.screen]
-	default:
-		m.screen--
+	case documentsScreen:
+		m.screen = m.docContext
+		m.failure = nil
+	case referencesScreen:
+		if len(m.referenceHistory) > 0 {
+			previous := m.referenceHistory[len(m.referenceHistory)-1]
+			m.referenceHistory = m.referenceHistory[:len(m.referenceHistory)-1]
+			m.restoreReferenceFrame(previous)
+			m.screen = previous.returnScreen
+		} else {
+			m.screen = m.referenceOrigin
+		}
+		m.failure = nil
+	case documentScreen:
+		if len(m.documentHistory) > 0 {
+			frame := m.documentHistory[len(m.documentHistory)-1]
+			m.documentHistory = m.documentHistory[:len(m.documentHistory)-1]
+			if frame.hasDocument {
+				document := frame.document
+				m.currentDocument = &document
+			} else {
+				m.currentDocument = nil
+			}
+			m.docViewport = frame.viewport
+			m.documentReturn, m.renderProblem = frame.returnScreen, frame.renderProblem
+			m.references = append([]ledger.LabeledReference(nil), frame.references...)
+			m.referenceOrigin, m.referencesFromDoc = frame.referenceOrigin, frame.referencesFromDoc
+			m.cursor[referencesScreen] = frame.referenceCursor
+			m.referenceHistory = append([]referenceFrame(nil), frame.referenceHistory...)
+			if frame.hasDocument {
+				if count := len(m.referenceHistory); count > 0 {
+					previous := m.referenceHistory[count-1]
+					m.referenceHistory = m.referenceHistory[:count-1]
+					m.restoreReferenceFrame(previous)
+				}
+				m.screen = documentScreen
+			} else {
+				m.screen = frame.screen
+			}
+		} else {
+			m.screen = m.documentReturn
+			m.currentDocument, m.renderProblem = nil, ""
+		}
+		m.failure = nil
 	}
-	m.status = ""
+
+	if fromDocumentOverlay || isDocumentOverlay(m.screen) {
+		m.layoutDetail()
+		return
+	}
 	m.load()
 }
 
@@ -542,6 +694,9 @@ func (m Model) relations() []relation {
 func (m *Model) switchProject() {
 	m.screen, m.status, m.history = overviewScreen, "", nil
 	m.contextHistory = nil
+	m.docContext, m.documents, m.currentDocument = overviewScreen, nil, nil
+	m.documentHistory, m.references, m.referenceHistory = nil, nil, nil
+	m.referenceOrigin, m.referencesFromDoc = overviewScreen, false
 	m.load()
 	if m.overview == nil {
 		return

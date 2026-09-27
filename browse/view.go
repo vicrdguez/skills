@@ -29,6 +29,8 @@ func (m Model) View() string {
 		body = wrap(warningStyle.Render("! Unable to show this view: "+m.failure.Error()), m.width)
 	case m.screen == sliceScreen || m.screen == diagnosticsScreen:
 		body = m.detail.View()
+	case m.screen == documentScreen:
+		body = m.docViewport.View()
 	default:
 		body = m.listBody(height)
 	}
@@ -39,64 +41,104 @@ func (m Model) bodyHeight(header, footer string) int {
 	return max(m.height-lipgloss.Height(header)-lipgloss.Height(footer), 3)
 }
 
-// layoutDetail fits the Slice detail viewport to the current terminal and
-// marks its followable relationships, the selected one by text as well as
-// style.
+// layoutDetail fits both viewports to the current terminal and marks the
+// Slice's selected followable relationship as well as styling it.
 func (m *Model) layoutDetail() {
-	m.detail.Width = m.width
-	m.detail.Height = m.bodyHeight(m.header(), m.footer())
-	if m.screen == diagnosticsScreen && m.search != nil {
+	height := m.bodyHeight(m.header(), m.footer())
+	m.detail.Width, m.detail.Height = m.width, height
+	switch m.screen {
+	case diagnosticsScreen:
+		offset := m.detail.YOffset
 		var lines []string
-		for _, diagnostic := range m.resultDiagnostics() {
+		for _, diagnostic := range m.activeDiagnostics() {
 			lines = append(lines, warningStyle.Render(DiagnosticText(diagnostic)))
 		}
+		if len(lines) == 0 {
+			lines = append(lines, "No diagnostics for this view.")
+		}
 		m.detail.SetContent(wrap(strings.Join(lines, "\n"), m.width))
-	}
-	if m.screen != sliceScreen || m.slice == nil {
-		return
-	}
-	lines, relations := sliceLines(m.slice)
-	m.relation = min(m.relation, max(len(relations)-1, 0))
-	for index, relation := range relations {
-		if index == m.relation {
-			lines[relation.line] = selectedStyle.Render("> " + lines[relation.line])
-		} else {
-			lines[relation.line] = "  " + lines[relation.line]
+		m.detail.SetYOffset(offset)
+	case sliceScreen:
+		if m.slice != nil {
+			offset := m.detail.YOffset
+			lines, relations := sliceLines(m.slice)
+			m.relation = min(m.relation, max(len(relations)-1, 0))
+			for index, relation := range relations {
+				if index == m.relation {
+					lines[relation.line] = selectedStyle.Render("> " + lines[relation.line])
+				} else {
+					lines[relation.line] = "  " + lines[relation.line]
+				}
+			}
+			var rows []string
+			m.selectedRow = 0
+			for index, line := range lines {
+				if len(relations) > 0 && index == relations[m.relation].line {
+					m.selectedRow = len(rows)
+				}
+				rows = append(rows, strings.Split(wrap(line, m.width), "\n")...)
+			}
+			m.detail.SetContent(strings.Join(rows, "\n"))
+			m.detail.SetYOffset(offset)
 		}
 	}
-	var rows []string
-	m.selectedRow = 0
-	for index, line := range lines {
-		if len(relations) > 0 && index == relations[m.relation].line {
-			m.selectedRow = len(rows)
-		}
-		rows = append(rows, strings.Split(wrap(line, m.width), "\n")...)
+
+	m.docViewport.Width, m.docViewport.Height = m.width, height
+	if m.screen == documentScreen && m.currentDocument != nil {
+		offset := m.docViewport.YOffset
+		content, problem := m.documentContent(m.currentDocument, m.width)
+		m.renderProblem = problem
+		m.docViewport.SetContent(content)
+		m.docViewport.SetYOffset(offset)
 	}
-	m.detail.SetContent(strings.Join(rows, "\n"))
 }
 
 func (m Model) header() string {
+	context := m.screen
+	if isDocumentOverlay(m.screen) || (m.screen == diagnosticsScreen && m.diagnosticReturn == documentsScreen) {
+		context = m.docContext
+	}
 	var path []string
 	switch {
-	case m.screen == factsScreen:
+	case context == factsScreen:
 		path = []string{"Find slices", "Facts"}
-	case m.screen == resultsScreen:
+	case context == resultsScreen:
 		path = []string{"Find slices"}
-	case m.screen == diagnosticsScreen:
+	case context == diagnosticsScreen:
 		path = []string{"Find slices", "Diagnostics"}
-	case m.finding():
+	case m.isFindingScreen(context):
 		path = []string{"Find slices", m.project, m.item}
 	default:
 		path = []string{"Projects"}
-		if m.screen >= projectScreen {
+		switch context {
+		case projectScreen:
 			path = append(path, m.project)
-		}
-		if m.screen >= proposalScreen {
-			path = append(path, m.proposal)
-		}
-		if m.screen == sliceScreen {
+		case proposalScreen:
+			path = append(path, m.project, m.proposal)
+		case sliceScreen:
+			path = append(path, m.project, m.proposal)
 			_, slice, _ := strings.Cut(m.item, "/")
 			path = append(path, slice)
+		}
+	}
+	switch m.screen {
+	case documentsScreen:
+		path = append(path, "documents")
+	case referencesScreen:
+		if m.referencesFromDoc && m.currentDocument != nil {
+			path = append(path, documentLabel(*m.currentDocument))
+		}
+		path = append(path, "references")
+	case documentScreen:
+		if m.documentReturn == referencesScreen {
+			path = append(path, "references")
+		}
+		if m.currentDocument != nil {
+			path = append(path, documentLabel(*m.currentDocument))
+		}
+	case diagnosticsScreen:
+		if m.diagnosticReturn == documentsScreen {
+			path = append(path, "documents", "diagnostics")
 		}
 	}
 	archived := "archived hidden"
@@ -107,9 +149,20 @@ func (m Model) header() string {
 	if len(revision) > 12 {
 		revision = revision[:12]
 	}
-	facts := "committed ledger " + revision + " · " + archived
+	facts := "current committed ledger " + revision + " · " + archived
 	if (m.screen == sliceScreen || m.screen == diagnosticsScreen) && m.detail.TotalLineCount() > m.detail.Height {
 		facts += fmt.Sprintf(" · scrolled %d%%", int(m.detail.ScrollPercent()*100))
+	}
+	if m.screen == documentScreen && m.currentDocument != nil {
+		identity := "current document"
+		if m.currentDocument.Reference.Commit != m.snapshot.Revision {
+			identity = "HISTORICAL document"
+		}
+		facts += " · " + identity
+		if m.docViewport.TotalLineCount() > m.docViewport.Height {
+			facts += fmt.Sprintf(" · scrolled %d%%", int(m.docViewport.ScrollPercent()*100))
+		}
+		facts += " · ref " + m.currentDocument.Reference.Commit[:min(len(m.currentDocument.Reference.Commit), 12)]
 	}
 	return truncate(titleStyle.Render("skl browse › "+strings.Join(path, " › ")), m.width) + "\n" +
 		truncate(mutedStyle.Render(facts), m.width)
@@ -120,10 +173,13 @@ func (m Model) footer() string {
 	if m.status != "" {
 		lines = append(lines, wrap(m.status, m.width))
 	}
+	if m.screen == documentScreen && m.renderProblem != "" {
+		lines = append(lines, wrap(warningStyle.Render("! "+m.renderProblem+"; showing recorded text"), m.width))
+	}
 	if m.typing != nil {
 		lines = append(lines, wrap(titleStyle.Render("Search names: ")+*m.typing+"█  (enter apply · esc cancel)", m.width))
 	}
-	return strings.Join(append(lines, truncate(m.help.View(m.keys), m.width)), "\n")
+	return strings.Join(append(lines, truncate(m.help.View(m.helpKeys()), m.width)), "\n")
 }
 
 // listBody renders the current list screen: its parent context, the list,
@@ -214,6 +270,55 @@ func (m Model) listContent() (context []string, title string, rows []string, cur
 		if len(rows) > 0 {
 			selected = ProposalLines(m.inventory.Proposals[cursor])
 		}
+	case documentsScreen:
+		if m.docContext == proposalScreen {
+			context = []string{"Documents for Proposal " + m.project + "/" + m.proposal}
+		} else {
+			context = []string{"Documents for Slice " + m.project + "/" + m.item}
+		}
+		if m.documents != nil && m.documents.Archived {
+			context = append(context, "Archive documents · current ledger revision "+m.documents.Revision)
+		}
+		title = fmt.Sprintf("Available documents (%d)", len(m.rowsForDocumentList()))
+		empty = "No readable documents are available at this committed revision. See diagnostics, if any."
+		if m.documents != nil {
+			if count := len(m.documents.Diagnostics); count > 0 {
+				context = append(context, warningStyle.Render(fmt.Sprintf("! %d diagnostics · d to inspect", count)))
+			}
+			context = append(context, optionalDocumentNotes(m.documents)...)
+			for _, document := range m.documents.Documents {
+				rows = append(rows, documentLabel(document))
+			}
+			if len(rows) > 0 {
+				document := m.documents.Documents[cursor]
+				selected = []string{documentSummary(document), "Exact ledger identity: " + document.Reference.Commit + ":" + document.Reference.Path}
+				if len(document.Diagnostics) > 0 {
+					selected = append(selected, diagnosticLines(document.Diagnostics)...)
+				}
+				selected = append(selected, "Enter reads this committed document; d opens this set's diagnostics.")
+			}
+		}
+	case referencesScreen:
+		context = []string{"Structured ledger references · exact commit and path; unavailable references are never replaced."}
+		if m.referencesFromDoc && m.currentDocument != nil {
+			context = append(context, "From "+documentLabel(*m.currentDocument))
+			context = append(context, diagnosticLines(m.currentDocument.Diagnostics)...)
+		} else {
+			context = append(context, "From the current Slice Claim at ledger revision "+m.snapshot.Revision)
+		}
+		title = fmt.Sprintf("References (%d)", len(m.references))
+		empty = "No structured exact ledger references are available. Metadata diagnostics remain with the document."
+		for _, reference := range m.references {
+			rows = append(rows, reference.Label+" — "+reference.Reference.Path)
+		}
+		if len(rows) > 0 {
+			reference := m.references[cursor]
+			selected = []string{
+				"Label: " + reference.Label,
+				"Exact ledger reference: " + reference.Reference.Commit + ":" + reference.Reference.Path,
+				"Enter follows this exact reference; source-code revisions are not browsed.",
+			}
+		}
 	case proposalScreen:
 		proposal := m.members.Proposal
 		context = []string{
@@ -229,7 +334,7 @@ func (m Model) listContent() (context []string, title string, rows []string, cur
 			rows = append(rows, SliceRow(slice.Slice, slice))
 		}
 		if len(rows) > 0 {
-			selected = SliceSummaryLines(m.members.Slices[cursor])
+			selected = append(SliceSummaryLines(m.members.Slices[cursor]), "Press d to read this Proposal's documents.")
 		}
 	case factsScreen:
 		context = m.findingContext()
@@ -278,6 +383,16 @@ func (m Model) resultDiagnostics() []ledger.Diagnostic {
 		diagnostics = append(diagnostics, project.Diagnostics...)
 	}
 	return diagnostics
+}
+
+func (m Model) activeDiagnostics() []ledger.Diagnostic {
+	if m.diagnosticReturn == documentsScreen {
+		if m.documents == nil {
+			return nil
+		}
+		return m.documents.Diagnostics
+	}
+	return m.resultDiagnostics()
 }
 
 // findingContext states the current selection and its result.

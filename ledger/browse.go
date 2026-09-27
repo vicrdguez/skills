@@ -86,8 +86,9 @@ type SliceSummary struct {
 // ClaimFacts is a recorded Claim: a reservation for one phase, not evidence
 // that a worker is running.
 type ClaimFacts struct {
-	Phase string `json:"phase"`
-	Basis string `json:"basis"`
+	Phase     string    `json:"phase"`
+	Basis     string    `json:"basis"`
+	Reference Reference `json:"reference"`
 }
 
 // RelatedSlice is the other end of one recorded Dependency with its recorded
@@ -470,7 +471,10 @@ func (v *Snapshot) sliceDetail(projectName, item string, location *bool) (*Slice
 	detail.Issue, detail.Submission, detail.Target, detail.Completion = state.Issue, state.Submission, state.Target, state.Completion
 	detail.ActiveDecision, detail.Pending = state.Decision, state.Publication
 	if state.Claim != nil {
-		detail.Claim = &ClaimFacts{Phase: state.Claim.Phase, Basis: state.Claim.Basis}
+		detail.Claim = &ClaimFacts{
+			Phase: state.Claim.Phase, Basis: state.Claim.Basis,
+			Reference: Reference{Commit: v.Revision, Path: v.slicePath(project.name, proposal, tree.name) + "/state.json"},
+		}
 	}
 	for _, dependency := range state.Dependencies {
 		detail.Dependencies = append(detail.Dependencies, v.dependency(project, dependency, records))

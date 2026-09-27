@@ -138,7 +138,10 @@ func sliceLines(slice *ledger.SliceDetail) ([]string, []relation) {
 		if slice.Claim == nil {
 			lines = append(lines, "Claim: none")
 		} else {
-			lines = append(lines, "Claim: "+claimText(slice.Claim.Phase, slice.Claim.Basis))
+			lines = append(lines,
+				"Claim: "+claimText(slice.Claim.Phase, slice.Claim.Basis),
+				"Claim state reference: "+slice.Claim.Reference.Commit+":"+slice.Claim.Reference.Path,
+			)
 		}
 		lines = append(lines, "Branch: "+orUnknown(slice.Branch))
 		if len(slice.Dependencies) == 0 {
@@ -190,7 +193,7 @@ func sliceLines(slice *ledger.SliceDetail) ([]string, []relation) {
 			lines = append(lines, "Pending push: "+slice.Pending.Push.Status+" "+slice.Pending.Push.Detail)
 		}
 	}
-	lines = append(lines, "Parent issue: "+attachmentText(slice.ParentIssue), "Contract documents: "+listText(slice.Documents), "Current reports: "+listText(slice.Reports))
+	lines = append(lines, "Parent issue: "+attachmentText(slice.ParentIssue), "Contract documents: "+listText(slice.Documents), "Current reports: "+listText(slice.Reports), "Press d to read Slice documents; r follows the exact Claim state reference.")
 	return append(lines, diagnosticLines(slice.Diagnostics)...), relations
 }
 
