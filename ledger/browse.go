@@ -210,6 +210,10 @@ type sliceTree struct {
 	files map[string]bool
 }
 
+// Refresh selects a fresh committed view through the same read-only query
+// boundary used by CLI queries. The previous Snapshot remains valid.
+func (v *Snapshot) Refresh() (*Snapshot, error) { return v.store.Snapshot() }
+
 // Snapshot selects the ledger's current committed revision and its record
 // tree. Failure to read the ledger itself is an error; damaged records are
 // diagnosed by the queries instead.

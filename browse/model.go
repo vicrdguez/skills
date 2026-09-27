@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
@@ -80,15 +81,15 @@ type Options struct {
 }
 
 type keyMap struct {
-	Up, Down, Enter, Back, Next, Previous, Projects, Archived, Search, Facts, Group, Scope, Diagnostics, Documents, References, Issue, PullRequest, Help, Quit key.Binding
+	Up, Down, Enter, Back, Next, Previous, Projects, Archived, Search, Facts, Group, Scope, Diagnostics, Documents, References, Issue, PullRequest, Refresh, Help, Quit key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Enter, k.Back, k.Documents, k.References, k.Projects, k.Help, k.Next, k.Archived, k.Issue, k.PullRequest, k.Quit, k.Search, k.Facts}
+	return []key.Binding{k.Enter, k.Back, k.Documents, k.References, k.Projects, k.Refresh, k.Help, k.Next, k.Archived, k.Issue, k.PullRequest, k.Quit, k.Search, k.Facts}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Up, k.Down, k.Enter, k.Back}, {k.Next, k.Previous}, {k.Projects, k.Archived}, {k.Search, k.Facts, k.Group, k.Scope, k.Diagnostics}, {k.Documents, k.References}, {k.Issue, k.PullRequest}, {k.Help, k.Quit}}
+	return [][]key.Binding{{k.Up, k.Down, k.Enter, k.Back}, {k.Next, k.Previous}, {k.Projects, k.Archived}, {k.Search, k.Facts, k.Group, k.Scope, k.Diagnostics}, {k.Documents, k.References}, {k.Issue, k.PullRequest, k.Refresh}, {k.Help, k.Quit}}
 }
 
 func newKeyMap() keyMap {
@@ -110,13 +111,14 @@ func newKeyMap() keyMap {
 		Diagnostics: key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "result diagnostics")),
 		Issue:       key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "open issue")),
 		PullRequest: key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "open PR")),
+		Refresh:     key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "refresh ledger")),
 		Help:        key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 		Quit:        key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 	}
 }
 
-// Model is one browsing session over a pinned ledger Snapshot. Selection and
-// navigation live only in the running session.
+// Model is one browsing session over a committed ledger Snapshot. Selection
+// and navigation live only in the running session.
 type Model struct {
 	snapshot    *ledger.Snapshot
 	open        func(string) error
@@ -163,6 +165,17 @@ type Model struct {
 	referencesFromDoc      bool
 	referenceHistory       []referenceFrame
 	renderProblem          string
+	// Opened document presentation is anchored at opening, not rewritten by
+	// a later current-facts refresh.
+	openedContext  string
+	openedRevision string
+
+	refreshRequest   uint64
+	refreshHandled   uint64
+	refreshFailure   error
+	selectionMissing string
+	missingIdentity  string
+	newerDocument    bool
 
 	width, height int
 	status        string
@@ -237,7 +250,29 @@ func (m Model) helpKeys() keyMap {
 	return keys
 }
 
-func (m Model) Init() tea.Cmd { return nil }
+// Refresh requests are asynchronous so a slow ledger read cannot stall
+// navigation. A periodic check is local and does not fetch or reconcile.
+type refreshTick struct{}
+type refreshResult struct {
+	request  uint64
+	snapshot *ledger.Snapshot
+	err      error
+}
+
+func refreshTimer() tea.Cmd {
+	return tea.Tick(time.Second, func(time.Time) tea.Msg { return refreshTick{} })
+}
+
+func (m Model) Init() tea.Cmd { return refreshTimer() }
+
+func (m *Model) requestRefresh() tea.Cmd {
+	m.refreshRequest++
+	request, snapshot := m.refreshRequest, m.snapshot
+	return func() tea.Msg {
+		fresh, err := snapshot.Refresh()
+		return refreshResult{request: request, snapshot: fresh, err: err}
+	}
+}
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -245,6 +280,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		m.help.Width = msg.Width
 		m.layoutDetail()
+	case refreshTick:
+		return m, tea.Batch(refreshTimer(), m.requestRefresh())
+	case refreshResult:
+		if msg.request <= m.refreshHandled {
+			return m, nil
+		}
+		m.refreshHandled = msg.request
+		if msg.err != nil {
+			m.refreshFailure = msg.err
+			return m, nil
+		}
+		m.refreshFailure = nil
+		if msg.snapshot.Revision != m.snapshot.Revision {
+			m.publish(msg.snapshot)
+		}
 	case openedMsg:
 		if msg.err != nil {
 			m.status = "Could not open " + msg.url + ": " + msg.err.Error()
@@ -258,6 +308,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if key.Matches(msg, m.keys.Refresh) {
+		return m, m.requestRefresh()
+	}
 	if m.typing != nil {
 		return m.typeSearch(msg)
 	}
@@ -355,6 +408,7 @@ func (m *Model) move(delta int) {
 		return
 	}
 	m.cursor[m.screen] = min(max(m.cursor[m.screen]+delta, 0), count-1)
+	m.selectionMissing, m.missingIdentity = "", ""
 }
 
 // rows counts the selectable entries of the current list screen.
@@ -505,7 +559,7 @@ func (m *Model) toggleScope() {
 }
 
 func (m *Model) enter() {
-	if m.rows() == 0 {
+	if m.selectionMissing != "" || m.failure != nil || m.rows() == 0 {
 		return
 	}
 	selected := m.cursor[m.screen]
@@ -609,6 +663,8 @@ func (m *Model) back() {
 			}
 			m.docViewport = frame.viewport
 			m.documentReturn, m.renderProblem = frame.returnScreen, frame.renderProblem
+			m.openedContext, m.openedRevision = frame.openedContext, frame.openedRevision
+			m.newerDocument = m.documentHasNewerVersion()
 			m.references = append([]ledger.LabeledReference(nil), frame.references...)
 			m.referenceOrigin, m.referencesFromDoc = frame.referenceOrigin, frame.referencesFromDoc
 			m.cursor[referencesScreen] = frame.referenceCursor
@@ -626,6 +682,7 @@ func (m *Model) back() {
 		} else {
 			m.screen = m.documentReturn
 			m.currentDocument, m.renderProblem = nil, ""
+			m.newerDocument = false
 		}
 		m.failure = nil
 	}
@@ -696,6 +753,7 @@ func (m *Model) switchProject() {
 	m.contextHistory = nil
 	m.docContext, m.documents, m.currentDocument = overviewScreen, nil, nil
 	m.documentHistory, m.references, m.referenceHistory = nil, nil, nil
+	m.selectionMissing, m.missingIdentity = "", ""
 	m.referenceOrigin, m.referencesFromDoc = overviewScreen, false
 	m.load()
 	if m.overview == nil {
@@ -711,6 +769,7 @@ func (m *Model) switchProject() {
 // load reads the current screen's facts from the pinned Snapshot.
 func (m *Model) load() {
 	m.failure = nil
+	m.selectionMissing, m.missingIdentity = "", ""
 	switch m.screen {
 	case overviewScreen:
 		m.overview, m.failure = m.snapshot.Overview(m.includeArchived)

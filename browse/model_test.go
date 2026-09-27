@@ -128,11 +128,13 @@ func fixtureLedger(t *testing.T, extras ...func(string)) *ledger.Snapshot {
 type session struct {
 	t      *testing.T
 	model  tea.Model
+	root   string
 	opened []string
 }
 
 func start(t *testing.T, project string, extras ...func(string)) *session {
 	s := &session{t: t}
+	extras = append(extras, func(root string) { s.root = root })
 	s.model = browse.New(fixtureLedger(t, extras...), browse.Options{Project: project, Open: func(url string) error {
 		s.opened = append(s.opened, url)
 		return nil
