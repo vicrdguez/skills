@@ -72,6 +72,27 @@ func TestStatusRequiresConfiguredAcceptedProjectWithoutReadingLegacyForge(t *tes
 	}
 }
 
+func TestStatusGuidesRepositoryWithCollidingProjectName(t *testing.T) {
+	fixture := newLedgerFixture(t)
+	root := sourceRepository(t, "acme", "widgets")
+	path := filepath.Join(fixture.clone, "projects", "widgets", "project.json")
+	writeFile(t, path, `{"repository":"other/widgets"}`+"\n")
+	runGit(t, fixture.clone, "add", "projects/widgets/project.json")
+	runGit(t, fixture.clone, "commit", "-q", "-m", "other repository owns name")
+	var output bytes.Buffer
+	app := newApp(func(github.RepositoryID) (setup.Backend, error) {
+		t.Fatal("colliding Project fell back to forge")
+		return nil, nil
+	}, bytes.NewReader(nil), &output, &output)
+	if err := app.Run([]string{"skl", "status", "--repo", root, "--format", "json"}); err != nil {
+		t.Fatal(err)
+	}
+	var outcome ledgerOutcome
+	if err := json.Unmarshal(output.Bytes(), &outcome); err != nil || outcome.Status != "fix_required" || !strings.Contains(outcome.Repair, "name collision") || !strings.Contains(outcome.Repair, "correct ledger") {
+		t.Fatalf("missing collision guidance: %v %s", err, &output)
+	}
+}
+
 func TestStatusShowsAcceptedProjectInBothFormats(t *testing.T) {
 	newLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
