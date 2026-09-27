@@ -36,15 +36,28 @@ var embedded embed.FS
 // adapter is one Harness Adapter: the command it runs and the flags whose
 // values a user passes as its arguments, in order.
 type adapter struct {
-	name    string
-	command string
-	slots   []string
+	name     string
+	command  string
+	slots    []string
+	defaults map[string]string
+	loop     bool
 }
 
 var adapters = []adapter{
-	{"implement", "skl implement next", []string{"reviewer-model", "reviewer-thinking"}},
-	{"implement-team", "skl implement next --mode team", []string{"helper-model", "helper-thinking", "reviewer-model", "reviewer-thinking"}},
-	{"watchdog", "skl watchdog next", nil},
+	{name: "implement", command: "skl implement next", slots: []string{"reviewer-model", "reviewer-thinking"}},
+	{name: "implement-team", command: "skl implement next --mode team", slots: []string{"helper-model", "helper-thinking", "reviewer-model", "reviewer-thinking"}},
+	{name: "watchdog", command: "skl watchdog next"},
+}
+
+// Loop adapters are installed only into pi and OpenCode. Their outcomes own
+// the continuation; the entry points only supply dispatch arguments.
+var loopAdapters = []adapter{
+	{name: "implement-loop", command: "skl implement next --dispatch --wait", slots: []string{"worker-model", "worker-thinking", "reviewer-model", "reviewer-thinking"}, loop: true,
+		defaults: map[string]string{"worker-model": "openai-codex/gpt-6-sol", "worker-thinking": "xhigh", "reviewer-model": "openai-codex/gpt-6-astra", "reviewer-thinking": "low"}},
+	{name: "implement-team-loop", command: "skl implement next --mode team --dispatch --wait", slots: []string{"worker-model", "worker-thinking", "helper-model", "helper-thinking", "reviewer-model", "reviewer-thinking"}, loop: true,
+		defaults: map[string]string{"worker-model": "openai-codex/gpt-6-sol", "worker-thinking": "xhigh", "helper-model": "openai-codex/gpt-6-luna", "helper-thinking": "xhigh", "reviewer-model": "openai-codex/gpt-6-sol", "reviewer-thinking": "xhigh"}},
+	{name: "watchdog-loop", command: "skl watchdog next --dispatch --wait", slots: []string{"worker-model", "worker-thinking"}, loop: true,
+		defaults: map[string]string{"worker-model": "openai-codex/gpt-6-astra", "worker-thinking": "high"}},
 }
 
 // piDefaults are the values the pi adapters pass for an omitted argument.
@@ -64,20 +77,22 @@ type harness struct {
 	entryKeys  []string
 	// argument is the harness's placeholder for an adapter's argument at a
 	// 0-based position.
-	argument func(position int, flag string) string
+	argument func(position int, flag, fallback string) string
 	// slotKeys are the frontmatter lines that declare an adapter's arguments.
 	slotKeys func(slots []string) []string
 }
 
 var harnesses = []harness{
 	{skills: ".pi/agent/skills", entryPoint: ".pi/agent/prompts/%s.md", entryKeys: []string{"description"},
-		argument: func(position int, flag string) string { return fmt.Sprintf("${%d:-%s}", position+1, piDefaults[flag]) },
+		argument: func(position int, flag, fallback string) string {
+			return fmt.Sprintf("${%d:-%s}", position+1, fallback)
+		},
 		slotKeys: func(slots []string) []string { return []string{argumentHint(slots)} }},
 	{skills: ".codex/skills"},
 	// Claude Code keeps an unfilled positional placeholder verbatim, and expands
 	// an unfilled named one to nothing.
 	{skills: ".claude/skills", entryPoint: ".claude/skills/%s/SKILL.md", entryKeys: []string{"name", "description", "disable-model-invocation"},
-		argument: func(_ int, flag string) string { return "$" + claudeArgument(flag) },
+		argument: func(_ int, flag, _ string) string { return "$" + claudeArgument(flag) },
 		slotKeys: func(slots []string) []string {
 			names := make([]string, len(slots))
 			for i, flag := range slots {
@@ -86,7 +101,7 @@ var harnesses = []harness{
 			return []string{"arguments: [" + strings.Join(names, ", ") + "]", argumentHint(slots)}
 		}},
 	{skills: ".config/opencode/skills", entryPoint: ".config/opencode/commands/%s.md", entryKeys: []string{"description"},
-		argument: func(position int, _ string) string { return fmt.Sprintf("$%d", position+1) }},
+		argument: func(position int, _, _ string) string { return fmt.Sprintf("$%d", position+1) }},
 }
 
 // claudeArgument is the Claude Code argument name of a flag.
@@ -98,28 +113,41 @@ func argumentHint(slots []string) string {
 	return `argument-hint: "[` + strings.Join(slots, "] [") + `]"`
 }
 
-// entry renders an adapter's command and frontmatter for one harness. An
-// unfilled argument passes an empty value, which skl treats as omitted.
-func (target harness) entry(a adapter, frontmatter string) (command, keys string) {
+// entry renders an adapter's command, argument slots and frontmatter. Loop
+// values stay outside the shell command so the Supervisor can quote each
+// supplied value as one opaque argument and omit blank slots.
+func (target harness) entry(a adapter, frontmatter string) (command, keys, arguments string) {
 	command = a.command
 	for position, flag := range a.slots {
-		command += " --" + flag + " '" + target.argument(position, flag) + "'"
+		fallback := piDefaults[flag]
+		if a.loop {
+			fallback = a.defaults[flag]
+		}
+		value := target.argument(position, flag, fallback)
+		if a.loop {
+			arguments += "- --" + flag + ": " + value + "\n"
+		} else {
+			command += " --" + flag + " '" + value + "'"
+		}
 	}
 	var slotKeys []string
 	if len(a.slots) > 0 && target.slotKeys != nil {
 		slotKeys = target.slotKeys(a.slots)
 	}
-	return command, frontmatterKeys(frontmatter, target.entryKeys, slotKeys)
+	return command, frontmatterKeys(frontmatter, target.entryKeys, slotKeys), arguments
 }
 
-// retiredPiFiles are the Pi runners, loop prompts and queue helper that
-// earlier installations wrote.
-var retiredPiFiles = []string{"prompts/implement-loop.md", "prompts/watchdog-loop.md", "prompts/queue-next.mjs", "agents/implement-runner.md", "agents/watchdog-runner.md"}
+// retiredPiFiles are the Pi runners and queue helper earlier installations
+// wrote. Old owned loop prompts are replaced in place by the new adapters.
+var retiredPiFiles = []string{"prompts/queue-next.mjs", "agents/implement-runner.md", "agents/watchdog-runner.md"}
 
 type installData struct {
 	Command     string
 	Protocol    string
 	Frontmatter string
+	Loop        bool
+	Arguments   string
+	LegacyOwner []byte
 }
 
 type InstallOutcome struct {
@@ -149,7 +177,11 @@ func Install(home string) (InstallOutcome, error) {
 				return outcome, fmt.Errorf("install %s for %s: %w", name, target.skills, err)
 			}
 		}
-		for _, a := range adapters {
+		available := adapters
+		if target.skills == ".pi/agent/skills" || target.skills == ".config/opencode/skills" {
+			available = append(slices.Clone(adapters), loopAdapters...)
+		}
+		for _, a := range available {
 			stubPath := filepath.Join(home, target.skills, a.name, "SKILL.md")
 			if target.entryPoint == "" {
 				if err := outcome.writeStub(stubPath, stub, a.name, a.command); err != nil {
@@ -161,9 +193,13 @@ func Install(home string) (InstallOutcome, error) {
 			if err != nil {
 				return outcome, err
 			}
-			command, keys := target.entry(a, frontmatter)
+			command, keys, arguments := target.entry(a, frontmatter)
 			adapterPath := filepath.Join(home, fmt.Sprintf(target.entryPoint, a.name))
-			if err := outcome.write(adapterPath, entry, installData{Command: command, Protocol: AdapterProtocol, Frontmatter: keys}); err != nil {
+			data := installData{Command: command, Protocol: AdapterProtocol, Frontmatter: keys, Loop: a.loop, Arguments: arguments}
+			if a.loop && target.skills == ".pi/agent/skills" {
+				data.LegacyOwner = piMarker
+			}
+			if err := outcome.write(adapterPath, entry, data); err != nil {
 				return outcome, fmt.Errorf("install %s adapter for %s: %w", a.name, target.skills, err)
 			}
 			if adapterPath != stubPath {
@@ -197,7 +233,8 @@ func (outcome *InstallOutcome) write(file string, tmpl *template.Template, data 
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	if err == nil && !bytes.Contains(current, stubMarker) && !bytes.Contains(current, adapterMarker) {
+	if err == nil && !bytes.Contains(current, stubMarker) && !bytes.Contains(current, adapterMarker) &&
+		(len(data.LegacyOwner) == 0 || !bytes.Contains(current, data.LegacyOwner)) {
 		outcome.Unchanged++
 		return nil
 	}
