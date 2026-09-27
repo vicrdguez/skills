@@ -248,62 +248,6 @@ func TestGitHubWatchdogHumanRequeueUsesProjectionNotProse(t *testing.T) {
 	}
 }
 
-func TestGitHubStatusReadsChildrenAndReconcilesLostClosure(t *testing.T) {
-	closed := false
-	writes := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		state := "open"
-		if closed {
-			state = "closed"
-		}
-		switch r.URL.Path {
-		case "/repos/acme/widgets/issues":
-			fmt.Fprintf(w, `[{"number":100,"title":"proposal","state":%q,"sub_issues_summary":{"total":101}}]`, state)
-		case "/repos/acme/widgets/issues/100/sub_issues":
-			if r.URL.Query().Get("page") == "1" {
-				children := []map[string]int{}
-				for i := 1; i <= 100; i++ {
-					children = append(children, map[string]int{"number": i})
-				}
-				json.NewEncoder(w).Encode(children)
-			} else {
-				fmt.Fprint(w, `[{"number":101}]`)
-			}
-		case "/repos/acme/widgets/issues/100":
-			if r.Method == "PATCH" {
-				var p map[string]string
-				json.NewDecoder(r.Body).Decode(&p)
-				if p["state"] != "closed" {
-					t.Errorf("unexpected patch %v", p)
-				}
-				closed = true
-				writes++
-				http.Error(w, "lost closure response", 500)
-				return
-			}
-			fmt.Fprintf(w, `{"number":100,"state":%q}`, state)
-		default:
-			t.Errorf("unexpected %s", r.URL)
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-	b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
-	ctx := context.Background()
-	parents, err := b.CoordinationItems(ctx)
-	if err != nil || len(parents) != 1 || parents[0].ID != "100" || parents[0].Closed || len(parents[0].Children) != 101 || parents[0].Children[100] != "101" {
-		t.Fatalf("children: %#v %v", parents, err)
-	}
-	for range 2 {
-		if err := b.CloseCoordination(ctx, "100"); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if !closed || writes != 1 {
-		t.Fatalf("closure: %t writes=%d", closed, writes)
-	}
-}
-
 func TestGitHubStatusAdoptsOnlyForwardReviewProjections(t *testing.T) {
 	for _, latest := range []string{"rework", "review", "done", "partial"} {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"strings"
-	"testing"
 
 	"github.com/vicrdguez/skills/workflow"
 )
@@ -68,15 +66,4 @@ func (b *implementationMemory) ImplementationItems(context.Context) ([]workflow.
 		}
 	}
 	return items, nil
-}
-
-func TestStatusRefusesImplementationProjectionWithoutResultDocument(t *testing.T) {
-	b := &implementationMemory{work: []workflow.ImplementationItem{{
-		ID: "7", Branch: "widget", State: workflow.Ready,
-		Submission: &workflow.Submission{ID: "11", State: workflow.AwaitingReview, Head: "fixed"},
-	}}}
-	_, err := workflow.ObserveStatus(context.Background(), b)
-	if err == nil || !strings.Contains(err.Error(), "original Result Document") || b.work[0].Claimed {
-		t.Fatalf("status guessed partial handoff authority: %v, %#v", err, b.work[0])
-	}
 }

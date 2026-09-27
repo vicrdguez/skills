@@ -85,9 +85,6 @@ func TestGitHubLifecycleRejectsInvalidIdentitiesBeforeTransport(t *testing.T) {
 		"complete-review": func(item workflow.ImplementationItem) error {
 			return b.CompleteReview(ctx, item, workflow.Rework, guard)
 		},
-		"close-coordination": func(item workflow.ImplementationItem) error {
-			return b.CloseCoordination(ctx, item.ID)
-		},
 		"review-submission": func(item workflow.ImplementationItem) error {
 			_, err := b.ReviewSubmission(ctx, item.Submission.ID)
 			return err
@@ -96,7 +93,7 @@ func TestGitHubLifecycleRejectsInvalidIdentitiesBeforeTransport(t *testing.T) {
 	for _, id := range []string{"", "0", "-1", "07", "7/labels", "issue:7", "999999999999999999999999"} {
 		for _, identity := range []string{"item", "submission"} {
 			for name, operation := range operations {
-				if identity == "item" && name == "review-submission" || identity == "submission" && name == "close-coordination" {
+				if identity == "item" && name == "review-submission" {
 					continue
 				}
 				t.Run(name+"/"+identity+"/"+id, func(t *testing.T) {
@@ -203,56 +200,5 @@ func TestGitHubImplementationPreservesPendingLifecycleObservations(t *testing.T)
 	}
 	if item.Problem != "contradictory lifecycle projections" || !item.Claimed {
 		t.Fatalf("retired transition metadata became authoritative: %#v", item)
-	}
-}
-
-func TestGitHubImplementationStatusRefusesPartialHandoff(t *testing.T) {
-	labels := []string{"ready"}
-	interrupt := true
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path := strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets")
-		ls := []map[string]string{}
-		for _, label := range labels {
-			ls = append(ls, map[string]string{"name": label})
-		}
-		source := map[string]any{"number": 7, "title": "widget", "state": "open", "body": "Branch: `widget`\n", "labels": ls}
-		pull := map[string]any{"number": 11, "state": "open", "body": "candidate\n\nCloses #7\n", "labels": []map[string]string{{"name": "review"}}, "head": map[string]any{"ref": "widget", "sha": "fixed", "repo": map[string]string{"full_name": "acme/widgets"}}}
-		var result any = []any{}
-		switch {
-		case path == "/graphql":
-			fmt.Fprint(w, `{"data":{"repository":{"issue":{"closedByPullRequestsReferences":{"nodes":[{"number":11,"repository":{"nameWithOwner":"acme/widgets"}}]}}}}}`)
-			return
-		case path == "/issues" && r.Method == http.MethodGet:
-			result = []any{source}
-		case path == "/pulls" && r.Method == http.MethodGet:
-			result = []any{pull}
-		case path == "/issues/11" && r.Method == http.MethodGet:
-			result = pull
-		case path == "/issues/7" && r.Method == http.MethodGet:
-			result = source
-		case path == "/issues/7/labels" && r.Method == http.MethodPost:
-			var payload struct{ Labels []string }
-			json.NewDecoder(r.Body).Decode(&payload)
-			labels = append(labels, payload.Labels...)
-		case strings.HasPrefix(path, "/issues/7/labels/") && r.Method == http.MethodDelete:
-			if interrupt {
-				http.Error(w, "interrupted source cleanup", http.StatusBadRequest)
-				return
-			}
-			label := strings.TrimPrefix(path, "/issues/7/labels/")
-			labels = slices.DeleteFunc(labels, func(value string) bool { return value == label })
-		case r.Method == http.MethodGet && (strings.HasSuffix(path, "/comments") || strings.HasSuffix(path, "/reviews") || strings.HasSuffix(path, "/dependencies/blocked_by")):
-		default:
-			t.Errorf("unexpected %s %s", r.Method, r.URL)
-			http.NotFound(w, r)
-			return
-		}
-		json.NewEncoder(w).Encode(result)
-	}))
-	defer server.Close()
-	b := boundGitHubBackend(NewGitHubBackend(server.URL, "token", server.Client()))
-	_, err := workflow.ObserveStatus(context.Background(), b)
-	if err == nil || !strings.Contains(err.Error(), "original Result Document") || !slices.Equal(labels, []string{"ready"}) {
-		t.Fatalf("status mutated an ambiguous partial handoff: %v, labels=%v", err, labels)
 	}
 }

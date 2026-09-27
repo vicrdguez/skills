@@ -2,260 +2,120 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
-	"slices"
 	"strings"
 	"testing"
 
-	skilldist "github.com/vicrdguez/skills"
 	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/setup"
-	"github.com/vicrdguez/skills/workflow"
 )
 
-func statusCLI(t *testing.T, root string, b *implementationMemory) setup.StatusOutput {
-	t.Helper()
-	var output bytes.Buffer
-	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return b, nil }, bytes.NewReader(nil), &output, &output)
-	if err := app.Run([]string{"skl", "status", "--repo", root}); err != nil {
-		t.Fatalf("status: %v %s", err, &output)
-	}
-	var result setup.StatusOutput
-	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
-		t.Fatal(err)
-	}
-	return result
-}
-
-func TestStatusCompletesCoordinationOnlyWhenEveryChildMerged(t *testing.T) {
-	root := proposalRepository(t)
-	b := &implementationMemory{coordination: []workflow.CoordinationItem{{ID: "100", Children: []workflow.WorkItemID{"7", "8"}}}, work: []workflow.ImplementationItem{{ID: "7", State: workflow.Merged}, {ID: "8", State: workflow.ReadyForMerge}}}
-	if got := statusCLI(t, root, b); b.coordination[0].Closed || len(got.CompleteProposals) != 0 {
-		t.Fatalf("premature completion: %#v", got)
-	}
-	b.work[1].State = workflow.Merged
-	got := statusCLI(t, root, b)
-	if !b.coordination[0].Closed || len(got.CompleteProposals) != 1 || got.CompleteProposals[0] != 100 {
-		t.Fatalf("parent completion: %#v", got)
-	}
-}
-
-func (b *implementationMemory) CoordinationItems(context.Context) ([]workflow.CoordinationItem, error) {
-	return b.coordination, nil
-}
-func (b *implementationMemory) CloseCoordination(_ context.Context, id workflow.WorkItemID) error {
-	for i := range b.coordination {
-		if b.coordination[i].ID == id {
-			b.coordination[i].Closed = true
-		}
-	}
-	return nil
-}
-
-func TestStatusObservesHumanMergePreservingDependencies(t *testing.T) {
-	root := proposalRepository(t)
-	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.ReadyForMerge, Submission: &workflow.Submission{ID: "11"}}, {ID: "8", Branch: "dependent", State: workflow.Ready, Blockers: []workflow.WorkItemID{"7"}}}}
-	if got := statusCLI(t, root, b); got.Items[0].State != workflow.ReadyForMerge {
-		t.Fatalf("approval was mistaken for a human merge: %#v", got)
-	}
-	b.work[0].Submission.Merged = true
-	got := statusCLI(t, root, b)
-	if len(got.Items) != 2 || got.Items[0].State != workflow.Merged {
-		t.Fatalf("merge observation: %#v", got)
-	}
-	if got.Items[0].Number != 7 || got.Items[0].Submission.Number != 11 || got.Items[1].Number != 8 || !reflect.DeepEqual(got.Items[1].Blockers, []int{7}) {
-		t.Fatalf("status lost numeric projections: %#v", got)
-	}
-}
-
-func TestStatusRefusesPartialAndPreservesRecords(t *testing.T) {
-	b := &implementationMemory{work: []workflow.ImplementationItem{
-		{ID: "1", State: workflow.Ready}, {ID: "2", State: workflow.Ready, Claimed: true},
-		{ID: "3", State: workflow.AwaitingReview}, {ID: "4", State: workflow.Rework},
-		{ID: "5", State: workflow.NeedsHuman}, {ID: "6", State: workflow.ReadyForMerge},
-		{ID: "7", State: workflow.Merged}, {ID: "8", State: workflow.Superseded, Branch: "retained-reference"},
-		{ID: "9", State: workflow.Ready, Claimed: true, Submission: &workflow.Submission{ID: "19", State: workflow.AwaitingReview, Head: "fixed"}},
-		{ID: "10", State: workflow.Rework, Problem: "contradictory lifecycle projections"},
-	}}
-	before := append([]workflow.ImplementationItem(nil), b.work...)
-	_, err := workflow.ObserveStatus(context.Background(), b)
-	if err == nil || !strings.Contains(err.Error(), "original Result Document") || !reflect.DeepEqual(before, b.work) {
-		t.Fatalf("status changed an ambiguous partial handoff: %v, %#v", err, b.work)
-	}
-}
-
-// Model multiple guarded writes without changing the shared backend fake.
-type statusGuardMemory struct {
-	*implementationMemory
-	beforeLaterGuard func()
-}
-
-func (b *statusGuardMemory) CompleteReview(ctx context.Context, item workflow.ImplementationItem, target workflow.State, guard func() error) error {
-	if err := guard(); err != nil {
-		return err
-	}
-	if b.beforeLaterGuard != nil {
-		b.beforeLaterGuard()
-	}
-	return b.implementationMemory.CompleteReview(ctx, item, target, guard)
-}
-
-func TestStatusPreservesApprovalRegardlessOfMergeability(t *testing.T) {
-	root := proposalRepository(t)
-	for _, mergeability := range []string{"conflicting", "unknown"} {
-		for _, pending := range []workflow.State{"", workflow.ReadyForMerge} {
-			t.Run(mergeability+"/"+string(pending), func(t *testing.T) {
-				b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.ReadyForMerge, Claimed: pending != "", Submission: &workflow.Submission{ID: "11", Head: "fixed", Base: "main", Mergeability: mergeability, PendingReview: pending, Claimed: pending != ""}}}}
-				b.work[0].Submission.ClaimAcquiredAt = "2026-01-01T00:00:01Z"
-				b.work[0].Submission.Comments = []skilldist.ReviewComment{{ReviewNumber: 1, Verdict: "pass", Commit: "fixed", FinalHead: "fixed", CreatedAt: "2026-01-01T00:00:02Z"}}
-				got := statusCLI(t, root, b).Items[0]
-				if got.State != workflow.ReadyForMerge || got.Synchronization || got.Claimed || got.Submission.Claimed || got.Submission.PendingReview != "" {
-					t.Fatalf("approval changed (pending %q): %#v / %#v", pending, got, got.Submission)
-				}
-			})
-		}
-	}
-}
-
-func TestStatusRefusesPendingPassForNonMainSubmission(t *testing.T) {
-	b := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.ReadyForMerge, Claimed: true, Submission: &workflow.Submission{ID: "11", Head: "fixed", Base: "release", PendingReview: workflow.ReadyForMerge, Claimed: true}}}}
-	var output bytes.Buffer
-	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return b, nil }, bytes.NewReader(nil), &output, &output)
-	if err := app.Run([]string{"skl", "status", "--repo", proposalRepository(t)}); err != nil {
-		t.Fatalf("repairable refusal exited with an error: %v", err)
-	}
-	var result workflow.ImplementationOutcome
-	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
-		t.Fatal(err)
-	}
-	if result.Status != "fix_required" || !strings.Contains(result.Reason, "main") || !b.work[0].Claimed || b.work[0].State != workflow.ReadyForMerge {
-		t.Fatalf("repairable status: %#v", result)
-	}
-}
-
-func TestStatusRefusesClaimLossDuringPartialPass(t *testing.T) {
-	b := &statusGuardMemory{implementationMemory: &implementationMemory{work: []workflow.ImplementationItem{{
-		ID: "7", Branch: "widget", State: workflow.ReadyForMerge, Claimed: true,
-		Submission: &workflow.Submission{
-			ID: "11", Head: "fixed", Base: "main", State: workflow.ReadyForMerge, Claimed: true,
-			PendingReview: workflow.ReadyForMerge, ClaimAcquiredAt: "2026-01-01T00:00:01Z",
-			Comments: []skilldist.ReviewComment{{ReviewNumber: 1, Verdict: "pass", Commit: "fixed", FinalHead: "fixed", CreatedAt: "2026-01-01T00:00:02Z"}},
-		},
-	}}}}
-	b.beforeLaterGuard = func() {
-		b.work[0].Submission.Lifecycle.Claimed = false
-		b.work[0].Submission.ClaimAcquiredAt = ""
-	}
-	var output bytes.Buffer
-	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return b, nil }, bytes.NewReader(nil), &output, &output)
-	if err := app.Run([]string{"skl", "status", "--repo", proposalRepository(t)}); err != nil {
-		t.Fatalf("status: %v %s", err, &output)
-	}
-	var got workflow.ImplementationOutcome
-	if err := json.Unmarshal(output.Bytes(), &got); err != nil || got.Status != "fix_required" || !strings.Contains(got.Reason, "changed during status") || b.work[0].Submission.PendingReview != workflow.ReadyForMerge || b.work[0].Submission.Claimed {
-		t.Fatalf("Claim loss completed the partial pass or fabricated a Claim: %v %s", err, &output)
-	}
-}
-
-func TestStatusRecoversOnlyTheCandidateAcceptedByInterruptedPassThroughGitHub(t *testing.T) {
+func TestStatusRequiresConfiguredAcceptedProjectWithoutReadingLegacyForge(t *testing.T) {
+	// The source and forge carry an old review; neither is an authority for
+	// status without an accepted ledger Project.
+	legacy := newReviewFixture(t)
+	fixture := newLedgerFixture(t)
 	for _, tc := range []struct {
-		name, failDelete, evidence string
-		marker, mergeable          bool
+		name, item, want string
+		configure        func(*testing.T)
 	}{
-		{"replaced during overlap", "review", "replaced", false, false},
-		{"replaced after review cleanup", "wip", "replaced", false, false},
-		{"unchanged reviewed head", "wip", "unchanged", false, false},
-		{"unchanged final marker head", "review", "unchanged", true, false},
-		{"replaced final marker head", "wip", "replaced", true, false},
-		{"replaced mergeable marker head", "review", "replaced", true, true},
-		{"unchanged mergeable head", "wip", "unchanged", false, true},
-		{"missing receipt", "review", "missing", false, false},
-		{"missing mergeable receipt", "review", "missing", false, true},
-		{"receipt omits final head", "wip", "legacy", false, false},
-		{"duplicate receipt", "wip", "duplicate", false, false},
-		{"receipt predates claim", "wip", "stale", false, false},
+		{"missing configuration", "", "config", func(t *testing.T) {
+			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+		}},
+		{"missing configuration fixed item", "old/review", "config", func(t *testing.T) {
+			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+		}},
+		{"unadopted project", "", "accept", func(t *testing.T) {}},
+		{"unadopted project fixed item", "old/review", "accept", func(t *testing.T) {}},
+		{"broken configuration", "", "ledger", func(t *testing.T) {
+			fixture.misconfigure(t, "{broken json")
+		}},
+		{"unusable ledger clone", "", "clone", func(t *testing.T) {
+			fixture.misconfigure(t, `{"ledger":"`+t.TempDir()+`"}`)
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := newReviewFixture(t)
-			final := f.head
-			if tc.marker {
-				runGit(t, f.worktree, "commit", "--allow-empty", "-m", "debt marker")
-				final = strings.TrimSpace(runGitOutput(t, f.worktree, "rev-parse", "HEAD"))
-				f.forge.head = final
-			}
-			f.forge.mergeable = tc.mergeable
-			dir := t.TempDir()
-			summary, body := filepath.Join(dir, "summary.md"), filepath.Join(dir, "submission.md")
-			if err := os.WriteFile(summary, []byte("accepted candidate"), 0600); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(body, []byte("final body"), 0600); err != nil {
-				t.Fatal(err)
-			}
-			// Seed a historical interrupted public projection directly. Active
-			// delivery no longer creates this forge-authoritative receipt, but
-			// status must still refuse unsafe recovery of existing records.
-			f.forge.labels = []string{"done", "wip"}
-			if tc.failDelete == "review" {
-				f.forge.labels = append(f.forge.labels, "review")
-			}
-			f.forge.timeline = append(f.forge.timeline, map[string]any{"event": "labeled", "created_at": "2026-01-01T00:00:02Z", "label": map[string]string{"name": "wip"}})
-			f.forge.clock = 5
-			f.forge.body = "final body\n\nCloses #7\n"
-			f.forge.summaries = []map[string]any{{
-				"author_association": "OWNER", "commit_id": f.head, "state": "COMMENTED", "submitted_at": "2026-01-01T00:00:04Z",
-				"body": fmt.Sprintf("<!-- skl.watchdog.review/v1\n{\"review_number\":1,\"verdict\":\"pass\",\"final_head\":%q}\n-->\naccepted candidate", final),
-			}}
-			switch tc.evidence {
-			case "replaced":
-				runGit(t, f.worktree, "commit", "--allow-empty", "-m", "unreviewed replacement")
-				f.forge.head = strings.TrimSpace(runGitOutput(t, f.worktree, "rev-parse", "HEAD"))
-			case "missing":
-				f.forge.summaries = nil
-				f.forge.sourceComments = append(f.forge.sourceComments, map[string]any{
-					"author_association": "OWNER",
-					"body":               "<!-- skl.implement/v1\n{\"watchdog_head\":\"" + f.head + "\",\"verdict_head\":\"" + final + "\"}\n-->",
-				})
-			case "legacy":
-				f.forge.summaries[0]["body"] = "<!-- skl.watchdog.review/v1\n{\"review_number\":1,\"verdict\":\"pass\"}\n-->\naccepted candidate"
-			case "duplicate":
-				f.forge.summaries = append(f.forge.summaries, f.forge.summaries[0])
-			case "stale":
-				f.forge.summaries[0]["submitted_at"] = "2025-01-01T00:00:00Z"
-			}
-			labels, writes := slices.Clone(f.forge.labels), f.forge.writes
-			checkpoint := checkpointSnapshot(f.checkpoint)
-			var output bytes.Buffer
-			app := newApp(func(repository github.RepositoryID) (setup.Backend, error) {
-				backend := setup.NewGitHubBackend(f.server.URL, "token", f.server.Client())
-				backend.BindRepository(repository)
-				return backend, nil
-			}, bytes.NewReader(nil), &output, &output)
-			if err := app.Run([]string{"skl", "status", "--repo", f.root}); err != nil {
-				t.Fatalf("status: %v %s", err, &output)
-			}
-			if tc.evidence == "unchanged" {
-				var got setup.StatusOutput
-				if err := json.Unmarshal(output.Bytes(), &got); err != nil || got.Status != "observed" || len(got.Items) == 0 || got.Items[0].State != workflow.ReadyForMerge || got.Items[0].Claimed || !slices.Equal(f.forge.labels, []string{"done"}) {
-					t.Fatalf("unchanged candidate did not recover: %v %s labels=%v", err, &output, f.forge.labels)
+			fixture.selectWithXDG(t)
+			tc.configure(t)
+			before := ledgerSnapshot(t, fixture.clone)
+			writes := legacy.forge.writes
+			calls := 0
+			for _, format := range []string{"json", "markdown"} {
+				var output bytes.Buffer
+				app := newApp(func(github.RepositoryID) (setup.Backend, error) {
+					calls++
+					t.Fatal("status accessed legacy GitHub records")
+					return nil, nil
+				}, bytes.NewReader(nil), &output, &output)
+				args := []string{"skl", "status", "--repo", legacy.root, "--format", format}
+				if tc.item != "" {
+					args = append(args, "--item", tc.item)
 				}
-			} else {
-				var got workflow.ImplementationOutcome
-				if err := json.Unmarshal(output.Bytes(), &got); err != nil || got.Status != "fix_required" || !strings.Contains(got.Reason, "interrupted pass") {
-					t.Fatalf("unsafe recovery was not refused: %v %s", err, &output)
+				if err := app.Run(args); err != nil {
+					t.Fatalf("status: %v", err)
 				}
-				if !slices.Equal(f.forge.labels, labels) || f.forge.writes != writes || checkpointSnapshot(f.checkpoint) != checkpoint {
-					t.Fatalf("refusal changed handoff: labels=%v writes=%d/%d checkpoint=%s", f.forge.labels, f.forge.writes, writes, checkpointSnapshot(f.checkpoint))
+				if format == "json" {
+					var outcome ledgerOutcome
+					if err := json.Unmarshal(output.Bytes(), &outcome); err != nil || outcome.Status != "fix_required" || !strings.Contains(strings.ToLower(outcome.Repair), tc.want) || outcome.Reason == "" {
+						t.Fatalf("missing actionable refusal: %v %s", err, &output)
+					}
+				} else if !strings.Contains(output.String(), "fix_required") || !strings.Contains(strings.ToLower(output.String()), tc.want) {
+					t.Fatalf("missing Markdown refusal: %s", &output)
 				}
 			}
-			if readFile(t, summary) != "accepted candidate" || readFile(t, body) != "final body" || f.forge.body != "final body\n\nCloses #7\n" {
-				t.Fatal("status discarded repair documents or published body")
+			if calls != 0 || legacy.forge.writes != writes || ledgerSnapshot(t, fixture.clone) != before {
+				t.Fatal("status read or mutated legacy records or ledger")
 			}
 		})
+	}
+}
+
+func TestStatusShowsAcceptedProjectInBothFormats(t *testing.T) {
+	newLedgerFixture(t)
+	root := sourceRepository(t, "acme", "widgets")
+	newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", singleSlice("shown")))
+	for _, tc := range []struct {
+		format, expected string
+	}{
+		{"json", `"item":"shown/foundation"`},
+		{"markdown", "Work Item: shown/foundation"},
+	} {
+		t.Run(tc.format, func(t *testing.T) {
+			var output bytes.Buffer
+			app := newApp(func(github.RepositoryID) (setup.Backend, error) {
+				t.Fatal("unattached ledger status should not contact the forge")
+				return nil, nil
+			}, bytes.NewReader(nil), &output, &output)
+			if err := app.Run([]string{"skl", "status", "--repo", root, "--item", "shown/foundation", "--format", tc.format}); err != nil || !strings.Contains(output.String(), tc.expected) {
+				t.Fatalf("accepted status: %v %s", err, &output)
+			}
+		})
+	}
+}
+
+func TestStatusRefusesMalformedAcceptedProjectWithoutForgeFallback(t *testing.T) {
+	fixture := newLedgerFixture(t)
+	root := sourceRepository(t, "acme", "widgets")
+	path := filepath.Join(fixture.clone, "projects", "widgets", "project.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, path, "{malformed\n")
+	runGit(t, fixture.clone, "add", "projects/widgets/project.json")
+	runGit(t, fixture.clone, "commit", "-q", "-m", "damaged Project")
+	before := ledgerSnapshot(t, fixture.clone)
+	var output bytes.Buffer
+	app := newApp(func(github.RepositoryID) (setup.Backend, error) {
+		t.Fatal("malformed Project fell back to forge")
+		return nil, nil
+	}, bytes.NewReader(nil), &output, &output)
+	if err := app.Run([]string{"skl", "status", "--repo", root, "--format", "json"}); err != nil {
+		t.Fatal(err)
+	}
+	var outcome ledgerOutcome
+	if err := json.Unmarshal(output.Bytes(), &outcome); err != nil || outcome.Status != "fix_required" || outcome.Repair == "" || ledgerSnapshot(t, fixture.clone) != before {
+		t.Fatalf("malformed Project was accepted or changed: %v %s", err, &output)
 	}
 }

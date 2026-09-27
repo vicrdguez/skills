@@ -1,16 +1,12 @@
 package main
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/urfave/cli/v2"
 	"github.com/vicrdguez/skills/ledger"
 	"github.com/vicrdguez/skills/setup"
-	"github.com/vicrdguez/skills/workflow"
 )
 
 func statusCommand(newBackend backendFactory, stdout io.Writer) *cli.Command {
@@ -26,46 +22,20 @@ func statusCommand(newBackend backendFactory, stdout io.Writer) *cli.Command {
 		if err != nil {
 			return err
 		}
-		_, exists, err := ledger.SettingsLocation(os.Getenv)
+		store, err := openConfiguredLedger()
 		if err != nil {
-			return err
+			return renderLedgerRefusal(stdout, format, err)
 		}
-		if exists {
-			store, err := openConfiguredLedger()
-			if err != nil {
-				return renderLedgerRefusal(stdout, format, err)
-			}
-			adopted, err := store.Adopted(repository.Repository)
-			if err != nil {
-				return renderLedgerRefusal(stdout, format, err)
-			}
-			if adopted {
-				return ledgerStatus(c, store, repository.Repository, newBackend, stdout, format)
-			}
-		}
-		if c.String("item") != "" {
-			return renderLedgerRefusal(stdout, format, fmt.Errorf("fixed-item status requires an accepted ledger Project"))
-		}
-		backend, err := newBackend(repository.Repository)
+		adopted, err := store.Adopted(repository.Repository)
 		if err != nil {
-			return err
+			return renderLedgerRefusal(stdout, format, err)
 		}
-		port, ok := backend.(workflow.ImplementationBackend)
-		if !ok {
-			return fmt.Errorf("backend does not support status")
+		if !adopted {
+			return renderLedgerRefusal(stdout, format, &ledger.Refusal{
+				Invariant: "repository " + repository.Repository.Owner + "/" + repository.Repository.Name + " has no accepted ledger Project",
+				Repair:    "accept a Proposal for this repository with `skl ledger accept --repo <path> --proposal-dir <dir> --issue <slice>=<body-file>` before running status",
+			})
 		}
-		outcome, err := workflow.ObserveStatus(c.Context, port)
-		if err != nil {
-			var violation *workflow.InvariantError
-			if errors.As(err, &violation) {
-				return json.NewEncoder(stdout).Encode(workflow.ImplementationOutcome{Status: "fix_required", Reason: violation.Reason})
-			}
-			return err
-		}
-		output, err := setup.PresentStatus(outcome)
-		if err != nil {
-			return err
-		}
-		return json.NewEncoder(stdout).Encode(output)
+		return ledgerStatus(c, store, repository.Repository, newBackend, stdout, format)
 	}}
 }

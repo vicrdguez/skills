@@ -122,4 +122,4 @@ Every view reads one committed ledger revision, never fetches or contacts a forg
 
 ## Legacy
 
-`skl propose publish` is the forge-era, source-artifact proposal flow. It remains for repositories that have not adopted the ledger and is refused for a ledger Project. `skl propose cleanup` and `skl status` follow the Project: for a ledger Project, cleanup archives terminal proposals and removes only safely merged local source work, and status reads the ledger; otherwise both use the forge.
+`skl status` requires ledger configuration and an accepted Project. It reads the Project's Workflow State and observes attached submissions for merge or closure; without configuration or adoption it reports how to configure or accept work, rather than inferring state from GitHub. `--item <proposal>/<slice>` limits the status read to a fixed Work Item. `skl propose publish` remains the forge-era source-artifact proposal flow for repositories that have not adopted the ledger, and `skl propose cleanup` still follows the Project: ledger-backed cleanup archives terminal proposals and removes only safely merged local source work; otherwise cleanup uses the forge.
