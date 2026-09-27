@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"os/exec"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -365,7 +366,17 @@ func (v *Snapshot) Project(name string, includeArchived bool) (*ProjectInventory
 // Proposal returns one Proposal, active or archived, with its membership. An
 // active record is preferred when both locations hold the same identity.
 func (v *Snapshot) Proposal(projectName, name string) (*ProposalDetail, error) {
-	project, proposal, err := v.proposal(projectName, name)
+	return v.proposalDetail(projectName, name, nil)
+}
+
+// ProposalAt selects the recorded location when both active and archived
+// Proposals have the same name.
+func (v *Snapshot) ProposalAt(projectName, name string, archived bool) (*ProposalDetail, error) {
+	return v.proposalDetail(projectName, name, &archived)
+}
+
+func (v *Snapshot) proposalDetail(projectName, name string, location *bool) (*ProposalDetail, error) {
+	project, proposal, err := v.proposalLocated(projectName, name, location)
 	if err != nil {
 		return nil, err
 	}
@@ -387,6 +398,16 @@ func (v *Snapshot) Proposal(projectName, name string) (*ProposalDetail, error) {
 // proposal/slice, with its Dependencies and the Slices it blocks resolved at
 // the same revision.
 func (v *Snapshot) Slice(projectName, item string) (*SliceDetail, error) {
+	return v.sliceDetail(projectName, item, nil)
+}
+
+// SliceAt selects the recorded location when active and archived Proposals
+// contain the same Slice identity.
+func (v *Snapshot) SliceAt(projectName, item string, archived bool) (*SliceDetail, error) {
+	return v.sliceDetail(projectName, item, &archived)
+}
+
+func (v *Snapshot) sliceDetail(projectName, item string, location *bool) (*SliceDetail, error) {
 	proposalName, sliceName, found := strings.Cut(item, "/")
 	if !found || !ValidRecordName(proposalName) || !ValidRecordName(sliceName) {
 		return nil, refuse(
@@ -394,7 +415,7 @@ func (v *Snapshot) Slice(projectName, item string) (*SliceDetail, error) {
 			"select a Slice listed by its Proposal, such as add-order-cancellation/foundation",
 		)
 	}
-	project, proposal, err := v.proposal(projectName, proposalName)
+	project, proposal, err := v.proposalLocated(projectName, proposalName, location)
 	if err != nil {
 		return nil, err
 	}
@@ -567,13 +588,17 @@ func (v *Snapshot) project(name string) (*projectTree, error) {
 }
 
 func (v *Snapshot) proposal(projectName, name string) (*projectTree, *proposalTree, error) {
+	return v.proposalLocated(projectName, name, nil)
+}
+
+func (v *Snapshot) proposalLocated(projectName, name string, location *bool) (*projectTree, *proposalTree, error) {
 	project, err := v.project(projectName)
 	if err != nil {
 		return nil, nil, err
 	}
 	for _, archived := range []bool{false, true} {
 		for _, proposal := range project.proposals {
-			if proposal.name == name && proposal.archived == archived {
+			if proposal.name == name && proposal.archived == archived && (location == nil || *location == archived) {
 				return project, proposal, nil
 			}
 		}
@@ -690,7 +715,7 @@ func decodeProject(name string, contents []byte, diagnostics []Diagnostic) (stri
 
 func (v *Snapshot) decodeProposal(project string, proposal *proposalTree, blobs map[string][]byte) proposalRead {
 	subject := project + "/" + proposal.name
-	read := proposalRead{tree: proposal, diagnostics: append([]Diagnostic(nil), proposal.invalid...)}
+	read := proposalRead{tree: proposal, diagnostics: proposal.membership(subject)}
 	path := v.proposalPath(project, proposal)
 	switch contents, present := blobs[path+"/proposal.json"]; {
 	case !present:
@@ -699,14 +724,21 @@ func (v *Snapshot) decodeProposal(project string, proposal *proposalTree, blobs 
 		read.meta = ProposalMeta{}
 		read.diagnostics = append(read.diagnostics, Diagnostic{ScopeProposal, subject, "proposal.json is unreadable, so its acceptance metadata is unknown"})
 	}
-	if len(proposal.slices) == 0 && len(proposal.invalid) == 0 {
-		read.diagnostics = append(read.diagnostics, Diagnostic{ScopeProposal, subject, "records no Slices, so its membership is unknown"})
-	}
 	for _, slice := range proposal.slices {
 		state, present := blobs[path+"/"+slice.name+"/state.json"]
 		read.slices = append(read.slices, decodeSlice(subject, slice, state, present))
 	}
 	return read
+}
+
+// membership diagnoses what keeps a Proposal's Slice membership unknown:
+// member names that cannot be Slice identities, or no members at all.
+func (p *proposalTree) membership(subject string) []Diagnostic {
+	diagnostics := append([]Diagnostic(nil), p.invalid...)
+	if len(p.slices) == 0 && len(p.invalid) == 0 {
+		diagnostics = append(diagnostics, Diagnostic{ScopeProposal, subject, "records no Slices, so its membership is unknown"})
+	}
+	return diagnostics
 }
 
 // decodeSlice interprets one state record. A missing or malformed record
@@ -735,11 +767,7 @@ func decodeSlice(proposalSubject string, slice *sliceTree, contents []byte, pres
 }
 
 func knownLifecycle(state string) bool {
-	switch state {
-	case ReadyForImplementation, AwaitingReview, Rework, NeedsHuman, ReadyForMerge, Merged, Superseded:
-		return true
-	}
-	return false
+	return slices.Contains(Lifecycles, state)
 }
 
 func (t *Tally) add(slice sliceRead) {
@@ -747,10 +775,10 @@ func (t *Tally) add(slice sliceRead) {
 	if t.Lifecycles == nil {
 		t.Lifecycles = map[string]int{}
 	}
-	if !slice.readable || !knownLifecycle(slice.state.State) {
-		t.Unknown++
+	if lifecycle, known := slice.lifecycle(); known {
+		t.Lifecycles[lifecycle]++
 	} else {
-		t.Lifecycles[slice.state.State]++
+		t.Unknown++
 	}
 	if slice.readable && slice.state.Claim != nil {
 		t.Claimed++

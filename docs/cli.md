@@ -97,14 +97,19 @@ skl decision retire --project <p> --proposal <proposal>
 
 `skl browse` opens a terminal browser over the ledger: Projects, their Proposals, and each Slice's state, Claim, dependencies, branch and attachments. It starts at the current checkout's Project when there is exactly one. Keys: `s` switches Project, `a` includes archived Proposals, `i` and `p` open the recorded issue or pull request.
 
+To find Slices, `f` picks a lifecycle or Claim from the counted facts of the current Project (every Project from the overview), and `/` searches Project, Proposal and Slice names and Slice titles. The criteria narrow the same results together. In the results, `w` switches between the current Project and every Project, `g` groups by Proposal or lifecycle, `d` opens scrollable membership diagnostics (`esc` returns to results), and `enter` opens the Slice. Slices whose unreadable records leave a criterion undecided are listed apart, never counted as matches.
+
 A Slice shows both Depends on and Blocks relationships, including targets in other or archived Proposals. `tab` / `shift+tab` select a relationship, `enter` opens it without changing archive visibility, and `esc` restores the previous browsing context.
 
 ```sh
 skl browse projects [--include-archived]
 skl browse project --project <name> [--include-archived]
-skl browse proposal --project <name> --proposal <proposal>
-skl browse slice --project <name> --item <proposal>/<slice>
+skl browse proposal --project <name> --proposal <proposal> [--archived]
+skl browse slice --project <name> --item <proposal>/<slice> [--archived]
+skl browse slices [--project <name>] [--lifecycle <state>]... [--claim implement|watchdog|none]... [--search <text>] [--group proposal|lifecycle] [--include-archived]
 ```
+
+Detail queries prefer active records when active and archived Proposals share a name; `--archived` explicitly selects the archived one.
 
 `skl browse slice` exposes both relationship directions. Only a Merged blocker satisfies a dependency. Missing or unreadable targets remain explicitly unresolved; reverse-dependency results disclose when unreadable records make them incomplete.
 
