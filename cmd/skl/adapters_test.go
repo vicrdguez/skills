@@ -116,12 +116,72 @@ func TestInstallPassesEachModeAndItsSlotsWithPiDefaults(t *testing.T) {
 	}
 }
 
+func TestInstallWritesDispatchLoopsForPiAndOpenCode(t *testing.T) {
+	home := t.TempDir()
+	installInto(t, home)
+	const sol = "openai-codex/gpt-6-sol"
+	cases := map[string]map[string][]string{
+		"pi": {
+			"implement-loop":      {"skl", "implement", "next", "--dispatch", "--wait", "--worker-model", sol, "--worker-thinking", "xhigh", "--reviewer-model", "openai-codex/gpt-6-astra", "--reviewer-thinking", "low"},
+			"implement-team-loop": {"skl", "implement", "next", "--mode", "team", "--dispatch", "--wait", "--worker-model", sol, "--worker-thinking", "xhigh", "--helper-model", "openai-codex/gpt-6-luna", "--helper-thinking", "xhigh", "--reviewer-model", sol, "--reviewer-thinking", "xhigh"},
+			"watchdog-loop":       {"skl", "watchdog", "next", "--dispatch", "--wait", "--worker-model", "openai-codex/gpt-6-astra", "--worker-thinking", "high"},
+		},
+		"opencode": {
+			"implement-loop":      {"skl", "implement", "next", "--dispatch", "--wait", "--worker-model", "", "--worker-thinking", "", "--reviewer-model", "", "--reviewer-thinking", ""},
+			"implement-team-loop": {"skl", "implement", "next", "--mode", "team", "--dispatch", "--wait", "--worker-model", "", "--worker-thinking", "", "--helper-model", "", "--helper-thinking", "", "--reviewer-model", "", "--reviewer-thinking", ""},
+			"watchdog-loop":       {"skl", "watchdog", "next", "--dispatch", "--wait", "--worker-model", "", "--worker-thinking", ""},
+		},
+	}
+	for harness, operations := range cases {
+		for operation, want := range operations {
+			entry := readFile(t, filepath.Join(home, fmt.Sprintf(entryPoints[harness], operation)))
+			if !strings.Contains(entry, "<!-- skl-owned: skl.adapter/v1 -->") || !strings.Contains(entry, "follow each Outcome Instruction until one tells you to stop") {
+				t.Errorf("%s %s is not an outcome-driven adapter:\n%s", harness, operation, entry)
+			}
+			if got := invokedCommand(t, entry); !slices.Equal(got, want) {
+				t.Errorf("%s %s runs %q, want %q", harness, operation, got, want)
+			}
+			if strings.Contains(entry, "Execution Skill") || strings.Contains(entry, "--after") {
+				t.Errorf("%s %s contains worker or continuation logic:\n%s", harness, operation, entry)
+			}
+			// Each positional override must replace only its own slot.
+			for i, position := 1, 0; position < len(want); position++ {
+				if !strings.HasPrefix(want[position], "--") || want[position] == "--dispatch" || want[position] == "--wait" || want[position] == "--mode" {
+					continue
+				}
+				value := "user/value-" + fmt.Sprint(i)
+				custom := entry
+				if harness == "pi" {
+					custom = regexp.MustCompile(fmt.Sprintf(`\$\{%d:-[^}]*\}`, i)).ReplaceAllString(custom, value)
+				} else {
+					custom = strings.ReplaceAll(custom, fmt.Sprintf("$%d", i), value)
+				}
+				overridden := slices.Clone(want)
+				overridden[position+1] = value
+				if got := invokedCommand(t, custom); !slices.Equal(got, overridden) {
+					t.Errorf("%s %s slot %d runs %q, want %q", harness, operation, i, got, overridden)
+				}
+				i++
+			}
+		}
+	}
+	for _, harness := range []string{"codex", "claude"} {
+		for operation := range cases["pi"] {
+			if _, err := os.Stat(filepath.Join(home, fmt.Sprintf(entryPoints[harness], operation))); !os.IsNotExist(err) {
+				t.Errorf("unexpected %s %s loop adapter: %v", harness, operation, err)
+			}
+		}
+	}
+}
+
 func TestInstallRefreshesOwnedEntryPointsAndLeavesUserTemplates(t *testing.T) {
 	home := t.TempDir()
 	const userTemplate = "---\ndescription: My own implement flow\n---\nDo it my way.\n"
 	user := writeHomeFile(t, home, ".pi/agent/prompts/implement.md", userTemplate)
 	owned := writeHomeFile(t, home, ".config/opencode/commands/watchdog.md", "<!-- skl-owned: skl.adapter/v1 -->\nstale\n")
 	stub := writeHomeFile(t, home, ".claude/skills/implement/SKILL.md", "---\nname: implement\n---\n\n<!-- skl-owned: skl.stub/v1 -->\n\nRun `skl implement next`.\n")
+	userLoop := writeHomeFile(t, home, ".config/opencode/commands/implement-loop.md", "my loop\n")
+	ownedLoop := writeHomeFile(t, home, ".pi/agent/prompts/watchdog-loop.md", "<!-- skl-owned: skl.adapter/v1 -->\nstale\n")
 
 	installInto(t, home)
 
@@ -134,15 +194,22 @@ func TestInstallRefreshesOwnedEntryPointsAndLeavesUserTemplates(t *testing.T) {
 	if got := readFile(t, stub); !strings.Contains(got, "skl.adapter/v1") {
 		t.Fatalf("owned Claude Code stub was not replaced by its entry point:\n%s", got)
 	}
+	if got := readFile(t, userLoop); got != "my loop\n" {
+		t.Fatalf("user-owned OpenCode loop changed: %q", got)
+	}
+	if got := readFile(t, ownedLoop); strings.Contains(got, "stale") || !strings.Contains(got, "skl watchdog next --dispatch --wait") {
+		t.Fatalf("owned pi loop was not refreshed:\n%s", got)
+	}
 }
 
-func TestInstallRetiresOwnedPiRunnersLoopsAndReplacedStubs(t *testing.T) {
+func TestInstallRetiresOwnedPiRunnersAndReplacedStubs(t *testing.T) {
 	home := t.TempDir()
 	var retired []string
-	for _, file := range []string{"agents/implement-runner.md", "agents/watchdog-runner.md", "prompts/implement-loop.md", "prompts/watchdog-loop.md"} {
+	for _, file := range []string{"agents/implement-runner.md", "agents/watchdog-runner.md"} {
 		retired = append(retired, writeHomeFile(t, home, ".pi/agent/"+file, "---\ndescription: x\n---\n\n<!-- skl-owned: skl.pi/v1 -->\nlegacy\n"))
 	}
 	retired = append(retired, writeHomeFile(t, home, ".pi/agent/prompts/queue-next.mjs", "// skl-owned: skl.pi/v1\n"))
+	legacyLoop := writeHomeFile(t, home, ".pi/agent/prompts/implement-loop.md", "<!-- skl-owned: skl.pi/v1 -->\nlegacy loop\n")
 	stub := "---\nname: implement\n---\n\n<!-- skl-owned: skl.stub/v1 -->\n\nRun `skl implement next`.\n"
 	retired = append(retired, writeHomeFile(t, home, ".pi/agent/skills/implement/SKILL.md", stub))
 	openCodeStub := writeHomeFile(t, home, ".config/opencode/skills/watchdog/SKILL.md", stub)
@@ -165,7 +232,7 @@ func TestInstallRetiresOwnedPiRunnersLoopsAndReplacedStubs(t *testing.T) {
 	if !strings.Contains(readFile(t, filepath.Join(home, ".pi/agent/prompts/implement.md")), "skl implement next") {
 		t.Error("the pi Implement entry point was not installed")
 	}
-	for path, want := range map[string]string{notes: "keep\n", userRunner: "mine\n", userRunnerCopy: "my own runner\n"} {
+	for path, want := range map[string]string{notes: "keep\n", userRunner: "mine\n", userRunnerCopy: "my own runner\n", legacyLoop: "<!-- skl-owned: skl.pi/v1 -->\nlegacy loop\n"} {
 		if got := readFile(t, path); got != want {
 			t.Errorf("user file %s changed: %q", path, got)
 		}

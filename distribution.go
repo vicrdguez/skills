@@ -21,7 +21,7 @@ const (
 var (
 	stubMarker    = ownedMarker(StubProtocol)
 	adapterMarker = ownedMarker(AdapterProtocol)
-	// piMarker owned the Pi runners, loop prompts and queue helper that
+	// piMarker owned the Pi runners and queue helper that
 	// Harness Adapters replace.
 	piMarker = []byte("skl-owned: skl.pi/v1")
 )
@@ -36,15 +36,28 @@ var embedded embed.FS
 // adapter is one Harness Adapter: the command it runs and the flags whose
 // values a user passes as its arguments, in order.
 type adapter struct {
-	name    string
-	command string
-	slots   []string
+	name     string
+	command  string
+	slots    []string
+	defaults map[string]string
+	loop     bool
 }
 
 var adapters = []adapter{
-	{"implement", "skl implement next", []string{"reviewer-model", "reviewer-thinking"}},
-	{"implement-team", "skl implement next --mode team", []string{"helper-model", "helper-thinking", "reviewer-model", "reviewer-thinking"}},
-	{"watchdog", "skl watchdog next", nil},
+	{name: "implement", command: "skl implement next", slots: []string{"reviewer-model", "reviewer-thinking"}},
+	{name: "implement-team", command: "skl implement next --mode team", slots: []string{"helper-model", "helper-thinking", "reviewer-model", "reviewer-thinking"}},
+	{name: "watchdog", command: "skl watchdog next"},
+}
+
+// Loop adapters are installed only into pi and OpenCode. Their outcomes own
+// the continuation; the entry points only supply dispatch arguments.
+var loopAdapters = []adapter{
+	{name: "implement-loop", command: "skl implement next --dispatch --wait", slots: []string{"worker-model", "worker-thinking", "reviewer-model", "reviewer-thinking"}, loop: true,
+		defaults: map[string]string{"worker-model": "openai-codex/gpt-6-sol", "worker-thinking": "xhigh", "reviewer-model": "openai-codex/gpt-6-astra", "reviewer-thinking": "low"}},
+	{name: "implement-team-loop", command: "skl implement next --mode team --dispatch --wait", slots: []string{"worker-model", "worker-thinking", "helper-model", "helper-thinking", "reviewer-model", "reviewer-thinking"}, loop: true,
+		defaults: map[string]string{"worker-model": "openai-codex/gpt-6-sol", "worker-thinking": "xhigh", "helper-model": "openai-codex/gpt-6-luna", "helper-thinking": "xhigh", "reviewer-model": "openai-codex/gpt-6-sol", "reviewer-thinking": "xhigh"}},
+	{name: "watchdog-loop", command: "skl watchdog next --dispatch --wait", slots: []string{"worker-model", "worker-thinking"}, loop: true,
+		defaults: map[string]string{"worker-model": "openai-codex/gpt-6-astra", "worker-thinking": "high"}},
 }
 
 // piDefaults are the values the pi adapters pass for an omitted argument.
@@ -64,20 +77,22 @@ type harness struct {
 	entryKeys  []string
 	// argument is the harness's placeholder for an adapter's argument at a
 	// 0-based position.
-	argument func(position int, flag string) string
+	argument func(position int, flag, fallback string) string
 	// slotKeys are the frontmatter lines that declare an adapter's arguments.
 	slotKeys func(slots []string) []string
 }
 
 var harnesses = []harness{
 	{skills: ".pi/agent/skills", entryPoint: ".pi/agent/prompts/%s.md", entryKeys: []string{"description"},
-		argument: func(position int, flag string) string { return fmt.Sprintf("${%d:-%s}", position+1, piDefaults[flag]) },
+		argument: func(position int, flag, fallback string) string {
+			return fmt.Sprintf("${%d:-%s}", position+1, fallback)
+		},
 		slotKeys: func(slots []string) []string { return []string{argumentHint(slots)} }},
 	{skills: ".codex/skills"},
 	// Claude Code keeps an unfilled positional placeholder verbatim, and expands
 	// an unfilled named one to nothing.
 	{skills: ".claude/skills", entryPoint: ".claude/skills/%s/SKILL.md", entryKeys: []string{"name", "description", "disable-model-invocation"},
-		argument: func(_ int, flag string) string { return "$" + claudeArgument(flag) },
+		argument: func(_ int, flag, _ string) string { return "$" + claudeArgument(flag) },
 		slotKeys: func(slots []string) []string {
 			names := make([]string, len(slots))
 			for i, flag := range slots {
@@ -86,7 +101,7 @@ var harnesses = []harness{
 			return []string{"arguments: [" + strings.Join(names, ", ") + "]", argumentHint(slots)}
 		}},
 	{skills: ".config/opencode/skills", entryPoint: ".config/opencode/commands/%s.md", entryKeys: []string{"description"},
-		argument: func(position int, _ string) string { return fmt.Sprintf("$%d", position+1) }},
+		argument: func(position int, _, _ string) string { return fmt.Sprintf("$%d", position+1) }},
 }
 
 // claudeArgument is the Claude Code argument name of a flag.
@@ -103,7 +118,11 @@ func argumentHint(slots []string) string {
 func (target harness) entry(a adapter, frontmatter string) (command, keys string) {
 	command = a.command
 	for position, flag := range a.slots {
-		command += " --" + flag + " '" + target.argument(position, flag) + "'"
+		fallback := piDefaults[flag]
+		if a.loop {
+			fallback = a.defaults[flag]
+		}
+		command += " --" + flag + " '" + target.argument(position, flag, fallback) + "'"
 	}
 	var slotKeys []string
 	if len(a.slots) > 0 && target.slotKeys != nil {
@@ -112,14 +131,16 @@ func (target harness) entry(a adapter, frontmatter string) (command, keys string
 	return command, frontmatterKeys(frontmatter, target.entryKeys, slotKeys)
 }
 
-// retiredPiFiles are the Pi runners, loop prompts and queue helper that
-// earlier installations wrote.
-var retiredPiFiles = []string{"prompts/implement-loop.md", "prompts/watchdog-loop.md", "prompts/queue-next.mjs", "agents/implement-runner.md", "agents/watchdog-runner.md"}
+// retiredPiFiles are the Pi runners and queue helper earlier installations
+// wrote. Old loop prompts occupy adapter locations and remain untouched unless
+// they carry the current adapter marker.
+var retiredPiFiles = []string{"prompts/queue-next.mjs", "agents/implement-runner.md", "agents/watchdog-runner.md"}
 
 type installData struct {
 	Command     string
 	Protocol    string
 	Frontmatter string
+	Loop        bool
 }
 
 type InstallOutcome struct {
@@ -149,7 +170,11 @@ func Install(home string) (InstallOutcome, error) {
 				return outcome, fmt.Errorf("install %s for %s: %w", name, target.skills, err)
 			}
 		}
-		for _, a := range adapters {
+		available := adapters
+		if target.skills == ".pi/agent/skills" || target.skills == ".config/opencode/skills" {
+			available = append(slices.Clone(adapters), loopAdapters...)
+		}
+		for _, a := range available {
 			stubPath := filepath.Join(home, target.skills, a.name, "SKILL.md")
 			if target.entryPoint == "" {
 				if err := outcome.writeStub(stubPath, stub, a.name, a.command); err != nil {
@@ -163,7 +188,7 @@ func Install(home string) (InstallOutcome, error) {
 			}
 			command, keys := target.entry(a, frontmatter)
 			adapterPath := filepath.Join(home, fmt.Sprintf(target.entryPoint, a.name))
-			if err := outcome.write(adapterPath, entry, installData{Command: command, Protocol: AdapterProtocol, Frontmatter: keys}); err != nil {
+			if err := outcome.write(adapterPath, entry, installData{Command: command, Protocol: AdapterProtocol, Frontmatter: keys, Loop: a.loop}); err != nil {
 				return outcome, fmt.Errorf("install %s adapter for %s: %w", a.name, target.skills, err)
 			}
 			if adapterPath != stubPath {

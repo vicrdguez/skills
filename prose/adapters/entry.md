@@ -2,4 +2,4 @@
 
 <!-- skl-owned: {{.Protocol}} -->
 
-Run `{{.Command}}` and follow the Execution Skill it returns.
+{{if .Loop}}Run `{{.Command}}` and follow each Outcome Instruction until one tells you to stop.{{else}}Run `{{.Command}}` and follow the Execution Skill it returns.{{end}}
