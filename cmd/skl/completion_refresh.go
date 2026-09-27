@@ -88,16 +88,16 @@ func refreshCompletions(ctx context.Context, store *ledger.Store, repository git
 }
 
 // A missing owned Submission is ordinary local state, and an unavailable
-// forge cannot establish a terminal fact. Other ledger refusals protect
-// project integrity and must stop delivery selection.
+// forge cannot establish a terminal fact. Forge read failures are marked
+// separately; every other observation error must stop delivery selection.
 func completionRefreshIntegrityError(item string, err error, forgeReadFailure bool) bool {
-	if forgeReadFailure {
+	if err == nil || forgeReadFailure {
 		return false
 	}
 	var refusal *ledger.Refusal
-	if !errors.As(err, &refusal) {
-		return false
+	if errors.As(err, &refusal) {
+		return refusal.Invariant != "forge observation is unavailable" &&
+			refusal.Invariant != "no exact owned Submission is attached to "+item
 	}
-	return refusal.Invariant != "forge observation is unavailable" &&
-		refusal.Invariant != "no exact owned Submission is attached to "+item
+	return true
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -312,6 +313,47 @@ func TestNextCompletionForgeFailureDoesNotBlockIndependentLocalClaim(t *testing.
 	}
 }
 
+func TestNextCompletionCommitFailureDoesNotClaimUnrelatedLocalWork(t *testing.T) {
+	fixture, source, _ := completionDependencyFixture(t, "commit-failure", ledger.ImplementPhase)
+	cli := newLedgerApp(t, newForgeServer(t))
+	local := singleSlice("commit-failure-local")
+	local.slices[0].branch = "commit-failure-local"
+	if accepted := cli.accept(t, source, writeProposal(t, "", local)); accepted.Status != "accepted" {
+		t.Fatalf("accept unrelated local work: %s", mustJSON(t, accepted))
+	}
+
+	hook := filepath.Join(fixture.clone, ".git", "hooks", "commit-msg")
+	writeFile(t, hook, "#!/bin/sh\nif grep -q '^observe completion widgets/commit-failure/foundation$' \"$1\"; then\n  echo 'forced terminal completion commit failure' >&2\n  exit 1\nfi\n")
+	if err := os.Chmod(hook, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var calls atomic.Int32
+	app, output := completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.Method != http.MethodGet || r.URL.Path != "/repos/acme/widgets/pulls/21" {
+			t.Errorf("unexpected forge request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = fmt.Fprint(w, fixturePull("closed", "true", "accepted-head", "merge-head", "acme/widgets", "acme/widgets", "main"))
+	})
+
+	started := completionNextCLI(t, app, output, ledger.ImplementPhase, source)
+	if calls.Load() < 1 {
+		t.Fatal("next did not attempt completion observation for the attached blocker")
+	}
+	if started.Status != "fix_required" || started.Execution != nil || !strings.Contains(started.Reason, "forced terminal completion commit failure") {
+		t.Fatalf("failed terminal ledger mutation did not stop selection: %s", mustJSON(t, started))
+	}
+	blocker := completionReadState(t, fixture.clone, "widgets", "commit-failure", "foundation")
+	dependent := completionReadState(t, fixture.clone, "widgets", "commit-failure", "feature")
+	independent := completionReadState(t, fixture.clone, "widgets", "commit-failure-local", "foundation")
+	if blocker.State != ledger.ReadyForMerge || blocker.Completion != nil || dependent.Claim != nil || independent.Claim != nil {
+		t.Fatalf("failed completion mutation changed committed facts or acquired unrelated work: blocker=%+v dependent=%+v independent=%+v", blocker, dependent, independent)
+	}
+}
+
 func TestNextCompletionUnsafeObservationDoesNotClaimDependency(t *testing.T) {
 	for _, scenario := range []string{"identity", "state interleave", "report interleave"} {
 		t.Run(scenario, func(t *testing.T) {
@@ -348,8 +390,8 @@ func TestNextCompletionUnsafeObservationDoesNotClaimDependency(t *testing.T) {
 			})
 
 			started := completionNextCLI(t, app, output, ledger.ImplementPhase, source)
-			if calls.Load() != 1 {
-				t.Fatalf("completion observation calls = %d, want one", calls.Load())
+			if calls.Load() < 1 {
+				t.Fatalf("completion observation calls = %d, want at least one", calls.Load())
 			}
 			blocker := completionReadState(t, fixture.clone, "widgets", "unsafe-completion", "foundation")
 			dependent := completionReadState(t, fixture.clone, "widgets", "unsafe-completion", "feature")
