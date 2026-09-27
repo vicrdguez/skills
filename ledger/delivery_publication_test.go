@@ -147,10 +147,20 @@ func deliveryWantPresentation(t *testing.T, forge *deliveryForgeStub, want deliv
 // no active Claim.
 func deliveryPublicationFixture(t *testing.T) (*deliveryLedger, *deliverySource, *ledger.Store, *ledger.DeliveryResult) {
 	t.Helper()
+	return deliveryPublicationFixtureWithIssue(t, nil)
+}
+
+func deliveryPublicationFixtureWithIssue(t *testing.T, issue *ledger.ForgeAttachment) (*deliveryLedger, *deliverySource, *ledger.Store, *ledger.DeliveryResult) {
+	t.Helper()
 	l := newDeliveryLedger(t)
 	l.addProject(deliveryPublicationProject, "acme/widgets")
 	l.addSlice(deliveryPublicationProject, deliveryPublicationSlice, deliveryPublicationBranch, ledger.ReadyForImplementation, nil, deliveryInitial)
 	l.commitAll("accept " + deliveryPublicationSlice)
+	if issue != nil {
+		state := l.committedState(deliveryPublicationProject, deliveryPublicationSlice, deliveryPublicationBranch)
+		state.Issue = issue
+		l.commitState(deliveryPublicationProject, deliveryPublicationSlice, deliveryPublicationBranch, state)
+	}
 	source := newDeliverySource(t)
 	store := l.store()
 	execution := deliveryStart(t, store, deliveryWidgets(), ledger.ImplementPhase)
@@ -248,6 +258,75 @@ func deliveryWaitPublished(t *testing.T, published <-chan struct{}) {
 	case <-time.After(deliveryPublicationDeadline):
 		t.Fatal("publication did not finish after its presentation was released")
 	}
+}
+
+// TestDeliveryPublicationAddsRecordedIssueFooter observes both normal and
+// explicit presentations, including a later review, through the forge seam.
+func TestDeliveryPublicationAddsRecordedIssueFooter(t *testing.T) {
+	l, source, store, implementation := deliveryPublicationFixtureWithIssue(t, &ledger.ForgeAttachment{Repository: "acme/widgets", Number: 110})
+	forge := &deliveryForgeStub{number: 42}
+	body := "Ready for review."
+	ledger.PublishDelivery(context.Background(), store, deliveryWidgets(), source.root, source.remote, implementation, &body, forge)
+	if implementation.Publication == nil || implementation.Publication.Status != ledger.PullPresented {
+		t.Fatalf("implementation publication = %#v", implementation.Publication)
+	}
+	deliveryWantPresentation(t, forge, deliveryPublicFields{
+		Title: deliveryPublicationBranch, Body: "Ready for review.\n\nCloses #110",
+		Branch: deliveryPublicationBranch, Head: source.head,
+	})
+
+	// The earlier body is not reused, even though the Submission is reused.
+	again := &deliveryForgeStub{number: 42}
+	presentation := ledger.PresentCurrent(context.Background(), store, deliveryWidgets(), source.root, source.remote, deliverySelect(t, store), "Updated summary.", again)
+	if presentation.Publication.Status != ledger.PullPresented {
+		t.Fatalf("explicit republication = %#v", presentation.Publication)
+	}
+	deliveryWantPresentation(t, again, deliveryPublicFields{
+		Number: 42, Title: deliveryPublicationBranch, Body: "Updated summary.\n\nCloses #110",
+		Branch: deliveryPublicationBranch, Head: source.head,
+	})
+
+	review := deliveryReview(t, store, source.head, "pass", "PRIVATE review findings\n")
+	approved := &deliveryForgeStub{number: 42}
+	reviewBody := "Review approved."
+	ledger.PublishDelivery(context.Background(), store, deliveryWidgets(), source.root, source.remote, review, &reviewBody, approved)
+	if review.Publication == nil || review.Publication.Status != ledger.PullPresented {
+		t.Fatalf("review publication = %#v", review.Publication)
+	}
+	deliveryWantPresentation(t, approved, deliveryPublicFields{
+		Number: 42, Title: deliveryPublicationBranch, Body: "Review approved.\n\nCloses #110",
+		Branch: deliveryPublicationBranch, Head: source.head, Approved: true,
+	})
+	if state := l.committedState(deliveryPublicationProject, deliveryPublicationSlice, deliveryPublicationBranch); state.Issue == nil || state.Issue.Number != 110 {
+		t.Fatalf("publication lost the recorded issue: %#v", state.Issue)
+	}
+}
+
+func TestDeliveryPublicationDoesNotRewriteWorkerClosingReferences(t *testing.T) {
+	_, source, store, result := deliveryPublicationFixtureWithIssue(t, &ledger.ForgeAttachment{Repository: "acme/widgets", Number: 110})
+	forge := &deliveryForgeStub{number: 42}
+	body := "Summary.\n\nCloses #110"
+	ledger.PublishDelivery(context.Background(), store, deliveryWidgets(), source.root, source.remote, result, &body, forge)
+	deliveryWantPresentation(t, forge, deliveryPublicFields{
+		Title: deliveryPublicationBranch, Body: "Summary.\n\nCloses #110\n\nCloses #110",
+		Branch: deliveryPublicationBranch, Head: source.head,
+	})
+}
+
+func TestDeliveryPublicationForgeFailureKeepsAttachedLocalHandoff(t *testing.T) {
+	l, source, store, result := deliveryPublicationFixtureWithIssue(t, &ledger.ForgeAttachment{Repository: "acme/widgets", Number: 110})
+	head := l.head()
+	forge := &deliveryForgeStub{err: errors.New("forge unavailable")}
+	body := "Ready for review."
+	ledger.PublishDelivery(context.Background(), store, deliveryWidgets(), source.root, source.remote, result, &body, forge)
+	if result.Publication == nil || result.Publication.Status != ledger.IssuePending || !strings.Contains(result.Publication.Detail, "forge unavailable") {
+		t.Fatalf("forge failure = %#v", result.Publication)
+	}
+	deliveryWantPresentation(t, forge, deliveryPublicFields{
+		Title: deliveryPublicationBranch, Body: "Ready for review.\n\nCloses #110",
+		Branch: deliveryPublicationBranch, Head: source.head,
+	})
+	deliveryAssertLocalHandoffPreserved(t, l, head, result)
 }
 
 // TestDeliveryPublicationWithoutPublicMaterialRemainsPending: with no
@@ -363,9 +442,10 @@ func TestDeliveryPublicationPushesSourceAndPresentsOnlyPublicProse(t *testing.T)
 	if presentation.Publication.Status != ledger.PullPresented || presentation.Replication != nil {
 		t.Fatalf("repeated presentation = %#v", presentation)
 	}
-	if calls := again.calls(); len(calls) != 1 || calls[0].Number != 42 {
-		t.Fatalf("repeated presentation did not use the established association: %#v", calls)
-	}
+	deliveryWantPresentation(t, again, deliveryPublicFields{
+		Number: 42, Title: deliveryPublicationBranch, Body: "refreshed prose\n",
+		Branch: deliveryPublicationBranch, Head: source.head,
+	})
 	if l.head() != head {
 		t.Fatal("repeating a presentation with an established association wrote to the ledger")
 	}
