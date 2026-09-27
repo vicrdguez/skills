@@ -482,6 +482,15 @@ func renderBrowseDocument(report *strings.Builder, line func(string), document *
 			}
 		}
 	}
+	if claim := document.Claim; claim != nil {
+		line("Claim metadata: phase " + claim.Phase + ", basis (ledger revision) " + claim.Basis)
+		if len(document.References) > 0 {
+			line("Claim input ledger references:")
+			for _, reference := range document.References {
+				line("- " + reference.Label + ": " + reference.Reference.Commit + ":" + reference.Reference.Path)
+			}
+		}
+	}
 	if metadata := document.Decision; metadata != nil {
 		line("Human Decision metadata: schema " + strconv.Itoa(metadata.Schema))
 		line("- Project: " + metadata.Project)

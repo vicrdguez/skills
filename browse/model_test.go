@@ -91,7 +91,7 @@ func fixtureLedger(t *testing.T, extras ...func(string)) *ledger.Snapshot {
 	contractRef := []ledger.Reference{{Commit: base, Path: cancelPath + "/intent.md"}, {Commit: base, Path: cancelPath + "/behavior.md"}}
 	write(t, root, cancelPath+"/state.json", `{"state": "awaiting_review", "title": "Cancel orders", "branch": "feat/cancel",
 		"issue": {"repository": "acme/widgets", "number": 11}, "submission": {"repository": "acme/widgets", "number": 12}, "decision": true,
-		"dependencies": ["proposals/legacy/old"], "claim": {"phase": "watchdog", "basis": "3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c", "inputs": {"contract": []}}}`)
+		"dependencies": ["proposals/legacy/old"], "claim": {"phase": "watchdog", "basis": "3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c", "inputs": {"contract": [{"commit": "`+base+`", "path": "`+cancelPath+`/intent.md"}]}}}`)
 	implementation, err := ledger.FormatReport(ledger.ImplementPhase, ledger.Report{
 		Schema: 1, Outcome: "awaiting_review",
 		Source: ledger.SourceRevisions{Head: strings.Repeat("a", 40), Target: strings.Repeat("b", 40)},
@@ -287,20 +287,38 @@ func TestBrowserFollowsDecisionAndClaimReferencesWithoutChangingSliceContext(t *
 	s.shows("Slice: orders/cancel", "Lifecycle: Awaiting Review", "Depends on: legacy/old [archived] — Old work (Merged; satisfied)")
 }
 
+func TestBrowserFollowsClaimInputsWithoutRewindingCurrentSlice(t *testing.T) {
+	s := start(t, "widgets")
+	s.send(tea.WindowSizeMsg{Width: 120, Height: 45})
+	s.press("enter", "down", "enter", "r", "enter")
+	s.shows("Claim state (state.json)", "Claim input ledger references", "current lifecycle: Awaiting Review")
+	s.press("r")
+	s.shows("References (1)", "contract", "intent.md")
+	s.press("enter")
+	s.shows("HISTORICAL", "Cancellation intent", "current lifecycle: Awaiting Review", "current Claim: watchdog reservation", "legacy/old (Merged)")
+	s.press("esc", "esc")
+	s.shows("References (1)", "current Claim state")
+	s.press("esc")
+	s.shows("Slice: orders/cancel", "Lifecycle: Awaiting Review")
+	if len(s.opened) != 0 {
+		t.Fatalf("following Claim inputs opened external links: %v", s.opened)
+	}
+}
+
 func TestBrowserReturnsFromNestedEmptyReferencesToTheOriginatingClaimReference(t *testing.T) {
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 100, Height: 40})
-	s.press("enter", "down", "enter", "r", "enter")
-	s.shows("Claim state (state.json)", "lifecycle: Awaiting Review")
+	s.press("enter", "down", "enter", "d", "down", "down", "enter", "r", "enter")
+	s.shows("Claim state (state.json)", "HISTORICAL")
 
-	// The Claim state has no structured references. Opening its reference
-	// screen and returning must preserve the Claim reference list that opened it.
+	// The earlier state has an empty Claim input set. Returning from its
+	// reference screen must restore the report reference that opened it.
 	s.press("r")
 	s.shows("References (0)", "No structured exact ledger references")
 	s.press("esc", "esc")
-	s.shows("References (1)", "current Claim state", "state.json")
-	s.press("esc")
-	s.shows("Slice: orders/cancel", "Claim state reference:")
+	s.shows("Latest implementation report")
+	s.press("r")
+	s.shows("References (4)", "claim", "state.json")
 }
 
 func TestBrowserKeepsHealthyDocumentsVisibleAndDiagnosticsScrollable(t *testing.T) {

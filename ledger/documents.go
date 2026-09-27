@@ -30,7 +30,7 @@ const (
 )
 
 // LabeledReference is a typed ledger reference extracted from structured
-// report or decision metadata. Repeated labels preserve the source order.
+// report, decision, or Claim metadata. Repeated labels preserve the source order.
 type LabeledReference struct {
 	Label     string    `json:"label"`
 	Reference Reference `json:"reference"`
@@ -48,7 +48,7 @@ type DocumentAvailability struct {
 }
 
 // Document is one exact committed ledger document. Contents are retained even
-// when report or decision metadata cannot be interpreted; structured facts
+// when metadata cannot be interpreted; structured facts
 // and their references are available separately when parsing succeeds.
 type Document struct {
 	Kind        DocumentKind       `json:"kind"`
@@ -60,6 +60,7 @@ type Document struct {
 	Body        string             `json:"body"`
 	Report      *Report            `json:"report,omitempty"`
 	Decision    *DecisionRecord    `json:"decision,omitempty"`
+	Claim       *Claim             `json:"claim,omitempty"`
 	References  []LabeledReference `json:"references,omitempty"`
 	Diagnostics []Diagnostic       `json:"diagnostics,omitempty"`
 }
@@ -294,6 +295,35 @@ func (document *Document) parseMetadata() {
 				document.Diagnostics = appendDiagnostic(document.Diagnostics, Diagnostic{
 					Scope: scope, Subject: subject,
 					Problem: phase + " report " + reference.Label + " reference is not a ledger record document path",
+				})
+			}
+		}
+	case StateDocumentKind:
+		var state SliceState
+		if err := json.Unmarshal([]byte(document.Contents), &state); err != nil {
+			document.Diagnostics = []Diagnostic{{Scope: scope, Subject: subject, Problem: "state metadata is unreadable: " + err.Error()}}
+			return
+		}
+		if state.Claim == nil {
+			return
+		}
+		document.Claim = state.Claim
+		for _, reference := range state.Claim.Inputs.Contract {
+			document.References = append(document.References, LabeledReference{Label: "contract", Reference: reference})
+		}
+		for _, entry := range []struct {
+			label string
+			ref   *Reference
+		}{{"implement", state.Claim.Inputs.Implement}, {"watchdog", state.Claim.Inputs.Watchdog}, {"decision", state.Claim.Inputs.Decision}} {
+			if entry.ref != nil {
+				document.References = append(document.References, LabeledReference{Label: entry.label, Reference: *entry.ref})
+			}
+		}
+		for _, reference := range document.References {
+			if !validRecordDocumentPath(reference.Reference.Path) {
+				document.Diagnostics = appendDiagnostic(document.Diagnostics, Diagnostic{
+					Scope: scope, Subject: subject,
+					Problem: "Claim " + reference.Label + " reference is not a ledger record document path",
 				})
 			}
 		}

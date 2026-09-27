@@ -360,6 +360,34 @@ func TestBrowseDocumentFollowsExactReferenceAndPreservesLedgerShowRaw(t *testing
 	}
 }
 
+func TestBrowseDocumentExposesClaimInputsAsExactCLIFacts(t *testing.T) {
+	fixture := newBrowseDocumentsFixture(t)
+	app, output := browseApp(t)
+	statePath := "projects/widgets/proposals/orders/cancel/state.json"
+	intentPath := "projects/widgets/proposals/orders/cancel/intent.md"
+	input := ledger.Reference{Commit: fixture.acceptedRevision, Path: intentPath}
+	writeFile(t, filepath.Join(fixture.ledger.clone, filepath.FromSlash(statePath)), `{"state":"awaiting_review","title":"Cancel orders","branch":"feat/cancel","claim":{"phase":"watchdog","basis":"`+fixture.acceptedRevision+`","inputs":{"contract":[{"commit":"`+input.Commit+`","path":"`+input.Path+`"}]}}}`)
+	runGit(t, fixture.ledger.clone, "add", statePath)
+	runGit(t, fixture.ledger.clone, "commit", "-q", "-m", "record fixed Claim input")
+	claimRevision := browseDocumentsHead(t, fixture.ledger.clone)
+	outcome := browseDocumentsJSON(t, app, output, "document", "--commit", claimRevision, "--path", statePath)
+	if outcome.Status != "shown" || outcome.Document == nil || outcome.Document.Claim == nil || outcome.Document.Claim.Phase != ledger.WatchdogPhase ||
+		len(outcome.Document.References) != 1 || outcome.Document.References[0] != (ledger.LabeledReference{Label: "contract", Reference: input}) {
+		t.Fatalf("CLI Claim facts = %+v", outcome)
+	}
+	followed := browseDocumentsJSON(t, app, output, "document", "--commit", input.Commit, "--path", input.Path)
+	if followed.Document == nil || followed.Document.Reference != input || !strings.Contains(followed.Document.Contents, "Accepted intent text.") {
+		t.Fatalf("CLI exact Claim input = %+v", followed)
+	}
+	output.Reset()
+	if err := app.Run([]string{"skl", "browse", "document", "--commit", claimRevision, "--path", statePath}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "Claim input ledger references:") || !strings.Contains(output.String(), "- contract: "+input.Commit+":"+input.Path) || !strings.Contains(output.String(), "Claim metadata: phase watchdog") {
+		t.Fatalf("CLI Markdown omitted structured Claim inputs:\n%s", output)
+	}
+}
+
 func TestBrowseDocumentsRequiresUnambiguousSelection(t *testing.T) {
 	newBrowseDocumentsFixture(t)
 	app, output := browseApp(t)

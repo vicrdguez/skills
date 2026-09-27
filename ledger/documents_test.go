@@ -101,6 +101,51 @@ func TestSnapshotDocumentsResolveCurrentAndHistoricalReportReferences(t *testing
 	}
 }
 
+func TestSnapshotClaimInputsRemainNavigableAtTheirRecordedRevision(t *testing.T) {
+	const item = "browse-records/readback"
+	l := newDeliveryLedger(t)
+	l.addProject("widgets", "acme/widgets")
+	l.addSlice("widgets", "browse-records", "readback", ledger.ReadyForImplementation, nil, deliveryInitial)
+	intentPath := deliveryContractPath("widgets", item, "intent.md")
+	l.addFile(intentPath, "# Historical accepted intent\n")
+	accepted := l.commitAll("accept contract")
+	input := ledger.Reference{Commit: accepted, Path: intentPath}
+	l.writeStateValue("widgets", "browse-records", "readback", ledger.SliceState{
+		State: ledger.AwaitingReview, Title: "Readback", Branch: "readback",
+		Claim: &ledger.Claim{Phase: ledger.WatchdogPhase, Basis: accepted, Inputs: ledger.ClaimInputs{
+			Contract:  []ledger.Reference{input},
+			Implement: &ledger.Reference{Commit: accepted, Path: deliveryReportPath("widgets", item, ledger.ImplementPhase)},
+		}},
+	})
+	claimRevision := l.commitAll("claim with fixed inputs")
+	l.addFile(intentPath, "# Later accepted intent\n")
+	l.commitAll("advance contract")
+	snapshot, err := l.store().Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := snapshot.Document(ledger.Reference{Commit: claimRevision, Path: deliveryStatePath("widgets", item)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.References) != 2 || state.References[0] != (ledger.LabeledReference{Label: "contract", Reference: input}) {
+		t.Fatalf("historical Claim structured facts = %+v", state)
+	}
+	inputDocument, err := snapshot.Document(state.References[0].Reference)
+	if err != nil || inputDocument.Contents != "# Historical accepted intent\n" || inputDocument.Reference != input {
+		t.Fatalf("exact Claim input = %+v, %v", inputDocument, err)
+	}
+	if _, err := snapshot.Document(state.References[1].Reference); err == nil || !strings.Contains(err.Error(), "unavailable") {
+		t.Fatalf("unavailable exact Claim input was substituted: %v", err)
+	}
+	l.addFile(deliveryStatePath("widgets", item), `{"state":"awaiting_review","claim":{"inputs":{"contract":"not-an-array"}}}`)
+	malformed := l.commitAll("damage state metadata")
+	bad, err := snapshot.Document(ledger.Reference{Commit: malformed, Path: deliveryStatePath("widgets", item)})
+	if err != nil || len(bad.References) != 0 || len(bad.Diagnostics) == 0 || bad.Body != bad.Contents || !strings.Contains(bad.Contents, "not-an-array") {
+		t.Fatalf("malformed Claim evidence = %+v, %v", bad, err)
+	}
+}
+
 func TestSnapshotDocumentsResolveArchivedProposalAndHistoricalPath(t *testing.T) {
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")

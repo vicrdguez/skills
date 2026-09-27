@@ -181,6 +181,15 @@ func (m Model) documentContent(document *ledger.Document, width int) (string, st
 			}
 		}
 	}
+	if claim := document.Claim; claim != nil {
+		preamble = append(preamble, "", "### Recorded Claim", "Phase: "+claim.Phase, "Basis (ledger revision): "+claim.Basis)
+		if len(document.References) > 0 {
+			preamble = append(preamble, "", "Claim input ledger references:")
+			for _, reference := range document.References {
+				preamble = append(preamble, "  "+reference.Label+": "+reference.Reference.Commit+":"+reference.Reference.Path)
+			}
+		}
+	}
 	if decision := document.Decision; decision != nil {
 		preamble = append(preamble,
 			"", "### Human Decision", "Schema: "+fmt.Sprint(decision.Schema),
