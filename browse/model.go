@@ -636,6 +636,7 @@ func (m *Model) back() {
 			}
 			m.docViewport = frame.viewport
 			m.documentReturn, m.renderProblem = frame.returnScreen, frame.renderProblem
+			m.versions, m.versionsReturn, m.cursor[versionsScreen] = frame.versions, frame.versionsReturn, frame.versionsCursor
 			m.references = append([]ledger.LabeledReference(nil), frame.references...)
 			m.referenceOrigin, m.referencesFromDoc = frame.referenceOrigin, frame.referencesFromDoc
 			m.cursor[referencesScreen] = frame.referenceCursor

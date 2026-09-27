@@ -323,6 +323,77 @@ func TestBrowserFindsReportHistoryWhenLatestReportWasRemoved(t *testing.T) {
 	s.shows("Implementation report versions")
 }
 
+func snapshotAfterChange(t *testing.T, root string) *ledger.Snapshot {
+	t.Helper()
+	store, err := ledger.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := store.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return snapshot
+}
+
+func TestBrowserKeepsArchivedReportIdentityAfterOpeningAnEarlierVersion(t *testing.T) {
+	var root string
+	fixtureLedger(t, func(directory string) {
+		root = directory
+		write(t, directory, "projects/widgets/proposals/orders/cancel/implement-report.md", "Earlier implementation reasoning.\n")
+	})
+	git(t, root, "mv", "projects/widgets/proposals/orders", "projects/widgets/archive/orders")
+	git(t, root, "commit", "-q", "-m", "archive orders")
+	s := &session{t: t, model: browse.New(snapshotAfterChange(t, root), browse.Options{Project: "widgets"})}
+	s.send(tea.WindowSizeMsg{Width: 120, Height: 45})
+	s.press("a")
+	s.shows("orders [archived]")
+	s.press("down", "enter", "down", "enter", "d", "down", "down", "enter", "v")
+	s.shows("report versions (2)")
+	s.press("down", "enter")
+	s.shows("Earlier implementation reasoning", "HISTORICAL")
+	s.press("v")
+	s.shows("report versions (2)")
+	s.hides("Cannot discover report versions")
+}
+
+func TestBrowserBrowsesActiveReportInProjectNamedArchive(t *testing.T) {
+	var root string
+	fixtureLedger(t, func(directory string) { root = directory })
+	git(t, root, "mv", "projects/widgets", "projects/archive")
+	git(t, root, "commit", "-q", "-m", "rename project archive")
+	s := &session{t: t, model: browse.New(snapshotAfterChange(t, root), browse.Options{Project: "archive"})}
+	s.send(tea.WindowSizeMsg{Width: 120, Height: 40})
+	s.press("enter", "down", "enter", "d", "down", "down", "enter", "v")
+	s.shows("implement report versions (1)")
+	s.hides("Cannot discover report versions")
+}
+
+func TestBrowserReturnsFromNestedVersionsToTheDocumentList(t *testing.T) {
+	var root string
+	fixtureLedger(t, func(directory string) { root = directory })
+	if err := os.Remove(filepath.Join(root, "projects/widgets/proposals/orders/cancel/implement-report.md")); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-q", "-m", "remove latest report")
+	s := &session{t: t, model: browse.New(snapshotAfterChange(t, root), browse.Options{Project: "widgets"})}
+	s.send(tea.WindowSizeMsg{Width: 120, Height: 40})
+	s.press("enter", "down", "enter", "d", "down", "down", "down", "down", "enter")
+	s.shows("implement report versions (1)")
+	s.press("enter")
+	s.shows("HISTORICAL", "The recorded implementation evidence is readable")
+	s.press("v")
+	s.shows("implement report versions (1)")
+	s.press("enter", "esc")
+	s.shows("HISTORICAL", "The recorded implementation evidence is readable")
+	s.press("esc")
+	s.shows("implement report versions (1)")
+	s.press("esc")
+	s.shows("Implementation report versions", "no latest report")
+	s.hides("Document:", "Cannot discover report versions")
+}
+
 func TestBrowserFollowsDecisionAndClaimReferencesWithoutChangingSliceContext(t *testing.T) {
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 100, Height: 50})

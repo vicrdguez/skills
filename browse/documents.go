@@ -16,6 +16,9 @@ type documentFrame struct {
 	screen            screen
 	returnScreen      screen
 	fromVersion       bool
+	versions          *ledger.ReportVersions
+	versionsReturn    screen
+	versionsCursor    int
 	renderProblem     string
 	references        []ledger.LabeledReference
 	referenceOrigin   screen
@@ -121,7 +124,7 @@ func (m *Model) openVersions() {
 		phase = ledger.WatchdogPhase
 	}
 	m.openVersionsFor(m.currentDocument.Project, m.currentDocument.Proposal+"/"+m.currentDocument.Slice,
-		phase, strings.Contains(m.currentDocument.Reference.Path, "/archive/"))
+		phase, m.archived)
 }
 
 func (m *Model) openVersionsFor(project, item, phase string, archived bool) {
@@ -157,6 +160,7 @@ func (m *Model) followReference(reference ledger.Reference) {
 	frame := documentFrame{
 		viewport: m.docViewport, screen: m.screen,
 		returnScreen: m.documentReturn, renderProblem: m.renderProblem,
+		versions: m.versions, versionsReturn: m.versionsReturn, versionsCursor: m.cursor[versionsScreen],
 		references:      append([]ledger.LabeledReference(nil), m.references...),
 		referenceOrigin: m.referenceOrigin, referencesFromDoc: m.referencesFromDoc,
 		referenceCursor:  m.cursor[referencesScreen],
