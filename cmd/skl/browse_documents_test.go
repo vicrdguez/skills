@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -174,6 +175,12 @@ func TestBrowseDocumentsExposeCurrentAndArchivedEvidenceReadOnly(t *testing.T) {
 		!hasDocument(current.Documents.Documents, ledger.DecisionDocumentKind, "projects/widgets/proposals/orders/cancel/decision.md") {
 		t.Fatalf("Slice discovery omitted current phase or decision evidence: %+v", current.Documents.Documents)
 	}
+	for _, kind := range []ledger.DocumentKind{ledger.ImplementReportDocumentKind, ledger.WatchdogReportDocumentKind, ledger.DecisionDocumentKind} {
+		availability := browseDocumentAvailability(t, current.Documents, kind)
+		if availability.Status != ledger.DocumentAvailable || availability.Reference == nil || availability.Reference.Commit != fixture.currentRevision {
+			t.Errorf("current %s availability = %+v", kind, availability)
+		}
+	}
 	for _, document := range current.Documents.Documents {
 		if document.Reference.Commit != fixture.currentRevision {
 			t.Fatalf("current document reference did not use the pinned snapshot: %+v", document.Reference)
@@ -216,6 +223,15 @@ func TestBrowseDocumentsExposeCurrentAndArchivedEvidenceReadOnly(t *testing.T) {
 		hasDocument(malformed.Documents.Documents, ledger.DecisionDocumentKind, "") || diagnosticMentions(malformed.Documents.Diagnostics, "decision.md") {
 		t.Fatalf("absent optional report or decision was treated as malformed: %+v", malformed.Documents)
 	}
+	for _, kind := range []ledger.DocumentKind{ledger.WatchdogReportDocumentKind, ledger.DecisionDocumentKind} {
+		availability := browseDocumentAvailability(t, malformed.Documents, kind)
+		if availability.Status != ledger.DocumentAbsent || availability.Reference != nil {
+			t.Errorf("absent %s availability = %+v", kind, availability)
+		}
+	}
+	if availability := browseDocumentAvailability(t, malformed.Documents, ledger.ImplementReportDocumentKind); availability.Status != ledger.DocumentAvailable || availability.Reference == nil {
+		t.Errorf("readable malformed report availability = %+v", availability)
+	}
 	output.Reset()
 	if err := app.Run([]string{"skl", "browse", "documents", "--project", "gadgets", "--item", "tools/hammer"}); err != nil {
 		t.Fatal(err)
@@ -228,6 +244,61 @@ func TestBrowseDocumentsExposeCurrentAndArchivedEvidenceReadOnly(t *testing.T) {
 
 	if ledgerSnapshot(t, fixture.ledger.clone) != cloneBefore || runGitOutput(t, fixture.ledger.upstream, "for-each-ref") != upstreamBefore || runGitOutput(t, fixture.ledger.clone, "rev-parse", "HEAD") != headBefore {
 		t.Fatal("browse document queries changed local or upstream Git state")
+	}
+}
+
+func TestBrowseDocumentsReportUnavailableOptionalReadFromTypedFact(t *testing.T) {
+	fixture := newBrowseDocumentsFixture(t)
+	app, output := browseApp(t)
+	path := "projects/widgets/proposals/orders/cancel/watchdog-report.md"
+	blob := strings.TrimSpace(runGitOutput(t, fixture.ledger.clone, "rev-parse", "HEAD:"+path))
+	objectPath := filepath.Join(fixture.ledger.clone, ".git", "objects", blob[:2], blob[2:])
+	if err := os.Remove(objectPath); err != nil {
+		t.Fatalf("remove report blob %s: %v", objectPath, err)
+	}
+
+	outcome := browseDocumentsJSON(t, app, output, "documents", "--project", "widgets", "--item", "orders/cancel")
+	if outcome.Documents == nil {
+		t.Fatalf("documents query returned no set: %+v", outcome)
+	}
+	availability := browseDocumentAvailability(t, outcome.Documents, ledger.WatchdogReportDocumentKind)
+	wantReference := ledger.Reference{Commit: outcome.Documents.Revision, Path: path}
+	if availability.Status != ledger.DocumentUnavailable || availability.Reference == nil || *availability.Reference != wantReference {
+		t.Fatalf("failed report read availability = %+v, want exact unavailable reference %+v", availability, wantReference)
+	}
+	output.Reset()
+	if err := app.Run([]string{"skl", "browse", "documents", "--project", "widgets", "--item", "orders/cancel"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "watchdog for cancel — unavailable; see diagnostic") ||
+		!strings.Contains(output.String(), "cannot read document "+path) {
+		t.Fatalf("Markdown did not report the unavailable typed fact and its diagnostic:\n%s", output)
+	}
+}
+
+func TestBrowseDocumentsReportUnknownDecisionWhenStateIsMalformed(t *testing.T) {
+	fixture := newBrowseDocumentsFixture(t)
+	app, output := browseApp(t)
+	statePath := "projects/widgets/proposals/orders/cancel/state.json"
+	writeFile(t, filepath.Join(fixture.ledger.clone, filepath.FromSlash(statePath)), "{malformed state\n")
+	runGit(t, fixture.ledger.clone, "add", statePath)
+	runGit(t, fixture.ledger.clone, "commit", "-q", "-m", "damage decision membership state")
+
+	outcome := browseDocumentsJSON(t, app, output, "documents", "--project", "widgets", "--item", "orders/cancel")
+	if outcome.Documents == nil {
+		t.Fatalf("documents query returned no set: %+v", outcome)
+	}
+	availability := browseDocumentAvailability(t, outcome.Documents, ledger.DecisionDocumentKind)
+	wantState := ledger.Reference{Commit: outcome.Documents.Revision, Path: statePath}
+	if availability.Status != ledger.DocumentUnknown || availability.Reference == nil || *availability.Reference != wantState {
+		t.Fatalf("malformed state decision availability = %+v, want unknown with state reference %+v", availability, wantState)
+	}
+	output.Reset()
+	if err := app.Run([]string{"skl", "browse", "documents", "--project", "widgets", "--item", "orders/cancel"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "Human Decision availability for cancel — unknown") {
+		t.Fatalf("malformed state was presented as an absent decision instead of unknown:\n%s", output)
 	}
 }
 
@@ -301,6 +372,17 @@ func TestBrowseDocumentsRequiresUnambiguousSelection(t *testing.T) {
 			t.Errorf("ambiguous document query %v = %+v", args, outcome)
 		}
 	}
+}
+
+func browseDocumentAvailability(t *testing.T, set *ledger.DocumentSet, kind ledger.DocumentKind) ledger.DocumentAvailability {
+	t.Helper()
+	for _, availability := range set.Availability {
+		if availability.Kind == kind {
+			return availability
+		}
+	}
+	t.Fatalf("no availability for %s in %+v", kind, set.Availability)
+	return ledger.DocumentAvailability{}
 }
 
 func hasDocument(documents []ledger.Document, kind ledger.DocumentKind, path string) bool {

@@ -242,10 +242,11 @@ func TestBrowserReadsReportsFollowsExactHistoricalReferencesAndPreservesScroll(t
 
 	s.send(tea.WindowSizeMsg{Width: 88, Height: 16})
 	s.send(tea.KeyMsg{Type: tea.KeyPgDown})
-	if !strings.Contains(s.model.View(), "scrolled ") {
+	if !strings.Contains(s.model.View(), "scrolled ") || strings.Contains(s.model.View(), "scrolled 0%") {
 		t.Fatalf("document did not scroll:\n%s", s.model.View())
 	}
-	if !strings.Contains(s.model.View(), "scrolled ") {
+	s.send(tea.WindowSizeMsg{Width: 90, Height: 17})
+	if !strings.Contains(s.model.View(), "scrolled ") || strings.Contains(s.model.View(), "scrolled 0%") {
 		t.Fatalf("resize reset document scroll:\n%s", s.model.View())
 	}
 
@@ -284,6 +285,113 @@ func TestBrowserFollowsDecisionAndClaimReferencesWithoutChangingSliceContext(t *
 	s.shows("projects/widgets/proposals/orders/cancel/state.json", "lifecycle: Awaiting Review", "current Claim: watchdog reservation", "Dependencies: legacy/old (Merged)")
 	s.press("esc", "esc")
 	s.shows("Slice: orders/cancel", "Lifecycle: Awaiting Review", "Depends on: legacy/old [archived] — Old work (Merged; satisfied)")
+}
+
+func TestBrowserReturnsFromNestedEmptyReferencesToTheOriginatingClaimReference(t *testing.T) {
+	s := start(t, "widgets")
+	s.send(tea.WindowSizeMsg{Width: 100, Height: 40})
+	s.press("enter", "down", "enter", "r", "enter")
+	s.shows("Claim state (state.json)", "lifecycle: Awaiting Review")
+
+	// The Claim state has no structured references. Opening its reference
+	// screen and returning must preserve the Claim reference list that opened it.
+	s.press("r")
+	s.shows("References (0)", "No structured exact ledger references")
+	s.press("esc", "esc")
+	s.shows("References (1)", "current Claim state", "state.json")
+	s.press("esc")
+	s.shows("Slice: orders/cancel", "Claim state reference:")
+}
+
+func TestBrowserKeepsHealthyDocumentsVisibleAndDiagnosticsScrollable(t *testing.T) {
+	for _, size := range []tea.WindowSizeMsg{{Width: 40, Height: 14}, {Width: 140, Height: 30}} {
+		s := start(t, "widgets", func(root string) {
+			for i := 0; i < 35; i++ {
+				write(t, root, fmt.Sprintf("projects/widgets/proposals/orders/damaged%02d/state.json", i), `{`)
+			}
+		})
+		s.send(size)
+		s.press("enter", "d")
+		s.shows("Available documents", "> Proposal description", "diagnostics", "d to inspect")
+		s.send(tea.WindowSizeMsg{Width: 140, Height: 30})
+
+		s.press("d")
+		s.shows("diagnostics", "damaged00")
+		for i := 0; i < 100; i++ {
+			s.press("pgdown")
+		}
+		s.shows("damaged34")
+		s.press("esc")
+		s.shows("Available documents", "> Proposal description")
+		s.press("enter")
+		s.shows("Proposal description", "Order cancellation", "Proposal description stays readable")
+	}
+}
+
+func TestBrowserRestoresSliceReadingPositionAfterDocumentDiagnostics(t *testing.T) {
+	s := start(t, "widgets")
+	s.send(tea.WindowSizeMsg{Width: 80, Height: 14})
+	s.press("enter", "down", "enter", "tab")
+	before := s.model.View()
+	s.press("d", "d")
+	diagnostics := s.model.View()
+	s.press("g", "w", "f", "/", "a")
+	if s.model.View() != diagnostics {
+		t.Fatal("finding keys changed the document diagnostics context")
+	}
+	s.press("pgdown", "esc", "esc")
+	if after := s.model.View(); after != before {
+		t.Fatalf("document diagnostics changed the Slice reading position:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
+func TestBrowserShowsContextualDiagnosticsHelp(t *testing.T) {
+	s := start(t, "widgets")
+	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})
+	s.press("/", "cancel", "enter", "?")
+	s.shows("d result diagnostics")
+	s.hides("d documents")
+
+	s = start(t, "widgets")
+	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})
+	s.press("enter", "d", "?")
+	s.shows("d diagnostics")
+	s.hides("d documents", "result diagnostics")
+}
+
+func TestBrowserPreservesRelationScrollAndFindingContextAcrossNestedReferences(t *testing.T) {
+	s := start(t, "widgets")
+	s.send(tea.WindowSizeMsg{Width: 80, Height: 14})
+	s.press("enter", "down", "enter", "tab")
+	s.shows("> Blocks: orders/refund")
+	s.press("r", "enter", "r", "esc", "esc", "esc")
+	s.shows("> Blocks: orders/refund", "scrolled ")
+
+	s = start(t, "widgets")
+	s.send(tea.WindowSizeMsg{Width: 100, Height: 20})
+	s.press("/", "cancel", "enter", "enter")
+	s.shows("Slice: orders/cancel")
+	s.press("r", "enter", "r", "esc", "esc", "esc")
+	s.shows("Slice: orders/cancel")
+	s.press("esc")
+	s.shows(`Finding: any lifecycle · any claim · name contains "cancel"`, "orders/cancel")
+}
+
+func TestBrowserUsesOptionalDocumentAvailabilityWithoutInventingAbsence(t *testing.T) {
+	s := start(t, "widgets")
+	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})
+	s.press(append([]string{"enter", "down", "enter", "d"}, downs(3)...)...)
+	s.shows("Latest watchdog report", "Metadata unavailable; recorded content remains readable", "watchdog report metadata is", "unreadable")
+	s.hides("Latest watchdog report: not yet available", "Latest watchdog report: recorded but unavailable")
+
+	s = start(t, "widgets", func(root string) {
+		write(t, root, "projects/widgets/proposals/orders/nostate/intent.md", "# Intent\n")
+		write(t, root, "projects/widgets/proposals/orders/nostate/behavior.md", "# Behavior\n")
+	})
+	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})
+	s.press("enter", "down", "down", "enter", "d")
+	s.shows("Active Human Decision: membership unknown", "see diagnostics")
+	s.hides("Active Human Decision: not available (optional)")
 }
 
 func TestBrowserReadsArchivedDocumentsAndNamesAbsentOptionalRecords(t *testing.T) {

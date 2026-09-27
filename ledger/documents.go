@@ -10,6 +10,16 @@ import (
 // Markdown prose.
 type DocumentKind string
 
+// DocumentStatus describes the membership or read outcome of an optional document.
+type DocumentStatus string
+
+const (
+	DocumentAvailable   DocumentStatus = "available"
+	DocumentAbsent      DocumentStatus = "absent"
+	DocumentUnavailable DocumentStatus = "unavailable"
+	DocumentUnknown     DocumentStatus = "unknown"
+)
+
 const (
 	ProposalDocumentKind        DocumentKind = "proposal"
 	ContractDocumentKind        DocumentKind = "contract"
@@ -24,6 +34,17 @@ const (
 type LabeledReference struct {
 	Label     string    `json:"label"`
 	Reference Reference `json:"reference"`
+}
+
+// DocumentAvailability is the query-owned membership and read status of one
+// optional document for a Slice. Reference identifies the committed document
+// when available or unavailable, and the state record when decision membership
+// is unknown.
+type DocumentAvailability struct {
+	Slice     string         `json:"slice"`
+	Kind      DocumentKind   `json:"kind"`
+	Status    DocumentStatus `json:"status"`
+	Reference *Reference     `json:"reference,omitempty"`
 }
 
 // Document is one exact committed ledger document. Contents are retained even
@@ -44,17 +65,18 @@ type Document struct {
 }
 
 // DocumentSet is the document membership of one Proposal or Slice at one
-// committed revision. Diagnostics identify unavailable required documents or
+// committed revision. Diagnostics identify unreadable documents or
 // uninterpretable metadata without discarding other readable documents.
 type DocumentSet struct {
-	Revision    string       `json:"revision"`
-	Project     string       `json:"project"`
-	Proposal    string       `json:"proposal"`
-	Slice       string       `json:"slice,omitempty"`
-	Archived    bool         `json:"archived"`
-	Documents   []Document   `json:"documents"`
-	Diagnostics []Diagnostic `json:"diagnostics,omitempty"`
-	Incomplete  bool         `json:"incomplete"`
+	Revision     string                 `json:"revision"`
+	Project      string                 `json:"project"`
+	Proposal     string                 `json:"proposal"`
+	Slice        string                 `json:"slice,omitempty"`
+	Archived     bool                   `json:"archived"`
+	Documents    []Document             `json:"documents"`
+	Availability []DocumentAvailability `json:"availability"`
+	Diagnostics  []Diagnostic           `json:"diagnostics,omitempty"`
+	Incomplete   bool                   `json:"incomplete"`
 }
 
 // ProposalDocuments returns the proposal description and the committed
@@ -78,8 +100,9 @@ func (v *Snapshot) proposalDocumentsLocated(projectName, proposalName string, lo
 	}
 	result := &DocumentSet{
 		Revision: v.Revision, Project: project.name, Proposal: proposal.name,
-		Archived: proposal.archived, Documents: []Document{}, Diagnostics: []Diagnostic{},
+		Archived: proposal.archived, Documents: []Document{}, Availability: []DocumentAvailability{}, Diagnostics: []Diagnostic{},
 	}
+	result.Diagnostics = append(result.Diagnostics, proposal.invalid...)
 	path := v.proposalPath(project.name, proposal) + "/proposal.md"
 	v.addDocument(result, path, ProposalDocumentKind, ScopeProposal, project.name+"/"+proposal.name)
 	for _, slice := range proposal.slices {
@@ -124,7 +147,7 @@ func (v *Snapshot) sliceDocumentsLocated(projectName, item string, location *boo
 	result := &DocumentSet{
 		Revision: v.Revision, Project: project.name, Proposal: proposal.name,
 		Slice: slice.name, Archived: proposal.archived,
-		Documents: []Document{}, Diagnostics: []Diagnostic{},
+		Documents: []Document{}, Availability: []DocumentAvailability{}, Diagnostics: []Diagnostic{},
 	}
 	v.addSliceDocuments(result, project, proposal, slice)
 	result.Incomplete = len(result.Diagnostics) > 0
@@ -170,51 +193,77 @@ func (v *Snapshot) addSliceDocuments(result *DocumentSet, project *projectTree, 
 	}
 	for _, phase := range []string{ImplementPhase, WatchdogPhase} {
 		name := phase + "-report.md"
-		if !slice.files[name] {
-			continue
-		}
 		kind := ImplementReportDocumentKind
 		if phase == WatchdogPhase {
 			kind = WatchdogReportDocumentKind
 		}
-		v.addDocument(result, base+"/"+name, kind, ScopeSlice, subject)
+		v.addOptionalDocument(result, base+"/"+name, kind, slice.name, slice.files[name], subject)
 	}
 
-	// decision.md is current only while state.json marks it active. An
-	// unreadable state cannot establish current-decision membership.
+	// decision.md is current only while state.json marks it active. Without
+	// readable state the decision's membership is unknown, not absent.
 	statePath := base + "/state.json"
-	state, err := ShowReference(v.store, v.Revision, statePath)
+	stateReference := Reference{Commit: v.Revision, Path: statePath}
+	state, err := ShowReference(v.store, stateReference.Commit, stateReference.Path)
 	if err != nil {
 		result.addDiagnostic(Diagnostic{Scope: ScopeSlice, Subject: subject, Problem: "cannot read state.json to determine current decision: " + err.Error()})
+		result.Availability = append(result.Availability, DocumentAvailability{
+			Slice: slice.name, Kind: DecisionDocumentKind, Status: DocumentUnknown, Reference: &stateReference,
+		})
 		return
 	}
 	var record SliceState
 	if err := json.Unmarshal([]byte(state.Contents), &record); err != nil {
 		result.addDiagnostic(Diagnostic{Scope: ScopeSlice, Subject: subject, Problem: "state.json is malformed, so current decision membership is unknown"})
+		result.Availability = append(result.Availability, DocumentAvailability{
+			Slice: slice.name, Kind: DecisionDocumentKind, Status: DocumentUnknown, Reference: &stateReference,
+		})
 		return
 	}
-	if record.Decision {
-		v.addDocument(result, base+"/decision.md", DecisionDocumentKind, ScopeSlice, subject)
+	if !record.Decision {
+		result.Availability = append(result.Availability, DocumentAvailability{
+			Slice: slice.name, Kind: DecisionDocumentKind, Status: DocumentAbsent,
+		})
+		return
 	}
+	v.addOptionalDocument(result, base+"/decision.md", DecisionDocumentKind, slice.name, true, subject)
 }
 
-func (v *Snapshot) addDocument(result *DocumentSet, documentPath string, kind DocumentKind, scope, subject string) {
+func (v *Snapshot) addOptionalDocument(result *DocumentSet, documentPath string, kind DocumentKind, slice string, member bool, subject string) {
+	if !member {
+		result.Availability = append(result.Availability, DocumentAvailability{
+			Slice: slice, Kind: kind, Status: DocumentAbsent,
+		})
+		return
+	}
+	reference := Reference{Commit: v.Revision, Path: documentPath}
+	status := DocumentUnavailable
+	if v.addDocument(result, documentPath, kind, ScopeSlice, subject) {
+		status = DocumentAvailable
+	}
+	result.Availability = append(result.Availability, DocumentAvailability{
+		Slice: slice, Kind: kind, Status: status, Reference: &reference,
+	})
+}
+
+func (v *Snapshot) addDocument(result *DocumentSet, documentPath string, kind DocumentKind, scope, subject string) bool {
 	document, err := v.Document(Reference{Commit: v.Revision, Path: documentPath})
 	if err != nil {
-		result.addDiagnostic(Diagnostic{Scope: scope, Subject: subject, Problem: "cannot read required document " + documentPath + ": " + err.Error()})
-		return
+		result.addDiagnostic(Diagnostic{Scope: scope, Subject: subject, Problem: "cannot read document " + documentPath + ": " + err.Error()})
+		return false
 	}
 	// The record tree selects membership and the path determines format; this
 	// assertion keeps accidental mismatches visible rather than mislabeling a
 	// document returned by the exact-reference reader.
 	if document.Kind != kind {
 		result.addDiagnostic(Diagnostic{Scope: scope, Subject: subject, Problem: "document " + documentPath + " has an unexpected record kind"})
-		return
+		return false
 	}
 	result.Documents = append(result.Documents, *document)
 	for _, diagnostic := range document.Diagnostics {
 		result.addDiagnostic(diagnostic)
 	}
+	return true
 }
 
 func (result *DocumentSet) addDiagnostic(diagnostic Diagnostic) {
@@ -288,13 +337,25 @@ func reportReferences(report Report) []LabeledReference {
 // In particular, it rejects paths that ShowReference's historical raw reader
 // would otherwise clean before access.
 func recordDocumentIdentity(value string) (project, proposal, slice string, kind DocumentKind, ok bool) {
-	if !validRecordDocumentPath(value) {
+	if value == "" || strings.ContainsRune(value, '\\') || path.Clean(value) != value {
 		return "", "", "", "", false
 	}
 	parts := strings.Split(value, "/")
+	if len(parts) != 5 && len(parts) != 6 || parts[0] != projectsRoot || !ValidRecordName(parts[1]) {
+		return "", "", "", "", false
+	}
+	if parts[2] != "proposals" && parts[2] != archiveRoot || !ValidRecordName(parts[3]) {
+		return "", "", "", "", false
+	}
 	project, proposal = parts[1], parts[3]
 	if len(parts) == 5 {
-		return project, proposal, "", ProposalDocumentKind, true
+		if parts[4] == "proposal.md" {
+			return project, proposal, "", ProposalDocumentKind, true
+		}
+		return "", "", "", "", false
+	}
+	if !ValidRecordName(parts[4]) {
+		return "", "", "", "", false
 	}
 	slice = parts[4]
 	switch parts[5] {
@@ -308,31 +369,13 @@ func recordDocumentIdentity(value string) (project, proposal, slice string, kind
 		kind = DecisionDocumentKind
 	case "state.json":
 		kind = StateDocumentKind
+	default:
+		return "", "", "", "", false
 	}
-	return project, proposal, slice, kind, kind != ""
+	return project, proposal, slice, kind, true
 }
 
 func validRecordDocumentPath(value string) bool {
-	if value == "" || strings.ContainsRune(value, '\\') || path.Clean(value) != value {
-		return false
-	}
-	parts := strings.Split(value, "/")
-	if len(parts) != 5 && len(parts) != 6 || parts[0] != projectsRoot || !ValidRecordName(parts[1]) {
-		return false
-	}
-	if parts[2] != "proposals" && parts[2] != archiveRoot || !ValidRecordName(parts[3]) {
-		return false
-	}
-	if len(parts) == 5 {
-		return parts[4] == "proposal.md"
-	}
-	if !ValidRecordName(parts[4]) {
-		return false
-	}
-	switch parts[5] {
-	case "intent.md", "behavior.md", "plan.md", "tasks.md", "implement-report.md", "watchdog-report.md", "decision.md", "state.json":
-		return true
-	default:
-		return false
-	}
+	_, _, _, _, ok := recordDocumentIdentity(value)
+	return ok
 }

@@ -151,15 +151,18 @@ type Model struct {
 	search    *ledger.SliceSearch
 	failure   error
 
-	docContext        screen
-	documents         *ledger.DocumentSet
-	currentDocument   *ledger.Document
-	documentReturn    screen
-	documentHistory   []documentFrame
-	references        []ledger.LabeledReference
-	referenceOrigin   screen
-	referencesFromDoc bool
-	renderProblem     string
+	docContext             screen
+	documents              *ledger.DocumentSet
+	diagnosticReturn       screen
+	diagnosticOriginDetail viewport.Model
+	currentDocument        *ledger.Document
+	documentReturn         screen
+	documentHistory        []documentFrame
+	references             []ledger.LabeledReference
+	referenceOrigin        screen
+	referencesFromDoc      bool
+	referenceHistory       []referenceFrame
+	renderProblem          string
 
 	width, height int
 	status        string
@@ -184,6 +187,14 @@ type location struct {
 type frame struct {
 	location
 	offset int
+}
+
+type referenceFrame struct {
+	references   []ledger.LabeledReference
+	origin       screen
+	fromDocument bool
+	cursor       int
+	returnScreen screen
 }
 
 // openedMsg reports the outcome of one explicit external-browser request.
@@ -212,6 +223,20 @@ func New(snapshot *ledger.Snapshot, options Options) Model {
 	return model
 }
 
+func (m Model) helpKeys() keyMap {
+	keys := m.keys
+	keys.Diagnostics.SetEnabled(false)
+	switch m.screen {
+	case resultsScreen:
+		keys.Documents = key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "result diagnostics"))
+	case documentsScreen:
+		keys.Documents = key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "diagnostics"))
+	case diagnosticsScreen:
+		keys.Documents.SetEnabled(false)
+	}
+	return keys
+}
+
 func (m Model) Init() tea.Cmd { return nil }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -237,6 +262,7 @@ func (m Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.typeSearch(msg)
 	}
 	finding := m.finding()
+	documentOverlay := isDocumentOverlay(m.screen) || (m.screen == diagnosticsScreen && m.diagnosticReturn == documentsScreen)
 	switch {
 	case key.Matches(msg, m.keys.Quit):
 		return m, tea.Quit
@@ -267,18 +293,18 @@ func (m Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.back()
 	case key.Matches(msg, m.keys.Projects):
 		m.switchProject()
-	case key.Matches(msg, m.keys.Archived) && !isDocumentOverlay(m.screen):
+	case key.Matches(msg, m.keys.Archived) && !documentOverlay:
 		m.includeArchived = !m.includeArchived
 		m.status = "Archived proposals hidden"
 		if m.includeArchived {
 			m.status = "Archived proposals shown"
 		}
 		m.load()
-	case key.Matches(msg, m.keys.Search) && !isDocumentOverlay(m.screen):
+	case key.Matches(msg, m.keys.Search) && !documentOverlay:
 		text := ""
 		m.typing = &text
 		m.layoutDetail()
-	case key.Matches(msg, m.keys.Facts) && !isDocumentOverlay(m.screen):
+	case key.Matches(msg, m.keys.Facts) && !documentOverlay:
 		m.find(factsScreen)
 	case key.Matches(msg, m.keys.Group) && finding:
 		m.query.GroupBy = ledger.GroupByLifecycle
@@ -289,7 +315,9 @@ func (m Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.load()
 	case key.Matches(msg, m.keys.Scope) && finding:
 		m.toggleScope()
-	case key.Matches(msg, m.keys.Diagnostics) && m.screen == resultsScreen:
+	case key.Matches(msg, m.keys.Diagnostics) && (m.screen == resultsScreen || m.screen == documentsScreen):
+		m.diagnosticReturn = m.screen
+		m.diagnosticOriginDetail = m.detail
 		m.screen = diagnosticsScreen
 		m.layoutDetail()
 		m.detail.GotoTop()
@@ -420,7 +448,7 @@ func (m Model) finding() bool {
 }
 
 func (m Model) isFindingScreen(screen screen) bool {
-	return screen == factsScreen || screen == resultsScreen || screen == diagnosticsScreen || (screen == sliceScreen && m.parent[sliceScreen] == resultsScreen)
+	return screen == factsScreen || screen == resultsScreen || (screen == diagnosticsScreen && m.diagnosticReturn == resultsScreen) || (screen == sliceScreen && m.parent[sliceScreen] == resultsScreen)
 }
 
 func isDocumentOverlay(screen screen) bool {
@@ -552,22 +580,49 @@ func (m *Model) back() {
 		}
 		m.screen = m.parent[sliceScreen]
 	case diagnosticsScreen:
-		m.screen = resultsScreen
+		m.screen = m.diagnosticReturn
+		m.detail = m.diagnosticOriginDetail
 	case factsScreen, resultsScreen:
 		m.screen = m.parent[m.screen]
 	case documentsScreen:
 		m.screen = m.docContext
 		m.failure = nil
 	case referencesScreen:
-		m.screen = m.referenceOrigin
+		if len(m.referenceHistory) > 0 {
+			previous := m.referenceHistory[len(m.referenceHistory)-1]
+			m.referenceHistory = m.referenceHistory[:len(m.referenceHistory)-1]
+			m.restoreReferenceFrame(previous)
+			m.screen = previous.returnScreen
+		} else {
+			m.screen = m.referenceOrigin
+		}
 		m.failure = nil
 	case documentScreen:
 		if len(m.documentHistory) > 0 {
 			frame := m.documentHistory[len(m.documentHistory)-1]
 			m.documentHistory = m.documentHistory[:len(m.documentHistory)-1]
-			m.currentDocument, m.docViewport = &frame.document, frame.viewport
+			if frame.hasDocument {
+				document := frame.document
+				m.currentDocument = &document
+			} else {
+				m.currentDocument = nil
+			}
+			m.docViewport = frame.viewport
 			m.documentReturn, m.renderProblem = frame.returnScreen, frame.renderProblem
-			m.screen = documentScreen
+			m.references = append([]ledger.LabeledReference(nil), frame.references...)
+			m.referenceOrigin, m.referencesFromDoc = frame.referenceOrigin, frame.referencesFromDoc
+			m.cursor[referencesScreen] = frame.referenceCursor
+			m.referenceHistory = append([]referenceFrame(nil), frame.referenceHistory...)
+			if frame.hasDocument {
+				if count := len(m.referenceHistory); count > 0 {
+					previous := m.referenceHistory[count-1]
+					m.referenceHistory = m.referenceHistory[:count-1]
+					m.restoreReferenceFrame(previous)
+				}
+				m.screen = documentScreen
+			} else {
+				m.screen = frame.screen
+			}
 		} else {
 			m.screen = m.documentReturn
 			m.currentDocument, m.renderProblem = nil, ""
@@ -640,7 +695,7 @@ func (m *Model) switchProject() {
 	m.screen, m.status, m.history = overviewScreen, "", nil
 	m.contextHistory = nil
 	m.docContext, m.documents, m.currentDocument = overviewScreen, nil, nil
-	m.documentHistory, m.references = nil, nil
+	m.documentHistory, m.references, m.referenceHistory = nil, nil, nil
 	m.referenceOrigin, m.referencesFromDoc = overviewScreen, false
 	m.load()
 	if m.overview == nil {

@@ -411,83 +411,47 @@ func renderBrowseDocuments(report *strings.Builder, line func(string), set *ledg
 }
 
 func renderReportAvailability(line func(string), set *ledger.DocumentSet) {
-	sliceNames := make(map[string]bool)
-	for _, document := range set.Documents {
-		if document.Slice != "" {
-			sliceNames[document.Slice] = true
-		}
-	}
-	prefix := set.Project + "/" + set.Proposal + "/"
-	for _, diagnostic := range set.Diagnostics {
-		if diagnostic.Scope == ledger.ScopeSlice && strings.HasPrefix(diagnostic.Subject, prefix) {
-			name := strings.TrimPrefix(diagnostic.Subject, prefix)
-			if name != "" && !strings.Contains(name, "/") {
-				sliceNames[name] = true
-			}
-		}
-	}
-	names := make([]string, 0, len(sliceNames))
-	for name := range sliceNames {
-		names = append(names, name)
-	}
-	slices.Sort(names)
-	for _, slice := range names {
-		for _, phase := range []string{ledger.ImplementPhase, ledger.WatchdogPhase} {
-			kind := ledger.ImplementReportDocumentKind
-			if phase == ledger.WatchdogPhase {
-				kind = ledger.WatchdogReportDocumentKind
-			}
-			found := false
-			for _, document := range set.Documents {
-				if document.Slice == slice && document.Kind == kind {
-					found = true
-					line("Report availability: " + phase + " for " + slice + " — available at " + document.Reference.Commit + ":" + document.Reference.Path)
-					break
+	for _, availability := range set.Availability {
+		if availability.Kind == ledger.DecisionDocumentKind {
+			status := "unknown; see diagnostic"
+			switch availability.Status {
+			case ledger.DocumentAvailable:
+				status = "active"
+				if availability.Reference != nil {
+					status += " at " + availability.Reference.Commit + ":" + availability.Reference.Path
 				}
-			}
-			if found {
-				continue
-			}
-			path := sliceDocumentPath(set, slice, phase+"-report.md")
-			status := "not yet available"
-			if browseDiagnosticsContain(set.Diagnostics, path) {
+			case ledger.DocumentAbsent:
+				status = "not yet available"
+			case ledger.DocumentUnavailable:
 				status = "unavailable; see diagnostic"
 			}
-			line("Report availability: " + phase + " for " + slice + " — " + status)
+			line("Human Decision availability for " + availability.Slice + " — " + status)
+			continue
 		}
-		decisionFound := false
-		for _, document := range set.Documents {
-			if document.Slice == slice && document.Kind == ledger.DecisionDocumentKind {
-				decisionFound = true
-				line("Human Decision availability for " + slice + " — active at " + document.Reference.Commit + ":" + document.Reference.Path)
-				break
-			}
-		}
-		if !decisionFound {
-			status := "not yet available"
-			if browseDiagnosticsContain(set.Diagnostics, sliceDocumentPath(set, slice, "decision.md")) || browseDiagnosticsContain(set.Diagnostics, "determine current decision") {
-				status = "unavailable; see diagnostic"
-			}
-			line("Human Decision availability for " + slice + " — " + status)
-		}
-	}
-}
 
-func sliceDocumentPath(set *ledger.DocumentSet, slice, name string) string {
-	location := "proposals"
-	if set.Archived {
-		location = "archive"
-	}
-	return "projects/" + set.Project + "/" + location + "/" + set.Proposal + "/" + slice + "/" + name
-}
-
-func browseDiagnosticsContain(diagnostics []ledger.Diagnostic, text string) bool {
-	for _, diagnostic := range diagnostics {
-		if strings.Contains(diagnostic.Problem, text) {
-			return true
+		phase := ""
+		switch availability.Kind {
+		case ledger.ImplementReportDocumentKind:
+			phase = ledger.ImplementPhase
+		case ledger.WatchdogReportDocumentKind:
+			phase = ledger.WatchdogPhase
+		default:
+			continue
 		}
+		status := "unknown; see diagnostic"
+		switch availability.Status {
+		case ledger.DocumentAvailable:
+			status = "available"
+			if availability.Reference != nil {
+				status += " at " + availability.Reference.Commit + ":" + availability.Reference.Path
+			}
+		case ledger.DocumentAbsent:
+			status = "not yet available"
+		case ledger.DocumentUnavailable:
+			status = "unavailable; see diagnostic"
+		}
+		line("Report availability: " + phase + " for " + availability.Slice + " — " + status)
 	}
-	return false
 }
 
 func renderBrowseDocument(report *strings.Builder, line func(string), document *ledger.Document) {

@@ -48,15 +48,16 @@ func (m *Model) layoutDetail() {
 	m.detail.Width, m.detail.Height = m.width, height
 	switch m.screen {
 	case diagnosticsScreen:
-		if m.search != nil {
-			offset := m.detail.YOffset
-			var lines []string
-			for _, diagnostic := range m.resultDiagnostics() {
-				lines = append(lines, warningStyle.Render(DiagnosticText(diagnostic)))
-			}
-			m.detail.SetContent(wrap(strings.Join(lines, "\n"), m.width))
-			m.detail.SetYOffset(offset)
+		offset := m.detail.YOffset
+		var lines []string
+		for _, diagnostic := range m.activeDiagnostics() {
+			lines = append(lines, warningStyle.Render(DiagnosticText(diagnostic)))
 		}
+		if len(lines) == 0 {
+			lines = append(lines, "No diagnostics for this view.")
+		}
+		m.detail.SetContent(wrap(strings.Join(lines, "\n"), m.width))
+		m.detail.SetYOffset(offset)
 	case sliceScreen:
 		if m.slice != nil {
 			offset := m.detail.YOffset
@@ -94,7 +95,7 @@ func (m *Model) layoutDetail() {
 
 func (m Model) header() string {
 	context := m.screen
-	if isDocumentOverlay(m.screen) {
+	if isDocumentOverlay(m.screen) || (m.screen == diagnosticsScreen && m.diagnosticReturn == documentsScreen) {
 		context = m.docContext
 	}
 	var path []string
@@ -135,6 +136,10 @@ func (m Model) header() string {
 		if m.currentDocument != nil {
 			path = append(path, documentLabel(*m.currentDocument))
 		}
+	case diagnosticsScreen:
+		if m.diagnosticReturn == documentsScreen {
+			path = append(path, "documents", "diagnostics")
+		}
 	}
 	archived := "archived hidden"
 	if m.includeArchived {
@@ -174,7 +179,7 @@ func (m Model) footer() string {
 	if m.typing != nil {
 		lines = append(lines, wrap(titleStyle.Render("Search names: ")+*m.typing+"█  (enter apply · esc cancel)", m.width))
 	}
-	return strings.Join(append(lines, truncate(m.help.View(m.keys), m.width)), "\n")
+	return strings.Join(append(lines, truncate(m.help.View(m.helpKeys()), m.width)), "\n")
 }
 
 // listBody renders the current list screen: its parent context, the list,
@@ -277,8 +282,8 @@ func (m Model) listContent() (context []string, title string, rows []string, cur
 		title = fmt.Sprintf("Available documents (%d)", len(m.rowsForDocumentList()))
 		empty = "No readable documents are available at this committed revision. See diagnostics, if any."
 		if m.documents != nil {
-			for _, diagnostic := range m.documents.Diagnostics {
-				context = append(context, warningStyle.Render(DiagnosticText(diagnostic)))
+			if count := len(m.documents.Diagnostics); count > 0 {
+				context = append(context, warningStyle.Render(fmt.Sprintf("! %d diagnostics · d to inspect", count)))
 			}
 			context = append(context, optionalDocumentNotes(m.documents)...)
 			for _, document := range m.documents.Documents {
@@ -290,7 +295,7 @@ func (m Model) listContent() (context []string, title string, rows []string, cur
 				if len(document.Diagnostics) > 0 {
 					selected = append(selected, diagnosticLines(document.Diagnostics)...)
 				}
-				selected = append(selected, "Enter reads this committed document; d opens documents from the containing context.")
+				selected = append(selected, "Enter reads this committed document; d opens this set's diagnostics.")
 			}
 		}
 	case referencesScreen:
@@ -378,6 +383,16 @@ func (m Model) resultDiagnostics() []ledger.Diagnostic {
 		diagnostics = append(diagnostics, project.Diagnostics...)
 	}
 	return diagnostics
+}
+
+func (m Model) activeDiagnostics() []ledger.Diagnostic {
+	if m.diagnosticReturn == documentsScreen {
+		if m.documents == nil {
+			return nil
+		}
+		return m.documents.Diagnostics
+	}
+	return m.resultDiagnostics()
 }
 
 // findingContext states the current selection and its result.

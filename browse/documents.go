@@ -10,10 +10,17 @@ import (
 )
 
 type documentFrame struct {
-	document      ledger.Document
-	viewport      viewport.Model
-	returnScreen  screen
-	renderProblem string
+	document          ledger.Document
+	hasDocument       bool
+	viewport          viewport.Model
+	screen            screen
+	returnScreen      screen
+	renderProblem     string
+	references        []ledger.LabeledReference
+	referenceOrigin   screen
+	referencesFromDoc bool
+	referenceCursor   int
+	referenceHistory  []referenceFrame
 }
 
 func (m *Model) openDocuments() {
@@ -38,6 +45,7 @@ func (m *Model) openDocuments() {
 	m.documentHistory = nil
 	m.currentDocument = nil
 	m.references = nil
+	m.referenceHistory = nil
 	m.cursor[documentsScreen] = 0
 	m.status = ""
 	m.layoutDetail()
@@ -49,6 +57,7 @@ func (m *Model) openReferences() {
 		if m.currentDocument == nil {
 			return
 		}
+		m.referenceHistory = append(m.referenceHistory, m.referenceFrame(documentScreen))
 		m.references = append([]ledger.LabeledReference(nil), m.currentDocument.References...)
 		m.referenceOrigin = documentScreen
 		m.referencesFromDoc = true
@@ -72,10 +81,25 @@ func (m *Model) openReferences() {
 	m.layoutDetail()
 }
 
+func (m Model) referenceFrame(returnScreen screen) referenceFrame {
+	return referenceFrame{
+		references: append([]ledger.LabeledReference(nil), m.references...),
+		origin:     m.referenceOrigin, fromDocument: m.referencesFromDoc,
+		cursor: m.cursor[referencesScreen], returnScreen: returnScreen,
+	}
+}
+
+func (m *Model) restoreReferenceFrame(frame referenceFrame) {
+	m.references = append([]ledger.LabeledReference(nil), frame.references...)
+	m.referenceOrigin, m.referencesFromDoc = frame.origin, frame.fromDocument
+	m.cursor[referencesScreen] = frame.cursor
+}
+
 func (m *Model) openDocument(document ledger.Document) {
 	m.currentDocument = &document
 	m.documentReturn = documentsScreen
 	m.documentHistory = nil
+	m.referenceHistory = nil
 	m.renderProblem = ""
 	m.screen = documentScreen
 	m.failure = nil
@@ -92,12 +116,18 @@ func (m *Model) followReference(reference ledger.Reference) {
 		m.status = fmt.Sprintf("Exact ledger reference unavailable (%s:%s): %s; no substitute was opened", reference.Commit, reference.Path, err)
 		return
 	}
-	if m.referencesFromDoc && m.screen == referencesScreen && m.currentDocument != nil {
-		m.documentHistory = append(m.documentHistory, documentFrame{
-			document: *m.currentDocument, viewport: m.docViewport,
-			returnScreen: m.documentReturn, renderProblem: m.renderProblem,
-		})
+	frame := documentFrame{
+		viewport: m.docViewport, screen: m.screen,
+		returnScreen: m.documentReturn, renderProblem: m.renderProblem,
+		references:      append([]ledger.LabeledReference(nil), m.references...),
+		referenceOrigin: m.referenceOrigin, referencesFromDoc: m.referencesFromDoc,
+		referenceCursor:  m.cursor[referencesScreen],
+		referenceHistory: append([]referenceFrame(nil), m.referenceHistory...),
 	}
+	if m.currentDocument != nil {
+		frame.document, frame.hasDocument = *m.currentDocument, true
+	}
+	m.documentHistory = append(m.documentHistory, frame)
 	m.currentDocument = document
 	m.documentReturn = referencesScreen
 	m.renderProblem = ""
@@ -276,18 +306,36 @@ func optionalDocumentNotes(documents *ledger.DocumentSet) []string {
 		return []string{"Only documents present at this committed revision are listed; absent optional reports are not malformed records."}
 	}
 	var notes []string
-	found := map[ledger.DocumentKind]bool{}
-	for _, document := range documents.Documents {
-		found[document.Kind] = true
-	}
-	if !found[ledger.ImplementReportDocumentKind] {
-		notes = append(notes, "Latest implementation report: not yet available (optional).")
-	}
-	if !found[ledger.WatchdogReportDocumentKind] {
-		notes = append(notes, "Latest watchdog report: not yet available (optional).")
-	}
-	if !found[ledger.DecisionDocumentKind] {
-		notes = append(notes, "Active Human Decision: not available (optional).")
+	for _, availability := range documents.Availability {
+		if availability.Slice != documents.Slice {
+			continue
+		}
+		label := optionalDocumentLabel(availability.Kind)
+		switch availability.Status {
+		case ledger.DocumentAbsent:
+			note := "not yet available (optional)."
+			if availability.Kind == ledger.DecisionDocumentKind {
+				note = "not available (optional)."
+			}
+			notes = append(notes, label+": "+note)
+		case ledger.DocumentUnavailable:
+			notes = append(notes, label+": recorded but unavailable; see diagnostics.")
+		case ledger.DocumentUnknown:
+			notes = append(notes, label+": membership unknown; see diagnostics.")
+		}
 	}
 	return notes
+}
+
+func optionalDocumentLabel(kind ledger.DocumentKind) string {
+	switch kind {
+	case ledger.ImplementReportDocumentKind:
+		return "Latest implementation report"
+	case ledger.WatchdogReportDocumentKind:
+		return "Latest watchdog report"
+	case ledger.DecisionDocumentKind:
+		return "Active Human Decision"
+	default:
+		return string(kind)
+	}
 }

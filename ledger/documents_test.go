@@ -130,6 +130,12 @@ func TestSnapshotDocumentsResolveArchivedProposalAndHistoricalPath(t *testing.T)
 			t.Fatalf("absent optional evidence was represented as a document: %+v", document)
 		}
 	}
+	for _, kind := range []ledger.DocumentKind{ledger.ImplementReportDocumentKind, ledger.WatchdogReportDocumentKind, ledger.DecisionDocumentKind} {
+		availability := documentAvailability(t, set, "finished", kind)
+		if availability.Status != ledger.DocumentAbsent || availability.Reference != nil {
+			t.Errorf("absent %s availability = %+v", kind, availability)
+		}
+	}
 	proposal := documentByKind(t, set, ledger.ProposalDocumentKind)
 	wantCurrentPath := "projects/widgets/archive/legacy-proposal/proposal.md"
 	if proposal.Reference != (ledger.Reference{Commit: archived, Path: wantCurrentPath}) || proposal.Contents != proposalContents || proposal.Body != proposalContents {
@@ -276,6 +282,12 @@ func TestSnapshotDocumentsPreserveMalformedMetadataAndIsolateMissingContent(t *t
 	if decision.Contents != badDecision || decision.Body != decision.Contents || decision.Decision != nil || len(decision.Diagnostics) == 0 {
 		t.Fatalf("malformed decision lost its readable content or diagnostic: %+v", decision)
 	}
+	if availability := documentAvailability(t, set, "readback", ledger.WatchdogReportDocumentKind); availability.Status != ledger.DocumentAvailable || availability.Reference == nil || *availability.Reference != report.Reference {
+		t.Errorf("readable malformed report availability = %+v, document reference = %+v", availability, report.Reference)
+	}
+	if availability := documentAvailability(t, set, "readback", ledger.DecisionDocumentKind); availability.Status != ledger.DocumentAvailable || availability.Reference == nil || *availability.Reference != decision.Reference {
+		t.Errorf("readable malformed decision availability = %+v, document reference = %+v", availability, decision.Reference)
+	}
 	if !hasDiagnosticSubject(set.Diagnostics, "widgets/browse-records/readback") || hasDiagnosticSubject(set.Diagnostics, "widgets/browse-records/healthy") {
 		t.Fatalf("document diagnostics must scope damage without marking a healthy sibling incomplete: %+v", set.Diagnostics)
 	}
@@ -335,6 +347,94 @@ func TestSnapshotExactDocumentMissIsNotSubstitutedAndReadsAreReadOnly(t *testing
 	}
 }
 
+func TestSnapshotDocumentsMarkFailedOptionalReadsUnavailable(t *testing.T) {
+	const item = "browse-records/readback"
+	l := newDeliveryLedger(t)
+	l.addProject("widgets", "acme/widgets")
+	l.addSlice("widgets", "browse-records", "readback", ledger.NeedsHuman, nil, deliveryInitial)
+	l.writeStateValue("widgets", "browse-records", "readback", ledger.SliceState{
+		State: ledger.NeedsHuman, Title: "Readback", Branch: "readback", Decision: true,
+	})
+	watchdogPath := deliveryReportPath("widgets", item, ledger.WatchdogPhase)
+	l.addFile(watchdogPath, "readable blob to remove\n")
+	revision := l.commitAll("record unavailable optional documents")
+	blob := deliveryGitOutput(t, l.root, "rev-parse", "HEAD:"+watchdogPath)
+	objectPath := filepath.Join(l.root, ".git", "objects", blob[:2], blob[2:])
+	if err := os.Remove(objectPath); err != nil {
+		t.Fatalf("remove optional report blob %s: %v", objectPath, err)
+	}
+
+	snapshot, err := l.store().Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, err := snapshot.SliceDocuments("widgets", item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	watchdog := documentAvailability(t, set, "readback", ledger.WatchdogReportDocumentKind)
+	wantWatchdog := ledger.Reference{Commit: revision, Path: watchdogPath}
+	if watchdog.Status != ledger.DocumentUnavailable || watchdog.Reference == nil || *watchdog.Reference != wantWatchdog {
+		t.Fatalf("failed report read availability = %+v, want unavailable exact reference %+v", watchdog, wantWatchdog)
+	}
+	decisionPath := deliveryDecisionPath("widgets", item)
+	decision := documentAvailability(t, set, "readback", ledger.DecisionDocumentKind)
+	wantDecision := ledger.Reference{Commit: revision, Path: decisionPath}
+	if decision.Status != ledger.DocumentUnavailable || decision.Reference == nil || *decision.Reference != wantDecision {
+		t.Fatalf("missing active decision availability = %+v, want unavailable exact reference %+v", decision, wantDecision)
+	}
+	if !hasDiagnosticSubject(set.Diagnostics, "widgets/browse-records/readback") {
+		t.Fatalf("failed optional reads were not diagnosed: %+v", set.Diagnostics)
+	}
+}
+
+func TestSnapshotDocumentsMarkDecisionUnknownWhenStateIsMissing(t *testing.T) {
+	const item = "browse-records/readback"
+	l := newDeliveryLedger(t)
+	l.addProject("widgets", "acme/widgets")
+	l.addSlice("widgets", "browse-records", "readback", ledger.ReadyForImplementation, nil, deliveryInitial)
+	if err := os.Remove(filepath.Join(l.root, filepath.FromSlash(deliveryStatePath("widgets", item)))); err != nil {
+		t.Fatal(err)
+	}
+	revision := l.commitAll("remove decision membership state")
+	snapshot, err := l.store().Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, err := snapshot.SliceDocuments("widgets", item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	availability := documentAvailability(t, set, "readback", ledger.DecisionDocumentKind)
+	wantState := ledger.Reference{Commit: revision, Path: deliveryStatePath("widgets", item)}
+	if availability.Status != ledger.DocumentUnknown || availability.Reference == nil || *availability.Reference != wantState {
+		t.Fatalf("missing state decision availability = %+v, want unknown with state reference %+v", availability, wantState)
+	}
+	if !hasDiagnosticSubject(set.Diagnostics, "widgets/browse-records/readback") {
+		t.Fatalf("missing state was not diagnosed: %+v", set.Diagnostics)
+	}
+}
+
+func TestProposalDocumentsCarryInvalidMemberDiagnostics(t *testing.T) {
+	l := newDeliveryLedger(t)
+	l.addProject("widgets", "acme/widgets")
+	l.addSlice("widgets", "browse-records", "readback", ledger.ReadyForImplementation, nil, deliveryInitial)
+	l.addFile("projects/widgets/proposals/browse-records/Bad Name/intent.md", "invalid member path\n")
+	l.commitAll("record invalid proposal member")
+
+	snapshot, err := l.store().Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, err := snapshot.ProposalDocuments("widgets", "browse-records")
+	if err != nil {
+		t.Fatalf("query Proposal documents: %v", err)
+	}
+	if !set.Incomplete || !hasDiagnosticSubject(set.Diagnostics, "widgets/browse-records") {
+		t.Fatalf("Proposal documents omitted invalid member diagnostics: %+v", set)
+	}
+}
+
 func formattedWatchdog(t *testing.T, claimCommit, item, body string) string {
 	t.Helper()
 	path := deliveryReportPath("widgets", item, ledger.WatchdogPhase)
@@ -352,6 +452,17 @@ func formattedWatchdog(t *testing.T, claimCommit, item, body string) string {
 		t.Fatalf("format watchdog report %s: %v", path, err)
 	}
 	return string(encoded)
+}
+
+func documentAvailability(t *testing.T, set *ledger.DocumentSet, slice string, kind ledger.DocumentKind) ledger.DocumentAvailability {
+	t.Helper()
+	for _, availability := range set.Availability {
+		if availability.Slice == slice && availability.Kind == kind {
+			return availability
+		}
+	}
+	t.Fatalf("no availability for %s %s: %+v", slice, kind, set.Availability)
+	return ledger.DocumentAvailability{}
 }
 
 func documentByKind(t *testing.T, set *ledger.DocumentSet, kind ledger.DocumentKind) ledger.Document {
