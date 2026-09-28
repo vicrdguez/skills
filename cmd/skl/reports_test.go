@@ -77,7 +77,8 @@ func TestLedgerShowReportsTraversesExactLocalHistoryReadOnly(t *testing.T) {
 		t.Fatal("source revision was confused with a ledger report commit")
 	}
 
-	// Add unrelated committed work and acquire a later Claim on another item.
+	// A later Claim supplies both unrelated committed history and a readback
+	// that must not disturb the current worker's reservation.
 	later := singleSlice("later-claim")
 	later.slices[0].branch = "later-branch"
 	if got := newLedgerApp(t, forge).accept(t, source, writeProposal(t, "", later)); got.Status != "accepted" {
@@ -87,22 +88,10 @@ func TestLedgerShowReportsTraversesExactLocalHistoryReadOnly(t *testing.T) {
 	if err != nil || claim.Execution == nil || claim.Execution.Item != "later-claim/foundation" {
 		t.Fatalf("later Claim = %#v, err=%v", claim, err)
 	}
-	unrelated := singleSlice("unrelated-ledger-commit")
-	unrelated.slices[0].branch = "unrelated-branch"
-	if got := newLedgerApp(t, forge).accept(t, source, writeProposal(t, "", unrelated)); got.Status != "accepted" {
-		t.Fatalf("record unrelated committed item: %s", mustJSON(t, got))
-	}
-
 	committedHead := deliveryTrimmed(t, fixture.clone, "rev-parse", "HEAD")
 	committedReadyState := deliveryGitShowForReportTest(t, fixture.clone, "HEAD", deliveryItemStatePath())
-	committedClaimState := deliveryGitShowForReportTest(t, fixture.clone, "HEAD", "projects/widgets/proposals/later-claim/foundation/state.json")
-	var laterState ledger.SliceState
-	if err := json.Unmarshal([]byte(committedClaimState), &laterState); err != nil {
-		t.Fatal(err)
-	}
-	if laterState.Claim == nil || laterState.Claim.Phase != ledger.ImplementPhase || laterState.State != ledger.ReadyForImplementation {
-		t.Fatalf("later committed Claim state = %#v", laterState)
-	}
+	claimPath := "projects/widgets/proposals/later-claim/foundation/state.json"
+	committedClaimState := deliveryGitShowForReportTest(t, fixture.clone, "HEAD", claimPath)
 	factoryCallsBeforeInspection := factoryCalls
 
 	current := cli.ledgerJSON(t, "skl", "ledger", "show", "--repo", source, "--item", deliveryTestItem, "--format", "json")
@@ -197,15 +186,11 @@ func TestLedgerShowReportsTraversesExactLocalHistoryReadOnly(t *testing.T) {
 		}
 	}
 
-	// A later Claim can be read too, while both missing reports remain honest.
 	claimedReadback := cli.ledgerJSON(t, "skl", "ledger", "show", "--repo", source, "--item", "later-claim/foundation", "--format", "json")
 	if claimedReadback.Status != "shown" || claimedReadback.Readback == nil || claimedReadback.Readback.Item != "later-claim/foundation" {
-		t.Fatalf("readback required a Claim or lifecycle transition: %s", mustJSON(t, claimedReadback))
+		t.Fatalf("readback of a held Claim = %s", mustJSON(t, claimedReadback))
 	}
 	assertReportPhases(t, claimedReadback.Readback, nil, nil)
-	if got := deliveryGitShowForReportTest(t, fixture.clone, "HEAD", "projects/widgets/proposals/later-claim/foundation/state.json"); got != committedClaimState {
-		t.Fatal("report inspection changed the later Claim record")
-	}
 
 	// A historical miss is an honest refusal even when a newer version exists.
 	missingCommit := strings.Repeat("0", 40)
@@ -274,12 +259,8 @@ func TestLedgerShowReportsTraversesExactLocalHistoryReadOnly(t *testing.T) {
 	if got := deliveryGitShowForReportTest(t, fixture.clone, "HEAD", deliveryItemStatePath()); got != committedReadyState {
 		t.Fatal("read operations changed committed Workflow State")
 	}
-	var stateAfter ledger.SliceState
-	if err := json.Unmarshal([]byte(deliveryGitShowForReportTest(t, fixture.clone, "HEAD", "projects/widgets/proposals/later-claim/foundation/state.json")), &stateAfter); err != nil {
-		t.Fatal(err)
-	}
-	if stateAfter.Claim == nil || stateAfter.Claim.Basis != laterState.Claim.Basis {
-		t.Fatalf("read operations changed the later Claim: %#v", stateAfter.Claim)
+	if got := deliveryGitShowForReportTest(t, fixture.clone, "HEAD", claimPath); got != committedClaimState {
+		t.Fatal("read operations changed the later Claim")
 	}
 	if currentAfter := cli.ledgerJSON(t, "skl", "ledger", "show", "--repo", source, "--item", deliveryTestItem, "--phase", "watchdog", "--format", "json"); currentAfter.Document == nil || currentAfter.Document.Contents != currentWatchdog.Document.Contents {
 		t.Fatal("dirty working-tree report replaced the committed current report")

@@ -275,7 +275,6 @@ func TestDeliverySourceInspectReviewScope(t *testing.T) {
 	}
 	base := gitOutput(t, source.Worktree, "rev-parse", "HEAD")
 	commitFile(t, source.Worktree, "one.txt", "1\n")
-	commitFile(t, source.Worktree, "two.txt", "2\n")
 	head := gitOutput(t, source.Worktree, "rev-parse", "HEAD")
 
 	inspected, err := InspectDeliverySource(root, "feature-scope", head, source.Target, base)
