@@ -15,7 +15,7 @@ behavior.md. Delete this comment in the real file.
 <!-- What this change includes. -->
 
 ## Out of Scope
-<!-- What this change deliberately excludes. -->
+<!-- What this change deliberately excludes, including stronger outcomes beyond an accepted limitation when they define the result's boundary. -->
 
 ## Definition of Done
 <!--
