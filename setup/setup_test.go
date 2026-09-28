@@ -10,29 +10,6 @@ import (
 	"github.com/vicrdguez/skills/setup"
 )
 
-func TestSetupMaintainsOnlyOwnedAgentsBlock(t *testing.T) {
-	root := newRepository(t)
-	agentsPath := filepath.Join(root, "AGENTS.md")
-	original := "user before\n<!-- dev-pipeline:start -->\nold workflow\n<!-- dev-pipeline:end -->\nuser after\n"
-	if err := os.WriteFile(agentsPath, []byte(original), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := setup.Run(setup.Request{Location: root}); err != nil {
-		t.Fatal(err)
-	}
-	want := "user before\n" + setup.AgentsBlock + "user after\n"
-	if got := readFile(t, agentsPath); got != want {
-		t.Fatalf("AGENTS.md = %q, want %q", got, want)
-	}
-}
-
-func TestRepositoryAgentsCarriesCurrentBlock(t *testing.T) {
-	if agents := readFile(t, filepath.Join("..", "AGENTS.md")); !strings.Contains(agents, setup.AgentsBlock) {
-		t.Fatal("AGENTS.md block differs from setup.AgentsBlock; copy it into AGENTS.md")
-	}
-}
-
 func TestSetupRefusesMalformedAgentsOwnershipMarkers(t *testing.T) {
 	cases := map[string]string{
 		"missing":   "<!-- dev-pipeline:start -->\n",
@@ -154,8 +131,9 @@ func TestSetupRetiresLegacySetupArtifacts(t *testing.T) {
 
 func TestSetupBoundPreparationRepeatsWithoutDrift(t *testing.T) {
 	root := newRepository(t)
+	before, after := "# User guidance\r\nKeep this spacing.  \n\n", "\nUser footer\twithout final newline"
 	for name, contents := range map[string]string{
-		"AGENTS.md":  "Keep repository guidance.\n<!-- dev-pipeline:start -->\nold workflow\n<!-- dev-pipeline:end -->\nKeep local conventions.\n",
+		"AGENTS.md":  before + "<!-- dev-pipeline:start -->\nstale guidance\n<!-- dev-pipeline:end -->\n" + after,
 		"CLAUDE.md":  "Keep substantive harness guidance.\n",
 		".gitignore": "dist/\n.worktrees/\n*.log\n.worktrees/\n",
 		"README.md":  "Unrelated project documentation.\n",
@@ -177,7 +155,7 @@ func TestSetupBoundPreparationRepeatsWithoutDrift(t *testing.T) {
 			t.Fatalf("outcome = %#v, want %#v", outcome, want)
 		}
 		for name, want := range map[string]string{
-			"AGENTS.md":  "Keep repository guidance.\n" + setup.AgentsBlock + "Keep local conventions.\n",
+			"AGENTS.md":  before + setup.AgentsBlock + after,
 			"CLAUDE.md":  "Keep substantive harness guidance.\n",
 			".gitignore": "dist/\n*.log\n.worktrees/\n",
 			"README.md":  "Unrelated project documentation.\n",

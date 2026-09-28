@@ -168,11 +168,7 @@ func TestShorterRenderingShowsReduction(t *testing.T) {
 // Watchdog carries the acceptance criteria inline, so its phase never
 // retrieves them, while Implement's phase still does.
 func TestInlineResourceCountsOnce(t *testing.T) {
-	dir := copyGoldens(t)
-	if _, err := report(dir, true); err != nil {
-		t.Fatal(err)
-	}
-	rows, err := report(dir, false)
+	rows, err := report(filepath.Join("..", "..", "testdata", "prose"), false)
 	if err != nil {
 		t.Fatal(err)
 	}
