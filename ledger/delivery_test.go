@@ -727,10 +727,10 @@ func TestDeliveryHandoffIsAtomicAndReplaySafe(t *testing.T) {
 	}
 }
 
-// TestDeliveryCountsCompletedReviewsAndHonorsHumanDirection covers B7/A6: two
-// failing reworks reach Needs Human, requeueing needs recorded direction, the
-// count is not reset, and an unchanged-code round 3 may pass.
-func TestDeliveryCountsCompletedReviewsAndHonorsHumanDirection(t *testing.T) {
+// TestDeliveryReviewCapRefusesUndirectedRework covers the package fault seam:
+// two failed reviews require human direction before another implementation
+// Claim. The CLI delivery journey covers directed round 3 and its count.
+func TestDeliveryReviewCapRefusesUndirectedRework(t *testing.T) {
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "delivery-flow", "foundation", ledger.ReadyForImplementation, nil, deliveryInitial)
@@ -781,29 +781,6 @@ func TestDeliveryCountsCompletedReviewsAndHonorsHumanDirection(t *testing.T) {
 		t.Fatalf("refused selection left a Claim: %#v", state.Claim)
 	}
 
-	deliveryRequeue(t, l, "widgets", item, ledger.Rework, "continue rework within the Contract\n")
-	implementThree := deliveryStart(t, store, deliveryWidgets(), ledger.ImplementPhase)
-	deliveryHandoff(t, store, deliveryWidgets(), item, ledger.ImplementPhase, implementThree.Claim.Commit, source, "awaiting_review", "implementation three\n")
-	if state := l.committedState("widgets", "delivery-flow", "foundation"); !state.Decision {
-		t.Fatal("implementation lost the direction its independent reviewer must consume")
-	}
-	// The recorded continuation reaches independent review without a second
-	// human joining the two operations. It does not reset completed rounds.
-	watchdogThree := deliveryStart(t, store, deliveryWidgets(), ledger.WatchdogPhase)
-	if watchdogThree.State.Claim.Inputs.Decision == nil || watchdogThree.Watchdog.Round != 2 {
-		t.Fatalf("continuation inputs/count lost: %#v", watchdogThree)
-	}
-	passed := deliveryHandoff(t, store, deliveryWidgets(), item, ledger.WatchdogPhase, watchdogThree.Claim.Commit, review, "pass", "W1 resolved.\n")
-	if passed.Status != ledger.ReadyForMerge {
-		t.Fatalf("round 3 pass routed to %q", passed.Status)
-	}
-	if passed.State.Decision {
-		t.Fatal("completed review retained authorization for a later cycle")
-	}
-	report, _ := deliveryReport(t, l, "widgets", item, ledger.WatchdogPhase)
-	if report.Round != 3 || report.Outcome != "pass" || report.Source.Reviewed != deliveryHead {
-		t.Fatalf("round 3 review metadata = %#v", report)
-	}
 }
 
 // TestDeliveryExplicitNeedsHumanCounts covers B7/A6: an explicit Needs Human
@@ -876,9 +853,6 @@ func TestDeliveryRefusesIncompatibleReportSchema(t *testing.T) {
 	}
 	if l.head() != headBefore {
 		t.Fatal("refused review mutated the ledger")
-	}
-	if got := deliveryGitShow(t, l.root, "HEAD", reportPath); got != deliveryGitShow(t, l.root, headBefore, reportPath) {
-		t.Fatal("refusal rewrote the required report")
 	}
 	state := l.committedState("widgets", "delivery-schema", "foundation")
 	if state.Claim != nil || state.State != ledger.AwaitingReview {

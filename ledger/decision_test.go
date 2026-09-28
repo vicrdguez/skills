@@ -1,20 +1,13 @@
 package ledger_test
 
-// Human Decision tests. They exercise the read-only Decision Inbox and the
-// explicitly scoped decision against real local Git ledgers: ledger-wide and
-// filtered scope, exact request matching across unrelated commits and
-// replacement reports, atomic answer-plus-route commits, exact-retry
-// recognition after later work, pre-commit fault atomicity, review-count
-// preservation, and guarded retirement.
-//
-// Expected outcomes come from the accepted behavior rules (B1-B8) and ADR 0006,
-// not from the implementation's own computations.
+// Package-level Human Decision tests retain fault injection and state
+// boundaries that complement the CLI's decision and delivery journeys:
+// active Claims, failed commits, review continuation and guarded retirement.
 
 import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"testing"
 
@@ -41,208 +34,9 @@ func decisionInbox(t *testing.T, store *ledger.Store, filter string) *ledger.Inb
 	return inbox
 }
 
-// TestDecisionInboxScopesProjectsAndDistinguishesEmpty covers B1/A1: the inbox
-// is ledger-wide, filters explicitly, reports an unknown Project, and changes
-// nothing.
-func TestDecisionInboxScopesProjectsAndDistinguishesEmpty(t *testing.T) {
-	l := newDeliveryLedger(t)
-	l.addProject("widgets", "acme/widgets")
-	l.addProject("gadgets", "acme/gadgets")
-	l.addProject("beacon", "acme/beacon")
-	l.addSlice("widgets", "widget-work", "repair", ledger.ReadyForImplementation, nil, deliveryInitial)
-	l.addSlice("widgets", "widget-work", "zz-ready", ledger.ReadyForImplementation, nil, deliveryInitial)
-	l.addSlice("gadgets", "gadget-work", "upgrade", ledger.ReadyForImplementation, nil, deliveryInitial)
-	l.addSlice("beacon", "quiet-work", "steady", ledger.ReadyForImplementation, nil, deliveryInitial)
-	l.commitAll("accept inbox records")
-
-	store := l.store()
-	decisionPauseImplement(t, l, store, deliveryWidgets(), "widget-work/repair", ledger.SourceRevisions{})
-	decisionPauseImplement(t, l, store, deliveryGadgets(), "gadget-work/upgrade", ledger.SourceRevisions{})
-	head := l.head()
-
-	all := decisionInbox(t, store, "")
-	if len(all.Requests) != 2 {
-		t.Fatalf("ledger-wide inbox returned %d requests, want 2", len(all.Requests))
-	}
-	items := []string{all.Requests[0].Project + "/" + all.Requests[0].Item, all.Requests[1].Project + "/" + all.Requests[1].Item}
-	sort.Strings(items)
-	if got := strings.Join(items, " "); got != "gadgets/gadget-work/upgrade widgets/widget-work/repair" {
-		t.Fatalf("inbox items = %q", got)
-	}
-	repair := all.Requests[1]
-	if repair.Phase != ledger.ImplementPhase || repair.Request.Path != deliveryReportPath("widgets", "widget-work/repair", ledger.ImplementPhase) {
-		t.Fatalf("request facts = %#v", repair)
-	}
-	if repair.Report.Outcome != "needs_human" || len(repair.Contract) != 2 || repair.Repository != "acme/widgets" {
-		t.Fatalf("inbox entry lacks accepted facts: %#v", repair)
-	}
-	if repair.Request.Commit != head {
-		t.Fatalf("request commit = %s, want current head %s", repair.Request.Commit, head)
-	}
-
-	filtered := decisionInbox(t, store, "gadgets")
-	if len(filtered.Requests) != 1 || filtered.Requests[0].Project != "gadgets" {
-		t.Fatalf("filtered inbox = %#v", filtered.Requests)
-	}
-	if empty := decisionInbox(t, store, "beacon"); len(empty.Requests) != 0 {
-		t.Fatalf("request-free project returned %d requests", len(empty.Requests))
-	}
-	if _, err := ledger.ReadDecisionInbox(store, ledger.InboxFilter{Project: "no-such-project"}); err == nil || !strings.Contains(err.Error(), "unknown Project") {
-		t.Fatalf("unknown Project refusal = %v", err)
-	}
-	if l.head() != head {
-		t.Fatal("reading the inbox changed the ledger")
-	}
-}
-
-// TestDecisionAppliesImplementAtomically covers B3/B5/A2: an explicitly scoped
-// implement answer commits decision.md and its route together, preserves frozen
-// documents, and recognizes an exact retry while refusing a different replay.
-func TestDecisionAppliesImplementAtomically(t *testing.T) {
-	l := newDeliveryLedger(t)
-	l.addProject("widgets", "acme/widgets")
-	l.addSlice("widgets", "decision-flow", "foundation", ledger.ReadyForImplementation, nil, deliveryInitial)
-	l.commitAll("accept decision-flow")
-
-	store := l.store()
-	item := "decision-flow/foundation"
-	request := decisionPauseImplement(t, l, store, deliveryWidgets(), item, ledger.SourceRevisions{})
-	contractBefore := deliveryGitShow(t, l.root, "HEAD", deliveryContractPath("widgets", item, "behavior.md"))
-	headBefore := l.head()
-
-	result, err := ledger.ApplyDecision(store, ledger.DecisionInput{
-		Project: "widgets", Item: item, Request: request,
-		Answer: "take the in-contract option and implement it\n", Route: ledger.RouteImplement,
-	})
-	if err != nil {
-		t.Fatalf("apply decision: %v", err)
-	}
-	if result.Status != ledger.DecisionApplied || result.State != ledger.ReadyForImplementation {
-		t.Fatalf("apply result = %#v", result)
-	}
-	if result.Decision.Commit != l.head() || result.Decision.Path != deliveryDecisionPath("widgets", item) {
-		t.Fatalf("decision reference = %#v", result.Decision)
-	}
-	if paths := deliveryCommitPaths(t, l.root, l.head()); len(paths) != 2 {
-		t.Fatalf("decision commit changed %v, want decision.md and state.json together", paths)
-	}
-	record, answer, err := ledger.ParseDecision([]byte(deliveryGitShow(t, l.root, "HEAD", result.Decision.Path)))
-	if err != nil {
-		t.Fatalf("parse committed decision: %v", err)
-	}
-	if record.AnsweredRequest != request || record.Route != ledger.RouteImplement || record.Item != item || record.Project != "widgets" {
-		t.Fatalf("committed decision metadata = %#v", record)
-	}
-	if !strings.Contains(answer, "in-contract option") {
-		t.Fatalf("committed decision answer = %q", answer)
-	}
-	state := l.committedState("widgets", "decision-flow", "foundation")
-	if !state.Decision || state.State != ledger.ReadyForImplementation || state.Claim != nil {
-		t.Fatalf("committed route state = %#v", state)
-	}
-	if got := deliveryGitShow(t, l.root, "HEAD", deliveryContractPath("widgets", item, "behavior.md")); got != contractBefore {
-		t.Fatal("decision rewrote the frozen contract")
-	}
-	if l.head() == headBefore {
-		t.Fatal("decision did not commit")
-	}
-
-	retried, err := ledger.ApplyDecision(store, ledger.DecisionInput{
-		Project: "widgets", Item: item, Request: request,
-		Answer: "take the in-contract option and implement it\n", Route: ledger.RouteImplement,
-	})
-	if err != nil {
-		t.Fatalf("retry decision: %v", err)
-	}
-	if retried.Status != ledger.DecisionAlreadyApplied || !retried.AlreadyApplied {
-		t.Fatalf("exact retry = %#v", retried)
-	}
-	if l.head() != result.Decision.Commit {
-		t.Fatal("exact retry recorded a second decision")
-	}
-
-	differing, err := ledger.ApplyDecision(store, ledger.DecisionInput{
-		Project: "widgets", Item: item, Request: request,
-		Answer: "actually supersede it\n", Route: ledger.RouteSupersede,
-	})
-	if err != nil {
-		t.Fatalf("differing replay returned error: %v", err)
-	}
-	if differing.Status != ledger.DecisionRefused || !strings.Contains(differing.Refusal, "already recorded") {
-		t.Fatalf("differing replay = %#v", differing)
-	}
-	if l.head() != result.Decision.Commit {
-		t.Fatal("differing replay mutated the ledger")
-	}
-}
-
-// TestDecisionRejectsReplacedRequestAndAllowsUnrelatedCommit covers B4/A2: an
-// unrelated ledger commit keeps a request answerable, while a replacement with
-// identical prose and a different recorded claim is refused.
-func TestDecisionRejectsReplacedRequestAndAllowsUnrelatedCommit(t *testing.T) {
-	l := newDeliveryLedger(t)
-	l.addProject("widgets", "acme/widgets")
-	l.addProject("gadgets", "acme/gadgets")
-	l.addSlice("widgets", "decision-stale", "foundation", ledger.ReadyForImplementation, nil, deliveryInitial)
-	l.commitAll("accept decision-stale")
-
-	store := l.store()
-	item := "decision-stale/foundation"
-	execution := deliveryStart(t, store, deliveryWidgets(), ledger.ImplementPhase)
-	deliveryHandoff(t, store, deliveryWidgets(), item, ledger.ImplementPhase, execution.Claim.Commit, ledger.SourceRevisions{}, "needs_human", "human judgment remains required.\n")
-	request := ledger.Reference{Commit: l.head(), Path: deliveryReportPath("widgets", item, ledger.ImplementPhase)}
-
-	// An unrelated Project records a result before the answer is applied.
-	l.addFile("projects/gadgets/notes.txt", "unrelated\n")
-	l.commitAll("unrelated ledger commit")
-
-	result, err := ledger.ApplyDecision(store, ledger.DecisionInput{
-		Project: "widgets", Item: item, Request: request,
-		Answer: "continue within the contract\n", Route: ledger.RouteImplement,
-	})
-	if err != nil {
-		t.Fatalf("unrelated commit invalidated the request: %v", err)
-	}
-	if result.Status != ledger.DecisionApplied {
-		t.Fatalf("unrelated commit result = %#v", result)
-	}
-
-	// A replacement report repeats the prose with a different claim identity.
-	l2 := newDeliveryLedger(t)
-	l2.addProject("widgets", "acme/widgets")
-	l2.addSlice("widgets", "decision-replaced", "foundation", ledger.ReadyForImplementation, nil, deliveryInitial)
-	l2.commitAll("accept decision-replaced")
-	store2 := l2.store()
-	item2 := "decision-replaced/foundation"
-	execution2 := deliveryStart(t, store2, deliveryWidgets(), ledger.ImplementPhase)
-	deliveryHandoff(t, store2, deliveryWidgets(), item2, ledger.ImplementPhase, execution2.Claim.Commit, ledger.SourceRevisions{}, "needs_human", "human judgment remains required.\n")
-	viewed := ledger.Reference{Commit: l2.head(), Path: deliveryReportPath("widgets", item2, ledger.ImplementPhase)}
-	raw := deliveryGitShow(t, l2.root, "HEAD", viewed.Path)
-	replaced := strings.Replace(raw, execution2.Claim.Commit, strings.Repeat("a", 40), 1)
-	if replaced == raw {
-		t.Fatal("fixture did not alter the recorded claim identity")
-	}
-	l2.addFile(viewed.Path, replaced)
-	l2.commitAll("replace request report")
-
-	refused, err := ledger.ApplyDecision(store2, ledger.DecisionInput{
-		Project: "widgets", Item: item2, Request: viewed,
-		Answer: "continue within the contract\n", Route: ledger.RouteImplement,
-	})
-	if err != nil {
-		t.Fatalf("replaced request returned error: %v", err)
-	}
-	if refused.Status != ledger.DecisionRefused || !strings.Contains(refused.Refusal, "replaced") {
-		t.Fatalf("replaced request = %#v", refused)
-	}
-	if state := l2.committedState("widgets", "decision-replaced", "foundation"); state.State != ledger.NeedsHuman || state.Decision || state.Claim != nil {
-		t.Fatalf("refusal changed the paused record: %#v", state)
-	}
-}
-
-// TestDecisionRefusesActiveClaimAndDifferingReplay covers B4/A2: an active
-// reservation and a differing replay are refused without mutation.
-func TestDecisionRefusesActiveClaimAndDifferingReplay(t *testing.T) {
+// TestDecisionRefusesActiveClaim covers the active-Claim refusal without
+// changing the authoritative record.
+func TestDecisionRefusesActiveClaim(t *testing.T) {
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "decision-claim", "foundation", ledger.ReadyForImplementation, nil, deliveryInitial)
@@ -269,65 +63,6 @@ func TestDecisionRefusesActiveClaimAndDifferingReplay(t *testing.T) {
 	}
 	if l.head() != headBefore {
 		t.Fatal("active-claim refusal mutated the ledger")
-	}
-}
-
-// TestDecisionRetryAfterLaterClaimAndResult covers B5/A2: the exact operation
-// is recognized after a later Claim and a later result without altering either.
-func TestDecisionRetryAfterLaterClaimAndResult(t *testing.T) {
-	l := newDeliveryLedger(t)
-	l.addProject("widgets", "acme/widgets")
-	l.addSlice("widgets", "decision-retry", "foundation", ledger.ReadyForImplementation, nil, deliveryInitial)
-	l.commitAll("accept decision-retry")
-
-	store := l.store()
-	item := "decision-retry/foundation"
-	request := decisionPauseImplement(t, l, store, deliveryWidgets(), item, ledger.SourceRevisions{})
-	input := ledger.DecisionInput{
-		Project: "widgets", Item: item, Request: request,
-		Answer: "continue within the contract\n", Route: ledger.RouteImplement,
-	}
-	result, err := ledger.ApplyDecision(store, input)
-	if err != nil || result.Status != ledger.DecisionApplied {
-		t.Fatalf("apply decision = %#v, %v", result, err)
-	}
-
-	// A later Claim must survive the exact retry untouched.
-	later := deliveryStart(t, store, deliveryWidgets(), ledger.ImplementPhase)
-	claimPath := deliveryStatePath("widgets", item)
-	claimedState := l.committedState("widgets", "decision-retry", "foundation")
-	if claimedState.Claim == nil {
-		t.Fatal("later Claim was not recorded")
-	}
-	retried, err := ledger.ApplyDecision(store, input)
-	if err != nil {
-		t.Fatalf("retry after Claim: %v", err)
-	}
-	if retried.Status != ledger.DecisionAlreadyApplied {
-		t.Fatalf("retry after Claim = %#v", retried)
-	}
-	if state := l.committedState("widgets", "decision-retry", "foundation"); state.Claim == nil || state.Claim.Phase != ledger.ImplementPhase {
-		t.Fatalf("retry released the later Claim: %#v", state.Claim)
-	}
-
-	// A later result keeps the recorded direction; the retry changes nothing.
-	source := ledger.SourceRevisions{Head: deliveryHead, Target: deliveryTarget}
-	deliveryHandoff(t, store, deliveryWidgets(), item, ledger.ImplementPhase, later.Claim.Commit, source, "awaiting_review", "implementation one\n")
-	reportBefore := deliveryGitShow(t, l.root, "HEAD", deliveryReportPath("widgets", item, ledger.ImplementPhase))
-	statePath := filepath.Join(l.root, filepath.FromSlash(claimPath))
-	stateBefore := deliveryReadFile(t, statePath)
-	retried, err = ledger.ApplyDecision(store, input)
-	if err != nil {
-		t.Fatalf("retry after result: %v", err)
-	}
-	if retried.Status != ledger.DecisionAlreadyApplied || retried.State != ledger.AwaitingReview {
-		t.Fatalf("retry after result = %#v", retried)
-	}
-	if got := deliveryReadFile(t, statePath); got != stateBefore {
-		t.Fatal("retry rewrote the later route state")
-	}
-	if got := deliveryGitShow(t, l.root, "HEAD", deliveryReportPath("widgets", item, ledger.ImplementPhase)); got != reportBefore {
-		t.Fatal("retry rewrote the later report")
 	}
 }
 
@@ -386,11 +121,10 @@ func TestDecisionPrecommitFaultLeavesNoPartialState(t *testing.T) {
 	}
 }
 
-// TestDecisionWatchdogContinuationPreservesReviewBudget covers B6/A3: a
-// finding-driven Implement decision resumes Rework, a Watchdog decision resumes
-// Awaiting Review at the same code with the implementation inputs and recorded
-// count, and the two-review budget is unchanged.
-func TestDecisionWatchdogContinuationPreservesReviewBudget(t *testing.T) {
+// TestDecisionFindingDrivenImplementResumesRework checks the package route
+// after a finding-driven pause. The CLI continuation journeys protect the
+// Watchdog route and the unchanged-code review count.
+func TestDecisionFindingDrivenImplementResumesRework(t *testing.T) {
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "decision-review", "foundation", ledger.ReadyForImplementation, nil, deliveryInitial)
@@ -418,68 +152,10 @@ func TestDecisionWatchdogContinuationPreservesReviewBudget(t *testing.T) {
 		t.Fatalf("finding-driven decision = %#v, %v", findingResult, err)
 	}
 
-	implementThree := deliveryStart(t, store, deliveryWidgets(), ledger.ImplementPhase)
-	deliveryHandoff(t, store, deliveryWidgets(), item, ledger.ImplementPhase, implementThree.Claim.Commit, source, "awaiting_review", "implementation three\n")
-	watchdogTwo := deliveryStart(t, store, deliveryWidgets(), ledger.WatchdogPhase)
-	deliveryHandoff(t, store, deliveryWidgets(), item, ledger.WatchdogPhase, watchdogTwo.Claim.Commit, review, "rework", "W1 still open.\n")
-
-	inbox := decisionInbox(t, store, "widgets")
-	if len(inbox.Requests) != 1 || inbox.Requests[0].Phase != ledger.WatchdogPhase {
-		t.Fatalf("paused review request = %#v", inbox.Requests)
-	}
-	request := inbox.Requests[0].Request
-
-	// Review continuation at unchanged code resumes Awaiting Review with the
-	// fixed implementation inputs and does not reset the count.
-	result, err := ledger.ApplyDecision(store, ledger.DecisionInput{
-		Project: "widgets", Item: item, Request: request,
-		Answer: "reconsider W1 at the same code revision\n", Route: ledger.RouteWatchdog,
-	})
-	if err != nil || result.Status != ledger.DecisionApplied || result.State != ledger.AwaitingReview {
-		t.Fatalf("watchdog decision = %#v, %v", result, err)
-	}
-	watchdogThree := deliveryStart(t, store, deliveryWidgets(), ledger.WatchdogPhase)
-	if watchdogThree.State.Claim == nil || watchdogThree.State.Claim.Inputs.Decision == nil {
-		t.Fatal("review continuation lost the recorded decision input")
-	}
-	if watchdogThree.Watchdog == nil || watchdogThree.Watchdog.Round != 2 {
-		t.Fatalf("review count was reset: %#v", watchdogThree.Watchdog)
-	}
-	passed := deliveryHandoff(t, store, deliveryWidgets(), item, ledger.WatchdogPhase, watchdogThree.Claim.Commit, review, "pass", "W1 resolved.\n")
-	if passed.Status != ledger.ReadyForMerge || passed.State.Decision {
-		t.Fatalf("round 3 pass = %#v", passed)
-	}
-	report, _ := deliveryReport(t, l, "widgets", item, ledger.WatchdogPhase)
-	if report.Round != 3 {
-		t.Fatalf("completed review count = %d, want 3", report.Round)
-	}
-}
-
-// TestDecisionAppliesLocallyDuringReplicationOutage covers B5/A2: an
-// unavailable remote leaves the local decision applied and its replication
-// reported as pending without requiring a forge.
-func TestDecisionAppliesLocallyDuringReplicationOutage(t *testing.T) {
-	l := newDeliveryLedger(t)
-	l.addProject("widgets", "acme/widgets")
-	l.addSlice("widgets", "decision-outage", "foundation", ledger.ReadyForImplementation, nil, deliveryInitial)
-	l.commitAll("accept decision-outage")
-	deliveryGit(t, l.root, "remote", "add", "origin", filepath.Join(t.TempDir(), "missing-upstream.git"))
-
-	store := l.store()
-	item := "decision-outage/foundation"
-	request := decisionPauseImplement(t, l, store, deliveryWidgets(), item, ledger.SourceRevisions{})
-	result, err := ledger.ApplyDecision(store, ledger.DecisionInput{
-		Project: "widgets", Item: item, Request: request,
-		Answer: "continue within the contract\n", Route: ledger.RouteImplement,
-	})
-	if err != nil || result.Status != ledger.DecisionApplied {
-		t.Fatalf("outage decision = %#v, %v", result, err)
-	}
-	if result.Replication == nil || result.Replication.Status != ledger.PushPending {
-		t.Fatalf("outage replication = %#v, want pending", result.Replication)
-	}
-	if state := l.committedState("widgets", "decision-outage", "foundation"); !state.Decision || state.State != ledger.ReadyForImplementation {
-		t.Fatalf("outage changed the local result: %#v", state)
+	// A fresh Claim must use the Rework lane, not reset to initial work.
+	continued := deliveryStart(t, store, deliveryWidgets(), ledger.ImplementPhase)
+	if continued.State.State != ledger.Rework || continued.State.Claim.Inputs.Decision == nil {
+		t.Fatalf("finding-driven continuation = %#v, want Rework with direction", continued.State)
 	}
 }
 
