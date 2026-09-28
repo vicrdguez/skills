@@ -388,6 +388,40 @@ func TestBrowseDocumentExposesClaimInputsAsExactCLIFacts(t *testing.T) {
 	}
 }
 
+func TestBrowseVersionsListExactContentChangesAndSelectHistoricalCLIBytes(t *testing.T) {
+	fixture := newBrowseDocumentsFixture(t)
+	app, output := browseApp(t)
+	older := fixture.implementRevision
+	path := fixture.implementPath
+	metadataOnly := strings.Replace(runGitOutput(t, fixture.ledger.clone, "show", older+":"+path), "outcome: awaiting_review", "outcome: needs_human", 1)
+	if metadataOnly == runGitOutput(t, fixture.ledger.clone, "show", older+":"+path) {
+		t.Fatal("fixture did not alter report metadata")
+	}
+	writeFile(t, filepath.Join(fixture.ledger.clone, filepath.FromSlash(path)), metadataOnly)
+	runGit(t, fixture.ledger.clone, "add", path)
+	runGit(t, fixture.ledger.clone, "commit", "-q", "-m", "metadata-only version")
+	latest := browseDocumentsHead(t, fixture.ledger.clone)
+	runGit(t, fixture.ledger.clone, "commit", "--allow-empty", "-q", "-m", "unrelated ledger commit")
+	versions := browseDocumentsJSON(t, app, output, "versions", "--project", "widgets", "--item", "orders/cancel", "--phase", "implement")
+	if versions.Status != "shown" || versions.Versions == nil || versions.Versions.Incomplete || len(versions.Versions.Versions) != 2 ||
+		versions.Versions.Versions[0].Reference != (ledger.Reference{Commit: latest, Path: path}) ||
+		versions.Versions.Versions[1].Reference != (ledger.Reference{Commit: older, Path: path}) ||
+		versions.Versions.Versions[0].Report == nil || versions.Versions.Versions[0].Report.Outcome != "needs_human" {
+		t.Fatalf("CLI versions = %+v", versions)
+	}
+	old := browseDocumentsJSON(t, app, output, "document", "--commit", older, "--path", path)
+	if old.Document == nil || old.Document.Contents == metadataOnly || !strings.Contains(old.Document.Contents, fixture.implementBody) || old.SnapshotRevision != versions.Versions.Revision {
+		t.Fatalf("CLI historical selection = %+v", old)
+	}
+	output.Reset()
+	if err := app.Run([]string{"skl", "browse", "versions", "--project", "widgets", "--item", "orders/cancel", "--phase", "implement"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "Ledger version: "+latest+":"+path) || !strings.Contains(output.String(), "Ledger version: "+older+":"+path) || !strings.Contains(output.String(), "Outcome: needs_human") {
+		t.Fatalf("Markdown versions omitted exact identities or metadata:\n%s", output)
+	}
+}
+
 func TestBrowseDocumentsRequiresUnambiguousSelection(t *testing.T) {
 	newBrowseDocumentsFixture(t)
 	app, output := browseApp(t)

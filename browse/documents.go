@@ -15,6 +15,10 @@ type documentFrame struct {
 	viewport          viewport.Model
 	screen            screen
 	returnScreen      screen
+	fromVersion       bool
+	versions          *ledger.ReportVersions
+	versionsReturn    screen
+	versionsCursor    int
 	renderProblem     string
 	openedContext     string
 	openedRevision    string
@@ -114,6 +118,50 @@ func (m *Model) openDocument(document ledger.Document) {
 	m.docViewport.GotoTop()
 }
 
+func (m *Model) openVersions() {
+	if m.screen != documentScreen || m.currentDocument == nil ||
+		(m.currentDocument.Kind != ledger.ImplementReportDocumentKind && m.currentDocument.Kind != ledger.WatchdogReportDocumentKind) {
+		m.status = "Open a report to browse its versions"
+		return
+	}
+	phase := ledger.ImplementPhase
+	if m.currentDocument.Kind == ledger.WatchdogReportDocumentKind {
+		phase = ledger.WatchdogPhase
+	}
+	// A selected version may predate archival, while a followed report may
+	// belong to another Slice. Keep the selected report's incarnation when
+	// reopening its history, otherwise use the exact document's location.
+	archived := m.currentDocument.Archived
+	if m.documentReturn == versionsScreen && m.versions != nil {
+		archived = m.versions.Archived
+	}
+	m.openVersionsFor(m.currentDocument.Project, m.currentDocument.Proposal+"/"+m.currentDocument.Slice,
+		phase, archived)
+}
+
+func (m *Model) openVersionsFor(project, item, phase string, archived bool) {
+	versions, err := m.snapshot.VersionsAt(project, item, phase, archived)
+	if err != nil {
+		m.status = "Cannot discover report versions: " + err.Error()
+		return
+	}
+	m.versions = versions
+	m.versionsReturn = m.screen
+	m.cursor[versionsScreen] = 0
+	m.screen = versionsScreen
+	m.status = ""
+	m.layoutDetail()
+}
+
+func (m *Model) followVersion(reference ledger.Reference) {
+	m.followReference(reference)
+	if m.screen == documentScreen && len(m.documentHistory) > 0 {
+		m.documentReturn = versionsScreen
+		m.documentHistory[len(m.documentHistory)-1].fromVersion = true
+		m.layoutDetail()
+	}
+}
+
 func (m *Model) followReference(reference ledger.Reference) {
 	document, err := m.snapshot.Document(reference)
 	if err != nil {
@@ -124,6 +172,7 @@ func (m *Model) followReference(reference ledger.Reference) {
 	frame := documentFrame{
 		viewport: m.docViewport, screen: m.screen,
 		returnScreen: m.documentReturn, renderProblem: m.renderProblem,
+		versions: m.versions, versionsReturn: m.versionsReturn, versionsCursor: m.cursor[versionsScreen],
 		openedContext: m.openedContext, openedRevision: m.openedRevision,
 		references:      append([]ledger.LabeledReference(nil), m.references...),
 		referenceOrigin: m.referenceOrigin, referencesFromDoc: m.referencesFromDoc,

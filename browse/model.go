@@ -27,6 +27,7 @@ const (
 	diagnosticsScreen
 	documentsScreen
 	referencesScreen
+	versionsScreen
 	documentScreen
 )
 
@@ -81,15 +82,15 @@ type Options struct {
 }
 
 type keyMap struct {
-	Up, Down, Enter, Back, Next, Previous, Projects, Archived, Search, Facts, Group, Scope, Diagnostics, Documents, References, Issue, PullRequest, Refresh, Help, Quit key.Binding
+	Up, Down, Enter, Back, Next, Previous, Projects, Archived, Search, Facts, Group, Scope, Diagnostics, Documents, References, Versions, Issue, PullRequest, Refresh, Help, Quit key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Enter, k.Back, k.Documents, k.References, k.Projects, k.Refresh, k.Help, k.Next, k.Archived, k.Issue, k.PullRequest, k.Quit, k.Search, k.Facts}
+	return []key.Binding{k.Enter, k.Back, k.Documents, k.References, k.Versions, k.Projects, k.Refresh, k.Help, k.Next, k.Archived, k.Issue, k.PullRequest, k.Quit, k.Search, k.Facts}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Up, k.Down, k.Enter, k.Back}, {k.Next, k.Previous}, {k.Projects, k.Archived}, {k.Search, k.Facts, k.Group, k.Scope, k.Diagnostics}, {k.Documents, k.References}, {k.Issue, k.PullRequest, k.Refresh}, {k.Help, k.Quit}}
+	return [][]key.Binding{{k.Up, k.Down, k.Enter, k.Back}, {k.Next, k.Previous}, {k.Projects, k.Archived}, {k.Search, k.Facts, k.Group, k.Scope, k.Diagnostics}, {k.Documents, k.References, k.Versions}, {k.Issue, k.PullRequest, k.Refresh}, {k.Help, k.Quit}}
 }
 
 func newKeyMap() keyMap {
@@ -104,6 +105,7 @@ func newKeyMap() keyMap {
 		Archived:    key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "toggle archived")),
 		Documents:   key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "documents")),
 		References:  key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "references")),
+		Versions:    key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "report versions")),
 		Search:      key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search names")),
 		Facts:       key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "find by lifecycle or claim")),
 		Group:       key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "group by proposal/lifecycle")),
@@ -164,6 +166,8 @@ type Model struct {
 	referenceOrigin        screen
 	referencesFromDoc      bool
 	referenceHistory       []referenceFrame
+	versions               *ledger.ReportVersions
+	versionsReturn         screen
 	renderProblem          string
 	// Opened document presentation is anchored at opening, not rewritten by
 	// a later current-facts refresh.
@@ -393,6 +397,8 @@ func (m Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.openDocuments()
 	case key.Matches(msg, m.keys.References):
 		m.openReferences()
+	case key.Matches(msg, m.keys.Versions):
+		m.openVersions()
 	}
 	return m, nil
 }
@@ -447,10 +453,18 @@ func (m Model) rows() int {
 		}
 	case documentsScreen:
 		if m.documents != nil {
-			return len(m.documents.Documents)
+			count := len(m.documents.Documents)
+			if m.documents.Slice != "" {
+				count += 2 // Each phase history remains accessible if its latest report is absent.
+			}
+			return count
 		}
 	case referencesScreen:
 		return len(m.references)
+	case versionsScreen:
+		if m.versions != nil {
+			return len(m.versions.Versions)
+		}
 	}
 	return 0
 }
@@ -518,7 +532,7 @@ func (m Model) isFindingScreen(screen screen) bool {
 
 func isDocumentOverlay(screen screen) bool {
 	switch screen {
-	case documentsScreen, referencesScreen, documentScreen:
+	case documentsScreen, referencesScreen, versionsScreen, documentScreen:
 		return true
 	default:
 		return false
@@ -597,10 +611,21 @@ func (m *Model) enter() {
 		m.project, m.proposal, m.item, m.archived = chosen.project, chosen.match.Proposal, chosen.match.Item, chosen.match.Archived
 		m.screen, m.parent[sliceScreen], m.relation = sliceScreen, resultsScreen, 0
 	case documentsScreen:
-		m.openDocument(m.documents.Documents[selected])
+		if selected < len(m.documents.Documents) {
+			m.openDocument(m.documents.Documents[selected])
+		} else {
+			phase := ledger.ImplementPhase
+			if selected > len(m.documents.Documents) {
+				phase = ledger.WatchdogPhase
+			}
+			m.openVersionsFor(m.project, m.item, phase, m.archived)
+		}
 		return
 	case referencesScreen:
 		m.followReference(m.references[selected].Reference)
+		return
+	case versionsScreen:
+		m.followVersion(m.versions.Versions[selected].Reference)
 		return
 	}
 	m.status = ""
@@ -657,6 +682,8 @@ func (m *Model) back() {
 	case documentsScreen:
 		m.screen = m.docContext
 		m.failure = nil
+	case versionsScreen:
+		m.screen = m.versionsReturn
 	case referencesScreen:
 		if len(m.referenceHistory) > 0 {
 			previous := m.referenceHistory[len(m.referenceHistory)-1]
@@ -679,6 +706,7 @@ func (m *Model) back() {
 			}
 			m.docViewport = frame.viewport
 			m.documentReturn, m.renderProblem = frame.returnScreen, frame.renderProblem
+			m.versions, m.versionsReturn, m.cursor[versionsScreen] = frame.versions, frame.versionsReturn, frame.versionsCursor
 			m.openedContext, m.openedRevision = frame.openedContext, frame.openedRevision
 			m.newerDocument = m.documentHasNewerVersion()
 			m.references = append([]ledger.LabeledReference(nil), frame.references...)
@@ -687,7 +715,7 @@ func (m *Model) back() {
 			m.referenceHistory = append([]referenceFrame(nil), frame.referenceHistory...)
 			m.refreshCurrentReferences()
 			if frame.hasDocument {
-				if count := len(m.referenceHistory); count > 0 {
+				if count := len(m.referenceHistory); count > 0 && !frame.fromVersion {
 					previous := m.referenceHistory[count-1]
 					m.referenceHistory = m.referenceHistory[:count-1]
 					m.restoreReferenceFrame(previous)
@@ -780,7 +808,7 @@ func (m *Model) switchProject() {
 	m.screen, m.status, m.history = overviewScreen, "", nil
 	m.contextHistory = nil
 	m.docContext, m.documents, m.currentDocument = overviewScreen, nil, nil
-	m.documentHistory, m.references, m.referenceHistory = nil, nil, nil
+	m.documentHistory, m.references, m.referenceHistory, m.versions = nil, nil, nil, nil
 	m.selectionMissing, m.missingIdentity = "", ""
 	m.referenceOrigin, m.referencesFromDoc = overviewScreen, false
 	m.load()

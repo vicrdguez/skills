@@ -36,6 +36,7 @@ type browseOutcome struct {
 	Slices           *ledger.SliceSearch      `json:"slices,omitempty"`
 	Documents        *ledger.DocumentSet      `json:"documents,omitempty"`
 	Document         *ledger.Document         `json:"document,omitempty"`
+	Versions         *ledger.ReportVersions   `json:"versions,omitempty"`
 	SnapshotRevision string                   `json:"snapshot_revision,omitempty"`
 }
 
@@ -166,6 +167,25 @@ func browseCommand(stdin io.Reader, stdout io.Writer) *cli.Command {
 						documents, err = snapshot.SliceDocuments(command.String("project"), command.String("item"))
 					}
 					return browseOutcome{Documents: documents}, err
+				})
+			},
+		}, {
+			Name:  "versions",
+			Usage: "List committed content versions of a Slice's implementation or watchdog report",
+			Flags: []cli.Flag{
+				projectFlag("Project of the Slice"), &cli.StringFlag{Name: "item", Usage: "Slice identity (<proposal>/<slice>)"},
+				&cli.StringFlag{Name: "phase", Usage: "implement or watchdog"}, locationFlag(), implementationFormatFlag(),
+			},
+			Action: func(command *cli.Context) error {
+				return runBrowseQuery(command, stdout, func(snapshot *ledger.Snapshot) (browseOutcome, error) {
+					var versions *ledger.ReportVersions
+					var err error
+					if command.Bool("archived") {
+						versions, err = snapshot.VersionsAt(command.String("project"), command.String("item"), command.String("phase"), true)
+					} else {
+						versions, err = snapshot.Versions(command.String("project"), command.String("item"), command.String("phase"))
+					}
+					return browseOutcome{Versions: versions}, err
 				})
 			},
 		}, {
@@ -335,6 +355,35 @@ func renderBrowse(stdout io.Writer, format implementationFormatKind, outcome bro
 	}
 	if documents := outcome.Documents; documents != nil {
 		renderBrowseDocuments(&report, line, documents)
+	}
+	if versions := outcome.Versions; versions != nil {
+		line("Ledger snapshot revision: " + versions.Revision)
+		line("Report versions: " + versions.Project + "/" + versions.Item + " — " + versions.Phase)
+		if versions.Archived {
+			line("Proposal location: archived")
+		}
+		if versions.Incomplete {
+			line("History completeness: incomplete")
+		}
+		for _, diagnostic := range versions.Diagnostics {
+			line("Diagnostic: " + browse.DiagnosticText(diagnostic))
+		}
+		if len(versions.Versions) == 0 {
+			line("No report content versions are locally discoverable.")
+		}
+		for _, version := range versions.Versions {
+			line("- Ledger version: " + version.Reference.Commit + ":" + version.Reference.Path)
+			if version.Report != nil {
+				label := "  Outcome: " + version.Report.Outcome
+				if version.Report.Round != 0 {
+					label += fmt.Sprintf(" · watchdog round %d", version.Report.Round)
+				}
+				line(label)
+			}
+			for _, diagnostic := range version.Diagnostics {
+				line("  Diagnostic: " + browse.DiagnosticText(diagnostic))
+			}
+		}
 	}
 	if document := outcome.Document; document != nil {
 		line("Ledger snapshot revision: " + outcome.SnapshotRevision)

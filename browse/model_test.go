@@ -274,6 +274,175 @@ func TestBrowserReadsReportsFollowsExactHistoricalReferencesAndPreservesScroll(t
 	}
 }
 
+func TestBrowserSelectsEarlierReportVersionAndReturnsToCurrentContext(t *testing.T) {
+	s := start(t, "widgets", func(root string) {
+		write(t, root, "projects/widgets/proposals/orders/cancel/implement-report.md", "---\nschema: 88\n---\nOlder recorded reasoning.\n")
+	})
+	s.send(tea.WindowSizeMsg{Width: 120, Height: 40})
+	s.press("enter", "down", "enter", "d", "down", "down", "enter")
+	s.shows("Latest implementation report", "current lifecycle: Awaiting Review")
+	s.press("v")
+	s.shows("report versions (2)", "awaiting_review", "Exact ledger version:")
+	s.press("down", "enter")
+	s.shows("HISTORICAL", "Older recorded reasoning", "Metadata diagnostic", "current lifecycle: Awaiting Review")
+	s.send(tea.WindowSizeMsg{Width: 84, Height: 19})
+	s.shows("HISTORICAL", "current committed ledger")
+	s.press("esc")
+	s.send(tea.WindowSizeMsg{Width: 120, Height: 40})
+	s.shows("current document", "current lifecycle: Awaiting Review", "awaiting_review")
+	if len(s.opened) != 0 {
+		t.Fatalf("version navigation opened external URLs: %v", s.opened)
+	}
+}
+
+func TestBrowserFindsReportHistoryWhenLatestReportWasRemoved(t *testing.T) {
+	var root string
+	fixtureLedger(t, func(directory string) {
+		root = directory
+		write(t, directory, "projects/widgets/proposals/orders/cancel/implement-report.md", "Older implementation reasoning.\n")
+	})
+	if err := os.Remove(filepath.Join(root, "projects/widgets/proposals/orders/cancel/implement-report.md")); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-q", "-m", "remove latest report")
+	store, err := ledger.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := store.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &session{t: t, model: browse.New(snapshot, browse.Options{Project: "widgets"})}
+	s.send(tea.WindowSizeMsg{Width: 120, Height: 40})
+	s.press("enter", "down", "enter", "d", "down", "down", "down", "down")
+	s.shows("Implementation report versions", "no latest report")
+	s.press("enter")
+	s.shows("implement report versions (2)")
+	s.press("enter")
+	s.shows("HISTORICAL", "The recorded implementation evidence is readable", "current lifecycle: Awaiting Review")
+	s.press("esc", "esc")
+	s.shows("Implementation report versions")
+}
+
+func snapshotAfterChange(t *testing.T, root string) *ledger.Snapshot {
+	t.Helper()
+	store, err := ledger.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := store.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return snapshot
+}
+
+func TestBrowserKeepsArchivedReportIdentityAfterOpeningAnEarlierVersion(t *testing.T) {
+	var root string
+	fixtureLedger(t, func(directory string) {
+		root = directory
+		write(t, directory, "projects/widgets/proposals/orders/cancel/implement-report.md", "Earlier implementation reasoning.\n")
+	})
+	git(t, root, "mv", "projects/widgets/proposals/orders", "projects/widgets/archive/orders")
+	git(t, root, "commit", "-q", "-m", "archive orders")
+	write(t, root, "projects/widgets/proposals/orders/proposal.json", `{"accepted":"2025-01-01T00:00:00Z"}`)
+	write(t, root, "projects/widgets/proposals/orders/cancel/state.json", `{"state":"ready_for_implementation","title":"New cancellation","branch":"new-cancel"}`)
+	write(t, root, "projects/widgets/proposals/orders/cancel/intent.md", "# New cancellation intent\n")
+	write(t, root, "projects/widgets/proposals/orders/cancel/behavior.md", "# New cancellation behavior\n")
+	write(t, root, "projects/widgets/proposals/orders/cancel/implement-report.md", "Active replacement report.\n")
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-q", "-m", "active replacement")
+	s := &session{t: t, model: browse.New(snapshotAfterChange(t, root), browse.Options{Project: "widgets"})}
+	s.send(tea.WindowSizeMsg{Width: 120, Height: 45})
+	s.press("a")
+	s.shows("Proposals (3)", "orders [archived]")
+	s.press("down", "down", "enter", "down", "enter", "d", "down", "down", "enter", "v")
+	s.shows("report versions (2)")
+	s.hides("Active replacement report")
+	s.press("down", "enter")
+	s.shows("Earlier implementation reasoning", "HISTORICAL")
+	s.press("v")
+	s.shows("report versions (2)")
+	s.hides("Cannot discover report versions")
+}
+
+func TestBrowserBrowsesActiveReportInProjectNamedArchive(t *testing.T) {
+	var root string
+	fixtureLedger(t, func(directory string) { root = directory })
+	git(t, root, "mv", "projects/widgets", "projects/archive")
+	git(t, root, "commit", "-q", "-m", "rename project archive")
+	s := &session{t: t, model: browse.New(snapshotAfterChange(t, root), browse.Options{Project: "archive"})}
+	s.send(tea.WindowSizeMsg{Width: 120, Height: 40})
+	s.press("enter", "down", "enter", "d", "down", "down", "enter", "v")
+	s.shows("implement report versions (1)")
+	s.hides("Cannot discover report versions")
+}
+
+func TestBrowserFollowsAnArchivedReportReferenceWithoutUsingTheCurrentSliceLocation(t *testing.T) {
+	var root string
+	fixtureLedger(t, func(directory string) {
+		root = directory
+		write(t, directory, "projects/widgets/archive/legacy/old/watchdog-report.md", "Earlier archived watchdog report.\n")
+	})
+	previous := gitOutput(t, root, "rev-parse", "HEAD")
+	watchdogPath := "projects/widgets/archive/legacy/old/watchdog-report.md"
+	currentPath := "projects/widgets/proposals/orders/cancel"
+	report, err := ledger.FormatReport(ledger.ImplementPhase, ledger.Report{
+		Schema: 1, Outcome: "awaiting_review",
+		Source: ledger.SourceRevisions{Head: strings.Repeat("a", 40), Target: strings.Repeat("b", 40)},
+		Ledger: ledger.ReportInputs{
+			Claim:    ledger.Reference{Commit: previous, Path: currentPath + "/state.json"},
+			Contract: []ledger.Reference{{Commit: previous, Path: currentPath + "/intent.md"}},
+			Watchdog: &ledger.Reference{Commit: previous, Path: watchdogPath},
+		},
+	}, "Current implementation reasoning.\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, root, currentPath+"/implement-report.md", string(report))
+	write(t, root, watchdogPath, "Later archived watchdog report.\n")
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-q", "-m", "later archived report and reference")
+	s := &session{t: t, model: browse.New(snapshotAfterChange(t, root), browse.Options{Project: "widgets"})}
+	s.send(tea.WindowSizeMsg{Width: 120, Height: 45})
+	s.press("enter", "down", "enter", "d", "down", "down", "enter", "r", "down", "down", "enter")
+	s.shows("Earlier archived watchdog report", "HISTORICAL")
+	s.press("v")
+	s.shows("watchdog report versions (2)")
+	s.press("down", "enter")
+	s.shows("Earlier archived watchdog report", "HISTORICAL", "current lifecycle: Awaiting Review")
+	s.press("v")
+	s.shows("watchdog report versions (2)")
+	s.hides("Cannot discover report versions")
+}
+
+func TestBrowserReturnsFromNestedVersionsToTheDocumentList(t *testing.T) {
+	var root string
+	fixtureLedger(t, func(directory string) { root = directory })
+	if err := os.Remove(filepath.Join(root, "projects/widgets/proposals/orders/cancel/implement-report.md")); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-q", "-m", "remove latest report")
+	s := &session{t: t, model: browse.New(snapshotAfterChange(t, root), browse.Options{Project: "widgets"})}
+	s.send(tea.WindowSizeMsg{Width: 120, Height: 40})
+	s.press("enter", "down", "enter", "d", "down", "down", "down", "down", "enter")
+	s.shows("implement report versions (1)")
+	s.press("enter")
+	s.shows("HISTORICAL", "The recorded implementation evidence is readable")
+	s.press("v")
+	s.shows("implement report versions (1)")
+	s.press("enter", "esc")
+	s.shows("HISTORICAL", "The recorded implementation evidence is readable")
+	s.press("esc")
+	s.shows("implement report versions (1)")
+	s.press("esc")
+	s.shows("Implementation report versions", "no latest report")
+	s.hides("Document:", "Cannot discover report versions")
+}
+
 func TestBrowserFollowsDecisionAndClaimReferencesWithoutChangingSliceContext(t *testing.T) {
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 100, Height: 50})
