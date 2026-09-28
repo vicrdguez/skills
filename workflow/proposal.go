@@ -13,8 +13,6 @@ import (
 
 type WorkItemID string
 
-type SubmissionID string
-
 type WorkItem struct {
 	ID               WorkItemID
 	Title            string

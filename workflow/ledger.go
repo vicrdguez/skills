@@ -9,6 +9,11 @@ import (
 	"strings"
 )
 
+type InvariantError struct{ Reason string }
+
+func (e *InvariantError) Error() string { return e.Reason }
+func Refuse(reason string) error        { return &InvariantError{Reason: reason} }
+
 type LedgerHistory struct {
 	Baseline   string
 	Completion string
