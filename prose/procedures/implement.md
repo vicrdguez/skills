@@ -48,7 +48,7 @@ Check: the merge is committed and `git status` is clean.
 
 ## 4. Audit
 
-Run the Audit below once, over the integrated candidate. Every `HARD` finding gets fixed. Each `JUDGEMENT` is fixed, declined with its reason, or kept as debt. A merge or functional edit after the Audit makes its evidence stale: run the affected checks and a Full Gate over the final state.
+Run the Audit below once, over the integrated candidate. Repair `HARD` violations against accepted obligations; route unresolved consequential choices to the human-decision pause. Each `JUDGEMENT` is fixed, declined with its reason, or kept as debt. A merge or functional edit after the Audit makes its evidence stale: run the affected checks and a Full Gate over the final state.
 
 Check: every `F<n>` has a disposition, and the last Full Gate ran on the final state.
 
@@ -72,5 +72,5 @@ Check: the pause reports the work waiting on a human.
 {{if ne .Mode "team"}}
 ## Delegation
 
-When you can spawn fresh-context subagents, you may give them bounded implementation or testing work whose writes do not overlap; otherwise work serially. Brief each one fully: the assignment, the worktree, the Contract items it serves, the standards, the checks it runs and the files it may write. Helpers return their changes, evidence and limitations. You keep the Claim: integrate and verify every contribution, and submit alone. Helper checks are input; the integrated checks, the Full Gate and Audit still run over the combined work.
+When you can spawn fresh-context subagents, you may give them bounded implementation or testing work whose writes do not overlap; otherwise work serially. Brief each one fully: the assignment, the worktree, authoritative Contract references or contents, relevant architectural commitments, required observations, standards, checks and files it may write. Distinguish those obligations from implementation preferences. Helpers return changes, evidence, limitations and consequential choices the Contract leaves open for you to resolve through the human-decision path. You keep the Claim: integrate and verify every contribution, and submit alone. Helper checks are input; the integrated checks, the Full Gate and Audit still run over the combined work.
 {{end -}}
