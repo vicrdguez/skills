@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -31,28 +30,17 @@ func structuredStageCommand(args ...string) []string {
 	return command
 }
 
-type memoryBackend struct {
-	repository github.RepositoryID
-	prepared   bool
-}
+type memoryBackend struct{}
 
-func (b *memoryBackend) Validate(context.Context) (string, error) {
-	return "trunk", nil
-}
-
-func (b *memoryBackend) Prepare(context.Context) error {
-	b.prepared = true
-	return nil
-}
-
-func TestSetupInfersGitHubConsumerRepository(t *testing.T) {
-	root := t.TempDir()
-	root, err := filepath.EvalSymlinks(root)
+func TestSetupPreparesUnhostedRepositoryFromNestedDirectory(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	runGit(t, root, "init")
-	runGit(t, root, "remote", "add", "origin", "git@github.com:acme/widgets.git")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "")
 	nested := filepath.Join(root, "some", "nested", "directory")
 	if err := os.MkdirAll(nested, 0o755); err != nil {
 		t.Fatal(err)
@@ -66,24 +54,17 @@ func TestSetupInfersGitHubConsumerRepository(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(previous) })
 
-	backend := &memoryBackend{}
 	var stdout, stderr bytes.Buffer
-	app := newApp(func(repository github.RepositoryID) (setup.Backend, error) {
-		backend.repository = repository
-		return backend, nil
-	}, bytes.NewBufferString("n\n"), &stdout, &stderr)
+	noBackend := func(github.RepositoryID) (setup.Backend, error) {
+		t.Fatal("Setup contacted the GitHub backend")
+		return nil, nil
+	}
+	app := newApp(noBackend, bytes.NewBufferString("n\n"), &stdout, &stderr)
 	if err := app.Run([]string{"skl", "setup"}); err != nil {
 		t.Fatalf("setup failed: %v\nstderr: %s", err, stderr.String())
 	}
-
-	if backend.repository != (github.RepositoryID{Owner: "acme", Name: "widgets"}) {
-		t.Fatalf("repository = %#v", backend.repository)
-	}
-	if got := stdout.String(); got != "Link CLAUDE.md to AGENTS.md? [y/N] Prepared "+root+" for GitHub workflow on trunk.\n" {
+	if got := stdout.String(); got != "Link CLAUDE.md to AGENTS.md? [y/N] Prepared local workflow guidance in "+root+".\n" {
 		t.Fatalf("stdout = %q", got)
-	}
-	if !backend.prepared {
-		t.Fatal("workflow backend was not prepared")
 	}
 	if got := readFile(t, filepath.Join(root, ".gitignore")); got != ".worktrees/\n" {
 		t.Fatalf(".gitignore = %q", got)
@@ -92,29 +73,32 @@ func TestSetupInfersGitHubConsumerRepository(t *testing.T) {
 	if installed := readFile(t, agentsPath); installed != setup.AgentsBlock {
 		t.Fatalf("fresh AGENTS.md = %q, want %q", installed, setup.AgentsBlock)
 	}
-	t.Run("refresh and repeat", func(t *testing.T) {
-		before, after := "# User guidance\r\nKeep this spacing.  \n\n", "\nUser footer\twithout final newline"
-		original := before + "<!-- dev-pipeline:start -->\nstale guidance\n<!-- dev-pipeline:end -->\n" + after
-		if err := os.WriteFile(agentsPath, []byte(original), 0o644); err != nil {
+	before, after := "# User guidance\r\nKeep this spacing.  \n\n", "\nUser footer\twithout final newline"
+	original := before + "<!-- dev-pipeline:start -->\nstale guidance\n<!-- dev-pipeline:end -->\n" + after
+	for name, contents := range map[string]string{
+		"AGENTS.md": original, "CLAUDE.md": "Keep substantive harness guidance.\n",
+		".gitignore": "dist/\n.worktrees/\n*.log\n.worktrees/\n", "README.md": "Keep project notes.\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		want := before + setup.AgentsBlock + after
-		for range 2 {
-			stdout.Reset()
-			app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewBufferString("n\n"), &stdout, &stderr)
-			if err := app.Run([]string{"skl", "setup", "--repo", root}); err != nil {
-				t.Fatal(err)
-			}
-			if got := stdout.String(); got != "Link CLAUDE.md to AGENTS.md? [y/N] Prepared "+root+" for GitHub workflow on trunk.\n" {
-				t.Errorf("stdout = %q", got)
-			}
-			got := readFile(t, agentsPath)
-			if got != want {
-				t.Fatalf("AGENTS.md = %q, want %q", got, want)
-			}
-			want = got
+	}
+	for range 2 {
+		stdout.Reset()
+		if err := app.Run([]string{"skl", "setup", "--repo", root}); err != nil {
+			t.Fatal(err)
 		}
-	})
+		if got := readFile(t, agentsPath); got != before+setup.AgentsBlock+after {
+			t.Fatalf("AGENTS.md = %q", got)
+		}
+		for name, want := range map[string]string{
+			".gitignore": "dist/\n*.log\n.worktrees/\n", "CLAUDE.md": "Keep substantive harness guidance.\n", "README.md": "Keep project notes.\n",
+		} {
+			if got := readFile(t, filepath.Join(root, name)); got != want {
+				t.Fatalf("%s = %q", name, got)
+			}
+		}
+	}
 	if _, err := os.Stat(filepath.Join(root, ".skl.yml")); !os.IsNotExist(err) {
 		t.Fatalf("workflow configuration was written: %v", err)
 	}
@@ -123,10 +107,8 @@ func TestSetupInfersGitHubConsumerRepository(t *testing.T) {
 func TestSetupDeclinesClaudeMigrationAtEndOfInput(t *testing.T) {
 	root := t.TempDir()
 	runGit(t, root, "init")
-	runGit(t, root, "remote", "add", "origin", "https://github.com/acme/widgets.git")
-	backend := &memoryBackend{}
 	var output bytes.Buffer
-	app := newApp(func(github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+	app := newApp(func(github.RepositoryID) (setup.Backend, error) { t.Fatal("backend called"); return nil, nil }, bytes.NewReader(nil), &output, &output)
 
 	if err := app.Run([]string{"skl", "setup", "--repo", root}); err != nil {
 		t.Fatal(err)
@@ -136,56 +118,41 @@ func TestSetupDeclinesClaudeMigrationAtEndOfInput(t *testing.T) {
 	}
 }
 
-func TestSetupResolvesRepository(t *testing.T) {
-	for _, layout := range []string{"origin", "sole upstream", "non-GitHub origin", "ambiguous", "explicit upstream"} {
-		t.Run(layout, func(t *testing.T) {
-			root := proposalRepository(t)
-			if layout == "origin" {
-				runGit(t, root, "remote", "add", "upstream", "https://github.com/other/widgets.git")
-			} else {
-				runGit(t, root, "remote", "rename", "origin", "upstream")
-			}
-			switch layout {
-			case "non-GitHub origin":
-				runGit(t, root, "remote", "add", "origin", "https://example.com/other/widgets.git")
-			case "ambiguous":
-				runGit(t, root, "remote", "add", "fork", "https://github.com/other/widgets.git")
-			case "explicit upstream":
-				runGit(t, root, "remote", "add", "origin", "https://github.com/other/widgets.git")
-			}
-			args := []string{"skl", "setup", "--repo", root}
-			if layout == "explicit upstream" {
-				args = append(args, "--remote", "upstream")
-			}
-			backend := &memoryBackend{}
-			var output bytes.Buffer
-			app := newApp(func(repository github.RepositoryID) (setup.Backend, error) {
-				backend.repository = repository
-				return backend, nil
-			}, bytes.NewReader(nil), &output, &output)
-			err := app.Run(args)
-			if layout == "ambiguous" {
-				if err == nil || !strings.Contains(err.Error(), "--remote") || output.Len() != 0 {
-					t.Fatalf("ambiguous selection = %v, output=%q", err, &output)
-				}
-				if backend.prepared {
-					t.Fatalf("ambiguous selection mutated backend: %#v", backend)
-				}
-				if got := runGitOutput(t, root, "status", "--porcelain", "--untracked-files=all"); got != "" {
-					t.Fatalf("ambiguous selection changed repository files: %s", got)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			if backend.repository != (github.RepositoryID{Owner: "acme", Name: "widgets"}) {
-				t.Fatalf("bound repository = %#v", backend.repository)
-			}
-			if !backend.prepared || !strings.Contains(output.String(), "for GitHub workflow on trunk.") || !strings.Contains(readFile(t, filepath.Join(root, "AGENTS.md")), "## Workflow") {
-				t.Fatalf("setup = %q, backend=%#v", &output, backend)
-			}
-		})
+func TestSetupCLIRejectsMalformedOwnershipWithoutMutatingOtherFiles(t *testing.T) {
+	root := t.TempDir()
+	runGit(t, root, "init")
+	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte("<!-- dev-pipeline:start -->\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	app := newApp(func(github.RepositoryID) (setup.Backend, error) { t.Fatal("backend called"); return nil, nil }, bytes.NewReader(nil), io.Discard, io.Discard)
+	if err := app.Run([]string{"skl", "setup", "--repo", root}); err == nil || !strings.Contains(err.Error(), "malformed workflow markers") {
+		t.Fatalf("malformed guidance = %v", err)
+	}
+	if got := readFile(t, filepath.Join(root, "AGENTS.md")); got != "<!-- dev-pipeline:start -->\n" {
+		t.Fatalf("AGENTS.md = %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".gitignore")); !os.IsNotExist(err) {
+		t.Fatalf("refused setup created .gitignore: %v", err)
+	}
+}
+
+func TestSetupRejectsNonGitLocationAndRemovedRemoteFlag(t *testing.T) {
+	root := t.TempDir()
+	var output bytes.Buffer
+	app := newApp(func(github.RepositoryID) (setup.Backend, error) {
+		t.Fatal("backend called")
+		return nil, nil
+	}, bytes.NewReader(nil), &output, &output)
+	if err := app.Run([]string{"skl", "setup", "--repo", root}); err == nil || !strings.Contains(err.Error(), "not a Git repository") {
+		t.Fatalf("non-Git setup = %v", err)
+	}
+	runGit(t, root, "init")
+	output.Reset()
+	if err := app.Run([]string{"skl", "setup", "--repo", root, "--remote", "origin"}); err == nil || !strings.Contains(err.Error(), "flag provided but not defined") {
+		t.Fatalf("removed flag = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "AGENTS.md")); !os.IsNotExist(err) {
+		t.Fatalf("refused setup created AGENTS.md: %v", err)
 	}
 }
 

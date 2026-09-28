@@ -1,7 +1,6 @@
 package setup
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -26,23 +25,21 @@ Choose the least complexity that satisfies the accepted scope, repository standa
 <!-- dev-pipeline:end -->
 `
 
-type Backend interface {
-	Validate(context.Context) (targetBranch string, err error)
-	Prepare(context.Context) error
-}
-
 type Request struct {
 	Location string
 	Confirm  func(string) (bool, error)
 }
 
 type Outcome struct {
-	Root         string
-	TargetBranch string
+	Root string
 }
 
-func Run(ctx context.Context, request Request, backend Backend) (Outcome, error) {
-	root, err := git(request.Location, "rev-parse", "--show-toplevel")
+func Run(request Request) (Outcome, error) {
+	location := request.Location
+	if location == "" {
+		location = "."
+	}
+	root, err := git(location, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return Outcome{}, errors.New("not a Git repository")
 	}
@@ -64,10 +61,6 @@ func Run(ctx context.Context, request Request, backend Backend) (Outcome, error)
 	if err != nil {
 		return Outcome{}, err
 	}
-	targetBranch, err := backend.Validate(ctx)
-	if err != nil {
-		return Outcome{}, fmt.Errorf("validate repository: %w", err)
-	}
 	linkClaude := false
 	if offerClaude && request.Confirm != nil {
 		linkClaude, err = request.Confirm("Link CLAUDE.md to AGENTS.md? [y/N] ")
@@ -76,9 +69,6 @@ func Run(ctx context.Context, request Request, backend Backend) (Outcome, error)
 		}
 	}
 
-	if err := backend.Prepare(ctx); err != nil {
-		return Outcome{}, fmt.Errorf("prepare workflow backend: %w", err)
-	}
 	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), agents, 0o644); err != nil {
 		return Outcome{}, err
 	}
@@ -98,7 +88,7 @@ func Run(ctx context.Context, request Request, backend Backend) (Outcome, error)
 			return Outcome{}, err
 		}
 	}
-	return Outcome{Root: root, TargetBranch: targetBranch}, nil
+	return Outcome{Root: root}, nil
 }
 
 func planGitignore(path string) ([]byte, error) {

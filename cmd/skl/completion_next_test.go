@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -257,9 +256,6 @@ func TestNextCompletionRefreshIsProjectWideAndKeepsSelectionPriority(t *testing.
 }
 
 type completionNoObserveBackend struct{}
-
-func (completionNoObserveBackend) Validate(context.Context) (string, error) { return "main", nil }
-func (completionNoObserveBackend) Prepare(context.Context) error            { return nil }
 
 func TestNextCompletionForgeFailureDoesNotBlockIndependentLocalClaim(t *testing.T) {
 	for _, mode := range []string{"construction", "capability", "read"} {

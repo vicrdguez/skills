@@ -23,70 +23,6 @@ func (function roundTripFunc) RoundTrip(request *http.Request) (*http.Response, 
 	return function(request)
 }
 
-func TestGitHubBackendMapsRepositoryAndLabels(t *testing.T) {
-	mutations := 0
-	labels := map[string]Label{
-		"ready":  {Name: "ready", Color: "ffffff", Description: "stale"},
-		"custom": {Name: "custom", Color: "123456", Description: "unrelated"},
-	}
-	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		if request.Header.Get("Authorization") != "Bearer secret" {
-			t.Errorf("Authorization = %q", request.Header.Get("Authorization"))
-		}
-		switch {
-		case request.Method == http.MethodGet && request.URL.Path == "/repos/acme/widgets":
-			_ = json.NewEncoder(response).Encode(map[string]string{"default_branch": "trunk"})
-		case request.Method == http.MethodGet && request.URL.Path == "/repos/acme/widgets/labels":
-			values := make([]Label, 0, len(labels))
-			for _, label := range labels {
-				values = append(values, label)
-			}
-			_ = json.NewEncoder(response).Encode(values)
-		case request.Method == http.MethodPatch:
-			mutations++
-			var label Label
-			_ = json.NewDecoder(request.Body).Decode(&label)
-			label.Name = strings.TrimPrefix(request.URL.Path, "/repos/acme/widgets/labels/")
-			labels[label.Name] = label
-			response.WriteHeader(http.StatusOK)
-		case request.Method == http.MethodPost && request.URL.Path == "/repos/acme/widgets/labels":
-			mutations++
-			var label Label
-			_ = json.NewDecoder(request.Body).Decode(&label)
-			labels[label.Name] = label
-			response.WriteHeader(http.StatusCreated)
-		default:
-			http.Error(response, "unexpected request", http.StatusNotFound)
-		}
-	}))
-	t.Cleanup(server.Close)
-	backend := NewGitHubBackend(server.URL, "secret", server.Client())
-	backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
-
-	branch, err := backend.Validate(context.Background())
-	if err != nil || branch != "trunk" {
-		t.Fatalf("Validate() = %q, %v", branch, err)
-	}
-	if err := backend.Prepare(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	firstMutations := mutations
-	if err := backend.Prepare(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if firstMutations == 0 || mutations != firstMutations {
-		t.Fatalf("Prepare mutations = %d then %d", firstMutations, mutations)
-	}
-	for _, want := range WorkflowLabels {
-		if got := labels[want.Name]; got != want {
-			t.Fatalf("label %q = %#v", want.Name, got)
-		}
-	}
-	if got := labels["custom"]; got != (Label{Name: "custom", Color: "123456", Description: "unrelated"}) {
-		t.Fatalf("unrelated label changed: %#v", got)
-	}
-}
-
 func TestGitHubTokenChain(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -109,34 +45,6 @@ func TestGitHubTokenChain(t *testing.T) {
 	}
 }
 
-func TestGitHubBackendDefersAuthenticationUntilValidation(t *testing.T) {
-	resolved := 0
-	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
-		if got := request.Header.Get("Authorization"); got != "Bearer delayed" {
-			t.Fatalf("Authorization = %q", got)
-		}
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       io.NopCloser(bytes.NewBufferString(`{"default_branch":"main"}`)),
-			Header:     make(http.Header),
-		}, nil
-	})}
-	backend := newGitHubBackend("https://api.github.test", client, func() (string, error) {
-		resolved++
-		return "delayed", nil
-	})
-	if resolved != 0 {
-		t.Fatal("authentication resolved during backend construction")
-	}
-	backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
-	if _, err := backend.Validate(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if resolved != 1 {
-		t.Fatalf("authentication resolved %d times", resolved)
-	}
-}
-
 func TestGitHubBackendRefusesUnboundOperations(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		t.Fatalf("unbound operation requested %s", request.URL)
@@ -145,8 +53,6 @@ func TestGitHubBackendRefusesUnboundOperations(t *testing.T) {
 	backend := NewGitHubBackend("https://api.github.test", "secret", client)
 	ctx := context.Background()
 	operations := map[string]func() error{
-		"Validate":     func() error { _, err := backend.Validate(ctx); return err },
-		"Prepare":      func() error { return backend.Prepare(ctx) },
 		"CreateIssue":  func() error { _, err := backend.CreateIssue(ctx, "slice", "body"); return err },
 		"ListChildren": func() error { _, err := backend.ListChildren(ctx, 1); return err },
 		"AttachChild":  func() error { return backend.AttachChild(ctx, 1, 2) },

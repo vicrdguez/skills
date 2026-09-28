@@ -21,6 +21,10 @@ import (
 	"github.com/vicrdguez/skills/workflow"
 )
 
+// Backend is the CLI factory result; each workflow operation checks its own
+// supported capability rather than requiring retired Setup methods.
+type Backend = any
+
 // GitHubBackend is also the transport of ledger issue publication.
 var _ ledger.Forge = (*GitHubBackend)(nil)
 
@@ -136,52 +140,6 @@ func resolveGitHubToken(getenv func(string) string, ghToken func() (string, erro
 		return "", errors.New("GitHub authentication unavailable: set GH_TOKEN or GITHUB_TOKEN, or run gh auth login")
 	}
 	return strings.TrimSpace(token), nil
-}
-
-func (b *GitHubBackend) validate(ctx context.Context, repository github.RepositoryID) (string, error) {
-	var response struct {
-		DefaultBranch string `json:"default_branch"`
-	}
-	if err := b.request(ctx, http.MethodGet, b.repositoryPath(repository), nil, &response); err != nil {
-		return "", err
-	}
-	if response.DefaultBranch == "" {
-		return "", errors.New("GitHub repository returned no default branch")
-	}
-	return response.DefaultBranch, nil
-}
-
-func (b *GitHubBackend) EnsureLabels(ctx context.Context, repository github.RepositoryID, wanted []Label) error {
-	existing := make(map[string]Label)
-	for page := 1; ; page++ {
-		var labels []Label
-		path := fmt.Sprintf("%s/labels?per_page=100&page=%d", b.repositoryPath(repository), page)
-		if err := b.request(ctx, http.MethodGet, path, nil, &labels); err != nil {
-			return err
-		}
-		for _, label := range labels {
-			existing[label.Name] = label
-		}
-		if len(labels) < 100 {
-			break
-		}
-	}
-	for _, label := range wanted {
-		current, found := existing[label.Name]
-		if found && current == label {
-			continue
-		}
-		method := http.MethodPost
-		path := b.repositoryPath(repository) + "/labels"
-		if found {
-			method = http.MethodPatch
-			path += "/" + url.PathEscape(label.Name)
-		}
-		if err := b.request(ctx, method, path, label, nil); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (b *GitHubBackend) repositoryPath(repository github.RepositoryID) string {

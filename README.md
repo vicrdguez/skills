@@ -164,10 +164,10 @@ mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/skl"
 printf '{"ledger": "%s/workflow-ledger"}\n' "$HOME" > "${XDG_CONFIG_HOME:-$HOME/.config}/skl/config.json"
 ```
 
-Then bind each repository you want to work in:
+Then prepare local guidance in each repository you want to work in (ledger Project adoption is separate):
 
 ```sh
-skl setup    # AGENTS.md workflow block, .gitignore entries, GitHub labels for the public view
+skl setup    # local AGENTS.md workflow block, .worktrees/ ignore entry, optional CLAUDE.md link
 ```
 
 Rebuild the binary after editing anything under `prose/`; stubs and adapters read the running binary, not the checkout.
