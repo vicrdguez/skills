@@ -109,7 +109,7 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 		},
 	}, {
 		Name:        "propose",
-		Subcommands: []*cli.Command{cleanupCommand(newBackend, stdout)},
+		Subcommands: []*cli.Command{cleanupCommand(stdout)},
 	}, {
 		Name:        "implement",
 		Subcommands: deliveryCommands("implement", newBackend, stdout),

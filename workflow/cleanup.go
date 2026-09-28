@@ -1,9 +1,7 @@
 package workflow
 
 import (
-	"context"
 	"errors"
-	"fmt"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -13,25 +11,12 @@ type WorkItemID string
 
 type SubmissionID string
 
-type WorkItem struct {
-	ID           WorkItemID
-	Title        string
-	Body         string
-	Branch       string
-	AcceptedHead string
-	Merged       bool
-}
-
 type CoordinationItem struct {
 	Children []WorkItemID
 	ID       WorkItemID
 	Title    string
 	Body     string
 	Closed   bool
-}
-
-type Backend interface {
-	ListMergedWorkItems(context.Context) ([]WorkItem, error)
 }
 
 // CleanupOutcome reports removed, preserved, and failed source work
@@ -54,27 +39,6 @@ type SourceCandidate struct {
 	Branch       string
 	AcceptedHead string
 	Hold         string
-}
-
-// Cleanup is the legacy forge-authoritative source cleanup.
-func Cleanup(ctx context.Context, root string, backend Backend) (CleanupOutcome, error) {
-	items, err := backend.ListMergedWorkItems(ctx)
-	if err != nil {
-		return CleanupOutcome{}, err
-	}
-	var candidates []SourceCandidate
-	for _, item := range items {
-		// Without an explicit branch attachment, preserve local Git state instead
-		// of redirecting cleanup through a title.
-		if item.Merged && item.Branch != "" {
-			candidates = append(candidates, SourceCandidate{Branch: item.Branch, AcceptedHead: item.AcceptedHead})
-		}
-	}
-	outcome, err := CleanupSource(root, candidates)
-	if err == nil && len(outcome.Failed) > 0 {
-		err = fmt.Errorf("remove %s: %s", outcome.Failed[0].Branch, outcome.Failed[0].Reason)
-	}
-	return outcome, err
 }
 
 // CleanupSource removes the local worktree and local branch of each candidate

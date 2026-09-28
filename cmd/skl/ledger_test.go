@@ -25,8 +25,8 @@ import (
 )
 
 // TestMain isolates every test in this package from any real machine
-// configuration: the legacy flow stays the default until a test installs
-// its own ledger configuration with t.Setenv.
+// configuration; tests that need a ledger install their own configuration
+// with t.Setenv.
 func TestMain(m *testing.M) {
 	if os.Getenv("XDG_CONFIG_HOME") == "" {
 		temp, err := os.MkdirTemp("", "skl-test-config")
