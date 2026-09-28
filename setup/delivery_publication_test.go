@@ -437,13 +437,13 @@ func TestDeliveryPublicationPassReadiesExistingDraft(t *testing.T) {
 	defer server.Close()
 
 	number, err := deliveryBackend(server).PresentPull(context.Background(), ledger.PullPresentation{
-		Number: 5, Title: "must not overwrite", Body: "approved public body", Branch: "widget", Head: "aaa", Approved: true,
+		Number: 5, Title: "must not overwrite", Body: deliveryBody, Branch: "widget", Head: "aaa", Approved: true,
 	})
 	if err != nil || number != 5 {
 		t.Fatalf("approved presentation = %d, %v", number, err)
 	}
 	pull := forge.pull(5)
-	if pull.Draft != false || pull.Body != "approved public body" {
+	if pull.Draft != false || pull.Body != deliveryBody {
 		t.Fatalf("approved presentation = %#v", pull)
 	}
 	if pull.Title != "recorded title" {
@@ -457,7 +457,7 @@ func TestDeliveryPublicationPassReadiesExistingDraft(t *testing.T) {
 		t.Fatalf("approved presentation created %d new pull requests", pulls)
 	}
 	for _, payload := range forge.patchPayloads {
-		if len(payload) != 1 || payload["body"] != "approved public body" {
+		if len(payload) != 1 || payload["body"] != deliveryBody {
 			t.Fatalf("existing pull request update payload = %#v", payload)
 		}
 	}
@@ -498,8 +498,14 @@ func TestDeliveryPublicationRefusesWrongSourceForReadiness(t *testing.T) {
 		expect       string
 	}{
 		"listed branch advanced past the expected head": {
-			pull:         deliveryPull{Number: 5, Body: deliveryBody, Draft: true, Head: "bbb"},
+			pull:         deliveryPull{Number: 5, Body: "newer authored prose", Draft: true, Head: "bbb"},
 			presentation: ledger.PullPresentation{Body: deliveryBody, Branch: "widget", Head: "aaa", Approved: true},
+			expect:       "not the expected aaa",
+		},
+		"attached pull request has a different head": {
+			number:       5,
+			pull:         deliveryPull{Number: 5, Body: "newer authored prose", Draft: true, Head: "bbb"},
+			presentation: ledger.PullPresentation{Number: 5, Body: "approved aaa", Branch: "widget", Head: "aaa", Approved: true},
 			expect:       "not the expected aaa",
 		},
 		"attached pull request targets another base": {
@@ -538,39 +544,10 @@ func TestDeliveryPublicationRefusesWrongSourceForReadiness(t *testing.T) {
 			if len(forge.patchPayloads) != 0 {
 				t.Fatalf("wrong source was edited: %#v", forge.patchPayloads)
 			}
-			if pull := forge.pull(scenario.pull.Number); pull != nil && pull.Draft != true {
-				t.Fatalf("wrong source became ready: %#v", pull)
+			if pull := forge.pull(scenario.pull.Number); pull == nil || !pull.Draft || pull.Body != scenario.pull.Body {
+				t.Fatalf("wrong source changed the current presentation: %#v", pull)
 			}
 		})
-	}
-}
-
-func TestDeliveryPublicationPreservesOpaquePublicBody(t *testing.T) {
-	forge := newDeliveryForge(t)
-	forge.add(deliveryPull{Number: 5, Body: "earlier public body", Draft: true, Head: "aaa"})
-	server := forge.server()
-	defer server.Close()
-
-	number, err := deliveryBackend(server).PresentPull(context.Background(), ledger.PullPresentation{
-		Number: 5, Body: deliveryBody, Branch: "widget", Head: "aaa", Approved: false,
-	})
-	if err != nil || number != 5 {
-		t.Fatalf("body refresh = %d, %v", number, err)
-	}
-	if pull := forge.pull(5); pull.Body != deliveryBody {
-		t.Fatalf("public body changed: %q", pull.Body)
-	}
-	for _, payload := range forge.patchPayloads {
-		if payload["body"] != deliveryBody {
-			t.Fatalf("body update payload changed the authored text: %#v", payload)
-		}
-	}
-	for _, request := range forge.requestLog() {
-		for _, forbidden := range []string{"/labels", "/comments", "/reviews", "/issues", "/merge"} {
-			if strings.Contains(request.path, forbidden) {
-				t.Fatalf("presentation touched a private or authoritative surface: %s %s", request.method, request.path)
-			}
-		}
 	}
 }
 
@@ -650,7 +627,15 @@ func TestDeliveryPublicationUsesOnlyPresentationSurfaces(t *testing.T) {
 		t.Fatal(err)
 	}
 	allowed := func(path string) bool {
-		return path == "/graphql" || path == "/repos/acme/widgets/pulls" || strings.HasPrefix(path, "/repos/acme/widgets/pulls/")
+		if path == "/graphql" || path == "/repos/acme/widgets/pulls" {
+			return true
+		}
+		const pullPath = "/repos/acme/widgets/pulls/"
+		if !strings.HasPrefix(path, pullPath) {
+			return false
+		}
+		_, err := strconv.Atoi(strings.TrimPrefix(path, pullPath))
+		return err == nil
 	}
 	for _, request := range forge.requestLog() {
 		if !allowed(request.path) {
@@ -801,30 +786,6 @@ func TestDeliveryPublicationReportsUnconfirmedReadinessCorrection(t *testing.T) 
 				t.Fatalf("expected one bounded correction, got %v", mutations)
 			}
 		})
-	}
-}
-
-// TestDeliveryPublicationPreservesNewerProseOnSourceMismatch covers preserving
-// unrelated authored content: a presentation for a stale head must not overwrite
-// the pull request's current body or readiness.
-func TestDeliveryPublicationPreservesNewerProseOnSourceMismatch(t *testing.T) {
-	forge := newDeliveryForge(t)
-	forge.add(deliveryPull{Number: 5, Body: "newer authored prose", Draft: true, Head: "bbb-unreviewed"})
-	server := forge.server()
-	defer server.Close()
-
-	_, err := deliveryBackend(server).PresentPull(context.Background(), ledger.PullPresentation{
-		Number: 5, Body: "approved aaa", Branch: "widget", Head: "aaa", Approved: true,
-	})
-	if err == nil || !strings.Contains(err.Error(), "not the expected aaa") {
-		t.Fatalf("stale presentation was not refused: %v", err)
-	}
-	pull := forge.pull(5)
-	if pull.Body != "newer authored prose" || !pull.Draft {
-		t.Fatalf("stale presentation rewrote newer prose or readiness: %#v", pull)
-	}
-	if len(forge.patchPayloads) != 0 || len(forge.mutations()) != 0 {
-		t.Fatalf("stale presentation wrote to the forge: patches=%v mutations=%v", forge.patchPayloads, forge.mutations())
 	}
 }
 

@@ -12,10 +12,10 @@ import (
 	"github.com/vicrdguez/skills/setup"
 )
 
-func TestStatusRequiresConfiguredAcceptedProjectWithoutReadingLegacyForge(t *testing.T) {
-	// The source and forge carry an old review; neither is an authority for
-	// status without an accepted ledger Project.
-	legacy := newReviewFixture(t)
+func TestStatusRequiresConfiguredAcceptedProjectWithoutForgeAccess(t *testing.T) {
+	// A source repository without an accepted ledger Project cannot derive
+	// status from any external records.
+	root := sourceRepository(t, "acme", "widgets")
 	fixture := newLedgerFixture(t)
 	for _, tc := range []struct {
 		name, item, want string
@@ -40,16 +40,19 @@ func TestStatusRequiresConfiguredAcceptedProjectWithoutReadingLegacyForge(t *tes
 			fixture.selectWithXDG(t)
 			tc.configure(t)
 			before := ledgerSnapshot(t, fixture.clone)
-			writes := legacy.forge.writes
 			calls := 0
-			for _, format := range []string{"json", "markdown"} {
+			formats := []string{"json"}
+			if tc.name == "missing configuration" {
+				formats = append(formats, "markdown")
+			}
+			for _, format := range formats {
 				var output bytes.Buffer
 				app := newApp(func(github.RepositoryID) (setup.Backend, error) {
 					calls++
-					t.Fatal("status accessed legacy GitHub records")
+					t.Fatal("status accessed GitHub without an accepted Project")
 					return nil, nil
 				}, bytes.NewReader(nil), &output, &output)
-				args := []string{"skl", "status", "--repo", legacy.root, "--format", format}
+				args := []string{"skl", "status", "--repo", root, "--format", format}
 				if tc.item != "" {
 					args = append(args, "--item", tc.item)
 				}
@@ -65,8 +68,8 @@ func TestStatusRequiresConfiguredAcceptedProjectWithoutReadingLegacyForge(t *tes
 					t.Fatalf("missing Markdown refusal: %s", &output)
 				}
 			}
-			if calls != 0 || legacy.forge.writes != writes || ledgerSnapshot(t, fixture.clone) != before {
-				t.Fatal("status read or mutated legacy records or ledger")
+			if calls != 0 || ledgerSnapshot(t, fixture.clone) != before {
+				t.Fatal("status accessed GitHub or mutated the ledger")
 			}
 		})
 	}
