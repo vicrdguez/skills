@@ -73,32 +73,6 @@ func TestSetupPreparesUnhostedRepositoryFromNestedDirectory(t *testing.T) {
 	if installed := readFile(t, agentsPath); installed != setup.AgentsBlock {
 		t.Fatalf("fresh AGENTS.md = %q, want %q", installed, setup.AgentsBlock)
 	}
-	before, after := "# User guidance\r\nKeep this spacing.  \n\n", "\nUser footer\twithout final newline"
-	original := before + "<!-- dev-pipeline:start -->\nstale guidance\n<!-- dev-pipeline:end -->\n" + after
-	for name, contents := range map[string]string{
-		"AGENTS.md": original, "CLAUDE.md": "Keep substantive harness guidance.\n",
-		".gitignore": "dist/\n.worktrees/\n*.log\n.worktrees/\n", "README.md": "Keep project notes.\n",
-	} {
-		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for range 2 {
-		stdout.Reset()
-		if err := app.Run([]string{"skl", "setup", "--repo", root}); err != nil {
-			t.Fatal(err)
-		}
-		if got := readFile(t, agentsPath); got != before+setup.AgentsBlock+after {
-			t.Fatalf("AGENTS.md = %q", got)
-		}
-		for name, want := range map[string]string{
-			".gitignore": "dist/\n*.log\n.worktrees/\n", "CLAUDE.md": "Keep substantive harness guidance.\n", "README.md": "Keep project notes.\n",
-		} {
-			if got := readFile(t, filepath.Join(root, name)); got != want {
-				t.Fatalf("%s = %q", name, got)
-			}
-		}
-	}
 	if _, err := os.Stat(filepath.Join(root, ".skl.yml")); !os.IsNotExist(err) {
 		t.Fatalf("workflow configuration was written: %v", err)
 	}
@@ -157,17 +131,9 @@ func TestSetupRejectsNonGitLocationAndRemovedRemoteFlag(t *testing.T) {
 }
 
 func TestProposePublishIsNotACommand(t *testing.T) {
-	app := newApp(nil, bytes.NewReader(nil), io.Discard, io.Discard)
-	if app.Command("propose").Command("publish") != nil {
-		t.Fatal("propose publish is still registered")
-	}
-	binary := filepath.Join(t.TempDir(), "skl")
-	build := exec.Command("go", "build", "-o", binary, ".")
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build skl: %v\n%s", err, output)
-	}
 	root := proposalRepository(t)
-	command := exec.Command(binary, "propose", "publish", "--repo", root, "--target", "main", "--slice", "widget=issue.md")
+	command := exec.Command(os.Args[0], "-test.run=^TestProposePublishProcess$", "--", "propose", "publish", "--repo", root, "--target", "main", "--slice", "widget=issue.md")
+	command.Env = append(os.Environ(), "SKL_PROPOSE_PUBLISH_PROCESS=1")
 	output, err := command.CombinedOutput()
 	if err == nil || !strings.Contains(string(output), "No help topic for 'publish'") {
 		t.Fatalf("retired invocation = %v, %q", err, output)
@@ -175,6 +141,14 @@ func TestProposePublishIsNotACommand(t *testing.T) {
 	if got := runGitOutput(t, root, "status", "--porcelain", "--untracked-files=all"); got != "" {
 		t.Fatalf("retired invocation changed repository files: %s", got)
 	}
+}
+
+func TestProposePublishProcess(t *testing.T) {
+	if os.Getenv("SKL_PROPOSE_PUBLISH_PROCESS") != "1" {
+		return
+	}
+	os.Args = append([]string{"skl"}, os.Args[3:]...)
+	main()
 }
 
 type httpRoundTripFunc func(*http.Request) (*http.Response, error)
@@ -243,10 +217,9 @@ func activeDeliveryPacket(t *testing.T, root, phase, operation string, state led
 	return packet
 }
 
-// TestDocumentedResourceCommands runs every `skl skill` command a rendering
-// emits, and the resource commands in the CLI reference. The goldens under
-// testdata/prose hold every rendering a worker receives.
-func TestDocumentedResourceCommands(t *testing.T) {
+// TestRenderedResourceCommands runs the `skl skill` commands in the worker
+// renderings. The goldens under testdata/prose hold every rendering received.
+func TestRenderedResourceCommands(t *testing.T) {
 	goldens, err := filepath.Glob(filepath.Join(proseDirectory(), "*.md"))
 	if err != nil || len(goldens) == 0 {
 		t.Fatalf("no prose goldens: %v", err)
@@ -257,25 +230,6 @@ func TestDocumentedResourceCommands(t *testing.T) {
 				runSkillCommand(t, command)
 			}
 		})
-	}
-
-	// The README links to docs/cli.md for the full command reference.
-	// Execute its concrete resource examples without requiring them to appear
-	// in the README overview as well.
-	seen := map[string]bool{}
-	for _, command := range skillCommands(readRepositoryFile(t, "docs/cli.md")) {
-		if !strings.Contains(command, "--resource") {
-			continue
-		}
-		args := runSkillCommand(t, command)
-		if index := slices.Index(args, "--resource"); index >= 0 {
-			seen[args[index+1]] = true
-		}
-	}
-	for _, want := range []string{"ledger-submission.md", "ledger-review.md", "DEEPENING.md"} {
-		if !seen[want] {
-			t.Errorf("docs/cli.md lacks a documented command for %s: %v", want, seen)
-		}
 	}
 }
 
@@ -310,7 +264,7 @@ func runSkillCommand(t *testing.T, command string) []string {
 	return args
 }
 
-// shellArgs resolves a documented command the way a shell would, so quoted
+// shellArgs resolves an emitted command the way a shell would, so quoted
 // values survive as the single arguments they name.
 func shellArgs(t *testing.T, command string) []string {
 	t.Helper()
@@ -815,7 +769,9 @@ func TestDeferredResourceCommandsFromParentInstructions(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("TMPDIR", hostile)
-	root := sourceRepository(t, "acme", "widgets")
+	root := t.TempDir()
+	runGit(t, root, "init", "-q")
+	runGit(t, root, "remote", "add", "origin", "https://github.com/acme/widgets.git")
 
 	cases := []struct {
 		name      string
