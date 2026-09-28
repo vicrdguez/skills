@@ -627,7 +627,15 @@ func TestDeliveryPublicationUsesOnlyPresentationSurfaces(t *testing.T) {
 		t.Fatal(err)
 	}
 	allowed := func(path string) bool {
-		return path == "/graphql" || path == "/repos/acme/widgets/pulls" || strings.HasPrefix(path, "/repos/acme/widgets/pulls/")
+		if path == "/graphql" || path == "/repos/acme/widgets/pulls" {
+			return true
+		}
+		const pullPath = "/repos/acme/widgets/pulls/"
+		if !strings.HasPrefix(path, pullPath) {
+			return false
+		}
+		_, err := strconv.Atoi(strings.TrimPrefix(path, pullPath))
+		return err == nil
 	}
 	for _, request := range forge.requestLog() {
 		if !allowed(request.path) {
