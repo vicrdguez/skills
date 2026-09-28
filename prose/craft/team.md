@@ -10,10 +10,10 @@ Hand each patch to its own fresh-context implementer with:
 
 - the worktree;
 - the files or modules it owns;
-- the acceptance criteria of its patch;
+- authoritative Contract references or contents, relevant architectural commitments and required observations, distinguished from implementation preferences;
 - the focused checks it runs.
 
-Each implementer edits only the files it owns and answers with a short report: done or blocked, what it changed, which checks it ran, and what stopped it.
+Each implementer edits only the files it owns and answers with a short report: done or blocked, what it changed, which checks it ran, and what stopped it. Return consequential choices the Contract leaves open to the owner for human resolution, rather than settling them from a patch brief.
 
 Run patches with disjoint ownership in parallel, and stage a patch after the ones it depends on or overlaps. While they run, your job is traffic control: confirm each implementer kept to its files and the worktree is sound. Take each finished patch as it is; review and polish wait for Audit, the first look at the whole change.
 

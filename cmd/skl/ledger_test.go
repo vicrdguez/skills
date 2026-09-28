@@ -24,8 +24,8 @@ import (
 )
 
 // TestMain isolates every test in this package from any real machine
-// configuration: the legacy flow stays the default until a test installs
-// its own ledger configuration with t.Setenv.
+// configuration; tests that need a ledger install their own configuration
+// with t.Setenv.
 func TestMain(m *testing.M) {
 	if os.Getenv("XDG_CONFIG_HOME") == "" {
 		temp, err := os.MkdirTemp("", "skl-test-config")
@@ -1967,32 +1967,6 @@ func TestMalformedDocumentsAndGitInvalidBranchAreRefusedWhole(t *testing.T) {
 			t.Fatalf("Git-invalid branch was accepted: %s", mustJSON(t, outcome))
 		}
 	})
-}
-
-func TestProposePublishRefusedForAdoptedProjects(t *testing.T) {
-	fixture := newLedgerFixture(t)
-	root := proposalRepository(t)
-	prepareSlice(t, root, "legacy-publish")
-	forge := newForgeServer(t)
-	cli := newLedgerApp(t, forge)
-	if outcome := cli.accept(t, root, writeProposal(t, "", singleSlice("adopted-publish"))); outcome.Status != "accepted" {
-		t.Fatalf("adoption acceptance failed: %s", mustJSON(t, outcome))
-	}
-	if _, err := os.Stat(filepath.Join(fixture.clone, "projects", "widgets", "proposals", "adopted-publish")); err != nil {
-		t.Fatalf("adoption not recorded: %v", err)
-	}
-	before := ledgerSnapshot(t, root)
-	created := forge.createdCount()
-	cli.out.Reset()
-	if err := cli.app.Run([]string{"skl", "propose", "publish", "--repo", root, "--target", "main", "--slice", proposalSliceFlag(t, "legacy-publish")}); err != nil {
-		t.Fatalf("run: %v", err)
-	}
-	if !strings.Contains(cli.out.String(), "Status: unsupported") || !strings.Contains(cli.out.String(), "propose publish") {
-		t.Fatalf("legacy publication was not gated: %s", cli.out.String())
-	}
-	if ledgerSnapshot(t, root) != before || forge.createdCount() != created {
-		t.Fatalf("gated legacy publication mutated source or forge state")
-	}
 }
 
 // requireLedgerUnlocked fails when the ledger mutation lock is held, which

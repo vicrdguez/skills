@@ -9,6 +9,11 @@ import (
 	"sync/atomic"
 )
 
+type InvariantError struct{ Reason string }
+
+func (e *InvariantError) Error() string { return e.Reason }
+func Refuse(reason string) error        { return &InvariantError{Reason: reason} }
+
 func validConventionalBranch(root, branch string) bool {
 	return branch != "" && gitOK(root, "check-ref-format", "--branch", branch) == nil
 }
