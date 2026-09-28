@@ -2,7 +2,7 @@ Turn the understanding the user confirmed in Explore into an accepted Proposal: 
 
 ## 1. Gather context
 
-- Find Explore's user-confirmed final recap in this conversation, with every decision it names. It is your approved source. Without a confirmed recap, stop and suggest running `explore`; a superseded change also needs a fresh one.
+- Find Explore's user-confirmed final recap in this conversation, with every decision it names. It is your approved source for responsibilities, consequences, accepted limits and delegated choices. Without a confirmed recap, stop and suggest running `explore`; a superseded change also needs a fresh one.
 - When the user passes a reference, such as a spec path or an issue, read it in full.
 - Read `CONTEXT.md` and use its vocabulary. Respect the ADRs relevant to the change.
 
@@ -56,13 +56,13 @@ Write each slice's Contract documents. Acceptance records their exact bytes and 
 | `plan.md` | When the approved design pins architecture. | `skl skill --resource plan.md propose` |
 | `tasks.md` | When sequencing, Dependencies or coordination need explicit tracking. | `skl skill --resource tasks.md propose` |
 
-Keep the set compact: preserve the approved decisions, and add no obligation they lack. Give each section a descriptive, unique heading.
+Keep the set compact: carry the approved responsibilities, architectural consequences, accepted limitations and bounds of delegation where they matter to an implementer absent from the conversation. A stronger guarantee with new coordination or recovery duties changes the agreement, even when the slice boundary stays the same. Give each section a descriptive, unique heading.
 
 Label each independently tracked commitment: `B<n>` for a behavior rule, `A<n>` for an architectural commitment, `T<n>` for a warranted task, `M<n>` for human-owned Manual Verification. Label commitments only, never every paragraph or heading. Each label lives in one document; you assign it, and it stays stable from acceptance on.
 
-An unambiguously implied case needs no text of its own. Resolve every consequential behavioral or architectural gap before acceptance: silence delegates nothing.
+An unambiguously implied case needs no text of its own. Compare elaborations, including inherited mechanisms they rely on, with the approved consequences. Delegate internal helpers that preserve them; return new blocking or recovery duties to the user before acceptance when the approved sources leave them unsettled. Silence delegates nothing.
 
-If writing the Contracts changes a slice boundary or Dependency, explain the discovery and return to step 3 with the revised breakdown. Elaboration within unchanged slices needs no renewed approval.
+If writing the Contracts changes a slice boundary or Dependency, explain the discovery and return to step 3 with the revised breakdown. Faithful elaboration needs no renewed approval; a changed obligation needs human agreement even within an unchanged slice.
 
 Check: every slice has `intent.md`, `behavior.md` and each warranted document.
 
@@ -74,9 +74,9 @@ Run one bounded review in a fresh context across the whole slice set. Give the r
 - every decision and ADR it names;
 - every slice and its drafted documents.
 
-The reviewer checks only whether the drafts omit, weaken, strengthen, contradict or invent obligations relative to those sources. It leaves the design, the accepted choices and any decision gap alone.
+The reviewer checks only whether the drafts omit, weaken, strengthen, contradict or invent obligations relative to those sources, and flags unsettled consequential choices. It leaves resolution of decision gaps and the design to the human.
 
-Correct each demonstrable transcription error against the approved source. Return to the user an unsettled consequential choice, a contradiction within the approved sources, or a proposed semantic or architectural change; when the resolution changes a boundary or Dependency, return to step 3. Faithful corrections need no second approval and no document-by-document reread.
+Correct each demonstrable transcription error against the approved source. Return flagged decision gaps, contradictions within the approved sources and proposed semantic or architectural changes to the user before acceptance; when the resolution changes a boundary or Dependency, return to step 3. Faithful corrections need no second approval and no document-by-document reread.
 
 Check: every review finding is corrected or resolved by the user.
 
