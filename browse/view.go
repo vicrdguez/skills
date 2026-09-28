@@ -152,6 +152,9 @@ func (m Model) header() string {
 		revision = revision[:12]
 	}
 	facts := "current committed ledger " + revision + " · " + archived
+	if m.refreshFailure != nil {
+		facts = "NOT REFRESHED · last committed ledger " + revision + " · " + archived
+	}
 	if (m.screen == sliceScreen || m.screen == diagnosticsScreen) && m.detail.TotalLineCount() > m.detail.Height {
 		facts += fmt.Sprintf(" · scrolled %d%%", int(m.detail.ScrollPercent()*100))
 	}
@@ -164,6 +167,9 @@ func (m Model) header() string {
 		if m.docViewport.TotalLineCount() > m.docViewport.Height {
 			facts += fmt.Sprintf(" · scrolled %d%%", int(m.docViewport.ScrollPercent()*100))
 		}
+		if m.newerDocument {
+			facts += " · newer document available"
+		}
 		facts += " · ref " + m.currentDocument.Reference.Commit[:min(len(m.currentDocument.Reference.Commit), 12)]
 	}
 	return truncate(titleStyle.Render("skl browse › "+strings.Join(path, " › ")), m.width) + "\n" +
@@ -174,6 +180,15 @@ func (m Model) footer() string {
 	lines := []string{}
 	if m.status != "" {
 		lines = append(lines, wrap(m.status, m.width))
+	}
+	if m.refreshFailure != nil {
+		lines = append(lines, wrap(warningStyle.Render("! Refresh failed; displayed facts are NOT REFRESHED: "+m.refreshFailure.Error()), m.width))
+	}
+	if m.selectionMissing != "" {
+		lines = append(lines, wrap(warningStyle.Render("! "+m.selectionMissing), m.width))
+	}
+	if m.screen == documentScreen && m.newerDocument {
+		lines = append(lines, wrap("Newer document available; esc to documents and select latest", m.width))
 	}
 	if m.screen == documentScreen && m.renderProblem != "" {
 		lines = append(lines, wrap(warningStyle.Render("! "+m.renderProblem+"; showing recorded text"), m.width))
@@ -221,7 +236,7 @@ func (m Model) list(rows []string, cursor, height, width int) string {
 	var lines []string
 	for index := start; index < len(rows) && index < start+height; index++ {
 		line := "  " + rows[index]
-		if index == cursor {
+		if index == cursor && m.selectionMissing == "" {
 			line = selectedStyle.Render(truncate("> "+rows[index], width))
 		}
 		lines = append(lines, truncate(line, width))
@@ -336,6 +351,8 @@ func (m Model) listContent() (context []string, title string, rows []string, cur
 		if m.referencesFromDoc && m.currentDocument != nil {
 			context = append(context, "From "+documentLabel(*m.currentDocument))
 			context = append(context, diagnosticLines(m.currentDocument.Diagnostics)...)
+		} else if m.slice == nil || m.slice.Claim == nil {
+			context = append(context, "No current Slice Claim at ledger revision "+m.snapshot.Revision)
 		} else {
 			context = append(context, "From the current Slice Claim at ledger revision "+m.snapshot.Revision)
 		}
@@ -404,6 +421,9 @@ func (m Model) listContent() (context []string, title string, rows []string, cur
 			chosen := results[cursor]
 			selected = append([]string{"Project: " + chosen.project}, SliceSummaryLines(chosen.match.SliceSummary)...)
 		}
+	}
+	if m.selectionMissing != "" {
+		cursorRow, selected = -1, nil
 	}
 	return context, title, rows, cursorRow, selected, empty
 }

@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 
 	"github.com/urfave/cli/v2"
@@ -22,7 +21,7 @@ type cleanupOutcome struct {
 	SourceRepair  *ledgerOutcome           `json:"source_repair,omitempty"`
 }
 
-func cleanupCommand(newBackend backendFactory, stdout io.Writer) *cli.Command {
+func cleanupCommand(stdout io.Writer) *cli.Command {
 	return &cli.Command{
 		Name:  "cleanup",
 		Usage: "Archive terminal, unclaimed proposals and remove only safe merged local source work",
@@ -53,31 +52,15 @@ func cleanupCommand(newBackend backendFactory, stdout io.Writer) *cli.Command {
 				failure.rerun = rerun
 				return renderLedgerOutcome(stdout, format, *failure)
 			}
-			if store != nil {
-				return renderCleanup(stdout, format, rerun, ledgerCleanup(command, store, repository))
+			if store == nil {
+				return renderLedgerOutcome(stdout, format, ledgerOutcome{
+					Status: "fix_required",
+					Reason: "cleanup requires a configured ledger and an accepted Project for " + repository.Repository.Owner + "/" + repository.Repository.Name,
+					Repair: "configure skl/config.json with a ledger clone, then accept the Project with `skl ledger accept --repo <root> --proposal-dir <directory>` before running cleanup",
+					rerun:  rerun,
+				})
 			}
-			backend, err := newBackend(repository.Repository)
-			if err != nil {
-				return err
-			}
-			proposalBackend, ok := backend.(workflow.Backend)
-			if !ok {
-				return fmt.Errorf("workflow backend does not support proposal cleanup")
-			}
-			outcome, err := workflow.Cleanup(command.Context, repository.Root, proposalBackend)
-			if err != nil {
-				return err
-			}
-			if format == formatJSON {
-				return renderCleanup(stdout, format, "", cleanupOutcome{Status: cleanupStatus(false, len(outcome.Removed) > 0), Source: &outcome})
-			}
-			for _, slug := range outcome.Removed {
-				fmt.Fprintln(stdout, "removed", slug)
-			}
-			for _, preserved := range outcome.Preserved {
-				fmt.Fprintln(stdout, "preserved", preserved.Branch)
-			}
-			return nil
+			return renderCleanup(stdout, format, rerun, ledgerCleanup(command, store, repository))
 		},
 	}
 }

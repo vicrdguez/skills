@@ -120,6 +120,6 @@ Detail queries prefer active records when active and archived Proposals share a 
 
 Every view reads one committed ledger revision, never fetches or contacts a forge, and changes nothing. A Claim is shown as a reservation, not as a running worker. Markdown is the default transport; add `--format json` for the same facts and document content as structured JSON. Existing `skl ledger show` remains the byte-preserving raw exact-readback command.
 
-## Legacy
+## Status and cleanup
 
-`skl propose publish` is the forge-era, source-artifact proposal flow. It remains for repositories that have not adopted the ledger and is refused for a ledger Project. `skl propose cleanup` and `skl status` follow the Project: for a ledger Project, cleanup archives terminal proposals and removes only safely merged local source work, and status reads the ledger; otherwise both use the forge.
+`skl propose cleanup` requires ledger configuration and an accepted Project. It archives terminal proposals and removes only safely merged local source work. Without that authority, cleanup reports how to configure the ledger and accept a Project, without consulting GitHub. `skl status` still reads the ledger for adopted Projects and uses the forge otherwise. Accept and publish Proposals through `skl ledger accept` and `skl ledger publish`.
