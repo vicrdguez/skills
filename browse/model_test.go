@@ -408,6 +408,10 @@ func TestBrowserFollowsAnArchivedReportReferenceWithoutUsingTheCurrentSliceLocat
 	s.shows("Earlier archived watchdog report", "HISTORICAL")
 	s.press("v")
 	s.shows("watchdog report versions (2)")
+	s.press("down", "enter")
+	s.shows("Earlier archived watchdog report", "HISTORICAL", "current lifecycle: Awaiting Review")
+	s.press("v")
+	s.shows("watchdog report versions (2)")
 	s.hides("Cannot discover report versions")
 }
 
