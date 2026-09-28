@@ -122,4 +122,6 @@ Every view reads one committed ledger revision, never fetches or contacts a forg
 
 ## Status and cleanup
 
-`skl propose cleanup` requires ledger configuration and an accepted Project. It archives terminal proposals and removes only safely merged local source work. Without that authority, cleanup reports how to configure the ledger and accept a Project, without consulting GitHub. `skl status` still reads the ledger for adopted Projects and uses the forge otherwise. Accept and publish Proposals through `skl ledger accept` and `skl ledger publish`.
+`skl status` requires ledger configuration and an accepted Project. It reads the Project's Workflow State and observes attached submissions for merge or closure; without configuration or adoption it reports how to configure or accept work, rather than inferring state from GitHub. `--item <proposal>/<slice>` limits the status read to a fixed Work Item.
+
+`skl propose cleanup` also requires ledger configuration and an accepted Project. It archives terminal proposals and removes only safely merged local source work. Without that authority, cleanup reports how to configure the ledger and accept a Project, without consulting GitHub. Accept and publish Proposals through `skl ledger accept` and `skl ledger publish`.

@@ -9,6 +9,15 @@ import (
 	"sync/atomic"
 )
 
+type InvariantError struct{ Reason string }
+
+func (e *InvariantError) Error() string { return e.Reason }
+func Refuse(reason string) error        { return &InvariantError{Reason: reason} }
+
+func validConventionalBranch(root, branch string) bool {
+	return branch != "" && gitOK(root, "check-ref-format", "--branch", branch) == nil
+}
+
 // DeliverySource is the source-repository state one delivery phase relies on.
 // It carries Git identities and the evidence-bearing scope only; Workflow State,
 // Claims, review counts, and report persistence stay outside this module.

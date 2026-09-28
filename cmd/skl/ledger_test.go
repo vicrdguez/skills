@@ -21,7 +21,6 @@ import (
 	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/ledger"
 	"github.com/vicrdguez/skills/setup"
-	"github.com/vicrdguez/skills/workflow"
 )
 
 // TestMain isolates every test in this package from any real machine
@@ -1506,17 +1505,21 @@ func TestDeliveryNeverFallsBackToForgeAuthority(t *testing.T) {
 	// No ledger configuration authorizes no forge fallback.
 	root := proposalRepository(t)
 	prepareSlice(t, root, "widget")
-	backend := &implementationMemory{work: []workflow.ImplementationItem{{ID: "7", Branch: "widget", State: workflow.Ready}}}
+	forgeCalls := 0
+	noForge := func(github.RepositoryID) (setup.Backend, error) {
+		forgeCalls++
+		return nil, fmt.Errorf("delivery consulted forge authority")
+	}
 	var output bytes.Buffer
-	app := newApp(func(repository github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+	app := newApp(noForge, bytes.NewReader(nil), &output, &output)
 	if err := app.Run([]string{"skl", "implement", "next", "--repo", root, "--format", "json"}); err != nil {
 		t.Fatalf("legacy selection refused without adoption: %v\n%s", err, output.String())
 	}
-	if !strings.Contains(output.String(), `"fix_required"`) || strings.Contains(output.String(), `"packet"`) || backend.work[0].Claimed {
+	if !strings.Contains(output.String(), `"fix_required"`) || strings.Contains(output.String(), `"packet"`) || forgeCalls != 0 {
 		t.Fatalf("unconfigured delivery used the forge queue: %s", output.String())
 	}
 
-	// Once accepted, the private item is selected instead of the public #7.
+	// Once accepted, selection still uses the private item without consulting the forge.
 	fixture := newLedgerFixture(t)
 	if outcome := newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", singleSlice("adopted-work"))); outcome.Status != "accepted" {
 		t.Fatalf("adoption acceptance failed: %s", mustJSON(t, outcome))
@@ -1524,12 +1527,12 @@ func TestDeliveryNeverFallsBackToForgeAuthority(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(fixture.clone, "projects", "widgets", "proposals", "adopted-work")); err != nil {
 		t.Fatalf("adoption not recorded: %v", err)
 	}
-	app2 := newApp(func(repository github.RepositoryID) (setup.Backend, error) { return backend, nil }, bytes.NewReader(nil), &output, &output)
+	app2 := newApp(noForge, bytes.NewReader(nil), &output, &output)
 	output.Reset()
 	if err := app2.Run([]string{"skl", "implement", "next", "--repo", root, "--format", "json"}); err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if !strings.Contains(output.String(), `"status":"work_available"`) || !strings.Contains(output.String(), "adopted-work/foundation") || backend.work[0].Claimed {
+	if !strings.Contains(output.String(), `"status":"work_available"`) || !strings.Contains(output.String(), "adopted-work/foundation") || forgeCalls != 0 {
 		t.Fatalf("adopted project fell back to the forge queue: %s", output.String())
 	}
 }

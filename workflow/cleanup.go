@@ -9,8 +9,6 @@ import (
 
 type WorkItemID string
 
-type SubmissionID string
-
 type CoordinationItem struct {
 	Children []WorkItemID
 	ID       WorkItemID

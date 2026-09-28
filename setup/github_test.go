@@ -17,6 +17,11 @@ import (
 	"github.com/vicrdguez/skills/github"
 )
 
+func boundGitHubBackend(backend *GitHubBackend) *GitHubBackend {
+	backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
+	return backend
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (function roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {

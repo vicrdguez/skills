@@ -1,20 +1,15 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
-
-	"github.com/vicrdguez/skills/github"
-	"github.com/vicrdguez/skills/setup"
 )
 
 // candidateForge is a controlled GitHub observation surface for the
@@ -420,24 +415,4 @@ func selectionRepository(t *testing.T) string {
 	root := proposalRepository(t)
 	runGit(t, root, "remote", "set-url", "origin", "git@github.com:acme/widgets.git")
 	return root
-}
-
-func selectionStatusRun(t *testing.T, root string, forge *candidateForge) setup.StatusOutput {
-	t.Helper()
-	server := httptest.NewServer(forge)
-	t.Cleanup(server.Close)
-	var output bytes.Buffer
-	app := newApp(func(github.RepositoryID) (setup.Backend, error) {
-		backend := setup.NewGitHubBackend(server.URL, "token", server.Client())
-		backend.BindRepository(github.RepositoryID{Owner: "acme", Name: "widgets"})
-		return backend, nil
-	}, bytes.NewReader(nil), &output, &output)
-	if err := app.Run([]string{"skl", "status", "--repo", root}); err != nil {
-		t.Fatal(err)
-	}
-	var result setup.StatusOutput
-	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
-		t.Fatal(err)
-	}
-	return result
 }
