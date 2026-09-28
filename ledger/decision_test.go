@@ -34,9 +34,9 @@ func decisionInbox(t *testing.T, store *ledger.Store, filter string) *ledger.Inb
 	return inbox
 }
 
-// TestDecisionRefusesActiveClaimAndDifferingReplay covers the active-Claim
-// refusal without changing the authoritative record.
-func TestDecisionRefusesActiveClaimAndDifferingReplay(t *testing.T) {
+// TestDecisionRefusesActiveClaim covers the active-Claim refusal without
+// changing the authoritative record.
+func TestDecisionRefusesActiveClaim(t *testing.T) {
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "decision-claim", "foundation", ledger.ReadyForImplementation, nil, deliveryInitial)
@@ -121,11 +121,10 @@ func TestDecisionPrecommitFaultLeavesNoPartialState(t *testing.T) {
 	}
 }
 
-// TestDecisionWatchdogContinuationPreservesReviewBudget covers B6/A3: a
-// finding-driven Implement decision resumes Rework, a Watchdog decision resumes
-// Awaiting Review at the same code with the implementation inputs and recorded
-// count, and the two-review budget is unchanged.
-func TestDecisionWatchdogContinuationPreservesReviewBudget(t *testing.T) {
+// TestDecisionFindingDrivenImplementResumesRework checks the package route
+// after a finding-driven pause. The CLI continuation journeys protect the
+// Watchdog route and the unchanged-code review count.
+func TestDecisionFindingDrivenImplementResumesRework(t *testing.T) {
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "decision-review", "foundation", ledger.ReadyForImplementation, nil, deliveryInitial)
@@ -153,40 +152,10 @@ func TestDecisionWatchdogContinuationPreservesReviewBudget(t *testing.T) {
 		t.Fatalf("finding-driven decision = %#v, %v", findingResult, err)
 	}
 
-	implementThree := deliveryStart(t, store, deliveryWidgets(), ledger.ImplementPhase)
-	deliveryHandoff(t, store, deliveryWidgets(), item, ledger.ImplementPhase, implementThree.Claim.Commit, source, "awaiting_review", "implementation three\n")
-	watchdogTwo := deliveryStart(t, store, deliveryWidgets(), ledger.WatchdogPhase)
-	deliveryHandoff(t, store, deliveryWidgets(), item, ledger.WatchdogPhase, watchdogTwo.Claim.Commit, review, "rework", "W1 still open.\n")
-
-	inbox := decisionInbox(t, store, "widgets")
-	if len(inbox.Requests) != 1 || inbox.Requests[0].Phase != ledger.WatchdogPhase {
-		t.Fatalf("paused review request = %#v", inbox.Requests)
-	}
-	request := inbox.Requests[0].Request
-
-	// Review continuation at unchanged code resumes Awaiting Review with the
-	// fixed implementation inputs and does not reset the count.
-	result, err := ledger.ApplyDecision(store, ledger.DecisionInput{
-		Project: "widgets", Item: item, Request: request,
-		Answer: "reconsider W1 at the same code revision\n", Route: ledger.RouteWatchdog,
-	})
-	if err != nil || result.Status != ledger.DecisionApplied || result.State != ledger.AwaitingReview {
-		t.Fatalf("watchdog decision = %#v, %v", result, err)
-	}
-	watchdogThree := deliveryStart(t, store, deliveryWidgets(), ledger.WatchdogPhase)
-	if watchdogThree.State.Claim == nil || watchdogThree.State.Claim.Inputs.Decision == nil {
-		t.Fatal("review continuation lost the recorded decision input")
-	}
-	if watchdogThree.Watchdog == nil || watchdogThree.Watchdog.Round != 2 {
-		t.Fatalf("review count was reset: %#v", watchdogThree.Watchdog)
-	}
-	passed := deliveryHandoff(t, store, deliveryWidgets(), item, ledger.WatchdogPhase, watchdogThree.Claim.Commit, review, "pass", "W1 resolved.\n")
-	if passed.Status != ledger.ReadyForMerge || passed.State.Decision {
-		t.Fatalf("round 3 pass = %#v", passed)
-	}
-	report, _ := deliveryReport(t, l, "widgets", item, ledger.WatchdogPhase)
-	if report.Round != 3 {
-		t.Fatalf("completed review count = %d, want 3", report.Round)
+	// A fresh Claim must use the Rework lane, not reset to initial work.
+	continued := deliveryStart(t, store, deliveryWidgets(), ledger.ImplementPhase)
+	if continued.State.State != ledger.Rework || continued.State.Claim.Inputs.Decision == nil {
+		t.Fatalf("finding-driven continuation = %#v, want Rework with direction", continued.State)
 	}
 }
 

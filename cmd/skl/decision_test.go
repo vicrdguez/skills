@@ -639,7 +639,7 @@ func TestDecisionWatchdogContinuationAtSameCode(t *testing.T) {
 	deliveryAcceptFixture(t, forge, source)
 	cli := decisionReadOnlyApp(t)
 
-	// Round 1: a change is implemented and reviewed as Rework.
+	// Round 1: implementation at the prepared revision is reviewed as Rework.
 	started := decisionSelect(t, cli, source)
 	prepared, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--item", deliveryTestItem, "--claim", started.Execution.Claim.Commit, "--format", "json")
 	if err != nil || prepared.Source == nil {
@@ -695,7 +695,7 @@ func TestDecisionWatchdogContinuationAtSameCode(t *testing.T) {
 		t.Fatalf("watchdog direction = %#v", applied)
 	}
 
-	// Round 3 reviews the same code with the recorded count and can pass.
+	// Round 3 reviews the same code with the recorded count and fails again.
 	review3 := decisionSelectPhase(t, cli, ledger.WatchdogPhase, source)
 	if review3.Execution.Implement == nil || review3.Execution.Implement.Source.Head != head {
 		t.Fatalf("round 3 did not review the unchanged revision %s: %#v", head, review3.Execution)
