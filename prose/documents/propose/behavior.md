@@ -1,25 +1,24 @@
 # {Change title} Behavior
 
 <!--
-Write a named rule wherever a consequential ambiguity needs a decision. A rule
-governs its whole class of situations, beyond the scenarios beneath it.
+For consequential stateful behavior, first ask what remains true across
+transitions, interruption and retry; state the governing rule for that class
+of situations, beyond a single demonstrated sequence. Name a rule wherever
+plausible interpretations have different consequences.
 
-Add a scenario only when it tells plausible interpretations of a rule apart.
-Each scenario:
-- is observable through the interface the slice is verified at;
-- states its precondition with Given, its action with When, and its observable
-  outcome with Then, adding And or But for further or unchanged outcomes;
-- considers, where relevant, state and side effects, effects that must not
-  happen, and failure, cancellation, retry or partial completion.
-
-Scenarios are readable Gherkin prose that bind behavior, not tests or tasks.
+Select scenarios that tell those interpretations apart through the slice's
+observable interface. State the precondition with Given, the action with When,
+and the outcome with Then; add And or But for relevant unchanged or prohibited
+effects, such as state or side effects after failure, cancellation or retry.
+Scenarios bind behavior; they are neither a phase-permutation inventory nor a
+test plan. Use only the cases that clarify the rule.
 
 Delete this comment in the real file.
 -->
 
 ## B1: {scoped, consequential rule}
 
-{State the rule, its scope, and the effects it rules out.}
+{State what holds throughout the rule's scope, including accepted limitations and relevant effects it rules out.}
 
 ### Scenario: {case that distinguishes plausible interpretations}
 - Given {the relevant precondition}

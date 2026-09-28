@@ -16,6 +16,8 @@ type documentFrame struct {
 	screen            screen
 	returnScreen      screen
 	renderProblem     string
+	openedContext     string
+	openedRevision    string
 	references        []ledger.LabeledReference
 	referenceOrigin   screen
 	referencesFromDoc bool
@@ -93,10 +95,13 @@ func (m *Model) restoreReferenceFrame(frame referenceFrame) {
 	m.references = append([]ledger.LabeledReference(nil), frame.references...)
 	m.referenceOrigin, m.referencesFromDoc = frame.origin, frame.fromDocument
 	m.cursor[referencesScreen] = frame.cursor
+	m.refreshCurrentReferences()
 }
 
 func (m *Model) openDocument(document ledger.Document) {
 	m.currentDocument = &document
+	m.openedContext, m.openedRevision = m.currentContext(), m.snapshot.Revision
+	m.newerDocument = false
 	m.documentReturn = documentsScreen
 	m.documentHistory = nil
 	m.referenceHistory = nil
@@ -119,6 +124,7 @@ func (m *Model) followReference(reference ledger.Reference) {
 	frame := documentFrame{
 		viewport: m.docViewport, screen: m.screen,
 		returnScreen: m.documentReturn, renderProblem: m.renderProblem,
+		openedContext: m.openedContext, openedRevision: m.openedRevision,
 		references:      append([]ledger.LabeledReference(nil), m.references...),
 		referenceOrigin: m.referenceOrigin, referencesFromDoc: m.referencesFromDoc,
 		referenceCursor:  m.cursor[referencesScreen],
@@ -129,6 +135,8 @@ func (m *Model) followReference(reference ledger.Reference) {
 	}
 	m.documentHistory = append(m.documentHistory, frame)
 	m.currentDocument = document
+	m.openedContext, m.openedRevision = m.currentContext(), m.snapshot.Revision
+	m.newerDocument = m.documentHasNewerVersion()
 	m.documentReturn = referencesScreen
 	m.renderProblem = ""
 	m.screen = documentScreen
@@ -140,18 +148,18 @@ func (m *Model) followReference(reference ledger.Reference) {
 }
 
 func (m Model) documentContent(document *ledger.Document, width int) (string, string) {
-	var preamble []string
-	preamble = append(preamble, "## Record metadata", "")
+	context := strings.Replace("Context at open: "+m.openedContext, " — current lifecycle:", "\n\ncurrent lifecycle:", 1)
+	context = strings.ReplaceAll(context, "; current ", "\n\ncurrent ")
+	preamble := []string{context, "", "## Record metadata", ""}
 	preamble = append(preamble,
 		"Document kind: "+string(document.Kind),
 		"Ledger document: "+document.Reference.Commit+":"+document.Reference.Path,
 	)
-	if document.Reference.Commit == m.snapshot.Revision {
-		preamble = append(preamble, "Identity: current snapshot document")
+	if document.Reference.Commit == m.openedRevision {
+		preamble = append(preamble, "Identity when opened: current snapshot document")
 	} else {
-		preamble = append(preamble, "Identity: HISTORICAL ledger document; current lifecycle, Claim, and Dependencies remain from the current snapshot")
+		preamble = append(preamble, "Identity when opened: HISTORICAL ledger document; context above describes the ledger when opened, not a historical whole-workflow view")
 	}
-	preamble = append(preamble, "Current browsing context: "+m.currentContext())
 
 	if report := document.Report; report != nil {
 		phase := "Implementation"
@@ -232,7 +240,7 @@ func (m Model) currentContext() string {
 				if m.slice.Claim == nil {
 					context += "; current Claim: none"
 				} else {
-					context += "; current Claim: " + claimText(m.slice.Claim.Phase, m.slice.Claim.Basis)
+					context += "; current Claim: " + m.slice.Claim.Phase + " reservation"
 				}
 				if len(m.slice.Dependencies) == 0 {
 					context += "; current Dependencies: none"
@@ -255,7 +263,7 @@ func (m Model) currentContext() string {
 	if m.docContext == proposalScreen && m.members != nil && m.members.Proposal.Archived {
 		context += " [archived Proposal]"
 	}
-	return context + " at current ledger " + m.snapshot.Revision
+	return context + " at current ledger " + m.snapshot.Revision[:min(len(m.snapshot.Revision), 12)]
 }
 
 func (m Model) rowsForDocumentList() []ledger.Document {

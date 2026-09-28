@@ -1,7 +1,7 @@
 # {Change title} Plan
 
 <!--
-Record the architecture the approved design pins, for an implementer who was
+Record the architecture the approved design pins for an implementer who was
 not in the conversation. Point to existing ADRs instead of restating them.
 Mark a sketch that only explains a decision **Illustrative**. Delete this
 comment in the real file.
@@ -12,8 +12,10 @@ comment in the real file.
 
 ## Approach
 <!--
-How the pinned responsibilities fit together. Leave private paths, helpers and
-other delegated details to the implementer unless they were agreed.
+How the pinned responsibilities fit together, the operational consequences and
+limits the approved design accepts, and which owner handles recovery when it is
+agreed. Name the boundary of delegated choices; leave private paths, helpers
+and other choices within it to the implementer.
 -->
 
 ## Responsibility ownership
