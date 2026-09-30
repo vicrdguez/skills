@@ -1,22 +1,25 @@
 # Issue Publication Prose
 
-Write fresh human-facing descriptions of accepted proposal `widget-dashboard` and publish them through `skl`. Write them from the current private evidence; earlier bodies are not kept.
+Write fresh human-facing descriptions of accepted proposal `widget-dashboard` from its current evidence, and publish them through `skl`.
 
 ## Read the evidence
 
-Read each slice the publication outcome lists with `skl ledger show --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/<slice>'`. It shows the frozen Contract, current state, Dependencies and attached issues. That evidence stays private.
+Run `skl browse documents --project 'widgets' --proposal 'widget-dashboard'`. It shows the Proposal description, every slice's Contract, current reports and any active Human Decision. When a report's consumed ledger references include a decision or earlier report that bears on the work, read it with `skl ledger show --commit <ledger-commit> --path <ledger-path>`.
 
-Check: you have read every listed slice.
+Check: you have read the Proposal description and every slice's documents.
 
 ## Write the prose
 
-Write one self-contained Markdown file per slice, plus one parent body when the proposal has several slices, in private temporary files outside the source tree and the ledger clone.
+Write one body per slice, plus a parent body when the Proposal has several slices, in private temporary Markdown files outside the source tree. Write each body for a collaborator whose only source is that one issue, and write it complete, as though it were the first version they read.
 
-- Say what the work commits to, its current context, useful evidence, and what a human still owns, such as Manual Verification.
-- Summarize the Contract, reports and decisions, and point to the private readback for detail.
-- Let a parent body describe how its slices group together, leaving each child's detail to the child.
+- **Slice body:** the problem, the intended outcome, the accepted scope and what it leaves out, and the broad approach. In a multi-slice Proposal, add a sentence or two on how this slice contributes to the overall change.
+- **Parent body:** the overall problem, intended outcome, scope and broad approach, and how the slices group together. Each slice's detailed scope stays in its own issue.
+- **Decisions and concerns:** the significant trade-offs and decisions, each marked as settled or still waiting on a human, and the concerns that still matter to a reader.
+- **Human checks:** each human-owned check, such as Manual Verification, described in the body well enough that its owner knows what to check and why, plus any known gap in verification.
 
-Check: every listed slice has a body file.
+Judge each fact by its use to the reader, whichever document holds it, and summarize it in your own words. Keep out bookkeeping, such as ledger paths and commits, `skl` commands, Claims, finding numbers, report inventories and worker exchanges, and genuinely sensitive detail, such as credentials or unfixed security weaknesses; where that detail shapes scope or readiness, state its effect in general terms. Describe the work itself rather than its progress. Links to public context, such as merged pull requests or public docs, may supplement the explanation.
+
+Check: every slice has a body file, plus a parent body for a multi-slice Proposal, and each body explains its work to a reader who sees only that issue.
 
 ## Publish
 

@@ -2442,7 +2442,7 @@ func TestMissingProseGuidesFreshAuthoring(t *testing.T) {
 			"skl ledger show " + selection + " --item 'lost-prose/feature'",
 			"skl ledger show " + selection + " --item 'lost-prose/foundation'",
 		},
-		Guidance:     "skl skill --resource issue-publication.md --input 'proposal=lost-prose' --input 'repo=" + root + "' --input 'remote=upstream' propose",
+		Guidance:     "skl skill --resource issue-publication.md --input 'proposal=lost-prose' --input 'project=widgets' --input 'repo=" + root + "' --input 'remote=upstream' propose",
 		Continuation: "skl ledger publish " + selection + " --proposal 'lost-prose' --issue 'feature='<body-file> --issue 'foundation='<body-file> --parent-body <parent-body-file>",
 	}
 	if mustJSON(t, outcome.Authoring) != mustJSON(t, want) {
@@ -2454,18 +2454,35 @@ func TestMissingProseGuidesFreshAuthoring(t *testing.T) {
 	if readback.Status != "shown" {
 		t.Fatalf("authoring readback cannot read the selected Project: %s", mustJSON(t, readback))
 	}
-	// The guidance renders with the continuation arguments bound.
+	// The guidance renders with the evidence and continuation arguments bound.
 	cli.out.Reset()
-	if err := cli.app.Run([]string{"skl", "skill", "--resource", "issue-publication.md", "--input", "proposal=lost-prose", "--input", "repo=" + root, "--input", "remote=upstream", "propose"}); err != nil {
+	if err := cli.app.Run([]string{"skl", "skill", "--resource", "issue-publication.md", "--input", "proposal=lost-prose", "--input", "project=widgets", "--input", "repo=" + root, "--input", "remote=upstream", "propose"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, wanted := range []string{
-		"skl ledger show " + selection + " --item 'lost-prose/<slice>'",
+		"skl browse documents --project 'widgets' --proposal 'lost-prose'",
 		"skl ledger publish " + selection + " --proposal 'lost-prose'",
 	} {
 		if !strings.Contains(cli.out.String(), wanted) {
 			t.Fatalf("authoring guidance lacks %q:\n%s", wanted, cli.out.String())
 		}
+	}
+	// The evidence command, run with exactly its bound arguments, reads the
+	// Proposal description and every slice's Contract.
+	cli.out.Reset()
+	if err := cli.app.Run([]string{"skl", "browse", "documents", "--project", "widgets", "--proposal", "lost-prose", "--format", "json"}); err != nil {
+		t.Fatal(err)
+	}
+	var evidence browseOutcome
+	if err := json.Unmarshal(cli.out.Bytes(), &evidence); err != nil {
+		t.Fatalf("decode evidence %q: %v", cli.out.String(), err)
+	}
+	proposalPath := "projects/widgets/proposals/lost-prose/"
+	if evidence.Status != "shown" || evidence.Documents == nil ||
+		!hasDocument(evidence.Documents.Documents, ledger.ProposalDocumentKind, proposalPath+"proposal.md") ||
+		!hasDocument(evidence.Documents.Documents, ledger.ContractDocumentKind, proposalPath+"feature/intent.md") ||
+		!hasDocument(evidence.Documents.Documents, ledger.ContractDocumentKind, proposalPath+"foundation/intent.md") {
+		t.Fatalf("authoring evidence omits the Proposal description or a slice Contract: %s", cli.out.String())
 	}
 	cli.out.Reset()
 	if err := cli.app.Run([]string{"skl", "ledger", "publish", "--repo", root, "--remote", "upstream", "--proposal", "lost-prose"}); err != nil {

@@ -412,7 +412,7 @@ func TestAgentProseGoldens(t *testing.T) {
 		}
 	}
 	g.capture("resource-propose-issue-publication", worker, "skill", "--resource", "issue-publication.md",
-		"--input", "proposal="+proseProposal, "--input", "repo="+source, "--input", "remote=origin", "propose")
+		"--input", "proposal="+proseProposal, "--input", "project=widgets", "--input", "repo="+source, "--input", "remote=origin", "propose")
 	g.capture("resource-implement-ledger-submission", worker, "skill", "--resource", "ledger-submission.md",
 		"--input", "result_directory="+result, "--input", "procedure=initial", "implement")
 	g.capture("resource-watchdog-ledger-review", worker, "skill", "--resource", "ledger-review.md",

@@ -80,7 +80,20 @@ Correct each demonstrable transcription error against the approved source. Retur
 
 Check: every review finding is corrected or resolved by the user.
 
-## 6. Accept into the Workflow Ledger
+## 6. Write the issue descriptions
+
+Write one body per slice, plus a parent body when the Proposal has several slices, in private temporary Markdown files outside the source tree. Write each body for a collaborator whose only source is that one issue, and write it complete, as though it were the first version they read.
+
+- **Slice body:** the problem, the intended outcome, the accepted scope and what it leaves out, and the broad approach. In a multi-slice Proposal, add a sentence or two on how this slice contributes to the overall change.
+- **Parent body:** the overall problem, intended outcome, scope and broad approach, and how the slices group together. Each slice's detailed scope stays in its own issue.
+- **Decisions and concerns:** the significant trade-offs and decisions, each marked as settled or still waiting on a human, and the concerns that still matter to a reader.
+- **Human checks:** each human-owned check, such as Manual Verification, described in the body well enough that its owner knows what to check and why, plus any known gap in verification.
+
+Judge each fact by its use to the reader, whichever document holds it, and summarize it in your own words. Keep out bookkeeping, such as ledger paths and commits, `skl` commands, Claims, finding numbers, report inventories and worker exchanges, and genuinely sensitive detail, such as credentials or unfixed security weaknesses; where that detail shapes scope or readiness, state its effect in general terms. Describe the work itself rather than its progress. Links to public context, such as merged pull requests or public docs, may supplement the explanation.
+
+Check: every slice has a body file, plus a parent body for a multi-slice Proposal, and each body explains its work to a reader who sees only that issue.
+
+## 7. Accept into the Workflow Ledger
 
 1. Run `skl propose cleanup --repo <root>` and follow its outcome. It archives finished Proposals and removes safe merged source work itself.
 2. Commit durable `CONTEXT.md` and ADR changes to the target branch.
@@ -88,8 +101,7 @@ Check: every review finding is corrected or resolved by the user.
    - `proposal.md`: the durable description of the approved Proposal;
    - `proposal.json`: `{"proposal": "<kebab-name>", "parent_title": "<multi-slice only>", "slices": [{"name": "<slug>", "title": "<issue title>", "branch": "<planned source branch>", "depends": ["<sibling slug or proposals/<proposal>/<slice>"]}]}`;
    - one directory per slice, holding only its Contract documents.
-4. Write a self-contained, human-facing issue body for each slice, plus a parent body for multi-slice work, in private temporary Markdown files.
-5. Run `skl ledger accept --repo <root> --proposal-dir <dir> --issue <slice>=<body-file>`, repeating `--issue` per slice and adding `--parent-body <file>` for multi-slice work, and follow its outcome. Acceptance records each planned branch; it creates no branch or worktree.
-6. Read each slice back with `skl ledger show --repo <root> --item <proposal>/<slice>`. Cite its ledger commit and path when you identify a document exactly.
+4. Run `skl ledger accept --repo <root> --proposal-dir <dir> --issue <slice>=<body-file>`, repeating `--issue` per slice and adding `--parent-body <file>` for multi-slice work, and follow its outcome. Acceptance records each planned branch; it creates no branch or worktree.
+5. Read each slice back with `skl ledger show --repo <root> --item <proposal>/<slice>`. Cite its ledger commit and path when you identify a document exactly.
 
 Check: the readback shows every slice's accepted documents.

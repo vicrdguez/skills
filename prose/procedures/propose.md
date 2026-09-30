@@ -80,7 +80,10 @@ Correct each demonstrable transcription error against the approved source. Retur
 
 Check: every review finding is corrected or resolved by the user.
 
-## 6. Accept into the Workflow Ledger
+## 6. Write the issue descriptions
+
+{{template "issue-description" .}}
+## 7. Accept into the Workflow Ledger
 
 1. Run `skl propose cleanup --repo <root>` and follow its outcome. It archives finished Proposals and removes safe merged source work itself.
 2. Commit durable `CONTEXT.md` and ADR changes to the target branch.
@@ -88,8 +91,7 @@ Check: every review finding is corrected or resolved by the user.
    - `proposal.md`: the durable description of the approved Proposal;
    - `proposal.json`: `{"proposal": "<kebab-name>", "parent_title": "<multi-slice only>", "slices": [{"name": "<slug>", "title": "<issue title>", "branch": "<planned source branch>", "depends": ["<sibling slug or proposals/<proposal>/<slice>"]}]}`;
    - one directory per slice, holding only its Contract documents.
-4. Write a self-contained, human-facing issue body for each slice, plus a parent body for multi-slice work, in private temporary Markdown files.
-5. Run `skl ledger accept --repo <root> --proposal-dir <dir> --issue <slice>=<body-file>`, repeating `--issue` per slice and adding `--parent-body <file>` for multi-slice work, and follow its outcome. Acceptance records each planned branch; it creates no branch or worktree.
-6. Read each slice back with `skl ledger show --repo <root> --item <proposal>/<slice>`. Cite its ledger commit and path when you identify a document exactly.
+4. Run `skl ledger accept --repo <root> --proposal-dir <dir> --issue <slice>=<body-file>`, repeating `--issue` per slice and adding `--parent-body <file>` for multi-slice work, and follow its outcome. Acceptance records each planned branch; it creates no branch or worktree.
+5. Read each slice back with `skl ledger show --repo <root> --item <proposal>/<slice>`. Cite its ledger commit and path when you identify a document exactly.
 
 Check: the readback shows every slice's accepted documents.
