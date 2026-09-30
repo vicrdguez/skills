@@ -3,6 +3,7 @@ package browse_test
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -99,7 +100,7 @@ func TestShortStackedTerminalKeepsTheListOverThePreview(t *testing.T) {
 	s.press("enter", "down")
 	s.within(size)
 	s.shows("Delivery: unknown", "╭─ Slices (3) ─", " 2/3 ─╯")
-	s.row("> ", "cancel", "◐ Awaiting Review")
+	s.row("> ", "cancel")
 }
 
 func TestStackedEmptyListShowsItsWholeMessage(t *testing.T) {
@@ -123,7 +124,10 @@ func TestListKeepsTheSelectedRowVisibleAndItsPositionOnTheBorder(t *testing.T) {
 		s.press("enter")
 		s.press(downs(30)...)
 		s.within(size)
-		s.row("> ! damaged28", "! lifecycle unknown")
+		s.shows("> ! damaged28")
+		if entry := s.listEntries("damaged28", "damaged29")["damaged28"]; !strings.Contains(strings.Join(entry, "\n"), "! lifecycle unknown") {
+			t.Fatalf("%dx%d: the selected row lacks its lifecycle: %q", size.Width, size.Height, entry)
+		}
 		s.row("╰", "31/38", "╯")
 	}
 }
@@ -165,6 +169,97 @@ func TestClaimMarkerStaysOnAFortyColumnList(t *testing.T) {
 	s.row("…ed", "◐ Awaiting Review", "▸ watchdog")
 	if open := s.row("…en", "◐ Awaiting Review"); strings.Contains(open, "▸") {
 		t.Fatalf("an unclaimed Slice shows a Claim marker: %q", open)
+	}
+}
+
+// listEntries is the lines of the list pane that show each of names in
+// turn, from the line naming it to the line before the next name.
+func (s *session) listEntries(names ...string) map[string][]string {
+	s.t.Helper()
+	entries, current, inside := map[string][]string{}, "", false
+	for _, line := range strings.Split(s.model.View(), "\n") {
+		switch {
+		case strings.Contains(line, "╭─ Slices"):
+			inside = true
+			continue
+		case strings.HasPrefix(line, "╰"):
+			inside = false
+		}
+		if !inside {
+			continue
+		}
+		for _, name := range names {
+			if strings.Contains(line, name) {
+				current = name
+			}
+		}
+		if current != "" {
+			entries[current] = append(entries[current], line)
+		}
+	}
+	return entries
+}
+
+func TestFortyColumnSliceListsKeepEveryLifecycleAndClaim(t *testing.T) {
+	spectrumFacts := map[string][]string{"i-torn": {"! lifecycle unknown", "claim unknown"}}
+	for slice, lifecycle := range lifecycleRows {
+		spectrumFacts[slice] = []string{lifecycle}
+	}
+	spectrumFacts["c-impl"] = append(spectrumFacts["c-impl"], "▸ implement")
+	spectrumFacts["d-review"] = append(spectrumFacts["d-review"], "▸ watchdog")
+	widgets := start(t, "widgets")
+	widgets.send(tea.WindowSizeMsg{Width: 40, Height: 24})
+	widgets.press("enter")
+	for _, list := range []struct {
+		s     *session
+		size  tea.WindowSizeMsg
+		facts map[string][]string
+	}{
+		{startSpectrum(t, 40), tea.WindowSizeMsg{Width: 40, Height: 40}, spectrumFacts},
+		{widgets, tea.WindowSizeMsg{Width: 40, Height: 24}, map[string][]string{
+			"broken": {"! lifecycle unknown", "claim unknown"},
+			"cancel": {"◐ Awaiting Review", "▸ watchdog"},
+			"refund": {"○ Ready for Implementation"},
+		}},
+	} {
+		var names []string
+		for name := range list.facts {
+			names = append(names, name)
+		}
+		// Each row is read once the selection has scrolled it into view.
+		entries := map[string][]string{}
+		for range names {
+			list.s.within(list.size)
+			for name, entry := range list.s.listEntries(names...) {
+				if _, seen := entries[name]; !seen {
+					entries[name] = entry
+				}
+			}
+			list.s.press("down")
+		}
+		lifecycles, claims := map[int]string{}, map[int]string{}
+		for name, facts := range list.facts {
+			entry := strings.Join(entries[name], "\n")
+			for index, fact := range facts {
+				at := slices.IndexFunc(entries[name], func(line string) bool { return strings.Contains(line, fact) })
+				if at < 0 {
+					t.Fatalf("%dx%d: %s lacks %q: %q", list.size.Width, list.size.Height, name, fact, entries[name])
+				}
+				line := entries[name][at]
+				offset := lipgloss.Width(line[:strings.Index(line, fact)])
+				if index == 0 {
+					lifecycles[offset] = name
+				} else {
+					claims[offset] = name
+				}
+			}
+			if len(facts) == 1 && (strings.Contains(entry, "▸") || strings.Contains(entry, "claim")) {
+				t.Errorf("unclaimed %s shows a Claim: %q", name, entry)
+			}
+		}
+		if len(lifecycles) != 1 || len(claims) != 1 {
+			t.Fatalf("columns start at different offsets: lifecycles %v, claims %v:\n%s", lifecycles, claims, list.s.model.View())
+		}
 	}
 }
 

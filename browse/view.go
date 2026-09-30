@@ -343,10 +343,13 @@ func (l listing) width() int {
 	return width
 }
 
-// shortestName is the fewest cells a shortened first column keeps: the name
-// yields before the lifecycle and Claim do. A pane too narrow for the whole
-// columns even then cuts rows at its edge instead.
+// shortestName is the fewest cells a shortened first column keeps on a
+// one-line row: the name yields before the lifecycle and Claim do.
 const shortestName = 3
+
+// tierIndent is how much further than the first column a row's later lines
+// start, so each row's lines read as one entry.
+const tierIndent = 2
 
 // lines renders the list in a window of height lines that keeps the cursor
 // row visible. The cursor row is marked by text as well as style.
@@ -355,68 +358,128 @@ func (l listing) lines(width, height int) []string {
 		return wrapLines([]string{l.empty}, width)
 	}
 	widths, marks := l.layout()
-	if l.whole > 0 {
-		excess := rowWidth(widths[:min(l.whole, len(widths))], marks) - width
-		if excess > 0 && widths[0]-excess >= shortestName {
-			widths[0] -= excess
+	tiers := l.tiers(widths, marks, width)
+	blocks := make([][]string, len(l.rows))
+	for index, row := range l.rows {
+		blocks[index] = row.render(widths, tiers, marks, index == l.cursorRow, width)
+	}
+	start := 0
+	if l.cursorRow >= 0 {
+		start = l.cursorRow
+		for used := len(blocks[start]); start > 0 && used+len(blocks[start-1]) <= height; start-- {
+			used += len(blocks[start-1])
 		}
 	}
-	start := max(l.cursorRow-height+1, 0)
 	var lines []string
-	for index := start; index < len(l.rows) && index < start+height; index++ {
-		lines = append(lines, l.rows[index].render(widths, marks, index == l.cursorRow, width))
+	for _, block := range blocks[start:] {
+		if len(lines) > 0 && len(lines)+len(block) > height {
+			break
+		}
+		lines = append(lines, block...)
 	}
 	return lines
 }
 
-// render draws one row with its columns padded to widths and, when marks is
-// set, a column for the unknown-facts marker.
-func (r row) render(widths []int, marks, selected bool, width int) string {
-	if r.columns == nil {
-		return truncate("  "+r.heading, width)
+// tiers groups the columns into the lines every row takes within width,
+// narrowing widths[0] where that keeps a row to one line. A row takes one
+// line when its whole columns fit, its first column shortened down to
+// shortestName if need be. Otherwise the first column takes a line of its
+// own and the other whole columns wrap beneath it, so each column still
+// starts at one offset on every row. Columns after the whole ones follow on
+// the last line and are cut at the pane's edge.
+func (l listing) tiers(widths []int, marks bool, width int) [][]int {
+	every := make([]int, len(widths))
+	for index := range every {
+		every[index] = index
 	}
-	line := ""
-	add := func(style lipgloss.Style, text string) {
-		// Selection reverses each span and leaves its weight alone, since a
-		// lifecycle's weight is part of its look.
-		if selected {
-			style = style.Reverse(true)
-		}
-		if text != "" {
-			line += style.Render(text)
-		}
+	whole := min(l.whole, len(widths))
+	excess := rowWidth(widths[:whole], marks) - width
+	if whole == 0 || excess <= 0 {
+		return [][]int{every}
 	}
-	plain := lipgloss.NewStyle()
-	if selected {
-		add(plain, "> ")
-	} else {
-		add(plain, "  ")
+	if widths[0]-excess >= shortestName {
+		widths[0] -= excess
+		return [][]int{every}
 	}
-	if marks && r.marked {
-		add(warningStyle, "!")
-		add(plain, " ")
-	} else if marks {
-		add(plain, "  ")
-	}
-	gap := ""
-	for index, columnWidth := range widths {
-		if columnWidth == 0 {
+	lead := rowWidth(nil, marks)
+	widths[0] = max(min(widths[0], width-lead), 1)
+	room := width - lead - tierIndent
+	tiers, used := [][]int{{0}}, room
+	for index := 1; index < len(widths); index++ {
+		if widths[index] == 0 {
 			continue
 		}
-		var column span
-		if index < len(r.columns) {
-			column = r.columns[index]
+		if index < whole && used+2+widths[index] > room {
+			tiers, used = append(tiers, nil), -2
 		}
-		column.text = shorten(column.text, columnWidth)
-		add(plain, gap)
-		add(column.style, column.text)
-		add(plain, strings.Repeat(" ", columnWidth-lipgloss.Width(column.text)))
-		gap = "  "
+		tiers[len(tiers)-1] = append(tiers[len(tiers)-1], index)
+		used += 2 + widths[index]
 	}
-	if selected {
-		add(plain, strings.Repeat(" ", max(width-lipgloss.Width(line), 0)))
+	return tiers
+}
+
+// render draws one row as the lines of its tiers, its columns padded to
+// widths and, when marks is set, a column for the unknown-facts marker. A
+// later line with nothing to show, such as an unclaimed Slice's Claim, is
+// left out.
+func (r row) render(widths []int, tiers [][]int, marks, selected bool, width int) []string {
+	if r.columns == nil {
+		return []string{truncate("  "+r.heading, width)}
 	}
-	return truncate(line, width)
+	var lines []string
+	for number, tier := range tiers {
+		line := ""
+		add := func(style lipgloss.Style, text string) {
+			// Selection reverses each span and leaves its weight alone, since
+			// a lifecycle's weight is part of its look.
+			if selected {
+				style = style.Reverse(true)
+			}
+			if text != "" {
+				line += style.Render(text)
+			}
+		}
+		plain := lipgloss.NewStyle()
+		shown := number == 0
+		switch {
+		case number > 0:
+			add(plain, strings.Repeat(" ", rowWidth(nil, marks)+tierIndent))
+		case selected:
+			add(plain, "> ")
+		default:
+			add(plain, "  ")
+		}
+		if number == 0 && marks && r.marked {
+			add(warningStyle, "!")
+			add(plain, " ")
+		} else if number == 0 && marks {
+			add(plain, "  ")
+		}
+		gap := ""
+		for _, index := range tier {
+			if widths[index] == 0 {
+				continue
+			}
+			var column span
+			if index < len(r.columns) {
+				column = r.columns[index]
+			}
+			shown = shown || column.text != ""
+			column.text = shorten(column.text, widths[index])
+			add(plain, gap)
+			add(column.style, column.text)
+			add(plain, strings.Repeat(" ", widths[index]-lipgloss.Width(column.text)))
+			gap = "  "
+		}
+		if !shown {
+			continue
+		}
+		if selected {
+			add(plain, strings.Repeat(" ", max(width-lipgloss.Width(line), 0)))
+		}
+		lines = append(lines, truncate(line, width))
+	}
+	return lines
 }
 
 // shorten keeps the end of text within width cells, marking the cut with …,
