@@ -14,6 +14,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/vicrdguez/skills/browse"
 	"github.com/vicrdguez/skills/ledger"
 )
@@ -171,9 +172,14 @@ func (s *session) send(msg tea.Msg) {
 	}
 }
 
+// text is the view as the human reads it, without terminal styling.
+func (s *session) text() string {
+	return ansi.Strip(s.model.View())
+}
+
 func (s *session) shows(fragments ...string) {
 	s.t.Helper()
-	view := s.model.View()
+	view := s.text()
 	for _, fragment := range fragments {
 		if !strings.Contains(view, fragment) {
 			s.t.Fatalf("view lacks %q:\n%s", fragment, view)
@@ -183,7 +189,7 @@ func (s *session) shows(fragments ...string) {
 
 func (s *session) hides(fragments ...string) {
 	s.t.Helper()
-	view := s.model.View()
+	view := s.text()
 	for _, fragment := range fragments {
 		if strings.Contains(view, fragment) {
 			s.t.Fatalf("view unexpectedly shows %q:\n%s", fragment, view)

@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/glamour/styles"
 	"github.com/vicrdguez/skills/ledger"
 )
 
@@ -36,13 +37,13 @@ func (m *Model) openDocuments() {
 			return
 		}
 		m.docContext = proposalScreen
-		m.documents, m.failure = m.snapshot.ProposalDocumentsAt(m.project, m.proposal, m.archived)
+		m.documents, m.failure = m.snapshot.ProposalDocumentListAt(m.project, m.proposal, m.archived)
 	case sliceScreen:
 		if m.slice == nil {
 			return
 		}
 		m.docContext = sliceScreen
-		m.documents, m.failure = m.snapshot.SliceDocumentsAt(m.project, m.item, m.archived)
+		m.documents, m.failure = m.snapshot.SliceDocumentListAt(m.project, m.item, m.archived)
 	default:
 		m.status = "Open documents from a Proposal or Slice"
 		return
@@ -102,8 +103,15 @@ func (m *Model) restoreReferenceFrame(frame referenceFrame) {
 	m.refreshCurrentReferences()
 }
 
-func (m *Model) openDocument(document ledger.Document) {
-	m.currentDocument = &document
+// openDocument reads the selected listed document; only then is its text
+// loaded.
+func (m *Model) openDocument(entry ledger.DocumentEntry) {
+	document, err := m.snapshot.Document(entry.Reference)
+	if err != nil {
+		m.status = unavailableReference(entry.Reference, err)
+		return
+	}
+	m.currentDocument = document
 	m.openedContext, m.openedRevision = m.currentContext(), m.snapshot.Revision
 	m.newerDocument = false
 	m.documentReturn = documentsScreen
@@ -166,7 +174,7 @@ func (m *Model) followReference(reference ledger.Reference) {
 	document, err := m.snapshot.Document(reference)
 	if err != nil {
 		m.failure = nil
-		m.status = fmt.Sprintf("Exact ledger reference unavailable (%s:%s): %s; no substitute was opened", reference.Commit, reference.Path, err)
+		m.status = unavailableReference(reference, err)
 		return
 	}
 	frame := documentFrame{
@@ -194,6 +202,10 @@ func (m *Model) followReference(reference ledger.Reference) {
 	m.docViewport = viewport.New(m.width, m.bodyHeight(m.header(), m.footer()))
 	m.layoutDetail()
 	m.docViewport.GotoTop()
+}
+
+func unavailableReference(reference ledger.Reference, err error) string {
+	return fmt.Sprintf("Exact ledger reference unavailable (%s:%s): %s; no substitute was opened", reference.Commit, reference.Path, err)
 }
 
 func (m Model) documentContent(document *ledger.Document, width int) (string, string) {
@@ -265,7 +277,11 @@ func (m Model) documentContent(document *ledger.Document, width int) (string, st
 	if body != "" {
 		preamble = append(preamble, "", "---", "", body)
 	}
-	renderer, err := glamour.NewTermRenderer(glamour.WithAutoStyle(), glamour.WithWordWrap(max(width, 1)))
+	style := styles.LightStyle
+	if m.darkBackground {
+		style = styles.DarkStyle
+	}
+	renderer, err := glamour.NewTermRenderer(glamour.WithStandardStyle(style), glamour.WithWordWrap(max(width, 1)))
 	if err != nil {
 		return strings.Join(preamble, "\n"), "Markdown renderer unavailable: " + err.Error()
 	}
@@ -315,21 +331,20 @@ func (m Model) currentContext() string {
 	return context + " at current ledger " + m.snapshot.Revision[:min(len(m.snapshot.Revision), 12)]
 }
 
-func (m Model) rowsForDocumentList() []ledger.Document {
+func (m Model) rowsForDocumentList() []ledger.DocumentEntry {
 	if m.documents == nil {
 		return nil
 	}
 	return m.documents.Documents
 }
 
-func documentLabel(document ledger.Document) string {
-	path := document.Reference.Path
-	name := path[strings.LastIndex(path, "/")+1:]
+func documentLabel(kind ledger.DocumentKind, slice, path string) string {
+	name := documentName(path)
 	prefix := ""
-	if document.Slice != "" {
-		prefix = document.Slice + " — "
+	if slice != "" {
+		prefix = slice + " — "
 	}
-	switch document.Kind {
+	switch kind {
 	case ledger.ProposalDocumentKind:
 		return "Proposal description"
 	case ledger.ContractDocumentKind:
@@ -343,11 +358,15 @@ func documentLabel(document ledger.Document) string {
 	case ledger.StateDocumentKind:
 		return prefix + "Claim state (" + name + ")"
 	default:
-		return prefix + name + " — " + string(document.Kind)
+		return prefix + name + " — " + string(kind)
 	}
 }
 
-func documentSummary(document ledger.Document) string {
+func currentDocumentLabel(document *ledger.Document) string {
+	return documentLabel(document.Kind, document.Slice, document.Reference.Path)
+}
+
+func documentSummary(document ledger.DocumentEntry) string {
 	if document.Report != nil {
 		text := "Outcome: " + document.Report.Outcome
 		if document.Report.Round != 0 {
@@ -364,7 +383,7 @@ func documentSummary(document ledger.Document) string {
 	return document.Reference.Commit + ":" + document.Reference.Path
 }
 
-func optionalDocumentNotes(documents *ledger.DocumentSet) []string {
+func optionalDocumentNotes(documents *ledger.DocumentList) []string {
 	if documents == nil {
 		return nil
 	}

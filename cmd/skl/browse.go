@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/term"
 	"github.com/urfave/cli/v2"
 	"github.com/vicrdguez/skills/browse"
@@ -223,6 +224,13 @@ func startBrowser(explicit string, explicitSet bool, location string) (browse.Mo
 	if err != nil {
 		return browse.Model{}, err
 	}
+	start := func(options browse.Options) (browse.Model, error) {
+		// Ask the terminal for its background once, before the program reads
+		// its input and could consume the answer. Lipgloss keeps this answer
+		// for the adaptive colors of the session too.
+		options.DarkBackground = lipgloss.HasDarkBackground()
+		return browse.New(snapshot, options), nil
+	}
 	if explicitSet {
 		if !slices.Contains(snapshot.ProjectNames(), explicit) {
 			return browse.Model{}, &ledger.Refusal{
@@ -230,11 +238,11 @@ func startBrowser(explicit string, explicitSet bool, location string) (browse.Mo
 				Repair:    "select a Project listed by `skl browse projects`",
 			}
 		}
-		return browse.New(snapshot, browse.Options{Project: explicit}), nil
+		return start(browse.Options{Project: explicit})
 	}
 	repository, err := setup.ResolveRepository(location, "")
 	if err != nil {
-		return browse.New(snapshot, browse.Options{Notice: "Showing every Project: the current directory identifies no single GitHub repository"}), nil
+		return start(browse.Options{Notice: "Showing every Project: the current directory identifies no single GitHub repository"})
 	}
 	overview, err := snapshot.Overview(false)
 	if err != nil {
@@ -252,13 +260,13 @@ func startBrowser(explicit string, explicitSet bool, location string) (browse.Mo
 	}
 	switch {
 	case len(matches) == 1:
-		return browse.New(snapshot, browse.Options{Project: matches[0]}), nil
+		return start(browse.Options{Project: matches[0]})
 	case len(matches) == 0 && len(unreadable) > 0:
-		return browse.New(snapshot, browse.Options{Notice: "Showing every Project: no readable Project records " + identity + "; the repository of " + strings.Join(unreadable, ", ") + " is unreadable"}), nil
+		return start(browse.Options{Notice: "Showing every Project: no readable Project records " + identity + "; the repository of " + strings.Join(unreadable, ", ") + " is unreadable"})
 	case len(matches) == 0:
-		return browse.New(snapshot, browse.Options{Notice: "Showing every Project: no Project records " + identity}), nil
+		return start(browse.Options{Notice: "Showing every Project: no Project records " + identity})
 	default:
-		return browse.New(snapshot, browse.Options{Notice: "Showing every Project: several Projects record " + identity + " (" + strings.Join(matches, ", ") + ")"}), nil
+		return start(browse.Options{Notice: "Showing every Project: several Projects record " + identity + " (" + strings.Join(matches, ", ") + ")"})
 	}
 }
 

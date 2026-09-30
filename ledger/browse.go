@@ -849,15 +849,46 @@ func (r sliceRead) summary(proposal string) SliceSummary {
 // blobs reads the given committed paths at this revision with one Git
 // process. A path absent from the revision is absent from the result.
 func (v *Snapshot) blobs(paths []string) (map[string][]byte, error) {
+	references := make([]Reference, len(paths))
+	for index, path := range paths {
+		references[index] = Reference{Commit: v.Revision, Path: path}
+	}
+	objects, err := v.objects(references, true)
+	if err != nil {
+		return nil, err
+	}
 	result := make(map[string][]byte, len(paths))
-	if len(paths) == 0 {
+	for index, object := range objects {
+		if object.kind == "blob" {
+			result[paths[index]] = object.contents
+		}
+	}
+	return result, nil
+}
+
+// object is the committed object one Reference names. Kind is empty when
+// the reference names no available object.
+type object struct {
+	id, kind string
+	contents []byte
+}
+
+// objects looks up the given references with one Git process, in order.
+// Contents are read only when requested.
+func (v *Snapshot) objects(references []Reference, contents bool) ([]object, error) {
+	result := make([]object, len(references))
+	if len(references) == 0 {
 		return result, nil
 	}
 	var input strings.Builder
-	for _, path := range paths {
-		input.WriteString(v.Revision + ":" + path + "\n")
+	for _, reference := range references {
+		input.WriteString(reference.Commit + ":" + reference.Path + "\n")
 	}
-	arguments := []string{"-C", v.store.Root, "cat-file", "--batch"}
+	mode := "--batch-check"
+	if contents {
+		mode = "--batch"
+	}
+	arguments := []string{"-C", v.store.Root, "cat-file", mode}
 	command := exec.Command("git", arguments...)
 	command.Stdin = strings.NewReader(input.String())
 	output, err := command.Output()
@@ -865,10 +896,10 @@ func (v *Snapshot) blobs(paths []string) (map[string][]byte, error) {
 		return nil, v.unreadable(gitError(v.store.Root, arguments[2:], err).Error())
 	}
 	reader := bufio.NewReader(bytes.NewReader(output))
-	for _, path := range paths {
+	for index, reference := range references {
 		header, err := reader.ReadString('\n')
 		if err != nil {
-			return nil, v.unreadable("truncated object output for " + path)
+			return nil, v.unreadable("truncated object output for " + reference.Path)
 		}
 		fields := strings.Fields(header)
 		if len(fields) != 3 {
@@ -878,12 +909,13 @@ func (v *Snapshot) blobs(paths []string) (map[string][]byte, error) {
 		if err != nil {
 			return nil, v.unreadable("malformed object header " + strconv.Quote(strings.TrimSpace(header)))
 		}
-		contents := make([]byte, size+1)
-		if _, err := io.ReadFull(reader, contents); err != nil {
-			return nil, v.unreadable("truncated object " + path)
-		}
-		if fields[1] == "blob" {
-			result[path] = contents[:size]
+		result[index] = object{id: fields[0], kind: fields[1]}
+		if contents {
+			body := make([]byte, size+1)
+			if _, err := io.ReadFull(reader, body); err != nil {
+				return nil, v.unreadable("truncated object " + reference.Path)
+			}
+			result[index].contents = body[:size]
 		}
 	}
 	return result, nil
