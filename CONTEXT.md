@@ -193,7 +193,7 @@ The human-facing account of a **Submission**'s commitments, delivered outcome, v
 _Avoid_: Agent handoff, worker transcript
 
 **Forge Publication**:
-Delivery of human-facing work descriptions, progress, or outcomes to an external collaboration service. Publication is distinct from recording a **Phase Report** or advancing **Workflow State** in the **Workflow Ledger**.
+Delivery of a self-contained, human-facing account of accepted work or a **Submission**'s latest phase result to an external collaboration service, explaining its purpose, approach, status and significant review context rather than agent-to-agent detail. Publication is distinct from recording a **Phase Report** or advancing **Workflow State** in the **Workflow Ledger**; information's presence in the ledger does not by itself make its substance confidential.
 _Avoid_: Worker handoff, authoritative phase result
 
 **Human Finding Directive**:
