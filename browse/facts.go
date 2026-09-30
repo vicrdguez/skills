@@ -234,6 +234,13 @@ func SliceRow(label string, slice ledger.SliceSummary) string {
 	return marked(len(slice.Diagnostics) > 0, label+" — "+lifecycleLabel(slice.Lifecycle)+" · "+claim)
 }
 
+func marked(incomplete bool, text string) string {
+	if incomplete {
+		return "! " + text
+	}
+	return text
+}
+
 // MatchRow is one found Slice with its identity and title.
 func MatchRow(match ledger.SliceMatch) string {
 	label := match.Item

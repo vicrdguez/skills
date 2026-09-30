@@ -2,6 +2,7 @@ package browse
 
 import (
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -199,137 +200,316 @@ func (m Model) footer() string {
 	return strings.Join(append(lines, truncate(m.help.View(m.helpKeys()), m.width)), "\n")
 }
 
-// listBody renders the current list screen: its parent context, the list,
-// and the selected entry's facts, side by side when the terminal is wide.
+// listBody renders the current list screen: its parent context above a list
+// pane and a preview pane of the selected entry's facts, side by side when
+// the terminal is wide and stacked when it is narrow.
 func (m Model) listBody(height int) string {
-	context, title, rows, cursor, selected, empty := m.listContent()
+	content := m.listContent()
 	width := m.width
 	top := ""
-	if len(context) > 0 {
-		top = wrap(strings.Join(context, "\n"), width) + "\n"
+	if len(content.context) > 0 {
+		top = wrap(strings.Join(content.context, "\n"), width) + "\n"
 	}
-	available := max(height-lipgloss.Height(top)-1, 2)
-	title = truncate(titleStyle.Render(title), width)
-	if len(rows) == 0 {
-		return top + title + "\n" + wrap(empty, width)
+	available := max(height-strings.Count(top, "\n"), 3)
+	position := m.position()
+	preview := content.preview
+	if len(preview) == 0 {
+		preview = []string{"No entry is selected."}
 	}
 	if width >= wideLayout {
-		listWidth := width / 2
-		list := m.list(rows, cursor, available, listWidth-2)
-		facts := clip(wrap(strings.Join(selected, "\n"), width-listWidth-2), available)
-		return top + title + "\n" + lipgloss.JoinHorizontal(lipgloss.Top,
-			lipgloss.NewStyle().Width(listWidth).Render(list), facts)
+		// The list widens beyond half the terminal, up to three fifths, to
+		// fit its rows; the preview wraps into the rest.
+		listWidth := min(max(content.width()+4, width/2), width*3/5)
+		return top + lipgloss.JoinHorizontal(lipgloss.Top,
+			pane(content.title, position, content.lines(listWidth-4, available-2), listWidth, available),
+			pane(content.previewTitle, "", wrapLines(preview, width-listWidth-4), width-listWidth, available))
 	}
-	listHeight := min(len(rows), max(available/2, 3))
-	list := m.list(rows, cursor, listHeight, width)
-	facts := clip(wrap(strings.Join(selected, "\n"), width), max(available-listHeight-1, 1))
-	return top + title + "\n" + list + "\n" + mutedStyle.Render(strings.Repeat("─", min(width, 40))) + "\n" + facts
+	// Stacked, the list takes up to half the height and the preview the
+	// rest; a preview too short for its border gives way to the list.
+	listHeight := min(content.height()+2, max(available/2, 3))
+	if available-listHeight < 3 {
+		return top + pane(content.title, position, content.lines(width-4, available-2), width, available)
+	}
+	return top + pane(content.title, position, content.lines(width-4, listHeight-2), width, listHeight) + "\n" +
+		pane(content.previewTitle, "", wrapLines(preview, width-4), width, available-listHeight)
 }
 
-// list renders rows in a window that keeps the cursor row visible. The
-// cursor is marked by text as well as style.
-func (m Model) list(rows []string, cursor, height, width int) string {
-	start := 0
-	if cursor >= height {
-		start = cursor - height + 1
+// position is the selected entry's place among the current list's entries.
+func (m Model) position() string {
+	count := m.rows()
+	switch {
+	case count == 0:
+		return "0/0"
+	case m.selectionMissing != "":
+		return fmt.Sprintf("-/%d", count)
 	}
-	var lines []string
-	for index := start; index < len(rows) && index < start+height; index++ {
-		line := "  " + rows[index]
-		if index == cursor && m.selectionMissing == "" {
-			line = selectedStyle.Render(truncate("> "+rows[index], width))
+	return fmt.Sprintf("%d/%d", m.cursor[m.screen]+1, count)
+}
+
+// pane frames lines in a rounded border exactly width cells wide and height
+// lines tall, with its title in the top edge and note, when set, in the
+// bottom edge. Lines beyond its height are clipped.
+func pane(title, note string, lines []string, width, height int) string {
+	inner := max(width-4, 1)
+	title = truncate(title, max(width-5, 1))
+	edge := mutedStyle.Render
+	framed := []string{edge("╭─ ") + titleStyle.Render(title) + edge(" "+strings.Repeat("─", max(width-5-lipgloss.Width(title), 0))+"╮")}
+	for index := 0; index < height-2; index++ {
+		line := ""
+		if index < len(lines) {
+			line = truncate(lines[index], inner)
 		}
-		lines = append(lines, truncate(line, width))
+		framed = append(framed, edge("│ ")+line+strings.Repeat(" ", max(inner-lipgloss.Width(line), 0))+edge(" │"))
 	}
-	return strings.Join(lines, "\n")
+	bottom := "╰" + strings.Repeat("─", max(width-2, 0)) + "╯"
+	if note != "" {
+		bottom = "╰" + strings.Repeat("─", max(width-5-lipgloss.Width(note), 0)) + " " + note + " ─╯"
+	}
+	return strings.Join(append(framed, edge(bottom)), "\n")
 }
 
-// listContent supplies the current list screen's parent context, list title,
-// rows, the cursor row, the selected entry's facts, and the text shown for an
-// empty list.
-func (m Model) listContent() (context []string, title string, rows []string, cursorRow int, selected []string, empty string) {
+func wrapLines(lines []string, width int) []string {
+	return strings.Split(wrap(strings.Join(lines, "\n"), width), "\n")
+}
+
+// listing is one list screen's content: the context above its panes, the
+// list pane's title and rows, the row at the cursor, and the preview of the
+// selected entry.
+type listing struct {
+	context      []string
+	title        string
+	rows         []row
+	cursorRow    int
+	empty        string
+	previewTitle string
+	preview      []string
+}
+
+// row is one line of a list pane: an entry's facts in columns, marked when
+// some of them are unknown or incomplete, or else a heading over the entries
+// that follow it.
+type row struct {
+	marked  bool
+	columns []span
+	heading string
+}
+
+// height is the number of lines the list needs, counting its empty text.
+func (l listing) height() int {
+	if len(l.rows) == 0 {
+		return 1
+	}
+	return len(l.rows)
+}
+
+// layout is the width of each column across every row, not only the
+// visible ones, and whether any row carries the unknown-facts marker.
+func (l listing) layout() (widths []int, marks bool) {
+	for _, row := range l.rows {
+		marks = marks || row.marked
+		for index, column := range row.columns {
+			if index == len(widths) {
+				widths = append(widths, 0)
+			}
+			widths[index] = max(widths[index], lipgloss.Width(column.text))
+		}
+	}
+	return widths, marks
+}
+
+// width is the width of the list's widest row.
+func (l listing) width() int {
+	widths, marks := l.layout()
+	width := 0
+	for _, row := range l.rows {
+		width = max(width, lipgloss.Width(row.render(widths, marks, false, math.MaxInt)))
+	}
+	return width
+}
+
+// lines renders the list in a window of height lines that keeps the cursor
+// row visible. The cursor row is marked by text as well as style.
+func (l listing) lines(width, height int) []string {
+	if len(l.rows) == 0 {
+		return wrapLines([]string{l.empty}, width)
+	}
+	widths, marks := l.layout()
+	start := max(l.cursorRow-height+1, 0)
+	var lines []string
+	for index := start; index < len(l.rows) && index < start+height; index++ {
+		lines = append(lines, l.rows[index].render(widths, marks, index == l.cursorRow, width))
+	}
+	return lines
+}
+
+// render draws one row with its columns padded to widths and, when marks is
+// set, a column for the unknown-facts marker.
+func (r row) render(widths []int, marks, selected bool, width int) string {
+	if r.columns == nil {
+		return truncate("  "+r.heading, width)
+	}
+	line := ""
+	add := func(style lipgloss.Style, text string) {
+		if selected {
+			style = style.Inherit(selectedStyle)
+		}
+		if text != "" {
+			line += style.Render(text)
+		}
+	}
+	plain := lipgloss.NewStyle()
+	if selected {
+		add(plain, "> ")
+	} else {
+		add(plain, "  ")
+	}
+	if marks && r.marked {
+		add(warningStyle, "!")
+		add(plain, " ")
+	} else if marks {
+		add(plain, "  ")
+	}
+	gap := ""
+	for index, columnWidth := range widths {
+		if columnWidth == 0 {
+			continue
+		}
+		var column span
+		if index < len(r.columns) {
+			column = r.columns[index]
+		}
+		add(plain, gap)
+		add(column.style, column.text)
+		add(plain, strings.Repeat(" ", columnWidth-lipgloss.Width(column.text)))
+		gap = "  "
+	}
+	if selected {
+		add(plain, strings.Repeat(" ", max(width-lipgloss.Width(line), 0)))
+	}
+	return truncate(line, width)
+}
+
+// texts are unstyled columns.
+func texts(values ...string) []span {
+	columns := make([]span, len(values))
+	for index, value := range values {
+		columns[index] = span{text: value}
+	}
+	return columns
+}
+
+// sliceRow shows one Slice's name, lifecycle and Claim, then any further
+// columns. Unknown facts read as unknown, never as a lifecycle or unclaimed.
+func sliceRow(name string, slice ledger.SliceSummary, more ...span) row {
+	if !slice.Readable {
+		return row{marked: true, columns: append([]span{{text: name}, unknownLifecycleSpan(), unknownClaimSpan()}, more...)}
+	}
+	columns := []span{{text: name}, lifecycleSpan(slice.Lifecycle), claimSpan(slice.ClaimPhase)}
+	return row{marked: len(slice.Diagnostics) > 0, columns: append(columns, more...)}
+}
+
+// groupHeading names one group of found Slices, naming a lifecycle group by
+// its lifecycle's glyph and label.
+func groupHeading(prefix string, group ledger.SliceGroup) string {
+	switch {
+	case group.UnknownLifecycle:
+		return titleStyle.Render(prefix) + unknownLifecycleSpan().render()
+	case group.Lifecycle != "":
+		return titleStyle.Render(prefix) + lifecycleSpan(group.Lifecycle).render()
+	}
+	return titleStyle.Render(prefix + GroupTitle(group))
+}
+
+// listContent supplies the current list screen's content.
+func (m Model) listContent() listing {
+	var l listing
 	cursor := m.cursor[m.screen]
-	cursorRow = cursor
+	l.cursorRow = cursor
 	switch m.screen {
 	case overviewScreen:
-		title = fmt.Sprintf("Projects (%d)", len(m.overview.Projects))
-		empty = "No Projects are recorded in the configured ledger at this revision."
+		l.title = fmt.Sprintf("Projects (%d)", len(m.overview.Projects))
+		l.empty = "No Projects are recorded in the configured ledger at this revision."
+		l.previewTitle = "Project"
 		for _, diagnostic := range m.overview.Diagnostics {
-			context = append(context, warningStyle.Render(DiagnosticText(diagnostic)))
+			l.context = append(l.context, warningStyle.Render(DiagnosticText(diagnostic)))
 		}
 		for _, project := range m.overview.Projects {
-			row := project.Name + " — " + orUnknown(project.Repository) + " — " + plural(project.Slices, "slice")
+			var claimed, unknown string
 			if project.Claimed > 0 {
-				row += fmt.Sprintf(" · %d claimed", project.Claimed)
+				claimed = fmt.Sprintf("%d claimed", project.Claimed)
 			}
 			if project.Unknown > 0 {
-				row += fmt.Sprintf(" · %d unknown", project.Unknown)
+				unknown = fmt.Sprintf("%d unknown", project.Unknown)
 			}
-			rows = append(rows, marked(project.Incomplete, row))
+			l.rows = append(l.rows, row{marked: project.Incomplete,
+				columns: texts(project.Name, orUnknown(project.Repository), plural(project.Slices, "slice"), claimed, unknown)})
 		}
-		if len(rows) > 0 {
-			selected = ProjectLines(m.overview.Projects[cursor])
+		if len(l.rows) > 0 {
+			l.preview = ProjectLines(m.overview.Projects[cursor])
 		}
 	case projectScreen:
 		project := m.inventory.Project
-		context = []string{"Project " + project.Name + " (" + orUnknown(project.Repository) + ") · " + tallyText(project.Tally)}
+		l.context = []string{"Project " + project.Name + " (" + orUnknown(project.Repository) + ") · " + tallyText(project.Tally)}
 		if project.Incomplete {
-			context = append(context, warningStyle.Render("! Incomplete: "+incompleteText(project.Diagnostics)+" in this Project"))
+			l.context = append(l.context, warningStyle.Render("! Incomplete: "+incompleteText(project.Diagnostics)+" in this Project"))
 		}
-		title = fmt.Sprintf("Proposals (%d)", len(m.inventory.Proposals))
-		empty = fmt.Sprintf("No active Proposals. %d archived; press a to include them.", project.ArchivedProposals)
+		l.title = fmt.Sprintf("Proposals (%d)", len(m.inventory.Proposals))
+		l.previewTitle = "Proposal"
+		l.empty = fmt.Sprintf("No active Proposals. %d archived; press a to include them.", project.ArchivedProposals)
 		if m.includeArchived {
-			empty = "No Proposals are recorded in this Project."
+			l.empty = "No Proposals are recorded in this Project."
 		}
 		for _, proposal := range m.inventory.Proposals {
-			rows = append(rows, marked(proposal.Incomplete, proposal.Name+flags(proposal)+" — "+progressText(proposal)))
+			l.rows = append(l.rows, row{marked: proposal.Incomplete, columns: texts(proposal.Name+flags(proposal), progressText(proposal))})
 		}
-		if len(rows) > 0 {
-			selected = ProposalLines(m.inventory.Proposals[cursor])
+		if len(l.rows) > 0 {
+			l.preview = ProposalLines(m.inventory.Proposals[cursor])
 		}
 	case documentsScreen:
 		if m.docContext == proposalScreen {
-			context = []string{"Documents for Proposal " + m.project + "/" + m.proposal}
+			l.context = []string{"Documents for Proposal " + m.project + "/" + m.proposal}
 		} else {
-			context = []string{"Documents for Slice " + m.project + "/" + m.item}
+			l.context = []string{"Documents for Slice " + m.project + "/" + m.item}
 		}
 		if m.documents != nil && m.documents.Archived {
-			context = append(context, "Archive documents · current ledger revision "+m.documents.Revision)
+			l.context = append(l.context, "Archive documents · current ledger revision "+m.documents.Revision)
 		}
-		title = fmt.Sprintf("Available documents (%d)", len(m.rowsForDocumentList()))
-		empty = "No readable documents are available at this committed revision. See diagnostics, if any."
+		l.title = fmt.Sprintf("Available documents (%d)", len(m.rowsForDocumentList()))
+		l.previewTitle = "Document"
+		l.empty = "No readable documents are available at this committed revision. See diagnostics, if any."
 		if m.documents != nil {
 			if count := len(m.documents.Diagnostics); count > 0 {
-				context = append(context, warningStyle.Render(fmt.Sprintf("! %d diagnostics · d to inspect", count)))
+				l.context = append(l.context, warningStyle.Render(fmt.Sprintf("! %d diagnostics · d to inspect", count)))
 			}
-			context = append(context, optionalDocumentNotes(m.documents)...)
+			l.context = append(l.context, optionalDocumentNotes(m.documents)...)
 			for _, document := range m.documents.Documents {
-				rows = append(rows, documentLabel(document))
+				l.rows = append(l.rows, row{columns: texts(documentLabel(document))})
 			}
 			if m.documents.Slice != "" {
-				rows = append(rows, "Implementation report versions", "Watchdog report versions")
+				l.rows = append(l.rows, row{columns: texts("Implementation report versions")}, row{columns: texts("Watchdog report versions")})
 			}
 			if cursor < len(m.documents.Documents) {
 				document := m.documents.Documents[cursor]
-				selected = []string{documentSummary(document), "Exact ledger identity: " + document.Reference.Commit + ":" + document.Reference.Path}
+				l.preview = []string{documentSummary(document), "Exact ledger identity: " + document.Reference.Commit + ":" + document.Reference.Path}
 				if len(document.Diagnostics) > 0 {
-					selected = append(selected, diagnosticLines(document.Diagnostics)...)
+					l.preview = append(l.preview, diagnosticLines(document.Diagnostics)...)
 				}
-				selected = append(selected, "Enter reads this committed document; d opens this set's diagnostics.")
-			} else if len(rows) > 0 {
-				selected = []string{"Enter discovers this phase's locally available content versions, even when no latest report exists."}
+				l.preview = append(l.preview, "Enter reads this committed document; d opens this set's diagnostics.")
+			} else if len(l.rows) > 0 {
+				l.preview = []string{"Enter discovers this phase's locally available content versions, even when no latest report exists."}
 			}
 		}
 	case versionsScreen:
-		context = []string{"Report content changes · newest first · exact ledger references; current Slice facts remain at the snapshot revision."}
+		l.context = []string{"Report content changes · newest first · exact ledger references; current Slice facts remain at the snapshot revision."}
+		l.previewTitle = "Version"
 		if m.versions != nil {
 			if m.versions.Incomplete {
-				context = append(context, warningStyle.Render("! Local history incomplete: "+m.versions.Diagnostics[0].Problem))
+				l.context = append(l.context, warningStyle.Render("! Local history incomplete: "+m.versions.Diagnostics[0].Problem))
 			} else if len(m.versions.Diagnostics) > 0 {
-				context = append(context, warningStyle.Render(fmt.Sprintf("! %d version metadata diagnostics; select a version for details", len(m.versions.Diagnostics))))
+				l.context = append(l.context, warningStyle.Render(fmt.Sprintf("! %d version metadata diagnostics; select a version for details", len(m.versions.Diagnostics))))
 			}
-			title = fmt.Sprintf("%s report versions (%d)", m.versions.Phase, len(m.versions.Versions))
-			empty = "No locally available report content versions."
+			l.title = fmt.Sprintf("%s report versions (%d)", m.versions.Phase, len(m.versions.Versions))
+			l.empty = "No locally available report content versions."
 			for _, version := range m.versions.Versions {
 				label := version.Reference.Commit[:min(12, len(version.Reference.Commit))]
 				if version.Report != nil {
@@ -338,32 +518,33 @@ func (m Model) listContent() (context []string, title string, rows []string, cur
 						label += fmt.Sprintf(" · round %d", version.Report.Round)
 					}
 				}
-				rows = append(rows, label+" · "+version.Reference.Path)
+				l.rows = append(l.rows, row{columns: texts(label + " · " + version.Reference.Path)})
 			}
-			if len(rows) > 0 {
+			if len(l.rows) > 0 {
 				version := m.versions.Versions[cursor]
-				selected = []string{"Exact ledger version: " + version.Reference.Commit + ":" + version.Reference.Path, "Enter reads this version; esc returns to the open report."}
-				selected = append(selected, diagnosticLines(version.Diagnostics)...)
+				l.preview = []string{"Exact ledger version: " + version.Reference.Commit + ":" + version.Reference.Path, "Enter reads this version; esc returns to the open report."}
+				l.preview = append(l.preview, diagnosticLines(version.Diagnostics)...)
 			}
 		}
 	case referencesScreen:
-		context = []string{"Structured ledger references · exact commit and path; unavailable references are never replaced."}
+		l.context = []string{"Structured ledger references · exact commit and path; unavailable references are never replaced."}
 		if m.referencesFromDoc && m.currentDocument != nil {
-			context = append(context, "From "+documentLabel(*m.currentDocument))
-			context = append(context, diagnosticLines(m.currentDocument.Diagnostics)...)
+			l.context = append(l.context, "From "+documentLabel(*m.currentDocument))
+			l.context = append(l.context, diagnosticLines(m.currentDocument.Diagnostics)...)
 		} else if m.slice == nil || m.slice.Claim == nil {
-			context = append(context, "No current Slice Claim at ledger revision "+m.snapshot.Revision)
+			l.context = append(l.context, "No current Slice Claim at ledger revision "+m.snapshot.Revision)
 		} else {
-			context = append(context, "From the current Slice Claim at ledger revision "+m.snapshot.Revision)
+			l.context = append(l.context, "From the current Slice Claim at ledger revision "+m.snapshot.Revision)
 		}
-		title = fmt.Sprintf("References (%d)", len(m.references))
-		empty = "No structured exact ledger references are available. Metadata diagnostics remain with the document."
+		l.title = fmt.Sprintf("References (%d)", len(m.references))
+		l.previewTitle = "Reference"
+		l.empty = "No structured exact ledger references are available. Metadata diagnostics remain with the document."
 		for _, reference := range m.references {
-			rows = append(rows, reference.Label+" — "+reference.Reference.Path)
+			l.rows = append(l.rows, row{columns: texts(reference.Label + " — " + reference.Reference.Path)})
 		}
-		if len(rows) > 0 {
+		if len(l.rows) > 0 {
 			reference := m.references[cursor]
-			selected = []string{
+			l.preview = []string{
 				"Label: " + reference.Label,
 				"Exact ledger reference: " + reference.Reference.Commit + ":" + reference.Reference.Path,
 				"Enter follows this exact reference; source-code revisions are not browsed.",
@@ -371,61 +552,68 @@ func (m Model) listContent() (context []string, title string, rows []string, cur
 		}
 	case proposalScreen:
 		proposal := m.members.Proposal
-		context = []string{
+		l.context = []string{
 			"Proposal " + proposal.Name + flags(proposal) + " — " + orUnknown(proposal.ParentTitle),
 			"Delivery: " + deliveryText(proposal) + " · Parent issue: " + attachmentText(proposal.ParentIssue),
 		}
 		if proposal.Incomplete {
-			context = append(context, warningStyle.Render("! Incomplete: "+incompleteText(proposal.Diagnostics)+" in this Proposal"))
+			l.context = append(l.context, warningStyle.Render("! Incomplete: "+incompleteText(proposal.Diagnostics)+" in this Proposal"))
 		}
-		title = fmt.Sprintf("Slices (%d)", len(m.members.Slices))
-		empty = "This Proposal records no Slices."
+		l.title = fmt.Sprintf("Slices (%d)", len(m.members.Slices))
+		l.previewTitle = "Slice"
+		l.empty = "This Proposal records no Slices."
 		for _, slice := range m.members.Slices {
-			rows = append(rows, SliceRow(slice.Slice, slice))
+			l.rows = append(l.rows, sliceRow(slice.Slice, slice))
 		}
-		if len(rows) > 0 {
-			selected = append(SliceSummaryLines(m.members.Slices[cursor]), "Press d to read this Proposal's documents.")
+		if len(l.rows) > 0 {
+			l.preview = append(SliceSummaryLines(m.members.Slices[cursor]), "Press d to read this Proposal's documents.")
 		}
 	case factsScreen:
-		context = m.findingContext()
+		l.context = m.findingContext()
 		facets := m.search.Facets
 		if facets.UnknownLifecycle > 0 || facets.UnknownClaim > 0 {
-			context = append(context, warningStyle.Render(fmt.Sprintf("! Counted only under Any: %d with unknown lifecycle, %d with unknown claim", facets.UnknownLifecycle, facets.UnknownClaim)))
+			l.context = append(l.context, warningStyle.Render(fmt.Sprintf("! Counted only under Any: %d with unknown lifecycle, %d with unknown claim", facets.UnknownLifecycle, facets.UnknownClaim)))
 		}
-		title = "Facts — select one to find its Slices"
+		l.title = fmt.Sprintf("Facts (%d) — select one to find its Slices", len(factOptions))
+		l.previewTitle = "Selection"
 		for _, option := range factOptions {
-			rows = append(rows, m.factRow(option))
+			l.rows = append(l.rows, m.factRow(option))
 		}
-		selected = []string{"Finds: " + SelectionText(factOptions[cursor].apply(m.search.Query))}
+		l.preview = []string{"Finds: " + SelectionText(factOptions[cursor].apply(m.search.Query))}
 	case resultsScreen:
-		context = m.findingContext()
+		l.context = m.findingContext()
 		if count := len(m.resultDiagnostics()); count > 0 {
-			context = append(context, warningStyle.Render(fmt.Sprintf("! %d diagnostics · d to inspect", count)))
+			l.context = append(l.context, warningStyle.Render(fmt.Sprintf("! %d diagnostics · d to inspect", count)))
 		}
-		title = fmt.Sprintf("Slices (%d)", m.search.Matched)
+		l.title = fmt.Sprintf("Slices (%d)", m.search.Matched)
 		if m.search.Undecided > 0 {
-			title = fmt.Sprintf("Slices (%d matched, %d undecided)", m.search.Matched, m.search.Undecided)
+			l.title = fmt.Sprintf("Slices (%d matched, %d undecided)", m.search.Matched, m.search.Undecided)
 		}
-		empty = ResultText(m.search)
+		l.previewTitle = "Slice"
+		l.empty = ResultText(m.search)
 		results := m.results()
 		for index, found := range results {
 			if index == 0 || found.heading != results[index-1].heading {
-				rows = append(rows, titleStyle.Render(found.heading))
+				l.rows = append(l.rows, row{heading: found.heading})
 			}
 			if index == cursor {
-				cursorRow = len(rows)
+				l.cursorRow = len(l.rows)
 			}
-			rows = append(rows, MatchRow(found.match))
+			name := found.match.Item
+			if found.match.Archived {
+				name += " [archived]"
+			}
+			l.rows = append(l.rows, sliceRow(name, found.match.SliceSummary, span{text: found.match.Title}))
 		}
 		if len(results) > 0 {
 			chosen := results[cursor]
-			selected = append([]string{"Project: " + chosen.project}, SliceSummaryLines(chosen.match.SliceSummary)...)
+			l.preview = append([]string{"Project: " + chosen.project}, SliceSummaryLines(chosen.match.SliceSummary)...)
 		}
 	}
 	if m.selectionMissing != "" {
-		cursorRow, selected = -1, nil
+		l.cursorRow, l.preview = -1, nil
 	}
-	return context, title, rows, cursorRow, selected, empty
+	return l
 }
 
 // resultDiagnostics lists membership uncertainty separately from the
@@ -464,12 +652,12 @@ func (m Model) findingContext() []string {
 }
 
 // factRow is one navigable fact with the number of Slices selecting it would
-// find, marked when it is the current selection.
-func (m Model) factRow(option factOption) string {
+// find, marked * when it is the current selection.
+func (m Model) factRow(option factOption) row {
 	facets := m.search.Facets
-	counts, unknown, current, label := facets.Lifecycles, facets.UnknownLifecycle, m.search.Query.Lifecycles, "Any lifecycle"
+	counts, unknown, current, label := facets.Lifecycles, facets.UnknownLifecycle, m.search.Query.Lifecycles, span{text: "Any lifecycle"}
 	if option.claim {
-		counts, unknown, current, label = facets.Claims, facets.UnknownClaim, m.search.Query.Claims, "Any claim"
+		counts, unknown, current, label = facets.Claims, facets.UnknownClaim, m.search.Query.Claims, span{text: "Any claim"}
 	}
 	count := counts[option.value]
 	switch {
@@ -478,16 +666,18 @@ func (m Model) factRow(option factOption) string {
 		for _, value := range counts {
 			count += value
 		}
+	case option.value == ledger.ClaimNone:
+		label = span{text: claimLabels[option.value]}
 	case option.claim:
-		label = claimLabels[option.value]
+		label = claimSpan(option.value)
 	default:
-		label = lifecycleLabel(option.value)
+		label = lifecycleSpan(option.value)
 	}
-	mark := "  "
+	mark := ""
 	if (option.value == "" && len(current) == 0) || (len(current) == 1 && current[0] == option.value) {
-		mark = "✓ "
+		mark = "*"
 	}
-	return fmt.Sprintf("%s%s (%d)", mark, label, count)
+	return row{columns: []span{{text: mark}, label, {text: fmt.Sprintf("(%d)", count)}}}
 }
 
 // progressText is the compact delivery state of one Proposal row.
@@ -509,13 +699,6 @@ func flags(proposal ledger.ProposalSummary) string {
 	}
 	if proposal.Retired {
 		text += " [retired]"
-	}
-	return text
-}
-
-func marked(incomplete bool, text string) string {
-	if incomplete {
-		return "! " + text
 	}
 	return text
 }

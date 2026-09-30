@@ -1,0 +1,229 @@
+package browse_test
+
+import (
+	"fmt"
+	"regexp"
+	"strings"
+	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
+)
+
+// lifecycleRows maps each Slice of the spectrum Proposal to the lifecycle
+// glyph and label its row must show.
+var lifecycleRows = map[string]string{
+	"a-needs":      "◆ Needs Human",
+	"b-merge":      "● Ready for Merge",
+	"c-impl":       "○ Ready for Implementation",
+	"d-review":     "◐ Awaiting Review",
+	"e-review":     "◐ Awaiting Review",
+	"f-rework":     "↻ Rework",
+	"g-merged":     "✓ Merged",
+	"h-superseded": "⊘ Superseded",
+}
+
+var lifecycleGlyphs = []string{"◆", "●", "○", "◐", "↻", "✓", "⊘"}
+
+// spectrum adds a gadgets Proposal with a Slice in every lifecycle, an
+// implement Claim, a watchdog-claimed and an unclaimed Slice in Awaiting
+// Review, and a Slice whose state record is unreadable.
+func spectrum(t *testing.T) func(string) {
+	return func(root string) {
+		states := map[string]string{
+			"a-needs":      `{"state": "needs_human"}`,
+			"b-merge":      `{"state": "ready_for_merge"}`,
+			"c-impl":       `{"state": "ready_for_implementation", "claim": {"phase": "implement", "basis": "b", "inputs": {"contract": []}}}`,
+			"d-review":     `{"state": "awaiting_review", "claim": {"phase": "watchdog", "basis": "b", "inputs": {"contract": []}}}`,
+			"e-review":     `{"state": "awaiting_review"}`,
+			"f-rework":     `{"state": "rework"}`,
+			"g-merged":     `{"state": "merged", "title": "Merged work"}`,
+			"h-superseded": `{"state": "superseded"}`,
+			"i-torn":       `{`,
+		}
+		write(t, root, "projects/gadgets/proposals/spectrum/proposal.json", `{"accepted": "2024-01-01T00:00:00Z"}`)
+		for slice, state := range states {
+			write(t, root, "projects/gadgets/proposals/spectrum/"+slice+"/state.json", state)
+		}
+	}
+}
+
+// startSpectrum lists the spectrum Proposal's Slices on a terminal narrow
+// enough to stack the panes, so each list line shows one row alone, and wide
+// enough for whole rows.
+func startSpectrum(t *testing.T) *session {
+	s := start(t, "gadgets", spectrum(t))
+	s.send(tea.WindowSizeMsg{Width: 80, Height: 40})
+	s.press("enter")
+	s.shows("Proposal spectrum", "Slices (9)")
+	return s
+}
+
+// lineIndex is the index of the first view line showing fragment.
+func (s *session) lineIndex(fragment string) int {
+	s.t.Helper()
+	for index, line := range strings.Split(s.model.View(), "\n") {
+		if strings.Contains(line, fragment) {
+			return index
+		}
+	}
+	s.t.Fatalf("view lacks %q:\n%s", fragment, s.model.View())
+	return -1
+}
+
+func TestListAndPreviewPanesSitSideBySideWhenWideAndStackWhenNarrow(t *testing.T) {
+	for _, size := range []tea.WindowSizeMsg{{Width: 140, Height: 40}, {Width: 40, Height: 24}} {
+		s := start(t, "widgets")
+		s.send(size)
+		s.press("enter")
+		s.within(size)
+		s.shows("Delivery: unknown: 0 of 3 Merged", "! Incomplete")
+		list, bottom, preview := s.lineIndex("╭─ Slices (3) ─"), s.lineIndex(" 1/3 ─╯"), s.lineIndex("╭─ Slice ─")
+		beside, below := list == preview && list < bottom, list < bottom && bottom < preview
+		if (size.Width >= 100 && !beside) || (size.Width < 100 && !below) {
+			t.Fatalf("%dx%d: list pane from line %d to %d, preview pane from line %d:\n%s", size.Width, size.Height, list, bottom, preview, s.model.View())
+		}
+		s.row("│", "Slice: orders/broken")
+
+		s.press("down")
+		s.row("╰", "2/3", "╯")
+		s.row("│", "Slice: orders/cancel", "│")
+	}
+}
+
+func TestListKeepsTheSelectedRowVisibleAndItsPositionOnTheBorder(t *testing.T) {
+	for _, size := range []tea.WindowSizeMsg{{Width: 40, Height: 24}, {Width: 140, Height: 30}} {
+		s := start(t, "widgets", func(root string) {
+			for i := 0; i < 35; i++ {
+				write(t, root, fmt.Sprintf("projects/widgets/proposals/orders/damaged%02d/state.json", i), `{`)
+			}
+		})
+		s.send(size)
+		s.press("enter")
+		s.press(downs(30)...)
+		s.within(size)
+		s.row("> ! damaged28", "! lifecycle unknown")
+		s.row("╰", "31/38", "╯")
+	}
+}
+
+func TestSliceRowsAlignNameLifecycleAndClaimColumns(t *testing.T) {
+	s := startSpectrum(t)
+	// column is the display offset of fragment on the row of slice.
+	column := func(slice, fragment string) int {
+		line := s.row(slice)
+		return lipgloss.Width(line[:strings.Index(line, fragment)])
+	}
+	names, lifecycles := map[int]string{}, map[int]string{}
+	for slice, lifecycle := range lifecycleRows {
+		names[column(slice, slice)] = slice
+		lifecycles[column(slice, lifecycle)] = slice
+	}
+	names[column("i-torn", "i-torn")] = "i-torn"
+	lifecycles[column("i-torn", "! lifecycle unknown")] = "i-torn"
+	claims := map[int]string{
+		column("c-impl", "▸ implement"):   "c-impl",
+		column("d-review", "▸ watchdog"):  "d-review",
+		column("i-torn", "claim unknown"): "i-torn",
+	}
+	if len(names) != 1 || len(lifecycles) != 1 || len(claims) != 1 {
+		t.Fatalf("columns start at different offsets: names %v, lifecycles %v, claims %v:\n%s", names, lifecycles, claims, s.model.View())
+	}
+}
+
+func TestSliceRowsShowEachLifecycleByGlyphAndLabelWithoutColour(t *testing.T) {
+	s := startSpectrum(t)
+	if strings.Contains(s.model.View(), "\x1b[") {
+		t.Fatal("the test terminal renders colour")
+	}
+	for slice, lifecycle := range lifecycleRows {
+		s.row(slice, lifecycle)
+	}
+
+	// The facts screen marks its current selection without a lifecycle glyph.
+	s.press("f")
+	s.row("◐ Awaiting Review", "(2)")
+	current := s.row("*", "Any lifecycle", "(10)")
+	for _, glyph := range append(lifecycleGlyphs, "▸") {
+		if strings.Contains(current, glyph) {
+			t.Fatalf("the current selection is marked with %q: %q", glyph, current)
+		}
+	}
+}
+
+func TestClaimIsItsOwnMarkerBesideTheLifecycle(t *testing.T) {
+	s := startSpectrum(t)
+	s.row("d-review", "◐ Awaiting Review", "▸ watchdog")
+	s.row("c-impl", "○ Ready for Implementation", "▸ implement")
+	if unclaimed := s.row("e-review", "◐ Awaiting Review"); strings.Contains(unclaimed, "▸") || strings.Contains(unclaimed, "claim") {
+		t.Fatalf("an unclaimed Slice shows a Claim marker: %q", unclaimed)
+	}
+}
+
+func TestUnreadableSliceStaysMarkedUnknownBesideSelectableHealthyOnes(t *testing.T) {
+	s := startSpectrum(t)
+	torn := s.row("! i-torn", "! lifecycle unknown", "claim unknown")
+	for _, glyph := range append(lifecycleGlyphs, "▸") {
+		if strings.Contains(torn, glyph) {
+			t.Fatalf("the unreadable Slice shows %q: %q", glyph, torn)
+		}
+	}
+	s.press(downs(6)...)
+	s.row("> ", "g-merged", "✓ Merged")
+	s.press("enter")
+	s.shows("Slice: spectrum/g-merged", "Title: Merged work", "Lifecycle: Merged")
+}
+
+// sgr matches the Select Graphic Rendition sequence that ends a prefix.
+var sgr = regexp.MustCompile(`\x1b\[([0-9;]*)m$`)
+
+// styleOf is the SGR parameters that start fragment after row on its view
+// line, with bright ANSI colours read as their normal variants.
+func (s *session) styleOf(row, fragment string) string {
+	s.t.Helper()
+	line := s.row(row, fragment)
+	at := strings.Index(line, row) + len(row)
+	at += strings.Index(line[at:], fragment)
+	match := sgr.FindStringSubmatch(line[:at])
+	if match == nil {
+		s.t.Fatalf("%q in %q is not styled", fragment, line)
+	}
+	var parameters []string
+	for _, parameter := range strings.Split(match[1], ";") {
+		if len(parameter) == 2 && parameter[0] == '9' {
+			parameter = "3" + parameter[1:]
+		}
+		parameters = append(parameters, parameter)
+	}
+	return strings.Join(parameters, ";")
+}
+
+func TestLifecycleAndClaimUseTheTerminalsAnsiColoursAndWeights(t *testing.T) {
+	profile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(profile) })
+	s := startSpectrum(t)
+	s.press(downs(4)...)
+	s.row("> ", "e-review")
+
+	// Bold for what waits on the human, normal for in-flight work and dim
+	// for finished work, in the terminal's own red, green, blue, yellow and
+	// magenta; the Claim alone is cyan.
+	for slice, want := range map[string]string{
+		"a-needs": "1;31", "b-merge": "1;32", "c-impl": "34", "d-review": "33",
+		"f-rework": "35", "g-merged": "2", "h-superseded": "2",
+	} {
+		if got := s.styleOf(slice, lifecycleRows[slice]); got != want {
+			t.Errorf("%s lifecycle style = %q, want %q", slice, got, want)
+		}
+	}
+	for slice, claim := range map[string]string{"c-impl": "▸ implement", "d-review": "▸ watchdog"} {
+		if got := s.styleOf(slice, claim); got != "36" {
+			t.Errorf("%s Claim style = %q, want cyan", slice, got)
+		}
+	}
+	if unknown, warning := s.styleOf("i-torn", "! lifecycle unknown"), s.styleOf("", "! Incomplete"); unknown != warning {
+		t.Errorf("unknown lifecycle style = %q, want the warning style %q", unknown, warning)
+	}
+}
