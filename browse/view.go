@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/vicrdguez/skills/ledger"
 )
@@ -38,7 +40,7 @@ func (m Model) View() string {
 }
 
 func (m Model) bodyHeight(header, footer string) int {
-	return max(m.height-lipgloss.Height(header)-lipgloss.Height(footer), 3)
+	return max(m.height-lipgloss.Height(header)-lipgloss.Height(footer), 1)
 }
 
 // layoutDetail fits both viewports to the current terminal and marks the
@@ -93,9 +95,11 @@ func (m *Model) layoutDetail() {
 	}
 }
 
+// header is one line: the breadcrumb on the left and the ledger revision on
+// the right, preceded by the indicators this view needs.
 func (m Model) header() string {
 	context := m.screen
-	if isDocumentOverlay(m.screen) || (m.screen == diagnosticsScreen && m.diagnosticReturn == documentsScreen) {
+	if m.inDocuments() {
 		context = m.docContext
 	}
 	var path []string
@@ -143,37 +147,49 @@ func (m Model) header() string {
 			path = append(path, "documents", "diagnostics")
 		}
 	}
-	archived := "archived hidden"
+	// Indicators run from least to most important. A narrow terminal drops
+	// them in that order, after the breadcrumb has given way. The footer
+	// already says when a newer document is available.
+	var indicators []string
+	scrolled := func(view viewport.Model) {
+		if view.TotalLineCount() > view.Height {
+			indicators = append(indicators, mutedStyle.Render(fmt.Sprintf("scrolled %d%%", int(view.ScrollPercent()*100))))
+		}
+	}
+	document := m.screen == documentScreen && m.currentDocument != nil
+	switch {
+	case m.screen == sliceScreen || m.screen == diagnosticsScreen:
+		scrolled(m.detail)
+	case document:
+		scrolled(m.docViewport)
+	}
 	if m.includeArchived {
-		archived = "archived shown"
+		indicators = append(indicators, mutedStyle.Render("archived shown"))
 	}
-	revision := m.snapshot.Revision
-	if len(revision) > 12 {
-		revision = revision[:12]
-	}
-	facts := "current committed ledger " + revision + " · " + archived
-	if m.refreshFailure != nil {
-		facts = "NOT REFRESHED · last committed ledger " + revision + " · " + archived
-	}
-	if (m.screen == sliceScreen || m.screen == diagnosticsScreen) && m.detail.TotalLineCount() > m.detail.Height {
-		facts += fmt.Sprintf(" · scrolled %d%%", int(m.detail.ScrollPercent()*100))
-	}
-	if m.screen == documentScreen && m.currentDocument != nil {
+	if document {
 		identity := "current document"
-		if m.currentDocument.Reference.Commit != m.snapshot.Revision {
-			identity = "HISTORICAL document"
+		if commit := m.currentDocument.Reference.Commit; commit != m.snapshot.Revision {
+			identity = "HISTORICAL " + commit[:min(len(commit), 12)]
 		}
-		facts += " · " + identity
-		if m.docViewport.TotalLineCount() > m.docViewport.Height {
-			facts += fmt.Sprintf(" · scrolled %d%%", int(m.docViewport.ScrollPercent()*100))
-		}
-		if m.newerDocument {
-			facts += " · newer document available"
-		}
-		facts += " · ref " + m.currentDocument.Reference.Commit[:min(len(m.currentDocument.Reference.Commit), 12)]
+		indicators = append(indicators, mutedStyle.Render(identity))
 	}
-	return truncate(titleStyle.Render("skl browse › "+strings.Join(path, " › ")), m.width) + "\n" +
-		truncate(mutedStyle.Render(facts), m.width)
+	revision := m.snapshot.Revision[:min(len(m.snapshot.Revision), 12)]
+	if m.refreshFailure != nil {
+		indicators = append(indicators, warningStyle.Bold(true).Render("NOT REFRESHED "+revision))
+	} else {
+		indicators = append(indicators, mutedStyle.Render(revision))
+	}
+	separator := mutedStyle.Render(" · ")
+	for len(indicators) > 1 && lipgloss.Width(strings.Join(indicators, separator)) > m.width {
+		indicators = indicators[1:]
+	}
+	right := strings.Join(indicators, separator)
+	left := ""
+	if room := m.width - lipgloss.Width(right) - 2; room > 0 {
+		left = titleStyle.Render(keepEnd("skl browse › "+strings.Join(path, " › "), room))
+	}
+	gap := strings.Repeat(" ", max(m.width-lipgloss.Width(left)-lipgloss.Width(right), 0))
+	return truncate(left+gap+right, m.width)
 }
 
 func (m Model) footer() string {
@@ -193,10 +209,43 @@ func (m Model) footer() string {
 	if m.screen == documentScreen && m.renderProblem != "" {
 		lines = append(lines, wrap(warningStyle.Render("! "+m.renderProblem+"; showing recorded text"), m.width))
 	}
-	if m.typing != nil {
+	switch {
+	case m.typing != nil:
+		// Typing takes every other key as text; the prompt names its own keys.
 		lines = append(lines, wrap(titleStyle.Render("Search names: ")+*m.typing+"█  (enter apply · esc cancel)", m.width))
+	case m.help.ShowAll:
+		lines = append(lines, m.allKeys()...)
+	default:
+		lines = append(lines, m.keyHelp(m.footerKeys()))
 	}
-	return strings.Join(append(lines, truncate(m.help.View(m.helpKeys()), m.width)), "\n")
+	return strings.Join(lines, "\n")
+}
+
+// keyHelp lists as many of bindings as fit the width, always followed by
+// help.
+func (m Model) keyHelp(bindings []key.Binding) string {
+	for count := len(bindings); count > 0; count-- {
+		line := m.help.ShortHelpView(append(bindings[:count:count], m.keys.Help))
+		if lipgloss.Width(line) <= m.width {
+			return line
+		}
+	}
+	return truncate(m.help.ShortHelpView([]key.Binding{m.keys.Help}), m.width)
+}
+
+// allKeys lays out every binding, wrapping between bindings so that none is
+// cut at the width.
+func (m Model) allKeys() []string {
+	var lines []string
+	var line []key.Binding
+	for _, binding := range m.keys.all() {
+		if len(line) > 0 && lipgloss.Width(m.help.ShortHelpView(append(line, binding))) > m.width {
+			lines = append(lines, truncate(m.help.ShortHelpView(line), m.width))
+			line = nil
+		}
+		line = append(line, binding)
+	}
+	return append(lines, truncate(m.help.ShortHelpView(line), m.width))
 }
 
 // listBody renders the current list screen: its parent context, the list,
@@ -526,6 +575,19 @@ func wrap(text string, width int) string {
 
 func truncate(text string, width int) string {
 	return lipgloss.NewStyle().MaxWidth(max(width, 1)).Render(text)
+}
+
+// keepEnd fits unstyled text to width by cutting its start, so a long
+// breadcrumb keeps the current place.
+func keepEnd(text string, width int) string {
+	if lipgloss.Width(text) <= width {
+		return text
+	}
+	runes := []rune(text)
+	for len(runes) > 0 && lipgloss.Width("…"+string(runes)) > width {
+		runes = runes[1:]
+	}
+	return "…" + string(runes)
 }
 
 func clip(text string, height int) string {

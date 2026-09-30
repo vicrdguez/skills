@@ -191,6 +191,48 @@ func (s *session) hides(fragments ...string) {
 	}
 }
 
+// header and footer are the first and last lines of the view.
+func (s *session) header() string {
+	lines := strings.Split(s.model.View(), "\n")
+	return lines[0]
+}
+
+func (s *session) footer() string {
+	lines := strings.Split(s.model.View(), "\n")
+	return lines[len(lines)-1]
+}
+
+// footerLists fails unless the footer lists every wanted key help and none
+// of the unwanted ones.
+func (s *session) footerLists(wanted []string, unwanted ...string) {
+	s.t.Helper()
+	footer := s.footer()
+	for _, help := range wanted {
+		if !strings.Contains(footer, help) {
+			s.t.Fatalf("footer lacks %q: %q", help, footer)
+		}
+	}
+	for _, help := range unwanted {
+		if strings.Contains(footer, help) {
+			s.t.Fatalf("footer lists %q: %q", help, footer)
+		}
+	}
+}
+
+// fitsIn fails when the view overflows a terminal of size.
+func (s *session) fitsIn(size tea.WindowSizeMsg) {
+	s.t.Helper()
+	view := s.model.View()
+	if height := lipgloss.Height(view); height > size.Height {
+		s.t.Fatalf("%dx%d view is %d lines tall:\n%s", size.Width, size.Height, height, view)
+	}
+	for _, line := range strings.Split(view, "\n") {
+		if width := lipgloss.Width(line); width > size.Width {
+			s.t.Fatalf("%dx%d view line is %d wide: %q", size.Width, size.Height, width, line)
+		}
+	}
+}
+
 func TestBrowserNavigatesProjectsProposalsAndSliceFacts(t *testing.T) {
 	s := start(t, "")
 	s.send(tea.WindowSizeMsg{Width: 120, Height: 40})
@@ -227,12 +269,27 @@ func TestBrowserStartsAtExplicitProjectAndSwitches(t *testing.T) {
 	s.shows("skl browse › Projects › widgets", "orders")
 }
 
-func TestBrowserShowsArchivedProposalsOnRequest(t *testing.T) {
+func TestBrowserHeaderIsOneLineAndMentionsArchivesOnlyWhenShown(t *testing.T) {
 	s := start(t, "widgets")
-	s.shows("archived hidden", "Proposals (1)")
+	s.send(tea.WindowSizeMsg{Width: 120, Height: 40})
+	revision := gitOutput(t, s.root, "rev-parse", "HEAD")[:12]
+	lines := strings.Split(s.model.View(), "\n")
+	if !strings.HasPrefix(lines[0], "skl browse › Projects › widgets ") || !strings.HasSuffix(lines[0], " "+revision) ||
+		strings.Contains(lines[0], "archived") {
+		t.Fatalf("header %q, want the breadcrumb, then %s, and no archives", lines[0], revision)
+	}
+	if !strings.HasPrefix(lines[1], "Project widgets (acme/widgets)") {
+		t.Fatalf("header continues on a second line: %q", lines[1])
+	}
+	s.shows("Proposals (1)")
 	s.hides("legacy")
+
 	s.press("a")
-	s.shows("archived shown", "legacy [archived] — 1 of 1 Merged · fully delivered")
+	if header := s.header(); !strings.HasPrefix(header, "skl browse › Projects › widgets ") ||
+		!strings.HasSuffix(header, "archived shown · "+revision) {
+		t.Fatalf("header %q, want the breadcrumb, then archived shown and %s", header, revision)
+	}
+	s.shows("legacy [archived] — 1 of 1 Merged · fully delivered")
 }
 
 func TestBrowserReadsReportsFollowsExactHistoricalReferencesAndPreservesScroll(t *testing.T) {
@@ -260,7 +317,7 @@ func TestBrowserReadsReportsFollowsExactHistoricalReferencesAndPreservesScroll(t
 	s.send(tea.KeyMsg{Type: tea.KeyPgDown})
 	s.shows("ready_for_implementation")
 	s.press("esc")
-	s.shows("Latest implementation", "scrolled ", "current committed ledger")
+	s.shows("Latest implementation", "scrolled ", "current document")
 
 	// The latest malformed report remains selectable and readable, while its
 	// schema failure is visible and never supplies invented metadata.
@@ -272,6 +329,25 @@ func TestBrowserReadsReportsFollowsExactHistoricalReferencesAndPreservesScroll(t
 	if len(s.opened) != 0 {
 		t.Fatalf("document navigation opened external URLs: %v", s.opened)
 	}
+}
+
+func TestBrowserKeepsHistoricalDocumentIdentityAndScrollInView(t *testing.T) {
+	s := start(t, "widgets")
+	s.send(tea.WindowSizeMsg{Width: 80, Height: 16})
+	s.press("enter", "down", "enter", "d", "down", "down", "enter", "r", "enter", "pgdown")
+	reference := gitOutput(t, s.root, "rev-parse", "HEAD~1")[:12]
+	if header := s.header(); !strings.Contains(header, "HISTORICAL "+reference) ||
+		!strings.Contains(header, "scrolled ") || strings.Contains(header, "scrolled 0%") {
+		t.Fatalf("scrolled historical document header %q, want HISTORICAL %s and its scroll position", header, reference)
+	}
+
+	// A narrow terminal keeps the document's identity before its scroll position.
+	narrow := tea.WindowSizeMsg{Width: 40, Height: 14}
+	s.send(narrow)
+	if header := s.header(); !strings.Contains(header, "HISTORICAL "+reference) {
+		t.Fatalf("narrow historical document header %q, want HISTORICAL %s", header, reference)
+	}
+	s.fitsIn(narrow)
 }
 
 func TestBrowserSelectsEarlierReportVersionAndReturnsToCurrentContext(t *testing.T) {
@@ -286,7 +362,10 @@ func TestBrowserSelectsEarlierReportVersionAndReturnsToCurrentContext(t *testing
 	s.press("down", "enter")
 	s.shows("HISTORICAL", "Older recorded reasoning", "Metadata diagnostic", "current lifecycle: Awaiting Review")
 	s.send(tea.WindowSizeMsg{Width: 84, Height: 19})
-	s.shows("HISTORICAL", "current committed ledger")
+	if header, revision := s.header(), gitOutput(t, s.root, "rev-parse", "HEAD")[:12]; !strings.Contains(header, "HISTORICAL ") ||
+		!strings.HasSuffix(header, revision) {
+		t.Fatalf("resized header %q, want the historical document and ledger %s", header, revision)
+	}
 	s.press("esc")
 	s.send(tea.WindowSizeMsg{Width: 120, Height: 40})
 	s.shows("current document", "current lifecycle: Awaiting Review", "awaiting_review")
@@ -534,18 +613,48 @@ func TestBrowserRestoresSliceReadingPositionAfterDocumentDiagnostics(t *testing.
 	}
 }
 
-func TestBrowserShowsContextualDiagnosticsHelp(t *testing.T) {
+func TestBrowserFooterListsOnlyKeysThatActOnTheScreen(t *testing.T) {
+	// Wide enough that the footer lists every key that acts, untrimmed.
 	s := start(t, "widgets")
-	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})
-	s.press("/", "cancel", "enter", "?")
-	s.shows("d result diagnostics")
-	s.hides("d documents")
+	s.send(tea.WindowSizeMsg{Width: 400, Height: 40})
+	s.press("enter", "down", "enter")
+	s.shows("Depends on: legacy/old")
+	s.footerLists([]string{"enter follow relation", "tab next relation", "esc back", "d documents", "r references",
+		"i open issue", "p open PR", "f find by lifecycle or claim", "/ search names", "a toggle archived", "? help"},
+		"toggle grouping", "toggle scope", "report versions", "diagnostics")
+
+	s.press("/", "cancel", "enter")
+	s.footerLists([]string{"enter open", "g toggle grouping", "w toggle scope", "d result diagnostics", "? help"},
+		"d documents", "relation", "references", "open issue", "open PR")
+	// Typing takes every key but enter and esc as text; its prompt names them.
+	s.press("/")
+	s.footerLists([]string{"Search names: █  (enter apply · esc cancel)"}, "? help")
+	s.press("esc")
 
 	s = start(t, "widgets")
-	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})
-	s.press("enter", "d", "?")
-	s.shows("d diagnostics")
-	s.hides("d documents", "result diagnostics")
+	s.send(tea.WindowSizeMsg{Width: 400, Height: 40})
+	s.footerLists([]string{"enter open", "a toggle archived", "s switch project", "? help"},
+		"documents", "open issue", "open PR", "toggle grouping")
+	s.press("enter", "d")
+	s.footerLists([]string{"enter open", "d diagnostics", "esc back", "? help"},
+		"d documents", "result diagnostics", "search names", "toggle archived")
+}
+
+func TestBrowserNarrowFooterKeepsHelpAndHelpShowsEveryBinding(t *testing.T) {
+	size := tea.WindowSizeMsg{Width: 40, Height: 14}
+	s := start(t, "widgets")
+	s.send(size)
+	s.press("/", "cancel", "enter")
+	if footer := s.footer(); lipgloss.Width(footer) > size.Width || !strings.HasSuffix(footer, "? help") {
+		t.Fatalf("narrow footer %q does not fit or omits help", footer)
+	}
+	s.press("?")
+	s.shows("↑/k up", "↓/j down", "pgup page up", "pgdown page down", "enter open", "esc back",
+		"tab next relation", "shift+tab previous relation", "s switch project", "a toggle archived",
+		"/ search names", "f find by lifecycle or claim", "g toggle grouping", "w toggle scope",
+		"d diagnostics", "d documents", "r references", "v report versions", "i open issue", "p open PR",
+		"R refresh ledger", "? help", "q quit")
+	s.fitsIn(size)
 }
 
 func TestBrowserPreservesRelationScrollAndFindingContextAcrossNestedReferences(t *testing.T) {
@@ -626,15 +735,7 @@ func fits(t *testing.T, sequences [][]string) []*session {
 		s.send(size)
 		for _, keys := range sequences {
 			s.press(keys...)
-			view := s.model.View()
-			if height := lipgloss.Height(view); height > size.Height {
-				t.Fatalf("%dx%d view is %d lines tall:\n%s", size.Width, size.Height, height, view)
-			}
-			for _, line := range strings.Split(view, "\n") {
-				if width := lipgloss.Width(line); width > size.Width {
-					t.Fatalf("%dx%d view line is %d wide: %q", size.Width, size.Height, width, line)
-				}
-			}
+			s.fitsIn(size)
 		}
 		sessions = append(sessions, s)
 	}
@@ -845,7 +946,8 @@ func TestBrowserFollowsArchivedRelationshipsFromResultsWhenNamesCollide(t *testi
 	})
 	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})
 	s.press("/", "cancel", "enter", "enter", "enter")
-	s.shows("skl browse › Find slices › widgets › legacy/old", "archived hidden", "Blocks: orders/refund [archived]")
+	s.shows("skl browse › Find slices › widgets › legacy/old", "Blocks: orders/refund [archived]")
+	s.hides("archived shown")
 	s.press("tab", "enter")
 	s.shows("Slice: orders/refund", "Title: Archived refund", "Location: archived proposal", "Lifecycle: Merged")
 	s.press("esc")
@@ -875,13 +977,15 @@ func TestBrowserFollowsRelationshipsAndRestoresContext(t *testing.T) {
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 120, Height: 40})
 	s.press("enter", "down", "enter")
-	s.shows("Slice: orders/cancel", "archived hidden",
+	s.shows("Slice: orders/cancel",
 		"> Depends on: legacy/old [archived] — Old work (Merged; satisfied)",
 		"  Blocks: orders/refund — Refund orders (Ready for Implementation)")
+	s.hides("archived shown")
 
 	s.press("enter")
-	s.shows("skl browse › Projects › widgets › legacy › old", "archived hidden", "Slice: legacy/old",
+	s.shows("skl browse › Projects › widgets › legacy › old", "Slice: legacy/old",
 		"Location: archived proposal", "Lifecycle: Merged", "> Blocks: orders/cancel — Cancel orders (Awaiting Review)")
+	s.hides("archived shown")
 	s.press("d", "enter")
 	s.shows("intent.md — accepted contract")
 	s.press("esc", "esc")
@@ -889,7 +993,8 @@ func TestBrowserFollowsRelationshipsAndRestoresContext(t *testing.T) {
 	s.press("a")
 	s.shows("archived shown", "Slice: legacy/old")
 	s.press("esc")
-	s.shows("skl browse › Projects › widgets › orders › cancel", "archived hidden", "> Depends on: legacy/old")
+	s.shows("skl browse › Projects › widgets › orders › cancel", "> Depends on: legacy/old")
+	s.hides("archived shown")
 
 	s.press("tab", "enter")
 	s.shows("Slice: orders/refund", "> Depends on: orders/cancel — Cancel orders (Awaiting Review; unsatisfied until Merged)",
@@ -905,8 +1010,8 @@ func TestBrowserFollowsRelationshipsAndRestoresContext(t *testing.T) {
 	s.press("esc")
 	s.shows("Slices (3)", "> cancel — Awaiting Review")
 	s.press("esc")
-	s.shows("Proposals (1)", "archived hidden")
-	s.hides("legacy")
+	s.shows("Proposals (1)")
+	s.hides("archived shown", "legacy")
 	if len(s.opened) != 0 {
 		t.Fatalf("following relationships opened links: %v", s.opened)
 	}
