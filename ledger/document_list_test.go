@@ -2,8 +2,11 @@ package ledger_test
 
 import (
 	"os"
+	"os/exec"
+	"path"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/vicrdguez/skills/ledger"
@@ -139,5 +142,63 @@ func sameAsDocuments(t *testing.T, list *ledger.DocumentList, set *ledger.Docume
 	}
 	if !reflect.DeepEqual(*list, want) {
 		t.Fatalf("document list differs from the documents query:\nlist: %+v\nwant: %+v", *list, want)
+	}
+}
+
+// When Git cannot confirm which prose documents exist, the list still offers
+// them, each with a diagnostic, and reads no prose text to find out.
+func TestDocumentListReadsNoProseWhenItsExistenceCheckFails(t *testing.T) {
+	l := newDeliveryLedger(t)
+	l.addProject("widgets", "acme/widgets")
+	l.addSlice("widgets", "records", "readback", ledger.NeedsHuman, nil, deliveryInitial)
+	initial := l.commitAll("accept records")
+	l.addFile(deliveryReportPath("widgets", "records/readback", ledger.WatchdogPhase), formattedWatchdog(t, initial, "records/readback", "healthy review"))
+	l.commitAll("record review")
+	snapshot, err := l.store().Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin, reads := t.TempDir(), filepath.Join(t.TempDir(), "reads")
+	script := "#!/bin/sh\n" +
+		"for arg in \"$@\"; do\n" +
+		"  [ \"$arg\" = --batch-check ] && exit 1\n" +
+		"  [ \"$arg\" = show ] && echo \"$*\" >> \"$SKL_TEST_READS\"\n" +
+		"done\n" +
+		"exec \"$SKL_TEST_REAL_GIT\" \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SKL_TEST_REAL_GIT", realGit)
+	t.Setenv("SKL_TEST_READS", reads)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	list, err := snapshot.SliceDocumentListAt("widgets", "records/readback", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if logged, err := os.ReadFile(reads); err == nil && strings.Contains(string(logged), ".md") {
+		t.Errorf("listing read document text:\n%s", logged)
+	}
+	listed := map[string][]ledger.Diagnostic{}
+	for _, entry := range list.Documents {
+		listed[path.Base(entry.Reference.Path)] = entry.Diagnostics
+	}
+	for _, name := range []string{"intent.md", "behavior.md"} {
+		diagnostics, ok := listed[name]
+		if !ok {
+			t.Errorf("%s is not listed: %+v", name, list.Documents)
+			continue
+		}
+		if len(diagnostics) != 1 || !strings.Contains(diagnostics[0].Problem, "cannot confirm document "+deliveryContractPath("widgets", "records/readback", name)) {
+			t.Errorf("%s diagnostics = %+v, want one naming the failed check", name, diagnostics)
+		}
+	}
+	if diagnostics, ok := listed["watchdog-report.md"]; !ok || len(diagnostics) != 0 {
+		t.Errorf("healthy watchdog report listed = %t with diagnostics %+v", ok, diagnostics)
 	}
 }

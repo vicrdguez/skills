@@ -147,9 +147,10 @@ func (v *Snapshot) sliceFiles(project *projectTree, proposal *proposalTree, slic
 // listingRead serves a listing's reads from two batched lookups over the
 // given committed paths: metadata-bearing records are read and interpreted,
 // while prose documents (proposal descriptions and accepted contracts) are
-// only confirmed to exist. Any other read, including one a failed batch
-// leaves unanswered, is an exact read with its own diagnostic, so an
-// unreadable document is diagnosed exactly as the full query diagnoses it.
+// only confirmed to exist. A record the batch leaves unanswered is an exact
+// read with its own diagnostic, and so is prose the batch reports missing,
+// which reads no text. When the prose lookup itself fails, each prose
+// document is listed with a diagnostic instead, so no prose text is read.
 func (v *Snapshot) listingRead(paths []string) documentRead {
 	var records, prose []Reference
 	for _, documentPath := range paths {
@@ -162,19 +163,26 @@ func (v *Snapshot) listingRead(paths []string) documentRead {
 		}
 	}
 	known := map[string]*Document{}
-	for _, batch := range []struct {
-		references []Reference
-		contents   bool
-	}{{records, true}, {prose, false}} {
-		objects, err := v.objects(batch.references, batch.contents)
-		if err != nil {
-			continue
-		}
+	if objects, err := v.objects(records, true); err == nil {
 		for index, object := range objects {
 			if object.kind == "blob" {
-				reference := batch.references[index]
-				known[reference.Path] = recordDocument(reference, string(object.contents))
+				known[records[index].Path] = recordDocument(records[index], string(object.contents))
 			}
+		}
+	}
+	objects, err := v.objects(prose, false)
+	for index, reference := range prose {
+		switch {
+		case err != nil:
+			document := recordDocument(reference, "")
+			scope, subject := ScopeSlice, document.Project+"/"+document.Proposal+"/"+document.Slice
+			if document.Kind == ProposalDocumentKind {
+				scope, subject = ScopeProposal, document.Project+"/"+document.Proposal
+			}
+			document.Diagnostics = []Diagnostic{{Scope: scope, Subject: subject, Problem: "cannot confirm document " + reference.Path + " is readable: " + err.Error()}}
+			known[reference.Path] = document
+		case objects[index].kind == "blob":
+			known[reference.Path] = recordDocument(reference, "")
 		}
 	}
 	return func(documentPath string) (*Document, error) {
