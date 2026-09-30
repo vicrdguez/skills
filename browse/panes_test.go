@@ -103,6 +103,19 @@ func TestShortStackedTerminalKeepsTheListOverThePreview(t *testing.T) {
 	s.row("> ", "cancel")
 }
 
+func TestShortStackedListShowsTheWholeSelectedRow(t *testing.T) {
+	size := tea.WindowSizeMsg{Width: 40, Height: 16}
+	s := start(t, "widgets")
+	s.send(size)
+	s.press("enter", "down")
+	s.within(size)
+	s.shows(" 2/3 ─╯")
+	if entry := strings.Join(s.listEntries("broken", "cancel", "refund")["cancel"], "\n"); !strings.Contains(entry, "> ") ||
+		!strings.Contains(entry, "◐ Awaiting Review") || !strings.Contains(entry, "▸ watchdog") {
+		t.Fatalf("the selected row lacks its lifecycle or Claim: %q\n%s", entry, s.model.View())
+	}
+}
+
 func TestStackedEmptyListShowsItsWholeMessage(t *testing.T) {
 	s := start(t, "empty", func(root string) {
 		write(t, root, "projects/empty/project.json", `{"repository": "acme/empty"}`)
@@ -379,7 +392,10 @@ func TestSelectedRowKeepsItsLifecycleWeight(t *testing.T) {
 	for _, selected := range []struct{ slice, want string }{
 		{"a-needs", "1;31;7"}, {"e-review", "33;7"}, {"f-rework", "35;7"}, {"g-merged", "2;7"},
 	} {
-		for !strings.Contains(s.row("> "), selected.slice) {
+		for step := 0; !strings.Contains(s.row("> "), selected.slice); step++ {
+			if step == len(lifecycleRows) {
+				t.Fatalf("no row of %s can be selected", selected.slice)
+			}
 			s.press("down")
 		}
 		if got := s.styleOf(selected.slice, lifecycleRows[selected.slice]); got != selected.want {

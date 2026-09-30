@@ -2,6 +2,7 @@ package browse
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -15,7 +16,7 @@ const wideLayout = 100
 var (
 	titleStyle    = lipgloss.NewStyle().Bold(true)
 	mutedStyle    = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "240", Dark: "245"})
-	selectedStyle = lipgloss.NewStyle().Bold(true).Reverse(true)
+	relationStyle = lipgloss.NewStyle().Bold(true).Reverse(true)
 	warningStyle  = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "124", Dark: "209"})
 )
 
@@ -65,7 +66,7 @@ func (m *Model) layoutDetail() {
 			m.relation = min(m.relation, max(len(relations)-1, 0))
 			for index, relation := range relations {
 				if index == m.relation {
-					lines[relation.line] = selectedStyle.Render("> " + lines[relation.line])
+					lines[relation.line] = relationStyle.Render("> " + lines[relation.line])
 				} else {
 					lines[relation.line] = "  " + lines[relation.line]
 				}
@@ -225,7 +226,8 @@ func (m Model) listBody(height int) string {
 	}
 	// Stacked, the list takes up to half the height and the preview the
 	// rest; a preview too short for its border gives way to the list.
-	listHeight := min(len(content.lines(width-paneFrame, available))+2, max(available/2, 3))
+	// The list never takes less than the selected row's lines.
+	listHeight := min(len(content.lines(width-paneFrame, available))+2, max(available/2, len(content.lines(width-paneFrame, 1))+2))
 	if available-listHeight < 3 {
 		return top + pane(content.title, position, content.lines(width-paneFrame, available-2), width, available)
 	}
@@ -244,6 +246,9 @@ func (m Model) position() string {
 	}
 	return fmt.Sprintf("%d/%d", m.cursor[m.screen]+1, count)
 }
+
+// columnGap is the space between two columns of a list row.
+const columnGap = 2
 
 // paneFrame is the width of a pane's side borders and their padding.
 const paneFrame = 4
@@ -325,7 +330,7 @@ func rowWidth(widths []int, marks bool) int {
 	for _, columnWidth := range widths {
 		if columnWidth > 0 {
 			width += gap + columnWidth
-			gap = 2
+			gap = columnGap
 		}
 	}
 	return width
@@ -358,7 +363,7 @@ func (l listing) lines(width, height int) []string {
 		return wrapLines([]string{l.empty}, width)
 	}
 	widths, marks := l.layout()
-	tiers := l.tiers(widths, marks, width)
+	tiers, widths := l.tiers(widths, marks, width)
 	blocks := make([][]string, len(l.rows))
 	for index, row := range l.rows {
 		blocks[index] = row.render(widths, tiers, marks, index == l.cursorRow, width)
@@ -381,13 +386,14 @@ func (l listing) lines(width, height int) []string {
 }
 
 // tiers groups the columns into the lines every row takes within width,
-// narrowing widths[0] where that keeps a row to one line. A row takes one
+// and returns widths with the first column narrowed to fit. A row takes one
 // line when its whole columns fit, its first column shortened down to
 // shortestName if need be. Otherwise the first column takes a line of its
 // own and the other whole columns wrap beneath it, so each column still
 // starts at one offset on every row. Columns after the whole ones follow on
 // the last line and are cut at the pane's edge.
-func (l listing) tiers(widths []int, marks bool, width int) [][]int {
+func (l listing) tiers(widths []int, marks bool, width int) ([][]int, []int) {
+	widths = slices.Clone(widths)
 	every := make([]int, len(widths))
 	for index := range every {
 		every[index] = index
@@ -395,27 +401,35 @@ func (l listing) tiers(widths []int, marks bool, width int) [][]int {
 	whole := min(l.whole, len(widths))
 	excess := rowWidth(widths[:whole], marks) - width
 	if whole == 0 || excess <= 0 {
-		return [][]int{every}
+		return [][]int{every}, widths
 	}
 	if widths[0]-excess >= shortestName {
 		widths[0] -= excess
-		return [][]int{every}
+		return [][]int{every}, widths
 	}
-	lead := rowWidth(nil, marks)
-	widths[0] = max(min(widths[0], width-lead), 1)
-	room := width - lead - tierIndent
+	widths[0] = max(min(widths[0], width-lead(marks)), 1)
+	room := width - lead(marks) - tierIndent
+	// used is the width taken on the current line; the first column past
+	// the name always starts a new line.
 	tiers, used := [][]int{{0}}, room
 	for index := 1; index < len(widths); index++ {
 		if widths[index] == 0 {
 			continue
 		}
-		if index < whole && used+2+widths[index] > room {
-			tiers, used = append(tiers, nil), -2
+		if index < whole && used+columnGap+widths[index] > room {
+			tiers = append(tiers, []int{index})
+			used = widths[index]
+			continue
 		}
 		tiers[len(tiers)-1] = append(tiers[len(tiers)-1], index)
-		used += 2 + widths[index]
+		used += columnGap + widths[index]
 	}
-	return tiers
+	return tiers, widths
+}
+
+// lead is the width of a row's selection and unknown-facts markers.
+func lead(marks bool) int {
+	return rowWidth(nil, marks)
 }
 
 // render draws one row as the lines of its tiers, its columns padded to
@@ -443,7 +457,7 @@ func (r row) render(widths []int, tiers [][]int, marks, selected bool, width int
 		shown := number == 0
 		switch {
 		case number > 0:
-			add(plain, strings.Repeat(" ", rowWidth(nil, marks)+tierIndent))
+			add(plain, strings.Repeat(" ", lead(marks)+tierIndent))
 		case selected:
 			add(plain, "> ")
 		default:
@@ -469,7 +483,7 @@ func (r row) render(widths []int, tiers [][]int, marks, selected bool, width int
 			add(plain, gap)
 			add(column.style, column.text)
 			add(plain, strings.Repeat(" ", widths[index]-lipgloss.Width(column.text)))
-			gap = "  "
+			gap = strings.Repeat(" ", columnGap)
 		}
 		if !shown {
 			continue
