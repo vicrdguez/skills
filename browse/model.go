@@ -241,7 +241,8 @@ func New(snapshot *ledger.Snapshot, options Options) Model {
 
 // footerKeys lists the bindings that act on the current screen, mirroring
 // the conditions in key. The most specific come first, so a narrow footer
-// trims the general ones.
+// trims the general ones. Movement (up, down, page, shift+tab) acts widely
+// and is left to `?`, keeping the room for the screen's actions.
 func (m Model) footerKeys() []key.Binding {
 	keys := m.keys
 	var bindings []key.Binding
@@ -254,7 +255,7 @@ func (m Model) footerKeys() []key.Binding {
 	follow := keys.Enter
 	follow.SetHelp("enter", "follow relation")
 	add(follow, relations)
-	add(keys.Enter, m.screen != sliceScreen && m.selectionMissing == "" && m.failure == nil && m.rows() > 0)
+	add(keys.Enter, m.screen != sliceScreen && m.canEnter())
 	add(keys.Next, relations)
 	add(keys.Back, m.screen != overviewScreen)
 	add(keys.Group, m.finding())
@@ -267,8 +268,7 @@ func (m Model) footerKeys() []key.Binding {
 	add(keys.Documents, (m.screen == proposalScreen && m.members != nil) || (m.screen == sliceScreen && m.slice != nil))
 	add(keys.References, (m.screen == documentScreen && m.currentDocument != nil) ||
 		(m.screen == sliceScreen && m.slice != nil && m.slice.Claim != nil))
-	add(keys.Versions, m.screen == documentScreen && m.currentDocument != nil &&
-		(m.currentDocument.Kind == ledger.ImplementReportDocumentKind || m.currentDocument.Kind == ledger.WatchdogReportDocumentKind))
+	add(keys.Versions, m.readingReport())
 	issue := keys.Issue
 	if m.screen == proposalScreen {
 		issue.SetHelp("i", "open parent issue")
@@ -617,8 +617,13 @@ func (m *Model) toggleScope() {
 	m.load()
 }
 
+// canEnter reports whether the current list has a selected entry to open.
+func (m Model) canEnter() bool {
+	return m.selectionMissing == "" && m.failure == nil && m.rows() > 0
+}
+
 func (m *Model) enter() {
-	if m.selectionMissing != "" || m.failure != nil || m.rows() == 0 {
+	if !m.canEnter() {
 		return
 	}
 	selected := m.cursor[m.screen]

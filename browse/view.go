@@ -39,6 +39,8 @@ func (m Model) View() string {
 	return strings.Join([]string{header, clip(body, height), footer}, "\n")
 }
 
+// bodyHeight leaves the body at least one line, so that the full key list
+// still fits a small terminal.
 func (m Model) bodyHeight(header, footer string) int {
 	return max(m.height-lipgloss.Height(header)-lipgloss.Height(footer), 1)
 }
@@ -184,12 +186,14 @@ func (m Model) header() string {
 		indicators = indicators[1:]
 	}
 	right := strings.Join(indicators, separator)
+	// The breadcrumb stays at least minGap spaces clear of the indicators.
+	const minGap = 2
 	left := ""
-	if room := m.width - lipgloss.Width(right) - 2; room > 0 {
+	if room := m.width - lipgloss.Width(right) - minGap; room > 0 {
 		left = titleStyle.Render(keepEnd("skl browse › "+strings.Join(path, " › "), room))
 	}
-	gap := strings.Repeat(" ", max(m.width-lipgloss.Width(left)-lipgloss.Width(right), 0))
-	return truncate(left+gap+right, m.width)
+	padding := strings.Repeat(" ", max(m.width-lipgloss.Width(left)-lipgloss.Width(right), 0))
+	return truncate(left+padding+right, m.width)
 }
 
 func (m Model) footer() string {
@@ -211,8 +215,12 @@ func (m Model) footer() string {
 	}
 	switch {
 	case m.typing != nil:
-		// Typing takes every other key as text; the prompt names its own keys.
 		lines = append(lines, wrap(titleStyle.Render("Search names: ")+*m.typing+"█  (enter apply · esc cancel)", m.width))
+		// Typing takes every other key as text, `?` included.
+		apply, cancel := m.keys.Enter, m.keys.Back
+		apply.SetHelp("enter", "apply")
+		cancel.SetHelp("esc", "cancel")
+		lines = append(lines, truncate(m.help.ShortHelpView([]key.Binding{apply, cancel}), m.width))
 	case m.help.ShowAll:
 		lines = append(lines, m.allKeys()...)
 	default:
@@ -225,6 +233,7 @@ func (m Model) footer() string {
 // help.
 func (m Model) keyHelp(bindings []key.Binding) string {
 	for count := len(bindings); count > 0; count-- {
+		// The capped slice makes append copy rather than overwrite bindings.
 		line := m.help.ShortHelpView(append(bindings[:count:count], m.keys.Help))
 		if lipgloss.Width(line) <= m.width {
 			return line

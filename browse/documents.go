@@ -118,9 +118,15 @@ func (m *Model) openDocument(document ledger.Document) {
 	m.docViewport.GotoTop()
 }
 
+// readingReport reports whether the open document is an implementation or
+// watchdog report, whose versions can be browsed.
+func (m Model) readingReport() bool {
+	return m.screen == documentScreen && m.currentDocument != nil &&
+		(m.currentDocument.Kind == ledger.ImplementReportDocumentKind || m.currentDocument.Kind == ledger.WatchdogReportDocumentKind)
+}
+
 func (m *Model) openVersions() {
-	if m.screen != documentScreen || m.currentDocument == nil ||
-		(m.currentDocument.Kind != ledger.ImplementReportDocumentKind && m.currentDocument.Kind != ledger.WatchdogReportDocumentKind) {
+	if !m.readingReport() {
 		m.status = "Open a report to browse its versions"
 		return
 	}

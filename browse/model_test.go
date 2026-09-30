@@ -202,17 +202,20 @@ func (s *session) footer() string {
 	return lines[len(lines)-1]
 }
 
-// footerLists fails unless the footer lists every wanted key help and none
-// of the unwanted ones.
-func (s *session) footerLists(wanted []string, unwanted ...string) {
+func (s *session) footerLists(helps ...string) {
 	s.t.Helper()
 	footer := s.footer()
-	for _, help := range wanted {
+	for _, help := range helps {
 		if !strings.Contains(footer, help) {
 			s.t.Fatalf("footer lacks %q: %q", help, footer)
 		}
 	}
-	for _, help := range unwanted {
+}
+
+func (s *session) footerOmits(helps ...string) {
+	s.t.Helper()
+	footer := s.footer()
+	for _, help := range helps {
 		if strings.Contains(footer, help) {
 			s.t.Fatalf("footer lists %q: %q", help, footer)
 		}
@@ -278,7 +281,7 @@ func TestBrowserHeaderIsOneLineAndMentionsArchivesOnlyWhenShown(t *testing.T) {
 		strings.Contains(lines[0], "archived") {
 		t.Fatalf("header %q, want the breadcrumb, then %s, and no archives", lines[0], revision)
 	}
-	if !strings.HasPrefix(lines[1], "Project widgets (acme/widgets)") {
+	if strings.HasPrefix(lines[1], "skl browse") || strings.Contains(lines[1], revision) {
 		t.Fatalf("header continues on a second line: %q", lines[1])
 	}
 	s.shows("Proposals (1)")
@@ -341,13 +344,19 @@ func TestBrowserKeepsHistoricalDocumentIdentityAndScrollInView(t *testing.T) {
 		t.Fatalf("scrolled historical document header %q, want HISTORICAL %s and its scroll position", header, reference)
 	}
 
-	// A narrow terminal keeps the document's identity before its scroll position.
+	// Narrower terminals give up the scroll position first, then the
+	// document's identity, and keep the ledger revision.
 	narrow := tea.WindowSizeMsg{Width: 40, Height: 14}
 	s.send(narrow)
-	if header := s.header(); !strings.Contains(header, "HISTORICAL "+reference) {
-		t.Fatalf("narrow historical document header %q, want HISTORICAL %s", header, reference)
+	if header := s.header(); !strings.Contains(header, "HISTORICAL "+reference) || strings.Contains(header, "scrolled") {
+		t.Fatalf("40-column historical document header %q, want HISTORICAL %s without the scroll position", header, reference)
 	}
 	s.fitsIn(narrow)
+	revision := gitOutput(t, s.root, "rev-parse", "HEAD")[:12]
+	s.send(tea.WindowSizeMsg{Width: 30, Height: 14})
+	if header := s.header(); lipgloss.Width(header) > 30 || !strings.HasSuffix(header, revision) || strings.Contains(header, "HISTORICAL") {
+		t.Fatalf("30-column historical document header %q, want only the ledger revision %s", header, revision)
+	}
 }
 
 func TestBrowserSelectsEarlierReportVersionAndReturnsToCurrentContext(t *testing.T) {
@@ -619,25 +628,30 @@ func TestBrowserFooterListsOnlyKeysThatActOnTheScreen(t *testing.T) {
 	s.send(tea.WindowSizeMsg{Width: 400, Height: 40})
 	s.press("enter", "down", "enter")
 	s.shows("Depends on: legacy/old")
-	s.footerLists([]string{"enter follow relation", "tab next relation", "esc back", "d documents", "r references",
-		"i open issue", "p open PR", "f find by lifecycle or claim", "/ search names", "a toggle archived", "? help"},
-		"toggle grouping", "toggle scope", "report versions", "diagnostics")
+	s.footerLists("enter follow relation", "tab next relation", "esc back", "d documents", "r references",
+		"i open issue", "p open PR", "f find by lifecycle or claim", "/ search names", "a toggle archived", "? help")
+	s.footerOmits("toggle grouping", "toggle scope", "report versions", "diagnostics")
 
 	s.press("/", "cancel", "enter")
-	s.footerLists([]string{"enter open", "g toggle grouping", "w toggle scope", "d result diagnostics", "? help"},
-		"d documents", "relation", "references", "open issue", "open PR")
-	// Typing takes every key but enter and esc as text; its prompt names them.
+	s.footerLists("enter open", "g toggle grouping", "w toggle scope", "d result diagnostics", "? help")
+	s.footerOmits("d documents", "relation", "references", "open issue", "open PR")
+	// The prompt stays above the footer; typing takes every other key, `?`
+	// included, as text.
 	s.press("/")
-	s.footerLists([]string{"Search names: █  (enter apply · esc cancel)"}, "? help")
+	if lines := strings.Split(s.model.View(), "\n"); !strings.Contains(lines[len(lines)-2], "Search names: █") {
+		t.Fatalf("the name-search prompt is not above the footer:\n%s", s.model.View())
+	}
+	s.footerLists("enter apply • esc cancel")
+	s.footerOmits("? help", "toggle grouping")
 	s.press("esc")
 
 	s = start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 400, Height: 40})
-	s.footerLists([]string{"enter open", "a toggle archived", "s switch project", "? help"},
-		"documents", "open issue", "open PR", "toggle grouping")
+	s.footerLists("enter open", "a toggle archived", "s switch project", "? help")
+	s.footerOmits("documents", "open issue", "open PR", "toggle grouping")
 	s.press("enter", "d")
-	s.footerLists([]string{"enter open", "d diagnostics", "esc back", "? help"},
-		"d documents", "result diagnostics", "search names", "toggle archived")
+	s.footerLists("enter open", "d diagnostics", "esc back", "? help")
+	s.footerOmits("d documents", "result diagnostics", "search names", "toggle archived")
 }
 
 func TestBrowserNarrowFooterKeepsHelpAndHelpShowsEveryBinding(t *testing.T) {
