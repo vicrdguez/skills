@@ -9,6 +9,6 @@ Write the report body at `{{.ResultDirectory}}/watchdog-report.md`, in Markdown.
 
 ## Public body
 
-Write `{{.ResultDirectory}}/public.md` separately, as the pull request body. `pass` leaves the Work Item `ready_for_merge`, `rework` leaves it `{{if .ReworkPauses}}needs_human{{else}}rework{{end}}`, and `needs-human` leaves it `needs_human`. Completed independent reviews, counting this one: {{.Round}}.
+Write `{{.ResultDirectory}}/public.md` separately, as the pull request body. `pass` leaves the Work Item `ready_for_merge`, `rework` leaves it `{{if .ReworkPauses}}needs_human{{else}}rework{{end}}`, and `needs-human` leaves it `needs_human`. Completed reviews, counting this one: {{.Round}}.
 
 {{template "pull-brief"}}

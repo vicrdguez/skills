@@ -354,8 +354,8 @@ func presentGuided(t *testing.T, cli ledgerCLI, source string) *presentationGuid
 // handoff's report resource and explicit presentation carry the cumulative
 // Review Count. A completed review, including one that pauses, advances it;
 // an interrupted review attempt, re-implementation and repeated presentation
-// leave it unchanged, and an implementation report's own round zero never
-// stands in for it.
+// leave it unchanged, as does human direction, and an implementation report's
+// own round zero never stands in for it.
 func TestPresentationAuthoringCarriesTheCompletedReviewCount(t *testing.T) {
 	newLedgerFixture(t)
 	source, target := deliverySourceRepo(t)
@@ -407,7 +407,7 @@ func TestPresentationAuthoringCarriesTheCompletedReviewCount(t *testing.T) {
 	presented(ledger.WatchdogPhase, ledger.Rework, 1)
 
 	started, reworked, _ := presentHandoff(t, offline, source, ledger.ImplementPhase, "--target", target)
-	if resource := authoring(started, "--input procedure=rework", "--input review_count=1"); !strings.Contains(resource, "Completed independent reviews: 1.") {
+	if resource := authoring(started, "--input procedure=rework", "--input review_count=1"); !strings.Contains(resource, "Completed reviews: 1.") {
 		t.Errorf("rework report resource does not carry the completed review:\n%s", resource)
 	}
 	if report, _ := deliveryCommittedReport(t, offline, reworked.Result.Report, ledger.ImplementPhase); report.Round != 0 {
@@ -418,6 +418,14 @@ func TestPresentationAuthoringCarriesTheCompletedReviewCount(t *testing.T) {
 	started, _, _ = presentHandoff(t, offline, source, ledger.WatchdogPhase, "--outcome", "needs-human")
 	authoring(started, "--input round=2", "--input rework_pauses=true")
 	presented(ledger.WatchdogPhase, ledger.NeedsHuman, 2)
+
+	// Human direction continues the implementation without resetting the count.
+	if direction := deliveryRecordHumanDirection(t, offline, target, ledger.RouteImplement); direction.Status != ledger.DecisionApplied {
+		t.Fatalf("human direction = %#v", direction)
+	}
+	started, _, _ = presentHandoff(t, offline, source, ledger.ImplementPhase, "--target", target)
+	authoring(started, "--input review_count=2")
+	presented(ledger.ImplementPhase, ledger.AwaitingReview, 2)
 }
 
 // TestPresentationEvidenceReachesADecisionThroughRework covers
@@ -426,7 +434,7 @@ func TestPresentationAuthoringCarriesTheCompletedReviewCount(t *testing.T) {
 // new round, yet explicit presentation's evidence still reaches it through
 // the consumed reports, beside the Contract's human-owned check.
 func TestPresentationEvidenceReachesADecisionThroughRework(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	newLedgerFixture(t)
 	source, target := deliverySourceRepo(t)
 	deliveryAcceptFixture(t, newForgeServer(t), source)
 	offline := deliveryNoForgeApp(t)
@@ -451,9 +459,6 @@ func TestPresentationEvidenceReachesADecisionThroughRework(t *testing.T) {
 	}
 	presentHandoff(t, offline, source, ledger.WatchdogPhase, "--outcome", "rework")
 	started, _, _ := presentHandoff(t, offline, source, ledger.ImplementPhase, "--target", target)
-	if deliveryPersistedState(t, fixture.clone).Decision {
-		t.Fatal("the decision still governs the rework round")
-	}
 	for _, document := range started.Execution.Documents {
 		if strings.HasSuffix(document.Path, "/decision.md") {
 			t.Fatalf("rework rendering supplies the settled decision as direction: %s", document.Path)

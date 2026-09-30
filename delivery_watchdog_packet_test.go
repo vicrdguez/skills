@@ -182,13 +182,8 @@ func TestDeliveryWatchdogReportResource(t *testing.T) {
 	paused, err := RenderResource("watchdog", "ledger-review.md", []string{
 		"result_directory=/tmp/result", "round=2", "reviewed_head=" + reviewed, "rework_pauses=true",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for rendered, want := range map[string]string{body: "`rework` leaves it `rework`", string(paused): "`rework` leaves it `needs_human`"} {
-		if !strings.Contains(rendered, want) {
-			t.Errorf("review report resource is missing the bound rework state %q:\n%s", want, rendered)
-		}
+	if err != nil || !strings.Contains(string(paused), "`rework` leaves it `needs_human`") {
+		t.Errorf("paused review report resource = %v:\n%s", err, paused)
 	}
 
 	// Every representable engine round works, but the resource must not

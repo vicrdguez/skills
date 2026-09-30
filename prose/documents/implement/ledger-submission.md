@@ -27,6 +27,6 @@ Only when you pause: the question, the evidence, the options with their conseque
 
 # Public body
 
-Write `{{.ResultDirectory}}/public.md` separately, as the pull request body. Submitting leaves the Work Item `awaiting_review`; pausing leaves it `needs_human`. Completed independent reviews: {{.ReviewCount}}.
+Write `{{.ResultDirectory}}/public.md` separately, as the pull request body. Submitting leaves the Work Item `awaiting_review`; pausing leaves it `needs_human`. Completed reviews: {{.ReviewCount}}.
 
 {{template "pull-brief"}}
