@@ -3,6 +3,7 @@ package browse_test
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -223,7 +224,7 @@ func TestUnreadableSliceStaysMarkedUnknownBesideSelectableHealthyOnes(t *testing
 var sgr = regexp.MustCompile(`\x1b\[([0-9;]*)m$`)
 
 // styleOf is the SGR parameters that start fragment after row on its view
-// line, with bright ANSI colours read as their normal variants.
+// line, sorted, with bright ANSI colours read as their normal variants.
 func (s *session) styleOf(row, fragment string) string {
 	s.t.Helper()
 	line := s.row(row, fragment)
@@ -240,6 +241,7 @@ func (s *session) styleOf(row, fragment string) string {
 		}
 		parameters = append(parameters, parameter)
 	}
+	sort.Strings(parameters)
 	return strings.Join(parameters, ";")
 }
 
@@ -269,5 +271,24 @@ func TestLifecycleAndClaimUseTheTerminalsAnsiColoursAndWeights(t *testing.T) {
 	}
 	if unknown, warning := s.styleOf("i-torn", "! lifecycle unknown"), s.styleOf("", "! Incomplete"); unknown != warning {
 		t.Errorf("unknown lifecycle style = %q, want the warning style %q", unknown, warning)
+	}
+}
+
+func TestSelectedRowKeepsItsLifecycleWeight(t *testing.T) {
+	profile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(profile) })
+	s := startSpectrum(t, 80)
+	// Selection adds reverse video (7) to the lifecycle's own colour and
+	// weight: bold stays on Needs Human alone, dim on finished work.
+	for _, selected := range []struct{ slice, want string }{
+		{"a-needs", "1;31;7"}, {"e-review", "33;7"}, {"f-rework", "35;7"}, {"g-merged", "2;7"},
+	} {
+		for !strings.Contains(s.row("> "), selected.slice) {
+			s.press("down")
+		}
+		if got := s.styleOf(selected.slice, lifecycleRows[selected.slice]); got != selected.want {
+			t.Errorf("selected %s lifecycle style = %q, want %q", selected.slice, got, selected.want)
+		}
 	}
 }

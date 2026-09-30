@@ -377,8 +377,10 @@ func (r row) render(widths []int, marks, selected bool, width int) string {
 	}
 	line := ""
 	add := func(style lipgloss.Style, text string) {
+		// Selection reverses each span and leaves its weight alone, since a
+		// lifecycle's weight is part of its look.
 		if selected {
-			style = style.Inherit(selectedStyle)
+			style = style.Reverse(true)
 		}
 		if text != "" {
 			line += style.Render(text)
