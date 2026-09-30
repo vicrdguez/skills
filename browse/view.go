@@ -343,9 +343,10 @@ func (l listing) width() int {
 	return width
 }
 
-// shortestName is the fewest cells a shortened first column keeps. A pane
-// too narrow for the whole columns even then cuts rows at its edge instead.
-const shortestName = 6
+// shortestName is the fewest cells a shortened first column keeps: the name
+// yields before the lifecycle and Claim do. A pane too narrow for the whole
+// columns even then cuts rows at its edge instead.
+const shortestName = 3
 
 // lines renders the list in a window of height lines that keeps the cursor
 // row visible. The cursor row is marked by text as well as style.

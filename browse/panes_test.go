@@ -151,6 +151,22 @@ func TestSliceRowsAlignNameLifecycleAndClaimColumns(t *testing.T) {
 	}
 }
 
+func TestClaimMarkerStaysOnAFortyColumnList(t *testing.T) {
+	size := tea.WindowSizeMsg{Width: 40, Height: 24}
+	s := start(t, "gadgets", func(root string) {
+		write(t, root, "projects/gadgets/proposals/pair/proposal.json", `{"accepted": "2024-01-01T00:00:00Z"}`)
+		write(t, root, "projects/gadgets/proposals/pair/x-claimed/state.json", `{"state": "awaiting_review", "claim": {"phase": "watchdog", "basis": "b", "inputs": {"contract": []}}}`)
+		write(t, root, "projects/gadgets/proposals/pair/y-open/state.json", `{"state": "awaiting_review"}`)
+	})
+	s.send(size)
+	s.press("enter")
+	s.within(size)
+	s.row("…ed", "◐ Awaiting Review", "▸ watchdog")
+	if open := s.row("…en", "◐ Awaiting Review"); strings.Contains(open, "▸") {
+		t.Fatalf("an unclaimed Slice shows a Claim marker: %q", open)
+	}
+}
+
 func TestNarrowListShortensNamesToKeepLifecycleAndClaim(t *testing.T) {
 	s := startSpectrum(t, 60)
 	s.within(tea.WindowSizeMsg{Width: 60, Height: 40})
