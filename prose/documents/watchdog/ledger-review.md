@@ -9,4 +9,6 @@ Write the report body at `{{.ResultDirectory}}/watchdog-report.md`, in Markdown.
 
 ## Public body
 
-Write `{{.ResultDirectory}}/public.md` separately, as fresh prose for humans: the verdict and the verification behind it. Leave out the findings, the Contract and private operational detail. Say that the human verification obligations remain available privately through `skl`.
+Write `{{.ResultDirectory}}/public.md` separately, as the pull request body. `pass` leaves the Work Item `ready_for_merge`, `rework` leaves it `{{if .ReworkPauses}}needs_human{{else}}rework{{end}}`, and `needs-human` leaves it `needs_human`. Completed independent reviews, counting this one: {{.Round}}.
+
+{{template "pull-brief"}}

@@ -38,22 +38,28 @@ type DeliveryForge interface {
 // CurrentResult is the latest committed phase result of one Work Item, the
 // only input a pull request presentation is derived from. It is selected from
 // the current lifecycle and the reports' recorded input references, never from
-// a publication record or the reports' Markdown prose.
+// a publication record or the reports' Markdown prose. Contract, Implement,
+// Watchdog and Decision are the ledger inputs the selected report consumed.
+// ReviewCount is the Work Item's completed Watchdog Reviews, recorded by its
+// latest review report; an implementation report's own round is always zero.
 type CurrentResult struct {
-	Item       string           `json:"item"`
-	Lifecycle  string           `json:"lifecycle"`
-	Phase      string           `json:"phase"`
-	Outcome    string           `json:"outcome"`
-	Round      uint64           `json:"round,omitempty"`
-	Report     Reference        `json:"report"`
-	Implement  *Reference       `json:"implement,omitempty"`
-	Decision   *Reference       `json:"decision,omitempty"`
-	Source     SourceRevisions  `json:"source"`
-	Branch     string           `json:"branch"`
-	Approved   bool             `json:"approved"`
-	Submission *ForgeAttachment `json:"submission,omitempty"`
-	Issue      *ForgeAttachment `json:"issue,omitempty"`
-	Claimed    bool             `json:"claimed,omitempty"`
+	Item        string           `json:"item"`
+	Lifecycle   string           `json:"lifecycle"`
+	Phase       string           `json:"phase"`
+	Outcome     string           `json:"outcome"`
+	Round       uint64           `json:"round,omitempty"`
+	ReviewCount uint64           `json:"review_count"`
+	Report      Reference        `json:"report"`
+	Contract    []Reference      `json:"contract"`
+	Implement   *Reference       `json:"implement,omitempty"`
+	Watchdog    *Reference       `json:"watchdog,omitempty"`
+	Decision    *Reference       `json:"decision,omitempty"`
+	Source      SourceRevisions  `json:"source"`
+	Branch      string           `json:"branch"`
+	Approved    bool             `json:"approved"`
+	Submission  *ForgeAttachment `json:"submission,omitempty"`
+	Issue       *ForgeAttachment `json:"issue,omitempty"`
+	Claimed     bool             `json:"claimed,omitempty"`
 
 	title, contents string
 }
@@ -80,10 +86,10 @@ func SelectCurrentResult(s *Store, repository github.RepositoryID, item string) 
 		if err != nil {
 			return CurrentResult{}, err
 		}
+		result.ReviewCount = parsed.Round
 		if consumed := parsed.Ledger.Implement; consumed != nil {
 			if reviewed, err := showPath(s, consumed.Commit, consumed.Path); err == nil && reviewed == implementation {
 				result.Phase, result.Report.Path, result.contents = WatchdogPhase, reviewPath, review
-				result.Implement = consumed
 			}
 		}
 	}
@@ -91,7 +97,8 @@ func SelectCurrentResult(s *Store, repository github.RepositoryID, item string) 
 	if err != nil {
 		return CurrentResult{}, err
 	}
-	result.Outcome, result.Round, result.Source, result.Decision = report.Outcome, report.Round, report.Source, report.Ledger.Decision
+	result.Outcome, result.Round, result.Source = report.Outcome, report.Round, report.Source
+	result.Contract, result.Implement, result.Watchdog, result.Decision = report.Ledger.Contract, report.Ledger.Implement, report.Ledger.Watchdog, report.Ledger.Decision
 	destination, err := deliveryDestination(result.Phase, report.Outcome, report.Round)
 	if err != nil {
 		return CurrentResult{}, err

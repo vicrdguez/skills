@@ -160,6 +160,7 @@ func TestDeliveryWatchdogReportResource(t *testing.T) {
 		"result_directory=/tmp/result",
 		"round=2",
 		"reviewed_head=" + reviewed,
+		"rework_pauses=false",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -176,15 +177,29 @@ func TestDeliveryWatchdogReportResource(t *testing.T) {
 		}
 	}
 
+	// The golden journey renders only a round whose rework verdict keeps
+	// automatic rework; at the limit, rework leaves the Work Item paused.
+	paused, err := RenderResource("watchdog", "ledger-review.md", []string{
+		"result_directory=/tmp/result", "round=2", "reviewed_head=" + reviewed, "rework_pauses=true",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rendered, want := range map[string]string{body: "`rework` leaves it `rework`", string(paused): "`rework` leaves it `needs_human`"} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("review report resource is missing the bound rework state %q:\n%s", want, rendered)
+		}
+	}
+
 	// Every representable engine round works, but the resource must not
 	// advertise object identities the documented schema-1 codec refuses.
 	if _, err := RenderResource("watchdog", "ledger-review.md", []string{
-		"result_directory=/tmp/result", "round=18446744073709551615", "reviewed_head=" + reviewed,
+		"result_directory=/tmp/result", "round=18446744073709551615", "reviewed_head=" + reviewed, "rework_pauses=true",
 	}); err != nil {
 		t.Fatalf("valid engine facts were not renderable: %v", err)
 	}
 	if _, err := RenderResource("watchdog", "ledger-review.md", []string{
-		"result_directory=/tmp/result", "round=1", "reviewed_head=" + strings.Repeat("a", 64),
+		"result_directory=/tmp/result", "round=1", "reviewed_head=" + strings.Repeat("a", 64), "rework_pauses=false",
 	}); err == nil {
 		t.Fatal("resource advertised a SHA-256 identity unsupported by schema 1")
 	}
@@ -193,6 +208,7 @@ func TestDeliveryWatchdogReportResource(t *testing.T) {
 		"result_directory=/tmp/result",
 		"round=0",
 		"reviewed_head=" + reviewed,
+		"rework_pauses=false",
 	}); err == nil {
 		t.Error("review report resource accepted round zero")
 	}
@@ -200,6 +216,7 @@ func TestDeliveryWatchdogReportResource(t *testing.T) {
 		"result_directory=/tmp/result",
 		"round=2",
 		"reviewed_head=not-a-sha",
+		"rework_pauses=false",
 	}); err == nil {
 		t.Error("review report resource accepted a malformed reviewed head")
 	}

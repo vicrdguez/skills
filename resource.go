@@ -33,12 +33,14 @@ func checkResultDirectory(resource, value string) error {
 type submissionData struct {
 	ResultDirectory string
 	Procedure       string
+	ReviewCount     uint64
 }
 
 type ledgerReviewData struct {
 	ResultDirectory string
 	Round           uint64
 	ReviewedHead    string
+	ReworkPauses    bool
 }
 
 type issuePublicationData struct {
@@ -108,6 +110,7 @@ func resourceSpecFor(resource string) resourceSpec {
 		return resourceSpec{data: data, inputs: []resourceInput{
 			{flag: &cli.StringFlag{Name: "result_directory", Required: true, Usage: resultDirectoryUsage, Destination: &data.ResultDirectory}},
 			{flag: &cli.StringFlag{Name: "procedure", Required: true, Usage: "Which submission procedure to render.", Destination: &data.Procedure}, choices: []string{"initial", "resumed", "rework"}},
+			{flag: &cli.Uint64Flag{Name: "review_count", Required: true, Usage: "Completed Work Item reviews before this submission.", Destination: &data.ReviewCount}},
 		}, validate: func(resource string) error {
 			return checkResultDirectory(resource, data.ResultDirectory)
 		}}
@@ -117,6 +120,7 @@ func resourceSpecFor(resource string) resourceSpec {
 			{flag: &cli.StringFlag{Name: "result_directory", Required: true, Usage: resultDirectoryUsage, Destination: &data.ResultDirectory}},
 			{flag: &cli.Uint64Flag{Name: "round", Required: true, Usage: "Next completed Work Item review round.", Destination: &data.Round}},
 			{flag: &cli.StringFlag{Name: "reviewed_head", Required: true, Usage: "Fixed reviewed source commit.", Destination: &data.ReviewedHead}},
+			{flag: &cli.BoolFlag{Name: "rework_pauses", Required: true, Usage: "Whether a rework verdict in this review pauses the Work Item for a human decision.", Destination: &data.ReworkPauses}},
 		}, validate: func(resource string) error {
 			if data.Round < 1 || !reviewedHeadPattern.MatchString(data.ReviewedHead) {
 				return fmt.Errorf("resource %s requires a positive round and full reviewed source SHA (40 lowercase hexadecimal characters for schema 1)", resource)

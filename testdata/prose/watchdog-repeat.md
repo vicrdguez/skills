@@ -154,7 +154,7 @@ A finding keeps its Work-Item-local `W<n>` across rounds: list resolved ones as 
 
 ## Verdict
 
-Write the report as `skl skill --resource ledger-review.md --input result_directory='/tmp/skl-watchdog-result' --input round=2 --input reviewed_head='0000000000000000000000000000000000000002' watchdog` instructs, then submit with `skl watchdog submit --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --body '/tmp/skl-watchdog-result/watchdog-report.md' --public-body '/tmp/skl-watchdog-result/public.md' --outcome <pass|rework|needs-human>`:
+Write the report as `skl skill --resource ledger-review.md --input result_directory='/tmp/skl-watchdog-result' --input round=2 --input reviewed_head='0000000000000000000000000000000000000002' --input rework_pauses=true watchdog` instructs, then submit with `skl watchdog submit --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --body '/tmp/skl-watchdog-result/watchdog-report.md' --public-body '/tmp/skl-watchdog-result/public.md' --outcome <pass|rework|needs-human>`:
 
 - `pass` only when no `BLOCK` or `HUMAN` finding is active;
 - `rework` when a `BLOCK` finding is active;

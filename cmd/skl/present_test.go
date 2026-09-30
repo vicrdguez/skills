@@ -136,8 +136,24 @@ func presentForgeApp(t *testing.T, pulls *pullServer) ledgerCLI {
 	return ledgerCLI{app: newApp(factory, bytes.NewReader(nil), &output, &output), out: &output}
 }
 
-// presentHandoff runs one claimed phase through its public commands offline.
-func presentHandoff(t *testing.T, cli ledgerCLI, source, phase string, arguments ...string) (deliveryOutput, string) {
+// presentEvidence runs every evidence command a presentation listed, as
+// printed, and returns the retrieved documents' contents.
+func presentEvidence(t *testing.T, cli ledgerCLI, guidance *presentationGuidance) string {
+	t.Helper()
+	var contents []string
+	for _, command := range guidance.Evidence {
+		shown := cli.ledgerJSON(t, append(shellWords(t, command), "--format", "json")...)
+		if shown.Document == nil {
+			t.Fatalf("%s retrieved no document", command)
+		}
+		contents = append(contents, shown.Document.Contents)
+	}
+	return strings.Join(contents, "\n")
+}
+
+// presentHandoff runs one claimed phase through its public commands offline
+// and returns its rendering, its handoff and the handed-off source head.
+func presentHandoff(t *testing.T, cli ledgerCLI, source, phase string, arguments ...string) (deliveryOutput, deliveryOutput, string) {
 	t.Helper()
 	started, err := cli.deliveryJSON(t, "skl", phase, "next", "--repo", source, "--format", "json")
 	if err != nil || started.Execution == nil {
@@ -169,7 +185,7 @@ func presentHandoff(t *testing.T, cli ledgerCLI, source, phase string, arguments
 	if submitted.Result.Publication == nil || submitted.Result.Publication.Status == ledger.PullPresented || !strings.Contains(submitted.Present, "skl ledger present") {
 		t.Fatalf("offline %s handoff = %#v, want pending presentation with a current-view continuation", phase, submitted)
 	}
-	return submitted, head
+	return started, submitted, head
 }
 
 // TestLedgerPresentReauthorsTheCurrentResultAfterMissedPhases covers the B5
@@ -185,9 +201,9 @@ func TestLedgerPresentReauthorsTheCurrentResultAfterMissedPhases(t *testing.T) {
 	offline := deliveryNoForgeApp(t)
 
 	presentHandoff(t, offline, source, ledger.ImplementPhase, "--target", target)
-	presentHandoff(t, offline, source, ledger.WatchdogPhase, "--outcome", "rework")
-	_, final := presentHandoff(t, offline, source, ledger.ImplementPhase, "--target", target)
-	passed, _ := presentHandoff(t, offline, source, ledger.WatchdogPhase, "--outcome", "pass")
+	_, rejected, _ := presentHandoff(t, offline, source, ledger.WatchdogPhase, "--outcome", "rework")
+	_, reworked, final := presentHandoff(t, offline, source, ledger.ImplementPhase, "--target", target)
+	_, passed, _ := presentHandoff(t, offline, source, ledger.WatchdogPhase, "--outcome", "pass")
 	before := deliveryPersistedState(t, fixture.clone)
 	ledgerHead := deliveryTrimmed(t, fixture.clone, "rev-parse", "HEAD")
 
@@ -201,8 +217,19 @@ func TestLedgerPresentReauthorsTheCurrentResultAfterMissedPhases(t *testing.T) {
 	if result.Phase != ledger.WatchdogPhase || result.Outcome != "pass" || result.Round != 2 || !result.Approved || result.Source.Reviewed != final || result.Report != passed.Result.Report {
 		t.Fatalf("guided result = %#v, want the approved second review of %s", result, final)
 	}
-	if len(guided.Guidance.Evidence) != 2 || !strings.Contains(guided.Guidance.Evidence[0], passed.Result.Report.Commit) || !strings.Contains(guided.Guidance.Evidence[1], "implement-report.md") {
-		t.Fatalf("evidence = %v, want the current review and its consumed implementation", guided.Guidance.Evidence)
+	if result.ReviewCount != 2 || len(guided.Guidance.Evidence) == 0 || !strings.Contains(guided.Guidance.Evidence[0], passed.Result.Report.Commit) {
+		t.Fatalf("guidance = %#v, want two completed reviews and the current review first", guided.Guidance)
+	}
+	// Beside the review, the evidence reaches the accepted Contract, the
+	// reworked implementation and the rejecting review it followed.
+	evidence := presentEvidence(t, offline, guided.Guidance)
+	for _, want := range []ledger.Reference{reworked.Result.Report, rejected.Result.Report} {
+		if shown := offline.ledgerJSON(t, "skl", "ledger", "show", "--commit", want.Commit, "--path", want.Path, "--format", "json"); !strings.Contains(evidence, shown.Document.Contents) {
+			t.Errorf("evidence lacks %s at %s:\n%s", want.Path, want.Commit, evidence)
+		}
+	}
+	if !strings.Contains(evidence, "# Foundation intent") || !strings.Contains(evidence, "# Foundation behavior") {
+		t.Errorf("evidence lacks the accepted Contract:\n%s", evidence)
 	}
 	if !strings.Contains(guided.Guidance.Continue, "--item '"+deliveryTestItem+"'") || !strings.Contains(guided.Guidance.Authoring, "pull-presentation.md watchdog") {
 		t.Fatalf("guidance commands = %#v", guided.Guidance)
@@ -211,7 +238,7 @@ func TestLedgerPresentReauthorsTheCurrentResultAfterMissedPhases(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range append([]string{"Status: prose_required", "Current result: watchdog pass, review round 2", guided.Guidance.Authoring, guided.Guidance.Continue, "reviewed " + final}, guided.Guidance.Evidence...) {
+	for _, want := range append([]string{"Status: prose_required", "Current result: watchdog pass", "Completed reviews: 2", guided.Guidance.Authoring, guided.Guidance.Continue, "reviewed " + final}, guided.Guidance.Evidence...) {
 		if !strings.Contains(markdown, want) {
 			t.Errorf("Markdown guidance lacks %q:\n%s", want, markdown)
 		}
@@ -301,5 +328,154 @@ func TestLedgerPresentReauthorsTheCurrentResultAfterMissedPhases(t *testing.T) {
 		if strings.Contains(raw, key) {
 			t.Fatalf("state.json persists publication coordination %s: %s", key, raw)
 		}
+	}
+}
+
+// presentGuided reads explicit presentation's authoring guidance twice, so a
+// repeated presentation is observed to leave the result and its count alone.
+func presentGuided(t *testing.T, cli ledgerCLI, source string) *presentationGuidance {
+	t.Helper()
+	var first *presentationGuidance
+	for range 2 {
+		guided := cli.ledgerJSON(t, "skl", "ledger", "present", "--repo", source, "--item", deliveryTestItem, "--format", "json")
+		if guided.Status != "prose_required" || guided.Guidance == nil {
+			t.Fatalf("present without prose = %s", mustJSON(t, guided))
+		}
+		if first != nil && mustJSON(t, guided.Guidance) != mustJSON(t, first) {
+			t.Fatalf("repeated presentation changed its guidance:\n%s\nwant\n%s", mustJSON(t, guided.Guidance), mustJSON(t, first))
+		}
+		first = guided.Guidance
+	}
+	return first
+}
+
+// TestPresentationAuthoringCarriesTheCompletedReviewCount covers
+// self-contained-forge-briefs B2 and B4 at both authoring interfaces: every
+// handoff's report resource and explicit presentation carry the cumulative
+// Review Count. A completed review, including one that pauses, advances it;
+// an interrupted review attempt, re-implementation and repeated presentation
+// leave it unchanged, and an implementation report's own round zero never
+// stands in for it.
+func TestPresentationAuthoringCarriesTheCompletedReviewCount(t *testing.T) {
+	newLedgerFixture(t)
+	source, target := deliverySourceRepo(t)
+	deliveryAcceptFixture(t, newForgeServer(t), source)
+	offline := deliveryNoForgeApp(t)
+
+	// authoring runs a rendering's report resource command as printed.
+	authoring := func(started deliveryOutput, binds ...string) string {
+		t.Helper()
+		command := started.Packet.Facts.Delivery.ResultResourceCommand
+		if !strings.Contains(started.Packet.Instructions, "`"+command+"`") {
+			t.Fatalf("rendering does not print its report resource command %s", command)
+		}
+		for _, bind := range binds {
+			if !strings.Contains(command, bind) {
+				t.Errorf("report resource command does not bind %q: %s", bind, command)
+			}
+		}
+		return runDeferredCommand(t, command, "", "")
+	}
+	// presented checks the current result explicit presentation authors from.
+	presented := func(phase, lifecycle string, count uint64) {
+		t.Helper()
+		result := presentGuided(t, offline, source).Result
+		if result.Phase != phase || result.Lifecycle != lifecycle || result.ReviewCount != count {
+			t.Fatalf("current result = %s, want %s in %s after %d completed reviews", mustJSON(t, result), phase, lifecycle, count)
+		}
+		markdown, err := offline.deliveryRun(t, "skl", "ledger", "present", "--repo", source, "--item", deliveryTestItem)
+		if want := fmt.Sprintf("Completed reviews: %d\n", count); err != nil || !strings.Contains(markdown, want) {
+			t.Fatalf("Markdown guidance lacks %q: %v\n%s", want, err, markdown)
+		}
+	}
+
+	started, _, _ := presentHandoff(t, offline, source, ledger.ImplementPhase, "--target", target)
+	authoring(started, "--input review_count=0")
+	presented(ledger.ImplementPhase, ledger.AwaitingReview, 0)
+
+	attempt, err := offline.deliveryJSON(t, "skl", "watchdog", "next", "--repo", source, "--format", "json")
+	if err != nil || attempt.Execution == nil {
+		t.Fatalf("review attempt = %#v, %v", attempt, err)
+	}
+	if _, err := offline.deliveryJSON(t, "skl", "watchdog", "release", "--repo", source, "--item", deliveryTestItem, "--claim", attempt.Execution.Claim.Commit, "--format", "json"); err != nil {
+		t.Fatal(err)
+	}
+	presented(ledger.ImplementPhase, ledger.AwaitingReview, 0)
+
+	started, _, _ = presentHandoff(t, offline, source, ledger.WatchdogPhase, "--outcome", "rework")
+	authoring(started, "--input round=1", "--input rework_pauses=false")
+	presented(ledger.WatchdogPhase, ledger.Rework, 1)
+
+	started, reworked, _ := presentHandoff(t, offline, source, ledger.ImplementPhase, "--target", target)
+	if resource := authoring(started, "--input procedure=rework", "--input review_count=1"); !strings.Contains(resource, "Completed independent reviews: 1.") {
+		t.Errorf("rework report resource does not carry the completed review:\n%s", resource)
+	}
+	if report, _ := deliveryCommittedReport(t, offline, reworked.Result.Report, ledger.ImplementPhase); report.Round != 0 {
+		t.Fatalf("implementation report round = %d, want its own round zero", report.Round)
+	}
+	presented(ledger.ImplementPhase, ledger.AwaitingReview, 1)
+
+	started, _, _ = presentHandoff(t, offline, source, ledger.WatchdogPhase, "--outcome", "needs-human")
+	authoring(started, "--input round=2", "--input rework_pauses=true")
+	presented(ledger.WatchdogPhase, ledger.NeedsHuman, 2)
+}
+
+// TestPresentationEvidenceReachesADecisionThroughRework covers
+// self-contained-forge-briefs B3 and A1: after independent review sends
+// directed work back, the Human Decision that shaped it no longer governs the
+// new round, yet explicit presentation's evidence still reaches it through
+// the consumed reports, beside the Contract's human-owned check.
+func TestPresentationEvidenceReachesADecisionThroughRework(t *testing.T) {
+	fixture := newLedgerFixture(t)
+	source, target := deliverySourceRepo(t)
+	deliveryAcceptFixture(t, newForgeServer(t), source)
+	offline := deliveryNoForgeApp(t)
+
+	start, err := offline.deliveryJSON(t, "skl", "implement", "next", "--repo", source, "--format", "json")
+	if err != nil || start.Execution == nil {
+		t.Fatalf("start = %#v, %v", start, err)
+	}
+	question := filepath.Join(t.TempDir(), "pause.md")
+	writeFile(t, question, "# Decision needed\n\nWhich widgets does the dashboard list?\n")
+	if paused, err := offline.deliveryJSON(t, "skl", "implement", "needs-human", "--repo", source, "--item", deliveryTestItem, "--claim", start.Execution.Claim.Commit, "--body", question, "--format", "json"); err != nil || paused.Status != ledger.NeedsHuman {
+		t.Fatalf("pause = %#v, %v", paused, err)
+	}
+	if direction := deliveryRecordHumanDirection(t, offline, target, ledger.RouteImplement); direction.Status != ledger.DecisionApplied {
+		t.Fatalf("human direction = %#v", direction)
+	}
+	answer := "Continue at " + target + " within the frozen Contract."
+
+	presentHandoff(t, offline, source, ledger.ImplementPhase, "--target", target)
+	if evidence := presentEvidence(t, offline, presentGuided(t, offline, source)); !strings.Contains(evidence, answer) {
+		t.Fatalf("directed implementation evidence lacks its decision:\n%s", evidence)
+	}
+	presentHandoff(t, offline, source, ledger.WatchdogPhase, "--outcome", "rework")
+	started, _, _ := presentHandoff(t, offline, source, ledger.ImplementPhase, "--target", target)
+	if deliveryPersistedState(t, fixture.clone).Decision {
+		t.Fatal("the decision still governs the rework round")
+	}
+	for _, document := range started.Execution.Documents {
+		if strings.HasSuffix(document.Path, "/decision.md") {
+			t.Fatalf("rework rendering supplies the settled decision as direction: %s", document.Path)
+		}
+	}
+
+	guidance := presentGuided(t, offline, source)
+	if guidance.Result.Decision != nil || guidance.Result.Watchdog == nil {
+		t.Fatalf("rework result = %s, want no governing decision and the consumed review", mustJSON(t, guidance.Result))
+	}
+	if evidence := presentEvidence(t, offline, guidance); !strings.Contains(evidence, "Confirm the dashboard by hand.") {
+		t.Errorf("evidence lacks the Contract's human-owned check:\n%s", evidence)
+	}
+	review, _ := deliveryCommittedReport(t, offline, *guidance.Result.Watchdog, ledger.WatchdogPhase)
+	if review.Ledger.Decision == nil {
+		t.Fatal("the consumed review names no decision to follow")
+	}
+	if !strings.Contains(started.Packet.Instructions, "path: "+review.Ledger.Decision.Path) {
+		t.Errorf("rework rendering does not show the consumed review's decision reference")
+	}
+	followed := offline.ledgerJSON(t, "skl", "ledger", "show", "--commit", review.Ledger.Decision.Commit, "--path", review.Ledger.Decision.Path, "--format", "json")
+	if followed.Document == nil || !strings.Contains(followed.Document.Contents, answer) {
+		t.Fatalf("following the decision reference = %#v", followed.Document)
 	}
 }

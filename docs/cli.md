@@ -79,7 +79,7 @@ A Dispatch claims a Slice like `next` but answers with two bound commands instea
 skl ledger present --repo <path> --item <proposal>/<slice> [--public-body <fresh-prose.md>]
 ```
 
-Without `--public-body` it returns the current committed result, its private evidence references and authoring guidance for the PR body. With one it pushes the recorded source revision (never forcing), opens or updates the pull request as the latest view of that result, and marks it ready only when the PR shows the reviewed final revision. It reruns no phase and changes no state; a pull request is a view of the local result, not a queue of updates.
+Without `--public-body` it returns the current committed result with the Work Item's completed Review Count, private evidence references to its report and every ledger input that report consumed, and authoring guidance for a self-contained PR body. With one it pushes the recorded source revision (never forcing), opens or updates the pull request as the latest view of that result, and marks it ready only when the PR shows the reviewed final revision. It reruns no phase and changes no state; a pull request is a view of the local result, not a queue of updates.
 
 ## Human decisions
 

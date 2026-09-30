@@ -1,8 +1,4 @@
-# Current review pull request prose
-
-Write the pull request body for the Work Item's current review result in a new temporary file, from the private evidence the presentation command listed, and pass it to that command's `--public-body`. The command also shows the Work Item's state and its completed reviews.
-
-The body replaces the whole pull request description. Write it complete, for a reader whose only source is this pull request, as though it were the first version they read:
+{{define "pull-brief"}}The body replaces the whole pull request description. Write it complete, for a reader whose only source is this pull request, as though it were the first version they read:
 
 - **Problem and solution:** the problem the change solves, what it delivers in broad strokes, and the scope it leaves out where a reviewer could expect it. For one slice of a larger change, add a sentence on this slice's part.
 - **Status:** the Work Item's state after the latest completed phase, as a settled result, with the number of completed independent reviews:
@@ -15,4 +11,11 @@ The body replaces the whole pull request description. Write it complete, for a r
 
 Summarize each fact in your own words, by its use to the reader, whichever document holds it. Keep out bookkeeping, such as ledger paths and commits, `skl` commands, Claims, finding numbers, finding inventories and worker exchanges, and genuinely sensitive detail, such as credentials or unfixed security weaknesses; where that detail shapes scope or readiness, state its effect in general terms. Links to public context, such as merged pull requests or public docs, may supplement the explanation.
 
-Check: the body covers each point above for a reader who sees only this pull request.
+Check: the body covers each point above for a reader who sees only this pull request.{{end}}
+
+{{define "pull-presentation"}}# Current {{.}} pull request prose
+
+Write the pull request body for the Work Item's current {{.}} result in a new temporary file, from the private evidence the presentation command listed, and pass it to that command's `--public-body`. The command also shows the Work Item's state and its completed reviews.
+
+{{template "pull-brief"}}
+{{end}}

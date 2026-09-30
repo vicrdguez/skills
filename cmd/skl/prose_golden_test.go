@@ -414,9 +414,9 @@ func TestAgentProseGoldens(t *testing.T) {
 	g.capture("resource-propose-issue-publication", worker, "skill", "--resource", "issue-publication.md",
 		"--input", "proposal="+proseProposal, "--input", "repo="+source, "--input", "remote=origin", "propose")
 	g.capture("resource-implement-ledger-submission", worker, "skill", "--resource", "ledger-submission.md",
-		"--input", "result_directory="+result, "--input", "procedure=initial", "implement")
+		"--input", "result_directory="+result, "--input", "procedure=initial", "--input", "review_count=0", "implement")
 	g.capture("resource-watchdog-ledger-review", worker, "skill", "--resource", "ledger-review.md",
-		"--input", "result_directory="+reviewResult, "--input", "round=1", "--input", "reviewed_head="+head, "watchdog")
+		"--input", "result_directory="+reviewResult, "--input", "round=1", "--input", "reviewed_head="+head, "--input", "rework_pauses=false", "watchdog")
 
 	// Installed stubs and Harness Adapters, and the AGENTS.md block setup
 	// writes. Codex keeps every stub, including Implement's and Watchdog's.

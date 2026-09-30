@@ -121,11 +121,15 @@ func PresentDelivery(e *ledger.Execution, repository RepositoryContext, phase, o
 	if phase == ledger.ImplementPhase {
 		f.SubmitCommand += " --head <final-source-sha> --target <observed-target-sha>"
 		f.PauseCommand += " --head <branch-head> --target <observed-target-sha>"
-		f.ResultResourceCommand = fmt.Sprintf("skl skill --resource ledger-submission.md --input result_directory=%s --input procedure=%s implement", q(directory), f.Procedure)
+		f.ResultResourceCommand = fmt.Sprintf("skl skill --resource ledger-submission.md --input result_directory=%s --input procedure=%s --input review_count=%d implement", q(directory), f.Procedure, f.ReviewCount)
 	} else {
 		f.SubmitCommand += " --outcome <pass|rework|needs-human>"
 		f.PauseCommand = command("submit") + " --body " + private + " --public-body " + public + " --outcome needs-human"
-		f.ResultResourceCommand = fmt.Sprintf("skl skill --resource ledger-review.md --input result_directory=%s --input round=%d --input reviewed_head=%s watchdog", q(directory), f.ReviewNumber, q(f.RequiredHead))
+		rework, err := ledger.ReviewDestination(ledger.Rework, f.ReviewNumber)
+		if err != nil {
+			return skilldist.Packet{}, err
+		}
+		f.ResultResourceCommand = fmt.Sprintf("skl skill --resource ledger-review.md --input result_directory=%s --input round=%d --input reviewed_head=%s --input rework_pauses=%t watchdog", q(directory), f.ReviewNumber, q(f.RequiredHead), rework == ledger.NeedsHuman)
 	}
 	return skilldist.BuildPacket(phase, skilldist.InvocationFacts{Delivery: f})
 }

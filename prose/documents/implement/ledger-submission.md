@@ -27,4 +27,6 @@ Only when you pause: the question, the evidence, the options with their conseque
 
 # Public body
 
-Write `{{.ResultDirectory}}/public.md` separately, as fresh prose for humans: what the change delivers and the verification behind it, or, at a pause, that the work waits on a human decision. Leave out the report, the findings, the Contract and private operational detail. Say that the human verification obligations remain available privately through `skl`.
+Write `{{.ResultDirectory}}/public.md` separately, as the pull request body. Submitting leaves the Work Item `awaiting_review`; pausing leaves it `needs_human`. Completed independent reviews: {{.ReviewCount}}.
+
+{{template "pull-brief"}}
