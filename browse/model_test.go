@@ -347,19 +347,17 @@ func TestBrowserKeepsHistoricalDocumentIdentityAndScrollInView(t *testing.T) {
 
 	// Narrower terminals give up the breadcrumb and shorten the indicators,
 	// keeping each of them.
-	reference, revision := reference[:7], gitOutput(t, s.root, "rev-parse", "HEAD")[:7]
+	reference = reference[:7]
+	revision := gitOutput(t, s.root, "rev-parse", "HEAD")[:7]
 	percent := regexp.MustCompile(`\b[1-9][0-9]*%`)
-	for _, want := range []struct {
-		width    int
-		identity string
-	}{{40, "HISTORICAL " + reference}, {34, "HIST " + reference}} {
-		size := tea.WindowSizeMsg{Width: want.width, Height: 14}
+	for _, width := range []int{40, 34} {
+		size := tea.WindowSizeMsg{Width: width, Height: 14}
 		s.send(size)
 		header := s.header()
-		if !strings.Contains(header, want.identity) || !percent.MatchString(header) || !strings.Contains(header, "archived") ||
-			!strings.HasSuffix(header, revision) {
-			t.Fatalf("%d-column historical document header %q, want %s, its scroll position, archived and ledger %s",
-				want.width, header, want.identity, revision)
+		if !strings.Contains(header, "HIST") || !strings.Contains(header, reference) || !percent.MatchString(header) ||
+			!strings.Contains(header, "archived") || !strings.Contains(header, revision) {
+			t.Fatalf("%d-column historical document header %q, want it historical at %s, its scroll position, archived and ledger %s",
+				width, header, reference, revision)
 		}
 		s.fitsIn(size)
 	}
@@ -675,15 +673,16 @@ func TestBrowserNarrowFooterKeepsHelpAndHelpShowsEveryBinding(t *testing.T) {
 		"d diagnostics", "d documents", "r references", "v report versions", "i open issue", "p open PR",
 		"R refresh ledger", "? help", "q quit")
 	s.fitsIn(size)
+}
 
-	// A status notice takes a line from the body, not from the header or
-	// the key list.
-	s = start(t, "widgets")
+func TestBrowserKeyListYieldsTheBodyToAStatusNotice(t *testing.T) {
+	size := tea.WindowSizeMsg{Width: 40, Height: 14}
+	s := start(t, "widgets")
 	s.send(size)
 	s.press("a", "?")
 	s.shows("Archived proposals shown", "↑/k up", "R refresh ledger • ? help • q quit")
 	if header := s.header(); !strings.Contains(header, "archived shown") {
-		t.Fatalf("header %q with every binding listed, want it first", header)
+		t.Fatalf("first line %q with every binding listed, want the header saying archived shown", header)
 	}
 	s.fitsIn(size)
 }

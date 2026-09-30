@@ -118,7 +118,7 @@ func TestFailedRefreshStaysLoudUntilARefreshSucceeds(t *testing.T) {
 		}
 		s.shows("! Refresh failed; displayed facts are", "↑/k up")
 		s.fitsIn(size)
-		s.press("?")
+		s.press("?") // Close the key list again.
 		if err := os.Rename(missing, s.root); err != nil {
 			t.Fatal(err)
 		}

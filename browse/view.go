@@ -40,8 +40,8 @@ func (m Model) View() string {
 	if height > 0 {
 		frame = []string{header, clip(body, height), footer}
 	}
-	// A frame taller than the terminal loses its top lines, the header
-	// among them, so the bottom gives way instead.
+	// Notices taller than the terminal would overflow it, and the renderer
+	// would drop the header with the top lines, so the bottom gives way.
 	return clip(strings.Join(frame, "\n"), m.height)
 }
 
@@ -183,13 +183,13 @@ func (m Model) header() string {
 	if document {
 		identity := indicator{mutedStyle, []string{"current document", "current"}}
 		if commit := m.currentDocument.Reference.Commit; commit != m.snapshot.Revision {
-			identity.forms = []string{"HISTORICAL " + short(commit, 12), "HISTORICAL " + short(commit, 7), "HIST " + short(commit, 7)}
+			identity.forms = append(refForms("HISTORICAL ", commit), "HIST "+short(commit, 7))
 		}
 		indicators = append(indicators, identity)
 	}
-	revision := indicator{mutedStyle, []string{short(m.snapshot.Revision, 12), short(m.snapshot.Revision, 7)}}
+	revision := indicator{mutedStyle, refForms("", m.snapshot.Revision)}
 	if m.refreshFailure != nil {
-		revision = indicator{warningStyle.Bold(true), []string{"NOT REFRESHED " + short(m.snapshot.Revision, 12), "NOT REFRESHED " + short(m.snapshot.Revision, 7)}}
+		revision = indicator{warningStyle.Bold(true), refForms("NOT REFRESHED ", m.snapshot.Revision)}
 	}
 	indicators = append(indicators, revision)
 	right := fitIndicators(indicators, m.width)
@@ -613,10 +613,11 @@ type indicator struct {
 // when even the shortest forms do not fit are the first, least important
 // indicators left out.
 func fitIndicators(indicators []indicator, width int) string {
+	wide, tight := mutedStyle.Render(" · "), mutedStyle.Render("·")
 	render := func(indicators []indicator, level int) string {
-		separator := mutedStyle.Render(" · ")
+		separator := wide
 		if level > 0 {
-			separator = mutedStyle.Render("·")
+			separator = tight
 		}
 		var parts []string
 		for _, indicator := range indicators {
@@ -624,7 +625,10 @@ func fitIndicators(indicators []indicator, width int) string {
 		}
 		return strings.Join(parts, separator)
 	}
-	const shortest = 2
+	shortest := 0
+	for _, indicator := range indicators {
+		shortest = max(shortest, len(indicator.forms)-1)
+	}
 	for level := 0; level <= shortest; level++ {
 		if line := render(indicators, level); lipgloss.Width(line) <= width {
 			return line
@@ -634,6 +638,12 @@ func fitIndicators(indicators []indicator, width int) string {
 		indicators = indicators[1:]
 	}
 	return render(indicators, shortest)
+}
+
+// refForms names commit after prefix with a 12- and then a 7-character
+// reference.
+func refForms(prefix, commit string) []string {
+	return []string{prefix + short(commit, 12), prefix + short(commit, 7)}
 }
 
 // short cuts a commit to at most length characters.
