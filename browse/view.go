@@ -36,13 +36,23 @@ func (m Model) View() string {
 	default:
 		body = m.listBody(height)
 	}
-	return strings.Join([]string{header, clip(body, height), footer}, "\n")
+	frame := []string{header, footer}
+	if height > 0 {
+		frame = []string{header, clip(body, height), footer}
+	}
+	// A frame taller than the terminal loses its top lines, the header
+	// among them, so the bottom gives way instead.
+	return clip(strings.Join(frame, "\n"), m.height)
 }
 
-// bodyHeight leaves the body at least one line, so that the full key list
-// still fits a small terminal.
+// bodyHeight leaves the body at least one line, or none while every binding
+// is listed, so that the list fits a small terminal.
 func (m Model) bodyHeight(header, footer string) int {
-	return max(m.height-lipgloss.Height(header)-lipgloss.Height(footer), 1)
+	least := 1
+	if m.help.ShowAll {
+		least = 0
+	}
+	return max(m.height-lipgloss.Height(header)-lipgloss.Height(footer), least)
 }
 
 // layoutDetail fits both viewports to the current terminal and marks the
@@ -149,13 +159,15 @@ func (m Model) header() string {
 			path = append(path, "documents", "diagnostics")
 		}
 	}
-	// Indicators run from least to most important. A narrow terminal drops
-	// them in that order, after the breadcrumb has given way. The footer
-	// already says when a newer document is available.
-	var indicators []string
+	// Each indicator has a full form and shorter ones. A narrow terminal
+	// first gives up the breadcrumb, then uses the shorter forms, so every
+	// indicator stays in view. The footer already says when a newer document
+	// is available.
+	var indicators []indicator
 	scrolled := func(view viewport.Model) {
 		if view.TotalLineCount() > view.Height {
-			indicators = append(indicators, mutedStyle.Render(fmt.Sprintf("scrolled %d%%", int(view.ScrollPercent()*100))))
+			percent := fmt.Sprintf("%d%%", int(view.ScrollPercent()*100))
+			indicators = append(indicators, indicator{mutedStyle, []string{"scrolled " + percent, percent}})
 		}
 	}
 	document := m.screen == documentScreen && m.currentDocument != nil
@@ -166,26 +178,21 @@ func (m Model) header() string {
 		scrolled(m.docViewport)
 	}
 	if m.includeArchived {
-		indicators = append(indicators, mutedStyle.Render("archived shown"))
+		indicators = append(indicators, indicator{mutedStyle, []string{"archived shown", "archived"}})
 	}
 	if document {
-		identity := "current document"
+		identity := indicator{mutedStyle, []string{"current document", "current"}}
 		if commit := m.currentDocument.Reference.Commit; commit != m.snapshot.Revision {
-			identity = "HISTORICAL " + commit[:min(len(commit), 12)]
+			identity.forms = []string{"HISTORICAL " + short(commit, 12), "HISTORICAL " + short(commit, 7), "HIST " + short(commit, 7)}
 		}
-		indicators = append(indicators, mutedStyle.Render(identity))
+		indicators = append(indicators, identity)
 	}
-	revision := m.snapshot.Revision[:min(len(m.snapshot.Revision), 12)]
+	revision := indicator{mutedStyle, []string{short(m.snapshot.Revision, 12), short(m.snapshot.Revision, 7)}}
 	if m.refreshFailure != nil {
-		indicators = append(indicators, warningStyle.Bold(true).Render("NOT REFRESHED "+revision))
-	} else {
-		indicators = append(indicators, mutedStyle.Render(revision))
+		revision = indicator{warningStyle.Bold(true), []string{"NOT REFRESHED " + short(m.snapshot.Revision, 12), "NOT REFRESHED " + short(m.snapshot.Revision, 7)}}
 	}
-	separator := mutedStyle.Render(" · ")
-	for len(indicators) > 1 && lipgloss.Width(strings.Join(indicators, separator)) > m.width {
-		indicators = indicators[1:]
-	}
-	right := strings.Join(indicators, separator)
+	indicators = append(indicators, revision)
+	right := fitIndicators(indicators, m.width)
 	// The breadcrumb stays at least minGap spaces clear of the indicators.
 	const minGap = 2
 	left := ""
@@ -222,7 +229,17 @@ func (m Model) footer() string {
 		cancel.SetHelp("esc", "cancel")
 		lines = append(lines, truncate(m.help.ShortHelpView([]key.Binding{apply, cancel}), m.width))
 	case m.help.ShowAll:
-		lines = append(lines, m.allKeys()...)
+		// The header and the notices above stay in view; the key list takes
+		// the lines left and says when some bindings do not fit.
+		keys := m.allKeys()
+		room := m.height - 1
+		if len(lines) > 0 {
+			room -= lipgloss.Height(strings.Join(lines, "\n"))
+		}
+		if len(keys) > room {
+			keys = append(keys[:max(room-1, 0)], truncate(mutedStyle.Render("… more keys fit a larger terminal"), m.width))
+		}
+		lines = append(lines, keys...)
 	default:
 		lines = append(lines, m.keyHelp(m.footerKeys()))
 	}
@@ -584,6 +601,44 @@ func wrap(text string, width int) string {
 
 func truncate(text string, width int) string {
 	return lipgloss.NewStyle().MaxWidth(max(width, 1)).Render(text)
+}
+
+// indicator is one header indicator: its forms run from full to shortest.
+type indicator struct {
+	style lipgloss.Style
+	forms []string
+}
+
+// fitIndicators renders indicators in the longest forms that fit width. Only
+// when even the shortest forms do not fit are the first, least important
+// indicators left out.
+func fitIndicators(indicators []indicator, width int) string {
+	render := func(indicators []indicator, level int) string {
+		separator := mutedStyle.Render(" · ")
+		if level > 0 {
+			separator = mutedStyle.Render("·")
+		}
+		var parts []string
+		for _, indicator := range indicators {
+			parts = append(parts, indicator.style.Render(indicator.forms[min(level, len(indicator.forms)-1)]))
+		}
+		return strings.Join(parts, separator)
+	}
+	const shortest = 2
+	for level := 0; level <= shortest; level++ {
+		if line := render(indicators, level); lipgloss.Width(line) <= width {
+			return line
+		}
+	}
+	for len(indicators) > 1 && lipgloss.Width(render(indicators, shortest)) > width {
+		indicators = indicators[1:]
+	}
+	return render(indicators, shortest)
+}
+
+// short cuts a commit to at most length characters.
+func short(commit string, length int) string {
+	return commit[:min(len(commit), length)]
 }
 
 // keepEnd fits unstyled text to width by cutting its start, so a long

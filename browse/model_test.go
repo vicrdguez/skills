@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -337,25 +338,30 @@ func TestBrowserReadsReportsFollowsExactHistoricalReferencesAndPreservesScroll(t
 func TestBrowserKeepsHistoricalDocumentIdentityAndScrollInView(t *testing.T) {
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 80, Height: 16})
-	s.press("enter", "down", "enter", "d", "down", "down", "enter", "r", "enter", "pgdown")
+	s.press("enter", "down", "enter", "a", "d", "down", "down", "enter", "r", "enter", "pgdown")
 	reference := gitOutput(t, s.root, "rev-parse", "HEAD~1")[:12]
 	if header := s.header(); !strings.Contains(header, "HISTORICAL "+reference) ||
 		!strings.Contains(header, "scrolled ") || strings.Contains(header, "scrolled 0%") {
 		t.Fatalf("scrolled historical document header %q, want HISTORICAL %s and its scroll position", header, reference)
 	}
 
-	// Narrower terminals give up the scroll position first, then the
-	// document's identity, and keep the ledger revision.
-	narrow := tea.WindowSizeMsg{Width: 40, Height: 14}
-	s.send(narrow)
-	if header := s.header(); !strings.Contains(header, "HISTORICAL "+reference) || strings.Contains(header, "scrolled") {
-		t.Fatalf("40-column historical document header %q, want HISTORICAL %s without the scroll position", header, reference)
-	}
-	s.fitsIn(narrow)
-	revision := gitOutput(t, s.root, "rev-parse", "HEAD")[:12]
-	s.send(tea.WindowSizeMsg{Width: 30, Height: 14})
-	if header := s.header(); lipgloss.Width(header) > 30 || !strings.HasSuffix(header, revision) || strings.Contains(header, "HISTORICAL") {
-		t.Fatalf("30-column historical document header %q, want only the ledger revision %s", header, revision)
+	// Narrower terminals give up the breadcrumb and shorten the indicators,
+	// keeping each of them.
+	reference, revision := reference[:7], gitOutput(t, s.root, "rev-parse", "HEAD")[:7]
+	percent := regexp.MustCompile(`\b[1-9][0-9]*%`)
+	for _, want := range []struct {
+		width    int
+		identity string
+	}{{40, "HISTORICAL " + reference}, {34, "HIST " + reference}} {
+		size := tea.WindowSizeMsg{Width: want.width, Height: 14}
+		s.send(size)
+		header := s.header()
+		if !strings.Contains(header, want.identity) || !percent.MatchString(header) || !strings.Contains(header, "archived") ||
+			!strings.HasSuffix(header, revision) {
+			t.Fatalf("%d-column historical document header %q, want %s, its scroll position, archived and ledger %s",
+				want.width, header, want.identity, revision)
+		}
+		s.fitsIn(size)
 	}
 }
 
@@ -668,6 +674,17 @@ func TestBrowserNarrowFooterKeepsHelpAndHelpShowsEveryBinding(t *testing.T) {
 		"/ search names", "f find by lifecycle or claim", "g toggle grouping", "w toggle scope",
 		"d diagnostics", "d documents", "r references", "v report versions", "i open issue", "p open PR",
 		"R refresh ledger", "? help", "q quit")
+	s.fitsIn(size)
+
+	// A status notice takes a line from the body, not from the header or
+	// the key list.
+	s = start(t, "widgets")
+	s.send(size)
+	s.press("a", "?")
+	s.shows("Archived proposals shown", "↑/k up", "R refresh ledger • ? help • q quit")
+	if header := s.header(); !strings.Contains(header, "archived shown") {
+		t.Fatalf("header %q with every binding listed, want it first", header)
+	}
 	s.fitsIn(size)
 }
 

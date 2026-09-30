@@ -111,6 +111,14 @@ func TestFailedRefreshStaysLoudUntilARefreshSucceeds(t *testing.T) {
 		}
 		s.shows("Slice: orders/cancel", "! Refresh failed; displayed facts are")
 		s.fitsIn(size)
+		// Listing every binding keeps the marker and the reason in view.
+		s.press("?")
+		if header := s.header(); !strings.HasSuffix(header, "NOT REFRESHED "+revision) {
+			t.Fatalf("%d-column header %q with every binding listed, want NOT REFRESHED %s", size.Width, header, revision)
+		}
+		s.shows("! Refresh failed; displayed facts are", "↑/k up")
+		s.fitsIn(size)
+		s.press("?")
 		if err := os.Rename(missing, s.root); err != nil {
 			t.Fatal(err)
 		}
