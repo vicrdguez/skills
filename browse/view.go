@@ -2,7 +2,6 @@ package browse
 
 import (
 	"fmt"
-	"math"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -219,19 +218,19 @@ func (m Model) listBody(height int) string {
 	if width >= wideLayout {
 		// The list widens beyond half the terminal, up to three fifths, to
 		// fit its rows; the preview wraps into the rest.
-		listWidth := min(max(content.width()+4, width/2), width*3/5)
+		listWidth := min(max(content.width()+paneFrame, width/2), width*3/5)
 		return top + lipgloss.JoinHorizontal(lipgloss.Top,
-			pane(content.title, position, content.lines(listWidth-4, available-2), listWidth, available),
-			pane(content.previewTitle, "", wrapLines(preview, width-listWidth-4), width-listWidth, available))
+			pane(content.title, position, content.lines(listWidth-paneFrame, available-2), listWidth, available),
+			pane(content.previewTitle, "", wrapLines(preview, width-listWidth-paneFrame), width-listWidth, available))
 	}
 	// Stacked, the list takes up to half the height and the preview the
 	// rest; a preview too short for its border gives way to the list.
-	listHeight := min(content.height()+2, max(available/2, 3))
+	listHeight := min(len(content.lines(width-paneFrame, available))+2, max(available/2, 3))
 	if available-listHeight < 3 {
-		return top + pane(content.title, position, content.lines(width-4, available-2), width, available)
+		return top + pane(content.title, position, content.lines(width-paneFrame, available-2), width, available)
 	}
-	return top + pane(content.title, position, content.lines(width-4, listHeight-2), width, listHeight) + "\n" +
-		pane(content.previewTitle, "", wrapLines(preview, width-4), width, available-listHeight)
+	return top + pane(content.title, position, content.lines(width-paneFrame, listHeight-2), width, listHeight) + "\n" +
+		pane(content.previewTitle, "", wrapLines(preview, width-paneFrame), width, available-listHeight)
 }
 
 // position is the selected entry's place among the current list's entries.
@@ -246,11 +245,14 @@ func (m Model) position() string {
 	return fmt.Sprintf("%d/%d", m.cursor[m.screen]+1, count)
 }
 
+// paneFrame is the width of a pane's side borders and their padding.
+const paneFrame = 4
+
 // pane frames lines in a rounded border exactly width cells wide and height
 // lines tall, with its title in the top edge and note, when set, in the
 // bottom edge. Lines beyond its height are clipped.
 func pane(title, note string, lines []string, width, height int) string {
-	inner := max(width-4, 1)
+	inner := max(width-paneFrame, 1)
 	title = truncate(title, max(width-5, 1))
 	edge := mutedStyle.Render
 	framed := []string{edge("╭─ ") + titleStyle.Render(title) + edge(" "+strings.Repeat("─", max(width-5-lipgloss.Width(title), 0))+"╮")}
@@ -276,9 +278,12 @@ func wrapLines(lines []string, width int) []string {
 // list pane's title and rows, the row at the cursor, and the preview of the
 // selected entry.
 type listing struct {
-	context      []string
-	title        string
-	rows         []row
+	context []string
+	title   string
+	rows    []row
+	// whole is how many leading columns a narrow pane keeps whole by
+	// shortening the first; any later columns are cut at the pane's edge.
+	whole        int
 	cursorRow    int
 	empty        string
 	previewTitle string
@@ -292,14 +297,6 @@ type row struct {
 	marked  bool
 	columns []span
 	heading string
-}
-
-// height is the number of lines the list needs, counting its empty text.
-func (l listing) height() int {
-	if len(l.rows) == 0 {
-		return 1
-	}
-	return len(l.rows)
 }
 
 // layout is the width of each column across every row, not only the
@@ -317,15 +314,38 @@ func (l listing) layout() (widths []int, marks bool) {
 	return widths, marks
 }
 
-// width is the width of the list's widest row.
-func (l listing) width() int {
-	widths, marks := l.layout()
-	width := 0
-	for _, row := range l.rows {
-		width = max(width, lipgloss.Width(row.render(widths, marks, false, math.MaxInt)))
+// rowWidth is the width of a row whose columns have widths, after its
+// selection and unknown-facts markers.
+func rowWidth(widths []int, marks bool) int {
+	width := 2
+	if marks {
+		width += 2
+	}
+	gap := 0
+	for _, columnWidth := range widths {
+		if columnWidth > 0 {
+			width += gap + columnWidth
+			gap = 2
+		}
 	}
 	return width
 }
+
+// width is the width of the list's widest row.
+func (l listing) width() int {
+	widths, marks := l.layout()
+	width := rowWidth(widths, marks)
+	for _, row := range l.rows {
+		if row.columns == nil {
+			width = max(width, 2+lipgloss.Width(row.heading))
+		}
+	}
+	return width
+}
+
+// shortestName is the fewest cells a shortened first column keeps. A pane
+// too narrow for the whole columns even then cuts rows at its edge instead.
+const shortestName = 6
 
 // lines renders the list in a window of height lines that keeps the cursor
 // row visible. The cursor row is marked by text as well as style.
@@ -334,6 +354,12 @@ func (l listing) lines(width, height int) []string {
 		return wrapLines([]string{l.empty}, width)
 	}
 	widths, marks := l.layout()
+	if l.whole > 0 {
+		excess := rowWidth(widths[:min(l.whole, len(widths))], marks) - width
+		if excess > 0 && widths[0]-excess >= shortestName {
+			widths[0] -= excess
+		}
+	}
 	start := max(l.cursorRow-height+1, 0)
 	var lines []string
 	for index := start; index < len(l.rows) && index < start+height; index++ {
@@ -378,6 +404,7 @@ func (r row) render(widths []int, marks, selected bool, width int) string {
 		if index < len(r.columns) {
 			column = r.columns[index]
 		}
+		column.text = shorten(column.text, columnWidth)
 		add(plain, gap)
 		add(column.style, column.text)
 		add(plain, strings.Repeat(" ", columnWidth-lipgloss.Width(column.text)))
@@ -387,6 +414,19 @@ func (r row) render(widths []int, marks, selected bool, width int) string {
 		add(plain, strings.Repeat(" ", max(width-lipgloss.Width(line), 0)))
 	}
 	return truncate(line, width)
+}
+
+// shorten keeps the end of text within width cells, marking the cut with …,
+// since the end of a Slice identity is what tells rows apart.
+func shorten(text string, width int) string {
+	if lipgloss.Width(text) <= width {
+		return text
+	}
+	runes := []rune(text)
+	for len(runes) > 0 && lipgloss.Width(string(runes)) >= width {
+		runes = runes[1:]
+	}
+	return "…" + string(runes)
 }
 
 // texts are unstyled columns.
@@ -560,6 +600,7 @@ func (m Model) listContent() listing {
 			l.context = append(l.context, warningStyle.Render("! Incomplete: "+incompleteText(proposal.Diagnostics)+" in this Proposal"))
 		}
 		l.title = fmt.Sprintf("Slices (%d)", len(m.members.Slices))
+		l.whole = 3
 		l.previewTitle = "Slice"
 		l.empty = "This Proposal records no Slices."
 		for _, slice := range m.members.Slices {
@@ -589,6 +630,7 @@ func (m Model) listContent() listing {
 		if m.search.Undecided > 0 {
 			l.title = fmt.Sprintf("Slices (%d matched, %d undecided)", m.search.Matched, m.search.Undecided)
 		}
+		l.whole = 3
 		l.previewTitle = "Slice"
 		l.empty = ResultText(m.search)
 		results := m.results()
@@ -652,7 +694,8 @@ func (m Model) findingContext() []string {
 }
 
 // factRow is one navigable fact with the number of Slices selecting it would
-// find, marked * when it is the current selection.
+// find, marked * when it is the current selection. A Claim fact carries the
+// Claim marker, except unclaimed, which has none.
 func (m Model) factRow(option factOption) row {
 	facets := m.search.Facets
 	counts, unknown, current, label := facets.Lifecycles, facets.UnknownLifecycle, m.search.Query.Lifecycles, span{text: "Any lifecycle"}

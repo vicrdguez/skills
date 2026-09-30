@@ -50,11 +50,10 @@ func spectrum(t *testing.T) func(string) {
 }
 
 // startSpectrum lists the spectrum Proposal's Slices on a terminal narrow
-// enough to stack the panes, so each list line shows one row alone, and wide
-// enough for whole rows.
-func startSpectrum(t *testing.T) *session {
+// enough to stack the panes, so each list line shows one row alone.
+func startSpectrum(t *testing.T, width int) *session {
 	s := start(t, "gadgets", spectrum(t))
-	s.send(tea.WindowSizeMsg{Width: 80, Height: 40})
+	s.send(tea.WindowSizeMsg{Width: width, Height: 40})
 	s.press("enter")
 	s.shows("Proposal spectrum", "Slices (9)")
 	return s
@@ -92,6 +91,26 @@ func TestListAndPreviewPanesSitSideBySideWhenWideAndStackWhenNarrow(t *testing.T
 	}
 }
 
+func TestShortStackedTerminalKeepsTheListOverThePreview(t *testing.T) {
+	size := tea.WindowSizeMsg{Width: 40, Height: 12}
+	s := start(t, "widgets")
+	s.send(size)
+	s.press("enter", "down")
+	s.within(size)
+	s.shows("Delivery: unknown", "╭─ Slices (3) ─", " 2/3 ─╯")
+	s.row("> ", "cancel", "◐ Awaiting Review")
+}
+
+func TestStackedEmptyListShowsItsWholeMessage(t *testing.T) {
+	s := start(t, "empty", func(root string) {
+		write(t, root, "projects/empty/project.json", `{"repository": "acme/empty"}`)
+		write(t, root, "projects/empty/archive/done/proposal.json", `{"accepted": "2023-01-01T00:00:00Z"}`)
+		write(t, root, "projects/empty/archive/done/old/state.json", `{"state": "merged"}`)
+	})
+	s.send(tea.WindowSizeMsg{Width: 40, Height: 24})
+	s.shows("Proposals (0)", "No active Proposals.", "include them.", " 0/0 ─╯")
+}
+
 func TestListKeepsTheSelectedRowVisibleAndItsPositionOnTheBorder(t *testing.T) {
 	for _, size := range []tea.WindowSizeMsg{{Width: 40, Height: 24}, {Width: 140, Height: 30}} {
 		s := start(t, "widgets", func(root string) {
@@ -109,7 +128,7 @@ func TestListKeepsTheSelectedRowVisibleAndItsPositionOnTheBorder(t *testing.T) {
 }
 
 func TestSliceRowsAlignNameLifecycleAndClaimColumns(t *testing.T) {
-	s := startSpectrum(t)
+	s := startSpectrum(t, 80)
 	// column is the display offset of fragment on the row of slice.
 	column := func(slice, fragment string) int {
 		line := s.row(slice)
@@ -132,8 +151,17 @@ func TestSliceRowsAlignNameLifecycleAndClaimColumns(t *testing.T) {
 	}
 }
 
+func TestNarrowListShortensNamesToKeepLifecycleAndClaim(t *testing.T) {
+	s := startSpectrum(t, 60)
+	s.within(tea.WindowSizeMsg{Width: 60, Height: 40})
+	s.row("c-impl", "○ Ready for Implementation", "▸ implement")
+	s.row("d-review", "◐ Awaiting Review", "▸ watchdog")
+	s.row("! i-torn", "! lifecycle unknown", "claim unknown")
+	s.row("…perseded", "⊘ Superseded")
+}
+
 func TestSliceRowsShowEachLifecycleByGlyphAndLabelWithoutColour(t *testing.T) {
-	s := startSpectrum(t)
+	s := startSpectrum(t, 80)
 	if strings.Contains(s.model.View(), "\x1b[") {
 		t.Fatal("the test terminal renders colour")
 	}
@@ -153,7 +181,7 @@ func TestSliceRowsShowEachLifecycleByGlyphAndLabelWithoutColour(t *testing.T) {
 }
 
 func TestClaimIsItsOwnMarkerBesideTheLifecycle(t *testing.T) {
-	s := startSpectrum(t)
+	s := startSpectrum(t, 80)
 	s.row("d-review", "◐ Awaiting Review", "▸ watchdog")
 	s.row("c-impl", "○ Ready for Implementation", "▸ implement")
 	if unclaimed := s.row("e-review", "◐ Awaiting Review"); strings.Contains(unclaimed, "▸") || strings.Contains(unclaimed, "claim") {
@@ -162,7 +190,7 @@ func TestClaimIsItsOwnMarkerBesideTheLifecycle(t *testing.T) {
 }
 
 func TestUnreadableSliceStaysMarkedUnknownBesideSelectableHealthyOnes(t *testing.T) {
-	s := startSpectrum(t)
+	s := startSpectrum(t, 80)
 	torn := s.row("! i-torn", "! lifecycle unknown", "claim unknown")
 	for _, glyph := range append(lifecycleGlyphs, "▸") {
 		if strings.Contains(torn, glyph) {
@@ -203,7 +231,7 @@ func TestLifecycleAndClaimUseTheTerminalsAnsiColoursAndWeights(t *testing.T) {
 	profile := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.ANSI)
 	t.Cleanup(func() { lipgloss.SetColorProfile(profile) })
-	s := startSpectrum(t)
+	s := startSpectrum(t, 80)
 	s.press(downs(4)...)
 	s.row("> ", "e-review")
 
