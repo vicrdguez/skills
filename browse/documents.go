@@ -338,13 +338,13 @@ func (m Model) rowsForDocumentList() []ledger.DocumentEntry {
 	return m.documents.Documents
 }
 
-func documentLabel(kind ledger.DocumentKind, slice, path string) string {
-	name := documentName(path)
+func documentLabel(document ledger.DocumentEntry) string {
+	name := documentName(document.Reference.Path)
 	prefix := ""
-	if slice != "" {
-		prefix = slice + " — "
+	if document.Slice != "" {
+		prefix = document.Slice + " — "
 	}
-	switch kind {
+	switch document.Kind {
 	case ledger.ProposalDocumentKind:
 		return "Proposal description"
 	case ledger.ContractDocumentKind:
@@ -358,12 +358,8 @@ func documentLabel(kind ledger.DocumentKind, slice, path string) string {
 	case ledger.StateDocumentKind:
 		return prefix + "Claim state (" + name + ")"
 	default:
-		return prefix + name + " — " + string(kind)
+		return prefix + name + " — " + string(document.Kind)
 	}
-}
-
-func currentDocumentLabel(document *ledger.Document) string {
-	return documentLabel(document.Kind, document.Slice, document.Reference.Path)
 }
 
 func documentSummary(document ledger.DocumentEntry) string {

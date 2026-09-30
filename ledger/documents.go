@@ -191,12 +191,17 @@ func (set *DocumentSet) list() *DocumentList {
 		Documents: make([]DocumentEntry, 0, len(set.Documents)), Availability: set.Availability, Diagnostics: set.Diagnostics,
 	}
 	for _, document := range set.Documents {
-		list.Documents = append(list.Documents, DocumentEntry{
-			Kind: document.Kind, Project: document.Project, Proposal: document.Proposal, Slice: document.Slice,
-			Reference: document.Reference, Report: document.Report, Decision: document.Decision, Diagnostics: document.Diagnostics,
-		})
+		list.Documents = append(list.Documents, document.Entry())
 	}
 	return list
+}
+
+// Entry is the document as a document list offers it, without its text.
+func (d *Document) Entry() DocumentEntry {
+	return DocumentEntry{
+		Kind: d.Kind, Project: d.Project, Proposal: d.Proposal, Slice: d.Slice,
+		Reference: d.Reference, Report: d.Report, Decision: d.Decision, Diagnostics: d.Diagnostics,
+	}
 }
 
 // ProposalDocuments returns the proposal description and the committed
@@ -308,8 +313,8 @@ func (v *Snapshot) Document(reference Reference) (*Document, error) {
 	return recordDocument(Reference{Commit: contents.Commit, Path: contents.Path}, contents.Contents), nil
 }
 
-// recordDocument interprets the committed contents of one recognized record
-// document path.
+// recordDocument interprets the committed contents at reference, whose path
+// the caller has already recognized as a record document path.
 func recordDocument(reference Reference, contents string) *Document {
 	project, proposal, slice, kind, _ := recordDocumentIdentity(reference.Path)
 	document := &Document{

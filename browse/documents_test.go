@@ -59,6 +59,9 @@ func TestDocumentListLoadsOnlyTheDocumentSelectedForReading(t *testing.T) {
 	s.press("esc", "k", "k", "k", "k", "k", "enter")
 	s.shows("Available documents (10)", "Exact ledger reference unavailable", "substitute was opened")
 	s.hides("Proposal description stays readable")
+	s.press("down", "down", "down", "enter")
+	s.shows("Available documents (10)", "Exact ledger reference unavailable", "cancel/intent.md")
+	s.hides("Cancellation intent")
 }
 
 func TestArchivedDocumentIsNewerOnlyWhenItsBytesChanged(t *testing.T) {

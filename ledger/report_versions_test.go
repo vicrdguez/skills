@@ -194,3 +194,45 @@ func TestReportVersionsKeepLabelsForMergedChangesAcrossAnUnchangedArchiveMove(t 
 		}
 	}
 }
+
+func TestReportVersionsDiscloseAnUnreadableHistoricalTreeAndKeepNewerVersions(t *testing.T) {
+	const item = "records/reader"
+	l := newDeliveryLedger(t)
+	l.addProject("widgets", "acme/widgets")
+	l.addSlice("widgets", "records", "reader", ledger.Merged, nil, deliveryInitial)
+	l.commitAll("first incarnation")
+	if err := os.MkdirAll(filepath.Join(l.root, "projects/widgets/archive"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	deliveryGit(t, l.root, "mv", "projects/widgets/proposals/records", "projects/widgets/archive/records")
+	archived := l.commitAll("archive first incarnation")
+	deliveryGit(t, l.root, "rm", "-r", "-q", "projects/widgets/archive/records")
+	l.commitAll("remove the archived incarnation")
+	l.addSlice("widgets", "records", "reader", ledger.ReadyForImplementation, nil, deliveryInitial)
+	l.commitAll("new active incarnation")
+	path := deliveryReportPath("widgets", item, ledger.ImplementPhase)
+	l.addFile(path, "first report\n")
+	first := l.commitAll("first report")
+	l.addFile(path, "second report\n")
+	second := l.commitAll("second report")
+	tree := deliveryGitOutput(t, l.root, "rev-parse", archived+":projects/widgets/archive/records")
+	if err := os.Remove(filepath.Join(l.root, ".git", "objects", tree[:2], tree[2:])); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot, err := l.store().Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	versions, err := snapshot.Versions("widgets", item, ledger.ImplementPhase)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !versions.Incomplete || len(versions.Diagnostics) == 0 || !strings.HasPrefix(versions.Diagnostics[0].Problem, "cannot read local report history: ") {
+		t.Fatalf("unreadable history was not disclosed: %+v", versions)
+	}
+	want := []ledger.Reference{{Commit: second, Path: path}, {Commit: first, Path: path}}
+	if len(versions.Versions) != len(want) || versions.Versions[0].Reference != want[0] || versions.Versions[1].Reference != want[1] {
+		t.Fatalf("versions newer than the unreadable history = %+v, want %v", versions.Versions, want)
+	}
+}

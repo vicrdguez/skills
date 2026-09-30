@@ -128,7 +128,7 @@ func (m Model) header() string {
 		path = append(path, "report versions")
 	case referencesScreen:
 		if m.referencesFromDoc && m.currentDocument != nil {
-			path = append(path, currentDocumentLabel(m.currentDocument))
+			path = append(path, documentLabel(m.currentDocument.Entry()))
 		}
 		path = append(path, "references")
 	case documentScreen:
@@ -136,7 +136,7 @@ func (m Model) header() string {
 			path = append(path, "references")
 		}
 		if m.currentDocument != nil {
-			path = append(path, currentDocumentLabel(m.currentDocument))
+			path = append(path, documentLabel(m.currentDocument.Entry()))
 		}
 	case diagnosticsScreen:
 		if m.diagnosticReturn == documentsScreen {
@@ -304,7 +304,7 @@ func (m Model) listContent() (context []string, title string, rows []string, cur
 			}
 			context = append(context, optionalDocumentNotes(m.documents)...)
 			for _, document := range m.documents.Documents {
-				rows = append(rows, documentLabel(document.Kind, document.Slice, document.Reference.Path))
+				rows = append(rows, documentLabel(document))
 			}
 			if m.documents.Slice != "" {
 				rows = append(rows, "Implementation report versions", "Watchdog report versions")
@@ -349,7 +349,7 @@ func (m Model) listContent() (context []string, title string, rows []string, cur
 	case referencesScreen:
 		context = []string{"Structured ledger references · exact commit and path; unavailable references are never replaced."}
 		if m.referencesFromDoc && m.currentDocument != nil {
-			context = append(context, "From "+currentDocumentLabel(m.currentDocument))
+			context = append(context, "From "+documentLabel(m.currentDocument.Entry()))
 			context = append(context, diagnosticLines(m.currentDocument.Diagnostics)...)
 		} else if m.slice == nil || m.slice.Claim == nil {
 			context = append(context, "No current Slice Claim at ledger revision "+m.snapshot.Revision)

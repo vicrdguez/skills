@@ -72,10 +72,8 @@ func (v *Snapshot) reportVersions(projectName, item, phase string, location *boo
 	// Path-limited history avoids treating unrelated commits as versions. Include
 	// proposal membership so a report introduced only after archival can still
 	// continue to its pre-archive record. First-parent follows the committed
-	// ledger view, including a change delivered by a merge commit; each listed
-	// commit is compared with its first parent.
-	tracked := []string{activeReport, archivedReport, activeProposal, archivedProposal}
-	args := append([]string{"log", "--first-parent", "--format=%H %P", v.Revision, "--"}, tracked...)
+	// ledger view, including a change delivered by a merge commit.
+	args := []string{"log", "--first-parent", "--format=%H", v.Revision, "--", activeReport, archivedReport, activeProposal, archivedProposal}
 	listing, err := git(v.store.Root, args...)
 	if err != nil {
 		addProblem("cannot read local report history: " + gitError(v.store.Root, args, err).Error())
@@ -86,20 +84,17 @@ func (v *Snapshot) reportVersions(projectName, item, phase string, location *boo
 	} else if shallow == "true" {
 		addProblem("local Git history is shallow; older report versions may be unavailable")
 	}
-	var commits, parents, revisions []string
-	for _, line := range strings.Split(listing, "\n") {
-		fields := strings.Fields(line)
-		if len(fields) == 0 {
-			continue
-		}
-		parent := ""
-		if len(fields) > 1 {
-			parent = fields[1]
-		}
-		commits, parents = append(commits, fields[0]), append(parents, parent)
-		revisions = append(revisions, fields[0], parent)
+
+	// Each listed commit is compared with its first parent. Git has read the
+	// trees of both while listing, so their entries and report blobs are read
+	// in one batch each.
+	commits := strings.Fields(listing)
+	parents, parentErr := v.firstParents(commits)
+	revisions := append([]string(nil), commits...)
+	for _, commit := range commits {
+		revisions = append(revisions, parents[commit])
 	}
-	trees, err := v.versionTrees(revisions, tracked)
+	trees, err := v.versionTrees(revisions, activeReport, archivedReport, activeProposal, archivedProposal)
 	if err != nil {
 		addProblem("cannot inspect report history: " + err.Error())
 		return result, nil
@@ -110,14 +105,18 @@ func (v *Snapshot) reportVersions(projectName, item, phase string, location *boo
 	// selected archived record continues at the old active path; an active
 	// replacement of the same name does not inherit archived history.
 	archiveSide := proposal.archived
-	for index, commit := range commits {
+	for _, commit := range commits {
 		paths := trees[commit].blobs
 		if treeErr := trees[commit].err; treeErr != nil {
 			addProblem("cannot inspect report history at " + commit + ": " + treeErr.Error())
 			continue
 		}
+		if parentErr != nil {
+			addProblem("cannot read parent of " + commit + ": " + parentErr.Error())
+			continue
+		}
 		older := map[string]string{}
-		if parent := parents[index]; parent != "" {
+		if parent := parents[commit]; parent != "" {
 			older = trees[parent].blobs
 			if treeErr := trees[parent].err; treeErr != nil {
 				addProblem("cannot inspect parent of report history at " + commit + ": " + treeErr.Error())
@@ -171,6 +170,26 @@ func (v *Snapshot) reportVersions(projectName, item, phase string, location *boo
 	return result, nil
 }
 
+// firstParents reads the first parent of each commit with one Git process. A
+// commit without a parent, such as a shallow boundary, has none.
+func (v *Snapshot) firstParents(commits []string) (map[string]string, error) {
+	parents := map[string]string{}
+	if len(commits) == 0 {
+		return parents, nil
+	}
+	args := append([]string{"rev-list", "--no-walk=unsorted", "--parents"}, commits...)
+	ancestry, err := git(v.store.Root, args...)
+	if err != nil {
+		return nil, gitError(v.store.Root, args, err)
+	}
+	for _, line := range strings.Split(ancestry, "\n") {
+		if fields := strings.Fields(line); len(fields) > 1 {
+			parents[fields[0]] = fields[1]
+		}
+	}
+	return parents, nil
+}
+
 // versionTree is the blob identity of each tracked path present at one
 // commit, or why that commit's entries cannot be interpreted.
 type versionTree struct {
@@ -182,7 +201,7 @@ type versionTree struct {
 // paths at every given commit. Entries, not blobs, identify versions: even an
 // unavailable report blob keeps its exact version reference and does not
 // hide healthy versions.
-func (v *Snapshot) versionTrees(commits, paths []string) (map[string]versionTree, error) {
+func (v *Snapshot) versionTrees(commits []string, paths ...string) (map[string]versionTree, error) {
 	tracked := map[string]bool{}
 	var directories []string
 	for _, trackedPath := range paths {
@@ -238,11 +257,11 @@ func (v *Snapshot) versionTrees(commits, paths []string) (map[string]versionTree
 // versionReports reads, with one Git process, the contents of every distinct
 // report blob the listed commits hold, keyed by blob identity. A blob it
 // cannot read is absent, so its version is read exactly and diagnosed.
-func (v *Snapshot) versionReports(commits []string, trees map[string]versionTree, reports ...string) map[string]string {
+func (v *Snapshot) versionReports(commits []string, trees map[string]versionTree, activeReport, archivedReport string) map[string]string {
 	var references []Reference
 	selected := map[string]bool{}
 	for _, commit := range commits {
-		for _, report := range reports {
+		for _, report := range []string{activeReport, archivedReport} {
 			if blob := trees[commit].blobs[report]; blob != "" && !selected[blob] {
 				selected[blob] = true
 				references = append(references, Reference{Commit: commit, Path: report})
