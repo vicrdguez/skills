@@ -4,6 +4,7 @@ No public prose was supplied, so the current result of Work Item `widget-dashboa
 
 Work Item: widget-dashboard/foundation (awaiting_review)
 Current result: implement awaiting_review at `projects/widgets/proposals/widget-dashboard/foundation/implement-report.md`
+Completed reviews: 0
 Ledger commit: `0000000000000000000000000000000000000001`
 Source: head 0000000000000000000000000000000000000002, target 0000000000000000000000000000000000000003
 Branch: `widget-dashboard`
@@ -11,6 +12,8 @@ Branch: `widget-dashboard`
 To present the current result, read the private evidence:
 
 - `skl ledger show --commit '0000000000000000000000000000000000000001' --path 'projects/widgets/proposals/widget-dashboard/foundation/implement-report.md'`
+- `skl ledger show --commit '0000000000000000000000000000000000000004' --path 'projects/widgets/proposals/widget-dashboard/foundation/behavior.md'`
+- `skl ledger show --commit '0000000000000000000000000000000000000004' --path 'projects/widgets/proposals/widget-dashboard/foundation/intent.md'`
 
 Write fresh public prose following `skl skill --resource pull-presentation.md implement`, then run:
 

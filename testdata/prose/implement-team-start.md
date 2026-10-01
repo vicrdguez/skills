@@ -114,7 +114,7 @@ Check: every `F<n>` has a disposition, and the last Full Gate ran on the final s
 
 ## 5. Report
 
-Retrieve the report template with `skl skill --resource ledger-submission.md --input result_directory='/tmp/skl-implement-result' --input procedure=initial implement`, and write the documents it describes. Commit all source changes.
+Retrieve the report template with `skl skill --resource ledger-submission.md --input result_directory='/tmp/skl-implement-result' --input procedure=initial --input review_count=0 implement`, and write the documents it describes. Commit all source changes.
 
 Check: `implement-report.md` and `public.md` exist in `/tmp/skl-implement-result`, and `git status` is clean.
 

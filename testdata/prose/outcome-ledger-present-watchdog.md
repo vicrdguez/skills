@@ -3,7 +3,8 @@ Status: prose_required
 No public prose was supplied, so the current result of Work Item `widget-dashboard/foundation` is not presented.
 
 Work Item: widget-dashboard/foundation (rework)
-Current result: watchdog rework, review round 1 at `projects/widgets/proposals/widget-dashboard/foundation/watchdog-report.md`
+Current result: watchdog rework at `projects/widgets/proposals/widget-dashboard/foundation/watchdog-report.md`
+Completed reviews: 1
 Ledger commit: `0000000000000000000000000000000000000001`
 Source: head 0000000000000000000000000000000000000002, target 0000000000000000000000000000000000000003, reviewed 0000000000000000000000000000000000000002
 Branch: `widget-dashboard`
@@ -11,6 +12,8 @@ Branch: `widget-dashboard`
 To present the current result, read the private evidence:
 
 - `skl ledger show --commit '0000000000000000000000000000000000000001' --path 'projects/widgets/proposals/widget-dashboard/foundation/watchdog-report.md'`
+- `skl ledger show --commit '0000000000000000000000000000000000000004' --path 'projects/widgets/proposals/widget-dashboard/foundation/behavior.md'`
+- `skl ledger show --commit '0000000000000000000000000000000000000004' --path 'projects/widgets/proposals/widget-dashboard/foundation/intent.md'`
 - `skl ledger show --commit '0000000000000000000000000000000000000004' --path 'projects/widgets/proposals/widget-dashboard/foundation/implement-report.md'`
 
 Write fresh public prose following `skl skill --resource pull-presentation.md watchdog`, then run:
