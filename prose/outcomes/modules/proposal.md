@@ -13,7 +13,7 @@ Slice `{{.Name}}`: {{.Title}} (branch `{{.Branch}}`)
   Parent grouping: {{.Grouping}}{{end}}
   Readback: `{{.Readback}}`
 {{end}}{{end}}
-{{- define "outcome-authoring"}}Some issues lack public prose. To publish them, read each slice with its readback command above, write fresh prose following `{{.Guidance}}`, then run:
+{{- define "outcome-authoring"}}Some issues lack public prose. To publish them, write fresh prose following `{{.Guidance}}`, then run:
 
 `{{.Continuation}}`
 {{end}}

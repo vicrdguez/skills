@@ -43,6 +43,7 @@ type ledgerReviewData struct {
 
 type issuePublicationData struct {
 	Proposal string
+	Project  string
 	Repo     string
 	Remote   string
 }
@@ -127,6 +128,7 @@ func resourceSpecFor(resource string) resourceSpec {
 		data := &issuePublicationData{}
 		return resourceSpec{data: data, inputs: []resourceInput{
 			{flag: &cli.StringFlag{Name: "proposal", Required: true, Usage: "Accepted proposal whose issue presentation is published.", Destination: &data.Proposal}},
+			{flag: &cli.StringFlag{Name: "project", Required: true, Usage: "Ledger Project that records the proposal.", Destination: &data.Project}},
 			{flag: &cli.StringFlag{Name: "repo", Required: true, Usage: "Absolute path of the source repository root.", Destination: &data.Repo}},
 			{flag: &cli.StringFlag{Name: "remote", Required: true, Usage: "Selected GitHub remote of the source repository.", Destination: &data.Remote}},
 		}, validate: func(resource string) error {
