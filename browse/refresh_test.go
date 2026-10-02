@@ -131,6 +131,53 @@ func TestFailedRefreshStaysLoudUntilARefreshSucceeds(t *testing.T) {
 	}
 }
 
+func TestFailedRefreshPrioritizesWarningOverDocumentContextAtNarrowWidths(t *testing.T) {
+	s := start(t, "widgets")
+	s.send(tea.WindowSizeMsg{Width: 80, Height: 14})
+	s.press("enter", "down", "enter", "a", "d", "down", "down", "enter", "r", "enter", "pgdown")
+	reference := gitOutput(t, s.root, "rev-parse", "HEAD~1")[:7]
+	revision := gitOutput(t, s.root, "rev-parse", "HEAD")[:7]
+	missing := s.root + "-temporarily-missing"
+	if err := os.Rename(s.root, missing); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Rename(missing, s.root) })
+	s.press("R")
+	for _, width := range []int{48, 40, 30} {
+		size := tea.WindowSizeMsg{Width: width, Height: 14}
+		s.send(size)
+		header := s.header()
+		if !strings.Contains(header, "NOT REFRESHED "+revision) {
+			t.Fatalf("%d-column failed-refresh header %q lacks last committed revision", width, header)
+		}
+		switch width {
+		case 48:
+			if !strings.Contains(header, "HIST "+reference) || !strings.Contains(header, "archived") || !strings.Contains(header, "%") {
+				t.Fatalf("%d-column header %q lost document, archive or scroll context", width, header)
+			}
+		case 40:
+			if !strings.Contains(header, "HIST "+reference) || strings.Contains(header, "archived") || strings.Contains(header, "%") {
+				t.Fatalf("%d-column header %q should retain document identity after scroll and archive yield", width, header)
+			}
+		case 30:
+			if strings.Contains(header, "HIST") || strings.Contains(header, "archived") || strings.Contains(header, "%") {
+				t.Fatalf("%d-column header %q should retain the warning after context yields", width, header)
+			}
+		}
+		s.shows("Refresh failed; displayed", "configured ledger")
+		s.fitsIn(size)
+	}
+	if err := os.Rename(missing, s.root); err != nil {
+		t.Fatal(err)
+	}
+	s.send(tea.WindowSizeMsg{Width: 40, Height: 14})
+	s.press("R")
+	if header := s.header(); !strings.Contains(header, "HIST") || !strings.Contains(header, reference) || !strings.Contains(header, "archived") || !strings.Contains(header, "%") {
+		t.Fatalf("after recovery, document context did not return to 40-column header: %q", header)
+	}
+	s.hides("NOT REFRESHED", "Refresh failed")
+}
+
 func TestRefreshDoesNotSilentlySelectAnotherResultWhenSelectedSliceDisappears(t *testing.T) {
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 140, Height: 35})
