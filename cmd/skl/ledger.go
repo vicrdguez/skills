@@ -64,7 +64,7 @@ func authoringFor(repository setup.RepositoryContext, outcome *ledger.Acceptance
 	}
 	selection := "--repo " + skilldist.ShellQuote(repository.Root) + " --remote " + skilldist.ShellQuote(repository.Remote)
 	authoring := &proseAuthoring{
-		Guidance:     "skl skill --resource issue-publication.md --input " + skilldist.ShellQuote("proposal="+outcome.Proposal) + " --input " + skilldist.ShellQuote("repo="+repository.Root) + " --input " + skilldist.ShellQuote("remote="+repository.Remote) + " propose",
+		Guidance:     "skl skill --resource issue-publication.md --input " + skilldist.ShellQuote("proposal="+outcome.Proposal) + " --input " + skilldist.ShellQuote("project="+outcome.Project) + " --input " + skilldist.ShellQuote("repo="+repository.Root) + " --input " + skilldist.ShellQuote("remote="+repository.Remote) + " propose",
 		Continuation: "skl ledger publish " + selection + " --proposal " + skilldist.ShellQuote(outcome.Proposal),
 	}
 	for _, slice := range outcome.Slices {

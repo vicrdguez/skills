@@ -683,11 +683,12 @@ func TestDeliveryPublicationSelectsTheLatestResult(t *testing.T) {
 	deliveryHandoff(t, store, deliveryWidgets(), deliveryPublicationItem, ledger.ImplementPhase, rework.Claim.Commit,
 		ledger.SourceRevisions{Head: final, Target: deliveryTarget}, "awaiting_review", "rework body\n")
 	selected := deliverySelect(t, store)
-	if selected.Phase != ledger.ImplementPhase || selected.Source.Head != final || selected.Implement != nil {
-		t.Fatalf("selected after rework = %#v, want the reworked implementation", selected)
+	// Its own round is zero, yet the rejecting review it consumed still counts.
+	if selected.Phase != ledger.ImplementPhase || selected.Source.Head != final || selected.Round != 0 || selected.ReviewCount != 1 || selected.Watchdog == nil {
+		t.Fatalf("selected after rework = %#v, want the reworked implementation after one completed review", selected)
 	}
 	deliveryReview(t, store, final, ledger.NeedsHuman, "pause\n")
-	if selected := deliverySelect(t, store); selected.Phase != ledger.WatchdogPhase || selected.Round != 2 || selected.Source.Reviewed != final {
+	if selected := deliverySelect(t, store); selected.Phase != ledger.WatchdogPhase || selected.Round != 2 || selected.ReviewCount != 2 || selected.Source.Reviewed != final {
 		t.Fatalf("selected = %#v, want the second review", selected)
 	}
 
