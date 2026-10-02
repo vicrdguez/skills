@@ -96,10 +96,11 @@ type DocumentEntry struct {
 	Diagnostics []Diagnostic
 }
 
-// DocumentList is the listing of a DocumentSet: the same entries in the same
-// order, with the same availability and diagnostics, but no document text.
-// Building it reads the text of metadata-bearing records only (phase
-// reports, the Human Decision and Slice state).
+// DocumentList carries a DocumentSet's entries, order, availability and
+// diagnostics without retaining document text. It reads metadata-bearing
+// records (phase reports, the Human Decision and Slice state), but checks
+// only prose object headers. Prose with a readable header and corrupt body
+// is diagnosed by Document when opened, not by the list.
 type DocumentList struct {
 	Revision     string
 	Project      string
@@ -111,8 +112,8 @@ type DocumentList struct {
 	Diagnostics  []Diagnostic
 }
 
-// ProposalDocumentListAt lists what ProposalDocumentsAt returns without
-// reading the text of any document.
+// ProposalDocumentListAt lists a Proposal's documents without reading prose
+// bodies. Metadata-bearing records are read to label and diagnose entries.
 func (v *Snapshot) ProposalDocumentListAt(projectName, proposalName string, archived bool) (*DocumentList, error) {
 	project, proposal, err := v.proposalLocated(projectName, proposalName, &archived)
 	if err != nil {
@@ -125,8 +126,8 @@ func (v *Snapshot) ProposalDocumentListAt(projectName, proposalName string, arch
 	return v.proposalDocuments(project, proposal, v.listingRead(paths)).list(), nil
 }
 
-// SliceDocumentListAt lists what SliceDocumentsAt returns without reading
-// the text of any document.
+// SliceDocumentListAt lists a Slice's documents without reading prose bodies.
+// Metadata-bearing records are read to label and diagnose entries.
 func (v *Snapshot) SliceDocumentListAt(projectName, item string, archived bool) (*DocumentList, error) {
 	project, proposal, slice, err := v.documentSlice(projectName, item, &archived)
 	if err != nil {

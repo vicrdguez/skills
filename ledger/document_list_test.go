@@ -1,6 +1,7 @@
 package ledger_test
 
 import (
+	"math/rand"
 	"os"
 	"os/exec"
 	"path"
@@ -12,8 +13,8 @@ import (
 	"github.com/vicrdguez/skills/ledger"
 )
 
-// A document list must offer exactly what the full documents query offers,
-// read by exact reads of every document, while reading no document text.
+// Missing objects and malformed metadata have the same diagnostics as the
+// full documents query. Prose body corruption is diagnosed only on open.
 func TestDocumentListsMatchTheDocumentsQueryAcrossDamagedRecords(t *testing.T) {
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
@@ -123,6 +124,59 @@ func TestDocumentListsMatchTheDocumentsQueryAcrossDamagedRecords(t *testing.T) {
 	}
 	if after := browseObservable(t, l); after != before {
 		t.Fatalf("document listing changed ledger refs or working tree:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
+// Prose headers remain listable when their bodies are corrupt. Only an exact
+// read discovers that corruption, without substituting another document.
+func TestDocumentListDefersProseBodyCorruptionUntilOpen(t *testing.T) {
+	l := newDeliveryLedger(t)
+	l.addProject("widgets", "acme/widgets")
+	l.addSlice("widgets", "records", "readback", ledger.NeedsHuman, nil, deliveryInitial)
+	// A poorly compressible body keeps the damaged checksum beyond the
+	// prefix Git inflates when checking only an object's header.
+	body := make([]byte, 100_000)
+	random := rand.New(rand.NewSource(1))
+	for i := range body {
+		body[i] = byte('!' + random.Intn(90))
+	}
+	intentPath := deliveryContractPath("widgets", "records/readback", "intent.md")
+	l.addFile(intentPath, string(body))
+	l.commitAll("accept records")
+	snapshot, err := l.store().Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	blob := deliveryGitOutput(t, l.root, "rev-parse", "HEAD:"+intentPath)
+	objectPath := filepath.Join(l.root, ".git", "objects", blob[:2], blob[2:])
+	object, err := os.ReadFile(objectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	object[len(object)-1] ^= 1
+	if err := os.Chmod(objectPath, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(objectPath, object, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	list, err := snapshot.SliceDocumentListAt("widgets", "records/readback", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Documents) != 2 || len(list.Diagnostics) != 0 {
+		t.Fatalf("a header-readable contract must remain listed without a body diagnosis: %+v", list)
+	}
+	for _, entry := range list.Documents {
+		document, err := snapshot.Document(entry.Reference)
+		if entry.Reference.Path == intentPath {
+			if err == nil || document != nil || !strings.Contains(err.Error(), "inflate") {
+				t.Errorf("corrupt prose read = %+v, %v; want refusal for body corruption", document, err)
+			}
+		} else if err != nil || document == nil || !strings.Contains(document.Contents, "behavior of readback") {
+			t.Errorf("healthy contract read = %+v, %v", document, err)
+		}
 	}
 }
 

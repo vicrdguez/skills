@@ -1,6 +1,7 @@
 package browse_test
 
 import (
+	"math/rand"
 	"os"
 	"path/filepath"
 	"testing"
@@ -62,6 +63,44 @@ func TestDocumentListLoadsOnlyTheDocumentSelectedForReading(t *testing.T) {
 	s.press("down", "down", "down", "enter")
 	s.shows("Available documents (10)", "Exact ledger reference unavailable", "cancel/intent.md")
 	s.hides("Cancellation intent")
+}
+
+func TestOpeningCorruptProseVisiblyRefusesWithoutSubstitution(t *testing.T) {
+	const intentPath = "projects/widgets/proposals/orders/cancel/intent.md"
+	s := start(t, "widgets", func(root string) {
+		// Keep the corrupt checksum beyond Git's header-read prefix.
+		body := make([]byte, 100_000)
+		random := rand.New(rand.NewSource(1))
+		for i := range body {
+			body[i] = byte('!' + random.Intn(90))
+		}
+		write(t, root, intentPath, "Corrupt cancellation intent\n"+string(body))
+	})
+	blob := gitOutput(t, s.root, "rev-parse", "HEAD:"+intentPath)
+	objectPath := filepath.Join(s.root, ".git", "objects", blob[:2], blob[2:])
+	object, err := os.ReadFile(objectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	object[len(object)-1] ^= 1
+	if err := os.Chmod(objectPath, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(objectPath, object, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s.send(tea.WindowSizeMsg{Width: 120, Height: 45})
+	s.press("enter", "d")
+	s.shows("Available documents (10)", "cancel — intent.md — accepted contract")
+	s.hides("Exact ledger reference unavailable")
+	s.press("down", "down", "down", "enter")
+	s.shows("Available documents (10)", "Exact ledger reference unavailable", intentPath, "no substitute was opened")
+	s.hides("Corrupt cancellation intent")
+	// Refusing the damaged selection leaves healthy entries openable.
+	s.press("down", "down", "enter")
+	s.shows("Latest implementation report", "The recorded implementation evidence is readable")
+	s.hides("Exact ledger reference unavailable", "Corrupt cancellation intent")
 }
 
 func TestArchivedDocumentIsNewerOnlyWhenItsBytesChanged(t *testing.T) {
