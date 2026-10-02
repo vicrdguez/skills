@@ -143,7 +143,7 @@ func TestFailedRefreshPrioritizesWarningOverDocumentContextAtNarrowWidths(t *tes
 	}
 	t.Cleanup(func() { _ = os.Rename(missing, s.root) })
 	s.press("R")
-	for _, width := range []int{48, 40, 30} {
+	for _, width := range []int{48, 43, 40, 30} {
 		size := tea.WindowSizeMsg{Width: width, Height: 14}
 		s.send(size)
 		header := s.header()
@@ -154,6 +154,10 @@ func TestFailedRefreshPrioritizesWarningOverDocumentContextAtNarrowWidths(t *tes
 		case 48:
 			if !strings.Contains(header, "HIST "+reference) || !strings.Contains(header, "archived") || !strings.Contains(header, "%") {
 				t.Fatalf("%d-column header %q lost document, archive or scroll context", width, header)
+			}
+		case 43:
+			if !strings.Contains(header, "HIST "+reference) || !strings.Contains(header, "archived") || strings.Contains(header, "%") {
+				t.Fatalf("%d-column header %q should drop scroll before archive and document context", width, header)
 			}
 		case 40:
 			if !strings.Contains(header, "HIST "+reference) || strings.Contains(header, "archived") || strings.Contains(header, "%") {

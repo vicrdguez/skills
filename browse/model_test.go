@@ -647,7 +647,13 @@ func TestBrowserFooterListsOnlyKeysThatActOnTheScreen(t *testing.T) {
 	}
 	s.footerLists("enter apply • esc cancel")
 	s.footerOmits("? help", "toggle grouping")
+	s.press("?")
+	s.shows("Search names: ?█")
+	s.footerOmits("? help")
 	s.press("esc")
+	s.footerLists("? help")
+	s.press("/", "cancel", "enter")
+	s.footerLists("? help")
 
 	s = start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 400, Height: 40})
