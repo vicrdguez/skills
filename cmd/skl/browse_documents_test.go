@@ -152,8 +152,10 @@ func TestBrowseDocumentsExposeCurrentAndArchivedEvidenceReadOnly(t *testing.T) {
 		t.Fatalf("current Proposal documents = %+v", proposal)
 	}
 	if !hasDocument(proposal.Documents.Documents, ledger.ProposalDocumentKind, "projects/widgets/proposals/orders/proposal.md") ||
-		!hasDocument(proposal.Documents.Documents, ledger.ContractDocumentKind, "projects/widgets/proposals/orders/cancel/plan.md") {
-		t.Fatalf("Proposal discovery omitted its description or accepted plan: %+v", proposal.Documents.Documents)
+		!hasDocument(proposal.Documents.Documents, ledger.ContractDocumentKind, "projects/widgets/proposals/orders/cancel/plan.md") ||
+		!hasDocument(proposal.Documents.Documents, ledger.ImplementReportDocumentKind, fixture.implementPath) ||
+		!hasDocument(proposal.Documents.Documents, ledger.DecisionDocumentKind, "projects/widgets/proposals/orders/cancel/decision.md") {
+		t.Fatalf("Proposal discovery omitted its description, accepted plan, current report or Human Decision: %+v", proposal.Documents.Documents)
 	}
 	archivedSameName := browseDocumentsJSON(t, app, output, "documents", "--project", "widgets", "--proposal", "orders", "--archived")
 	if archivedSameName.Status != "shown" || archivedSameName.Documents == nil || !archivedSameName.Documents.Archived ||

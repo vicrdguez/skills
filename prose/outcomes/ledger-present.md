@@ -3,7 +3,8 @@ Status: {{.Status}}
 {{with .Result}}{{if eq $.Status "presented"}}The current result of Work Item `{{.Item}}` is presented.{{else if eq $.Status "prose_required"}}No public prose was supplied, so the current result of Work Item `{{.Item}}` is not presented.{{else if eq $.Status "uncertain"}}The presentation of Work Item `{{.Item}}` may or may not have reached the forge.{{else}}The current result of Work Item `{{.Item}}` is not presented yet; the committed result is unaffected.{{end}}
 
 Work Item: {{.Item}} ({{.Lifecycle}})
-Current result: {{.Phase}} {{.Outcome}}{{if .Round}}, review round {{.Round}}{{end}} at `{{.Report.Path}}`
+Current result: {{.Phase}} {{.Outcome}} at `{{.Report.Path}}`
+Completed reviews: {{.ReviewCount}}
 Ledger commit: `{{.Report.Commit}}`{{if $.Source}}
 Source: {{$.Source}}{{end}}
 Branch: `{{.Branch}}`{{if .Submission}}

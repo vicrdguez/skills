@@ -1,23 +1,16 @@
 # Issue Publication Prose
 
-Write fresh human-facing descriptions of accepted proposal `{{.Proposal}}` and publish them through `skl`. Write them from the current private evidence; earlier bodies are not kept.
+Write fresh human-facing descriptions of accepted proposal `{{.Proposal}}` from its current evidence, and publish them through `skl`.
 
 ## Read the evidence
 
-Read each slice the publication outcome lists with `skl ledger show --repo {{quote .Repo}} --remote {{quote .Remote}} --item {{quote (print .Proposal "/<slice>")}}`. It shows the frozen Contract, current state, Dependencies and attached issues. That evidence stays private.
+Run `skl browse documents --project {{quote .Project}} --proposal {{quote .Proposal}}`. It shows the Proposal description, every slice's Contract, current reports and any active Human Decision. When a report's consumed ledger references include a decision or earlier report that bears on the work, read it with `skl ledger show --commit <ledger-commit> --path <ledger-path>`.
 
-Check: you have read every listed slice.
+Check: you have read the Proposal description and every slice's documents.
 
 ## Write the prose
 
-Write one self-contained Markdown file per slice, plus one parent body when the proposal has several slices, in private temporary files outside the source tree and the ledger clone.
-
-- Say what the work commits to, its current context, useful evidence, and what a human still owns, such as Manual Verification.
-- Summarize the Contract, reports and decisions, and point to the private readback for detail.
-- Let a parent body describe how its slices group together, leaving each child's detail to the child.
-
-Check: every listed slice has a body file.
-
+{{template "issue-description" .}}
 ## Publish
 
 ```
