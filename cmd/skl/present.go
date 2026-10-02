@@ -13,8 +13,9 @@ import (
 )
 
 // presentationGuidance binds what an agent needs to author fresh public prose
-// for the current result: exact private evidence, the phase's authoring
-// resource, and the continuation command. The CLI authors no public prose.
+// for the current result: exact private evidence (the report and every ledger
+// input it consumed), the phase's authoring resource, and the continuation
+// command. The CLI authors no public prose.
 type presentationGuidance struct {
 	Result    ledger.CurrentResult `json:"result"`
 	Evidence  []string             `json:"evidence"`
@@ -92,7 +93,10 @@ func presentGuidance(repository setup.RepositoryContext, result ledger.CurrentRe
 		return "skl ledger show --commit " + q(reference.Commit) + " --path " + q(reference.Path)
 	}
 	evidence := []string{show(result.Report)}
-	for _, reference := range []*ledger.Reference{result.Implement, result.Decision} {
+	for _, reference := range result.Contract {
+		evidence = append(evidence, show(reference))
+	}
+	for _, reference := range []*ledger.Reference{result.Implement, result.Watchdog, result.Decision} {
 		if reference != nil {
 			evidence = append(evidence, show(*reference))
 		}

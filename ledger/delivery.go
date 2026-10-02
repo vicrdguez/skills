@@ -138,6 +138,12 @@ func HandoffDelivery(s *Store, repository github.RepositoryID, item, phase, clai
 	return result, err
 }
 
+// ReviewDestination is the lifecycle a completed review records for its
+// verdict in the given round.
+func ReviewDestination(outcome string, round uint64) (string, error) {
+	return deliveryDestination(WatchdogPhase, outcome, round)
+}
+
 func deliveryDestination(phase, outcome string, round uint64) (string, error) {
 	if phase == ImplementPhase {
 		switch outcome {

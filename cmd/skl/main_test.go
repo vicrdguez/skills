@@ -627,12 +627,12 @@ func TestRejectInvalidResourceInputs(t *testing.T) {
 		},
 		{
 			name: "undeclared input", owner: "implement", resource: "ledger-submission.md",
-			inputs: []string{"result_directory=" + directory, "procedure=initial", "findings=1"},
+			inputs: []string{"result_directory=" + directory, "procedure=initial", "review_count=0", "findings=1"},
 			wants:  []string{"findings", "--describe-inputs"},
 		},
 		{
 			name: "duplicate input", owner: "watchdog", resource: "ledger-review.md",
-			inputs: []string{"result_directory=" + directory, "round=1", "round=1", "reviewed_head=" + head},
+			inputs: []string{"result_directory=" + directory, "round=1", "round=1", "reviewed_head=" + head, "rework_pauses=false"},
 			wants:  []string{"round", "duplicate"},
 		},
 		{
@@ -642,32 +642,32 @@ func TestRejectInvalidResourceInputs(t *testing.T) {
 		},
 		{
 			name: "invalid integer", owner: "watchdog", resource: "ledger-review.md",
-			inputs: []string{"result_directory=" + directory, "round=two", "reviewed_head=" + head},
+			inputs: []string{"result_directory=" + directory, "round=two", "reviewed_head=" + head, "rework_pauses=false"},
 			wants:  []string{"round", "integer"},
 		},
 		{
 			name: "unsupported choice", owner: "implement", resource: "ledger-submission.md",
-			inputs: []string{"result_directory=" + directory, "procedure=later"},
+			inputs: []string{"result_directory=" + directory, "procedure=later", "review_count=0"},
 			wants:  []string{"procedure", "initial", "rework"},
 		},
 		{
 			name: "zero round", owner: "watchdog", resource: "ledger-review.md",
-			inputs: []string{"result_directory=" + directory, "round=0", "reviewed_head=" + head},
+			inputs: []string{"result_directory=" + directory, "round=0", "reviewed_head=" + head, "rework_pauses=false"},
 			wants:  []string{"round", "positive"},
 		},
 		{
 			name: "empty result directory", owner: "implement", resource: "ledger-submission.md",
-			inputs: []string{"result_directory=", "procedure=initial"},
+			inputs: []string{"result_directory=", "procedure=initial", "review_count=0"},
 			wants:  []string{"result_directory", "absolute"},
 		},
 		{
 			name: "relative result directory", owner: "implement", resource: "ledger-submission.md",
-			inputs: []string{"result_directory=.worktrees/result", "procedure=initial"},
+			inputs: []string{"result_directory=.worktrees/result", "procedure=initial", "review_count=0"},
 			wants:  []string{"result_directory", "absolute"},
 		},
 		{
 			name: "malformed reviewed head", owner: "watchdog", resource: "ledger-review.md",
-			inputs: []string{"result_directory=" + directory, "round=1", "reviewed_head=" + head[:12] + "nonsense"},
+			inputs: []string{"result_directory=" + directory, "round=1", "reviewed_head=" + head[:12] + "nonsense", "rework_pauses=false"},
 			wants:  []string{"reviewed source SHA", "40 lowercase hexadecimal"},
 		},
 		{
@@ -739,7 +739,7 @@ func TestPreserveLiteralResourceInputValues(t *testing.T) {
 		return output.String(), err
 	}
 
-	rendered, err := render("result_directory="+first, "procedure=initial")
+	rendered, err := render("result_directory="+first, "procedure=initial", "review_count=0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -747,7 +747,7 @@ func TestPreserveLiteralResourceInputValues(t *testing.T) {
 		t.Errorf("rendering did not preserve every supplied character:\n%s", rendered)
 	}
 
-	rendered, err = render("result_directory="+second, "procedure=rework")
+	rendered, err = render("result_directory="+second, "procedure=rework", "review_count=1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -755,7 +755,7 @@ func TestPreserveLiteralResourceInputValues(t *testing.T) {
 		t.Errorf("a rendering reused an earlier call's inputs:\n%s", rendered)
 	}
 
-	if _, err := render("result_directory=" + second); err == nil || !strings.Contains(err.Error(), "procedure") {
+	if _, err := render("result_directory="+second, "review_count=1"); err == nil || !strings.Contains(err.Error(), "procedure") {
 		t.Fatalf("omitted required input was reused instead of rejected: %v", err)
 	}
 }
@@ -819,8 +819,8 @@ func TestDeferredResourceCommandsFromParentInstructions(t *testing.T) {
 			if !strings.Contains(command, "--input result_directory=") || !strings.Contains(command, "result_directory="+skilldist.ShellQuote(facts.ResultDirectory)) {
 				t.Errorf("parent command does not bind the private directory: %s", command)
 			}
-			if testCase.procedure != "" && !strings.Contains(command, "--input procedure="+testCase.procedure) {
-				t.Errorf("parent command does not bind procedure %q: %s", testCase.procedure, command)
+			if testCase.procedure != "" && !strings.Contains(command, "--input procedure="+testCase.procedure+" --input review_count="+strconv.FormatUint(facts.ReviewCount, 10)) {
+				t.Errorf("parent command does not bind procedure %q and the completed reviews: %s", testCase.procedure, command)
 			}
 			if !strings.Contains(packet.Instructions, "`"+facts.PauseCommand+"`") {
 				t.Errorf("packet lost the engine-bound human-decision path %q", facts.PauseCommand)
@@ -830,6 +830,8 @@ func TestDeferredResourceCommandsFromParentInstructions(t *testing.T) {
 					"result_directory=" + skilldist.ShellQuote(facts.ResultDirectory),
 					"--input round=" + strconv.FormatUint(facts.ReviewNumber, 10),
 					"reviewed_head=" + skilldist.ShellQuote(facts.RequiredHead),
+					// A second completed review that asks for rework pauses instead.
+					"--input rework_pauses=" + strconv.FormatBool(facts.ReviewNumber >= 2),
 				} {
 					if !strings.Contains(command, want) {
 						t.Errorf("parent command does not bind %q: %s", want, command)
@@ -1026,19 +1028,21 @@ func TestDescribeNamedResourceInputs(t *testing.T) {
 	}{
 		{
 			owner: "implement", resource: "ledger-submission.md",
-			inputs: []string{"result_directory=/tmp/result", "procedure=initial"},
+			inputs: []string{"result_directory=/tmp/result", "procedure=initial", "review_count=0"},
 			described: []string{
 				"result_directory (string, required): Absolute path of the private Result Document directory this invocation created.",
 				"procedure (string, required, one of: initial, resumed, rework): Which submission procedure to render.",
+				"review_count (integer, required): Completed Work Item reviews before this submission.",
 			},
 		},
 		{
 			owner: "watchdog", resource: "ledger-review.md",
-			inputs: []string{"result_directory=/tmp/result", "round=2", "reviewed_head=" + strings.Repeat("a", 40)},
+			inputs: []string{"result_directory=/tmp/result", "round=2", "reviewed_head=" + strings.Repeat("a", 40), "rework_pauses=true"},
 			described: []string{
 				"result_directory (string, required): Absolute path of the private Result Document directory this invocation created.",
 				"round (integer, required): Next completed Work Item review round.",
 				"reviewed_head (string, required): Fixed reviewed source commit.",
+				"rework_pauses (boolean, required): Whether a rework verdict in this review pauses the Work Item for a human decision.",
 			},
 		},
 		{
