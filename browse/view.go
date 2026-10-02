@@ -438,7 +438,7 @@ func lead(marks bool) int {
 // left out.
 func (r row) render(widths []int, tiers [][]int, marks, selected bool, width int) []string {
 	if r.columns == nil {
-		return []string{truncate("  "+r.heading, width)}
+		return wrapLines([]string{"  " + r.heading}, width)
 	}
 	var lines []string
 	for number, tier := range tiers {

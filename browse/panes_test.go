@@ -276,6 +276,26 @@ func TestFortyColumnSliceListsKeepEveryLifecycleAndClaim(t *testing.T) {
 	}
 }
 
+func TestNarrowResultHeadingsKeepTheWholeLifecycleLabel(t *testing.T) {
+	s := start(t, "gadgets", spectrum(t))
+	size := tea.WindowSizeMsg{Width: 40, Height: 40}
+	s.send(size)
+	s.press("/", "c-impl", "enter", "w", "g")
+	s.within(size)
+	var content []string
+	for _, line := range strings.Split(s.model.View(), "\n") {
+		if strings.HasPrefix(line, "│") {
+			content = append(content, strings.Trim(line, "│ "))
+		}
+	}
+	// A heading may wrap, but its Project and complete lifecycle label
+	// remain readable in order before the Slice rows.
+	text := strings.Join(strings.Fields(strings.Join(content, " ")), " ")
+	if !strings.Contains(text, "gadgets · ○ Ready for Implementation") {
+		t.Fatalf("result heading loses its lifecycle label:\n%s", s.model.View())
+	}
+}
+
 func TestNarrowListShortensNamesToKeepLifecycleAndClaim(t *testing.T) {
 	s := startSpectrum(t, 60)
 	s.within(tea.WindowSizeMsg{Width: 60, Height: 40})
