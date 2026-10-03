@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/vicrdguez/skills/ledger"
 )
@@ -35,11 +37,23 @@ func (m Model) View() string {
 	default:
 		body = m.listBody(height)
 	}
-	return strings.Join([]string{header, clip(body, height), footer}, "\n")
+	frame := []string{header, footer}
+	if height > 0 {
+		frame = []string{header, clip(body, height), footer}
+	}
+	// Notices taller than the terminal would overflow it, and the renderer
+	// would drop the header with the top lines, so the bottom gives way.
+	return clip(strings.Join(frame, "\n"), m.height)
 }
 
+// bodyHeight leaves the body at least one line, or none while every binding
+// is listed, so that the list fits a small terminal.
 func (m Model) bodyHeight(header, footer string) int {
-	return max(m.height-lipgloss.Height(header)-lipgloss.Height(footer), 3)
+	least := 1
+	if m.help.ShowAll {
+		least = 0
+	}
+	return max(m.height-lipgloss.Height(header)-lipgloss.Height(footer), least)
 }
 
 // layoutDetail fits both viewports to the current terminal and marks the
@@ -94,9 +108,11 @@ func (m *Model) layoutDetail() {
 	}
 }
 
+// header is one line: the breadcrumb on the left and the ledger revision on
+// the right, preceded by the indicators this view needs.
 func (m Model) header() string {
 	context := m.screen
-	if isDocumentOverlay(m.screen) || (m.screen == diagnosticsScreen && m.diagnosticReturn == documentsScreen) {
+	if m.inDocuments() {
 		context = m.docContext
 	}
 	var path []string
@@ -144,37 +160,48 @@ func (m Model) header() string {
 			path = append(path, "documents", "diagnostics")
 		}
 	}
-	archived := "archived hidden"
+	// Each indicator has a full form and shorter ones. A narrow terminal
+	// first gives up the breadcrumb, then uses the shorter forms, so every
+	// indicator stays in view. The footer already says when a newer document
+	// is available.
+	var indicators []indicator
+	scrolled := func(view viewport.Model) {
+		if view.TotalLineCount() > view.Height {
+			percent := fmt.Sprintf("%d%%", int(view.ScrollPercent()*100))
+			indicators = append(indicators, indicator{mutedStyle, []string{"scrolled " + percent, percent}})
+		}
+	}
+	document := m.screen == documentScreen && m.currentDocument != nil
+	switch {
+	case m.screen == sliceScreen || m.screen == diagnosticsScreen:
+		scrolled(m.detail)
+	case document:
+		scrolled(m.docViewport)
+	}
 	if m.includeArchived {
-		archived = "archived shown"
+		indicators = append(indicators, indicator{mutedStyle, []string{"archived shown", "archived"}})
 	}
-	revision := m.snapshot.Revision
-	if len(revision) > 12 {
-		revision = revision[:12]
+	if document {
+		identity := indicator{mutedStyle, []string{"current document", "current"}}
+		if commit := m.currentDocument.Reference.Commit; commit != m.snapshot.Revision {
+			identity.forms = append(refForms("HISTORICAL ", commit), "HIST "+short(commit, 7))
+		}
+		indicators = append(indicators, identity)
 	}
-	facts := "current committed ledger " + revision + " · " + archived
+	revision := indicator{mutedStyle, refForms("", m.snapshot.Revision)}
 	if m.refreshFailure != nil {
-		facts = "NOT REFRESHED · last committed ledger " + revision + " · " + archived
+		revision = indicator{warningStyle.Bold(true), refForms("NOT REFRESHED ", m.snapshot.Revision)}
 	}
-	if (m.screen == sliceScreen || m.screen == diagnosticsScreen) && m.detail.TotalLineCount() > m.detail.Height {
-		facts += fmt.Sprintf(" · scrolled %d%%", int(m.detail.ScrollPercent()*100))
+	indicators = append(indicators, revision)
+	right := fitIndicators(indicators, m.width)
+	// The breadcrumb stays at least minGap spaces clear of the indicators.
+	const minGap = 2
+	left := ""
+	if room := m.width - lipgloss.Width(right) - minGap; room > 0 {
+		left = titleStyle.Render(keepEnd("skl browse › "+strings.Join(path, " › "), room))
 	}
-	if m.screen == documentScreen && m.currentDocument != nil {
-		identity := "current document"
-		if m.currentDocument.Reference.Commit != m.snapshot.Revision {
-			identity = "HISTORICAL document"
-		}
-		facts += " · " + identity
-		if m.docViewport.TotalLineCount() > m.docViewport.Height {
-			facts += fmt.Sprintf(" · scrolled %d%%", int(m.docViewport.ScrollPercent()*100))
-		}
-		if m.newerDocument {
-			facts += " · newer document available"
-		}
-		facts += " · ref " + m.currentDocument.Reference.Commit[:min(len(m.currentDocument.Reference.Commit), 12)]
-	}
-	return truncate(titleStyle.Render("skl browse › "+strings.Join(path, " › ")), m.width) + "\n" +
-		truncate(mutedStyle.Render(facts), m.width)
+	padding := strings.Repeat(" ", max(m.width-lipgloss.Width(left)-lipgloss.Width(right), 0))
+	return truncate(left+padding+right, m.width)
 }
 
 func (m Model) footer() string {
@@ -194,10 +221,58 @@ func (m Model) footer() string {
 	if m.screen == documentScreen && m.renderProblem != "" {
 		lines = append(lines, wrap(warningStyle.Render("! "+m.renderProblem+"; showing recorded text"), m.width))
 	}
-	if m.typing != nil {
+	switch {
+	case m.typing != nil:
 		lines = append(lines, wrap(titleStyle.Render("Search names: ")+*m.typing+"█  (enter apply · esc cancel)", m.width))
+		// Typing takes every other key as text, `?` included.
+		apply, cancel := m.keys.Enter, m.keys.Back
+		apply.SetHelp("enter", "apply")
+		cancel.SetHelp("esc", "cancel")
+		lines = append(lines, truncate(m.help.ShortHelpView([]key.Binding{apply, cancel}), m.width))
+	case m.help.ShowAll:
+		// The header and the notices above stay in view; the key list takes
+		// the lines left and says when some bindings do not fit.
+		keys := m.allKeys()
+		room := m.height - 1
+		if len(lines) > 0 {
+			room -= lipgloss.Height(strings.Join(lines, "\n"))
+		}
+		if len(keys) > room {
+			keys = append(keys[:max(room-1, 0)], truncate(mutedStyle.Render("… more keys fit a larger terminal"), m.width))
+		}
+		lines = append(lines, keys...)
+	default:
+		lines = append(lines, m.keyHelp(m.footerKeys()))
 	}
-	return strings.Join(append(lines, truncate(m.help.View(m.helpKeys()), m.width)), "\n")
+	return strings.Join(lines, "\n")
+}
+
+// keyHelp lists as many of bindings as fit the width, always followed by
+// help.
+func (m Model) keyHelp(bindings []key.Binding) string {
+	for count := len(bindings); count > 0; count-- {
+		// The capped slice makes append copy rather than overwrite bindings.
+		line := m.help.ShortHelpView(append(bindings[:count:count], m.keys.Help))
+		if lipgloss.Width(line) <= m.width {
+			return line
+		}
+	}
+	return truncate(m.help.ShortHelpView([]key.Binding{m.keys.Help}), m.width)
+}
+
+// allKeys lays out every binding, wrapping between bindings so that none is
+// cut at the width.
+func (m Model) allKeys() []string {
+	var lines []string
+	var line []key.Binding
+	for _, binding := range m.keys.all() {
+		if len(line) > 0 && lipgloss.Width(m.help.ShortHelpView(append(line, binding))) > m.width {
+			lines = append(lines, truncate(m.help.ShortHelpView(line), m.width))
+			line = nil
+		}
+		line = append(line, binding)
+	}
+	return append(lines, truncate(m.help.ShortHelpView(line), m.width))
 }
 
 // listBody renders the current list screen: its parent context above a list
@@ -832,6 +907,67 @@ func wrap(text string, width int) string {
 
 func truncate(text string, width int) string {
 	return lipgloss.NewStyle().MaxWidth(max(width, 1)).Render(text)
+}
+
+// indicator is one header indicator: its forms run from full to shortest.
+type indicator struct {
+	style lipgloss.Style
+	forms []string
+}
+
+// fitIndicators renders indicators in the longest forms that fit width. Only
+// when even the shortest forms do not fit are the first, least important
+// indicators left out.
+func fitIndicators(indicators []indicator, width int) string {
+	wide, tight := mutedStyle.Render(" · "), mutedStyle.Render("·")
+	render := func(indicators []indicator, level int) string {
+		separator := wide
+		if level > 0 {
+			separator = tight
+		}
+		var parts []string
+		for _, indicator := range indicators {
+			parts = append(parts, indicator.style.Render(indicator.forms[min(level, len(indicator.forms)-1)]))
+		}
+		return strings.Join(parts, separator)
+	}
+	shortest := 0
+	for _, indicator := range indicators {
+		shortest = max(shortest, len(indicator.forms)-1)
+	}
+	for level := 0; level <= shortest; level++ {
+		if line := render(indicators, level); lipgloss.Width(line) <= width {
+			return line
+		}
+	}
+	for len(indicators) > 1 && lipgloss.Width(render(indicators, shortest)) > width {
+		indicators = indicators[1:]
+	}
+	return render(indicators, shortest)
+}
+
+// refForms names commit after prefix with a 12- and then a 7-character
+// reference.
+func refForms(prefix, commit string) []string {
+	return []string{prefix + short(commit, 12), prefix + short(commit, 7)}
+}
+
+// short cuts a commit to at most length characters.
+func short(commit string, length int) string {
+	return commit[:min(len(commit), length)]
+}
+
+// keepEnd fits unstyled text to width by cutting its start, so a long
+// breadcrumb keeps the current place.
+func keepEnd(text string, width int) string {
+	if lipgloss.Width(text) <= width {
+		return text
+	}
+	runes := []rune(text)
+	for len(runes) > 0 && lipgloss.Width("…"+string(runes)) > width {
+		runes = runes[1:]
+	}
+	return "…" + string(runes)
 }
 
 func clip(text string, height int) string {

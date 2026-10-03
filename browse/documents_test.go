@@ -4,6 +4,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -48,6 +49,11 @@ func TestDocumentReferencesKeepMetadataInWideAndStackedPanes(t *testing.T) {
 		s.row("╭─ Available documents (5)")
 		s.row("╭─ Document")
 		s.row("╰", "1/7", "╯")
+		s.footerLists("? help")
+		revision := gitOutput(t, s.root, "rev-parse", "HEAD")[:12]
+		if header := s.header(); !strings.HasSuffix(header, " "+revision) || strings.Contains(header, "archived") {
+			t.Fatalf("document-list header %q, want current ledger %s and no archive marker", header, revision)
+		}
 
 		s.press("down", "down", "enter", "r")
 		s.within(size)
@@ -55,6 +61,7 @@ func TestDocumentReferencesKeepMetadataInWideAndStackedPanes(t *testing.T) {
 		s.row("╭─ References (4)")
 		s.row("╭─ Reference")
 		s.row("╰", "1/4", "╯")
+		s.footerLists("? help")
 		s.press("enter")
 		s.shows("HISTORICAL")
 		s.press("esc")
