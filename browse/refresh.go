@@ -113,9 +113,9 @@ func (m *Model) publish(snapshot *ledger.Snapshot) {
 	if overlay && staged.failure == nil {
 		var err error
 		if m.docContext == sliceScreen {
-			staged.documents, err = snapshot.SliceDocumentsAt(m.project, m.item, m.archived)
+			staged.documents, err = snapshot.SliceDocumentListAt(m.project, m.item, m.archived)
 		} else {
-			staged.documents, err = snapshot.ProposalDocumentsAt(m.project, m.proposal, m.archived)
+			staged.documents, err = snapshot.ProposalDocumentListAt(m.project, m.proposal, m.archived)
 		}
 		if err != nil && !missingRecord(err) {
 			m.refreshFailure = err
@@ -181,26 +181,30 @@ func (m *Model) refreshCurrentReferences() {
 	m.cursor[referencesScreen] = 0
 }
 
+// documentHasNewerVersion compares the open document's text with the
+// current committed text of the same document, read at its listed location.
 func (m Model) documentHasNewerVersion() bool {
 	if m.currentDocument == nil {
 		return false
 	}
-	for _, current := range m.rowsForDocumentList() {
-		if current.Project == m.currentDocument.Project && current.Proposal == m.currentDocument.Proposal &&
-			current.Slice == m.currentDocument.Slice && current.Kind == m.currentDocument.Kind &&
-			strings.HasSuffix(current.Reference.Path, "/"+documentName(m.currentDocument.Reference.Path)) {
-			// Moving a record into the archive without changing its bytes is
-			// not a newer document version.
-			return current.Contents != m.currentDocument.Contents
+	// Exact referenced documents (notably state.json) need not occur in the
+	// current document list; their current committed path is the same one.
+	current := ledger.Reference{Commit: m.snapshot.Revision, Path: m.currentDocument.Reference.Path}
+	for _, entry := range m.rowsForDocumentList() {
+		if entry.Project == m.currentDocument.Project && entry.Proposal == m.currentDocument.Proposal &&
+			entry.Slice == m.currentDocument.Slice && entry.Kind == m.currentDocument.Kind &&
+			documentName(entry.Reference.Path) == documentName(m.currentDocument.Reference.Path) {
+			// An archive move lists the same document at another path; it is
+			// newer only if its bytes changed.
+			current = entry.Reference
+			break
 		}
 	}
-	// Exact referenced documents (notably state.json) need not occur in
-	// the current document list. Read their current committed path directly.
-	if m.currentDocument.Reference.Commit == m.snapshot.Revision {
+	if current == m.currentDocument.Reference {
 		return false
 	}
-	current, err := m.snapshot.Document(ledger.Reference{Commit: m.snapshot.Revision, Path: m.currentDocument.Reference.Path})
-	return err == nil && current.Contents != m.currentDocument.Contents
+	document, err := m.snapshot.Document(current)
+	return err == nil && document.Contents != m.currentDocument.Contents
 }
 
 func documentName(path string) string {
