@@ -18,7 +18,7 @@ func TestUnrelatedCommitDoesNotClaimAReportHasAChangedVersion(t *testing.T) {
 	s.shows("HISTORICAL document", "The recorded implementation evidence is readable")
 	s.hides("Newer document available")
 	s.press("esc", "esc")
-	s.shows("Blocks: orders/refund", "Merged")
+	s.shows("Blocks      orders/refund", "Merged")
 }
 
 func TestOpenedDocumentSurvivesRemovalWithoutPresentingOldDocumentsAsCurrent(t *testing.T) {

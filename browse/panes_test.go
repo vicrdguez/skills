@@ -85,11 +85,11 @@ func TestListAndPreviewPanesSitSideBySideWhenWideAndStackWhenNarrow(t *testing.T
 		if (size.Width >= 100 && !beside) || (size.Width < 100 && !below) {
 			t.Fatalf("%dx%d: list pane from line %d to %d, preview pane from line %d:\n%s", size.Width, size.Height, list, bottom, preview, s.model.View())
 		}
-		s.row("│", "Slice: orders/broken")
+		s.row("│", "Slice  orders/broken")
 
 		s.press("down")
 		s.row("╰", "2/3", "╯")
-		s.row("│", "Slice: orders/cancel", "│")
+		s.row("│", "Slice  orders/cancel", "│")
 	}
 }
 
@@ -345,7 +345,8 @@ func TestUnreadableSliceStaysMarkedUnknownBesideSelectableHealthyOnes(t *testing
 	s.press(downs(6)...)
 	s.row("> ", "g-merged", "✓ Merged")
 	s.press("enter")
-	s.shows("Slice: spectrum/g-merged", "Title: Merged work", "Lifecycle: Merged")
+	s.shows("Slice  spectrum/g-merged", "Title  Merged work")
+	s.fact("Lifecycle", "Merged")
 }
 
 // sgr matches the Select Graphic Rendition sequence that ends a prefix.
