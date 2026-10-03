@@ -15,6 +15,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/vicrdguez/skills/browse"
 	"github.com/vicrdguez/skills/ledger"
 )
@@ -172,9 +173,14 @@ func (s *session) send(msg tea.Msg) {
 	}
 }
 
+// text is the view as the human reads it, without terminal styling.
+func (s *session) text() string {
+	return ansi.Strip(s.model.View())
+}
+
 func (s *session) shows(fragments ...string) {
 	s.t.Helper()
-	view := s.model.View()
+	view := s.text()
 	for _, fragment := range fragments {
 		if !strings.Contains(view, fragment) {
 			s.t.Fatalf("view lacks %q:\n%s", fragment, view)
@@ -182,9 +188,28 @@ func (s *session) shows(fragments ...string) {
 	}
 }
 
-func (s *session) hides(fragments ...string) {
+// row returns the first view line showing every fragment in order, failing
+// when no line does.
+func (s *session) row(fragments ...string) string {
 	s.t.Helper()
 	view := s.model.View()
+	for _, line := range strings.Split(view, "\n") {
+		rest, found := line, true
+		for _, fragment := range fragments {
+			_, after, ok := strings.Cut(rest, fragment)
+			rest, found = after, found && ok
+		}
+		if found {
+			return line
+		}
+	}
+	s.t.Fatalf("no view line shows %q in order:\n%s", fragments, view)
+	return ""
+}
+
+func (s *session) hides(fragments ...string) {
+	s.t.Helper()
+	view := s.text()
 	for _, fragment := range fragments {
 		if strings.Contains(view, fragment) {
 			s.t.Fatalf("view unexpectedly shows %q:\n%s", fragment, view)
@@ -240,14 +265,22 @@ func (s *session) fitsIn(size tea.WindowSizeMsg) {
 func TestBrowserNavigatesProjectsProposalsAndSliceFacts(t *testing.T) {
 	s := start(t, "")
 	s.send(tea.WindowSizeMsg{Width: 120, Height: 40})
-	s.shows("Projects (2)", "> gadgets — acme/gadgets — 1 slice", "! widgets — acme/widgets")
+	s.shows("Projects (2)")
+	s.row("> ", "gadgets", "acme/gadgets", "1 slice")
+	s.row("! widgets", "acme/widgets")
 
 	s.press("down", "enter")
-	s.shows("Project widgets (acme/widgets)", "Proposals (1)", "! orders — 0 of 3 Merged · 1 unknown", "! Incomplete")
+	s.shows("Project widgets (acme/widgets)", "Proposals (1)", "! Incomplete")
+	s.row("! orders", "0 of 3 Merged · 1 unknown")
 	s.hides("legacy")
 
 	s.press("enter")
-	s.shows("Slices (3)", "Order cancellation", "cancel — Awaiting Review · watchdog claim", "refund — Ready for Implementation · unclaimed", "! broken — lifecycle unknown · claim unknown")
+	s.shows("Slices (3)", "Order cancellation")
+	s.row("cancel", "◐ Awaiting Review", "▸ watchdog")
+	s.row("! broken", "! lifecycle unknown", "claim unknown")
+	if refund := s.row("refund", "○ Ready for Implementation"); strings.Contains(refund, "▸") {
+		t.Fatalf("an unclaimed Slice shows a Claim marker: %q", refund)
+	}
 
 	s.press("down", "enter")
 	s.shows("Lifecycle: Awaiting Review", "Claim: watchdog reservation", "a reservation, not a running",
@@ -258,7 +291,8 @@ func TestBrowserNavigatesProjectsProposalsAndSliceFacts(t *testing.T) {
 	s.shows("Lifecycle: unknown", "Claim: unknown", "state.json is unreadable")
 
 	s.press("s")
-	s.shows("Projects (2)", "> ! widgets — acme/widgets — 3 slices · 1 claimed")
+	s.shows("Projects (2)")
+	s.row("> ! widgets", "acme/widgets", "3 slices", "1 claimed")
 	s.press("k", "enter", "enter", "enter")
 	s.shows("Slice: tools/hammer", "Lifecycle: Rework")
 	if len(s.opened) != 0 {
@@ -286,6 +320,10 @@ func TestBrowserHeaderIsOneLineAndMentionsArchivesOnlyWhenShown(t *testing.T) {
 		t.Fatalf("header continues on a second line: %q", lines[1])
 	}
 	s.shows("Proposals (1)")
+	s.row("╭─ Proposals (1)")
+	s.row("╭─ Proposal")
+	s.row("╰", "1/1", "╯")
+	s.footerLists("? help")
 	s.hides("legacy")
 
 	s.press("a")
@@ -293,7 +331,9 @@ func TestBrowserHeaderIsOneLineAndMentionsArchivesOnlyWhenShown(t *testing.T) {
 		!strings.HasSuffix(header, "archived shown · "+revision) {
 		t.Fatalf("header %q, want the breadcrumb, then archived shown and %s", header, revision)
 	}
-	s.shows("legacy [archived] — 1 of 1 Merged · fully delivered")
+	s.row("legacy [archived]", "1 of 1 Merged · fully delivered")
+	s.row("╭─ Proposals (2)")
+	s.row("╰", "1/2", "╯")
 }
 
 func TestBrowserReadsReportsFollowsExactHistoricalReferencesAndPreservesScroll(t *testing.T) {
@@ -771,11 +811,25 @@ func fits(t *testing.T, sequences [][]string) []*session {
 		s.send(size)
 		for _, keys := range sequences {
 			s.press(keys...)
-			s.fitsIn(size)
+			s.within(size)
 		}
 		sessions = append(sessions, s)
 	}
 	return sessions
+}
+
+// within fails when the view overflows a terminal of size.
+func (s *session) within(size tea.WindowSizeMsg) {
+	s.t.Helper()
+	view := s.model.View()
+	if height := lipgloss.Height(view); height > size.Height {
+		s.t.Fatalf("%dx%d view is %d lines tall:\n%s", size.Width, size.Height, height, view)
+	}
+	for _, line := range strings.Split(view, "\n") {
+		if width := lipgloss.Width(line); width > size.Width {
+			s.t.Fatalf("%dx%d view line is %d wide: %q", size.Width, size.Height, width, line)
+		}
+	}
 }
 
 func TestBrowserFitsNarrowAndWideTerminals(t *testing.T) {
@@ -792,16 +846,19 @@ func TestBrowserNavigatesFromClaimFactToSlices(t *testing.T) {
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})
 	s.press("f")
-	s.shows("skl browse › Find slices › Facts", "✓ Any lifecycle (3)", "Awaiting Review (1)", "watchdog claim (1)", "unclaimed (1)",
-		"! Counted only under Any: 1 with unknown lifecycle, 1 with unknown claim")
+	s.shows("skl browse › Find slices › Facts", "! Counted only under Any: 1 with unknown lifecycle, 1 with unknown claim")
+	s.row("*", "Any lifecycle", "(3)")
+	s.row("◐ Awaiting Review", "(1)")
+	s.row("▸ watchdog", "(1)")
+	s.row("unclaimed", "(1)")
 
 	s.press(downs(10)...)
 	s.shows("Finds: any lifecycle · watchdog claim in Project widgets")
 	s.press("enter")
 	s.shows("skl browse › Find slices", "Finding: any lifecycle · watchdog claim in Project widgets",
-		"Proposal orders", "orders/cancel — Awaiting Review · watchdog claim — Cancel orders",
-		"Undecided: unknown facts", "! orders/broken — lifecycle unknown · claim unknown",
-		"! 1 matching slice; 1 undecided by unknown facts; incomplete")
+		"Proposal orders", "Undecided: unknown facts", "! 1 matching slice; 1 undecided by unknown facts; incomplete")
+	s.row("orders/cancel", "◐ Awaiting Review", "▸ watchdog", "Cancel orders")
+	s.row("! orders/broken", "! lifecycle unknown", "claim unknown")
 	s.hides("orders/refund", "tools/hammer")
 
 	s.press("enter")
@@ -823,8 +880,8 @@ func TestBrowserCombinesNameSearchWithFactsScopeAndGrouping(t *testing.T) {
 	s.press("/", "ORDERS", "enter")
 	s.shows(`Finding: any lifecycle · any claim · name contains "ORDERS" in Project widgets`, "3 matching slices", "orders/refund")
 	s.press("f", "down", "enter")
-	s.shows(`Finding: Ready for Implementation · any claim · name contains "ORDERS"`, "orders/refund — Ready for Implementation · unclaimed",
-		"! orders/broken", "1 matching slice; 1 undecided")
+	s.shows(`Finding: Ready for Implementation · any claim · name contains "ORDERS"`, "! orders/broken", "1 matching slice; 1 undecided")
+	s.row("orders/refund", "○ Ready for Implementation")
 	s.hides("orders/cancel")
 
 	s.press("/", "hammer", "enter")
@@ -833,10 +890,11 @@ func TestBrowserCombinesNameSearchWithFactsScopeAndGrouping(t *testing.T) {
 	s.shows("in every Project", "No Slice is known to match")
 	s.hides("tools/hammer")
 	s.press("f", "k", "enter")
-	s.shows("any lifecycle · any claim", "gadgets · Proposal tools", "tools/hammer — Rework · unclaimed — Hammer", "widgets · Undecided")
+	s.shows("any lifecycle · any claim", "gadgets · Proposal tools", "widgets · Undecided")
+	s.row("tools/hammer", "↻ Rework", "Hammer")
 	s.hides("orders/refund")
 	s.press("g")
-	s.shows("grouped by lifecycle", "gadgets · Rework", "widgets · Undecided")
+	s.shows("grouped by lifecycle", "gadgets · ↻ Rework", "widgets · Undecided")
 	s.press("enter")
 	s.shows("skl browse › Find slices › gadgets › tools/hammer", "Lifecycle: Rework")
 }
@@ -850,7 +908,8 @@ func TestBrowserTellsEmptyResultsFromUnknownOnes(t *testing.T) {
 	s.press("w")
 	s.shows("No Slice is known to match; 1 undecided by unknown facts; incomplete", "widgets · Undecided", "orders/broken")
 	s.press("a", "/", "old", "enter")
-	s.shows("archived shown", "legacy/old [archived] — Merged · unclaimed — Old work")
+	s.shows("archived shown")
+	s.row("legacy/old [archived]", "✓ Merged", "Old work")
 }
 
 func TestBrowserFitsFindingScreens(t *testing.T) {
@@ -908,7 +967,8 @@ func TestBrowserOpensTheSelectedArchivedSliceWhenNamesCollide(t *testing.T) {
 	})
 	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})
 	s.press("a", "/", "Archived cancellation", "enter")
-	s.shows("Proposal orders [archived]", "orders/cancel [archived] — Merged")
+	s.shows("Proposal orders [archived]")
+	s.row("orders/cancel [archived]", "✓ Merged")
 	s.press("enter")
 	s.shows("Slice: orders/cancel", "Title: Archived cancellation", "Location: archived proposal", "Lifecycle: Merged")
 	s.press("d", "enter")
@@ -972,7 +1032,8 @@ func TestBrowserFindsFromRelatedSliceAndRestoresBothHistories(t *testing.T) {
 	s.press("esc")
 	s.shows("skl browse › Projects › widgets › orders › cancel", "> Depends on: legacy/old")
 	s.press("esc")
-	s.shows("Slices (3)", "> cancel — Awaiting Review")
+	s.shows("Slices (3)")
+	s.row("> ", "cancel", "◐ Awaiting Review")
 }
 
 func TestBrowserFollowsArchivedRelationshipsFromResultsWhenNamesCollide(t *testing.T) {
@@ -1044,7 +1105,8 @@ func TestBrowserFollowsRelationshipsAndRestoresContext(t *testing.T) {
 	s.shows("Slice: orders/cancel", "> Blocks: orders/refund")
 
 	s.press("esc")
-	s.shows("Slices (3)", "> cancel — Awaiting Review")
+	s.shows("Slices (3)")
+	s.row("> ", "cancel", "◐ Awaiting Review")
 	s.press("esc")
 	s.shows("Proposals (1)")
 	s.hides("archived shown", "legacy")

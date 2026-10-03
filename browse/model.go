@@ -79,6 +79,10 @@ type Options struct {
 	Notice string
 	// Open requests external-browser opening of one URL.
 	Open func(url string) error
+	// DarkBackground selects the dark Markdown style over the light one. The
+	// caller decides it before the program starts; the browser never asks the
+	// terminal.
+	DarkBackground bool
 }
 
 type keyMap struct {
@@ -121,12 +125,13 @@ func newKeyMap() keyMap {
 // Model is one browsing session over a committed ledger Snapshot. Selection
 // and navigation live only in the running session.
 type Model struct {
-	snapshot    *ledger.Snapshot
-	open        func(string) error
-	keys        keyMap
-	help        help.Model
-	detail      viewport.Model
-	docViewport viewport.Model
+	snapshot       *ledger.Snapshot
+	open           func(string) error
+	darkBackground bool
+	keys           keyMap
+	help           help.Model
+	detail         viewport.Model
+	docViewport    viewport.Model
 
 	location
 	// selectedRow is the detail row where the selected relationship starts.
@@ -155,7 +160,7 @@ type Model struct {
 	failure   error
 
 	docContext             screen
-	documents              *ledger.DocumentSet
+	documents              *ledger.DocumentList
 	diagnosticReturn       screen
 	diagnosticOriginDetail viewport.Model
 	currentDocument        *ledger.Document
@@ -223,7 +228,7 @@ type openedMsg struct {
 // New starts a session at the selected Project, or at the overview.
 func New(snapshot *ledger.Snapshot, options Options) Model {
 	model := Model{
-		snapshot: snapshot, open: options.Open, keys: newKeyMap(), help: help.New(),
+		snapshot: snapshot, open: options.Open, darkBackground: options.DarkBackground, keys: newKeyMap(), help: help.New(),
 		detail: viewport.New(80, 10), docViewport: viewport.New(80, 10),
 		location: location{cursor: map[screen]int{}},
 		parent:   map[screen]screen{sliceScreen: proposalScreen},
@@ -509,11 +514,11 @@ func (m Model) results() []result {
 		}
 		for _, group := range project.Groups {
 			for _, match := range group.Slices {
-				results = append(results, result{project.Name, prefix + GroupTitle(group), match})
+				results = append(results, result{project.Name, groupHeading(prefix, group), match})
 			}
 		}
 		for _, match := range project.Undecided {
-			results = append(results, result{project.Name, prefix + UndecidedTitle, match})
+			results = append(results, result{project.Name, titleStyle.Render(prefix + UndecidedTitle), match})
 		}
 	}
 	return results

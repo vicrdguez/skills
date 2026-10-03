@@ -192,7 +192,8 @@ func TestRefreshDoesNotSilentlySelectAnotherResultWhenSelectedSliceDisappears(t 
 	}
 	commitFixture(t, s.root, "remove cancellation")
 	s.press("R")
-	s.shows("Selected widgets/orders/cancel", "no longer available", "orders/refund")
+	s.shows("Selected widgets/orders/cancel", "no longer available", "orders/refund", "-/2")
+	s.hides("> ")
 	s.press("enter")
 	s.shows("no longer available")
 	s.hides("Slice: orders/refund")
