@@ -21,10 +21,11 @@ func TestOverlappingRefreshesCannotPublishAnOlderCommittedRevision(t *testing.T)
 	changeFixture(t, s.root, "projects/widgets/proposals/orders/cancel/state.json", `"state": "awaiting_review"`, `"state": "rework"`)
 	commitFixture(t, s.root, "advance selected slice")
 	s.send(first())
-	s.shows("Lifecycle: Rework")
+	s.fact("Lifecycle", "Rework")
 	s.send(old)
-	s.shows("Lifecycle: Rework", gitOutput(t, s.root, "rev-parse", "HEAD")[:12])
-	s.hides("Lifecycle: Awaiting Review")
+	s.shows(gitOutput(t, s.root, "rev-parse", "HEAD")[:12])
+	s.fact("Lifecycle", "Rework")
+	s.noFact("Lifecycle", "Awaiting Review")
 }
 
 func TestRemovedSliceDocumentReturnsToUnavailableFactsThenHealthyParent(t *testing.T) {
@@ -39,7 +40,8 @@ func TestRemovedSliceDocumentReturnsToUnavailableFactsThenHealthyParent(t *testi
 	s.shows("The recorded implementation evidence is readable")
 	s.press("esc", "esc")
 	s.shows("Unable to show this view", "no Slice")
-	s.hides("Lifecycle: Awaiting Review", "Claim: watchdog")
+	s.noFact("Lifecycle", "Awaiting Review")
+	s.noFact("Claim", "watchdog")
 	s.press("esc")
 	s.shows("Slices (2)", "refund")
 }
@@ -87,7 +89,8 @@ func TestDocumentDiagnosticsStayDiagnosticsWhenFactsAdvance(t *testing.T) {
 	commitFixture(t, s.root, "change another slice")
 	s.press("R")
 	s.shows("watchdog report metadata", "diagnostics")
-	s.hides("Slice: orders/cancel", "Claim: watchdog reservation")
+	s.hides("Slice  orders/cancel")
+	s.noFact("Claim", "watchdog reservation")
 }
 
 func TestCurrentClaimReferencesStayCurrentWhenLeavingExactDocument(t *testing.T) {
@@ -120,11 +123,12 @@ func TestDocumentReturnKeepsMissingFilteredSliceIdentity(t *testing.T) {
 	changeFixture(t, s.root, "projects/widgets/proposals/orders/cancel/state.json", `"state": "awaiting_review"`, `"state": "rework"`)
 	commitFixture(t, s.root, "selected slice leaves filtered results")
 	s.press("R", "R", "esc", "esc")
-	s.shows("Slice: orders/cancel", "Lifecycle: Rework")
+	s.shows("Slice  orders/cancel")
+	s.fact("Lifecycle", "Rework")
 	s.press("esc")
 	s.shows("Finding: Awaiting Review", "no longer available")
 	s.press("enter")
-	s.hides("Slice: orders/broken")
+	s.hides("Slice  orders/broken")
 }
 
 func TestSearchAcceptsCapitalRefreshKeyAsText(t *testing.T) {

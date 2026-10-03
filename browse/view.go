@@ -28,7 +28,13 @@ func (m Model) View() string {
 	switch {
 	case m.failure != nil:
 		body = wrap(warningStyle.Render("! Unable to show this view: "+m.failure.Error()), m.width)
-	case m.screen == sliceScreen || m.screen == diagnosticsScreen:
+	case m.screen == sliceScreen:
+		note := ""
+		if m.detail.TotalLineCount() > m.detail.Height {
+			note = fmt.Sprintf("scrolled %d%%", int(m.detail.ScrollPercent()*100))
+		}
+		body = pane("Slice", note, strings.Split(m.detail.View(), "\n"), m.width, height)
+	case m.screen == diagnosticsScreen:
 		body = m.detail.View()
 	case m.screen == documentScreen:
 		body = m.docViewport.View()
@@ -60,26 +66,17 @@ func (m *Model) layoutDetail() {
 		m.detail.SetContent(wrap(strings.Join(lines, "\n"), m.width))
 		m.detail.SetYOffset(offset)
 	case sliceScreen:
+		// The detail sits in a pane whose border carries its scroll position.
+		m.detail.Width, m.detail.Height = max(m.width-paneFrame, 1), max(height-2, 1)
 		if m.slice != nil {
 			offset := m.detail.YOffset
-			lines, relations := sliceLines(m.slice)
-			m.relation = min(m.relation, max(len(relations)-1, 0))
-			for index, relation := range relations {
-				if index == m.relation {
-					lines[relation.line] = relationStyle.Render("> " + lines[relation.line])
-				} else {
-					lines[relation.line] = "  " + lines[relation.line]
-				}
-			}
-			var rows []string
+			m.relation = min(m.relation, max(len(sliceRelations(m.slice))-1, 0))
+			lines, starts := renderSliceFacts(sliceSections(m.slice, m.sliceReports), m.detail.Width, m.relation)
 			m.selectedRow = 0
-			for index, line := range lines {
-				if len(relations) > 0 && index == relations[m.relation].line {
-					m.selectedRow = len(rows)
-				}
-				rows = append(rows, strings.Split(wrap(line, m.width), "\n")...)
+			if len(starts) > 0 {
+				m.selectedRow = starts[m.relation]
 			}
-			m.detail.SetContent(strings.Join(rows, "\n"))
+			m.detail.SetContent(strings.Join(lines, "\n"))
 			m.detail.SetYOffset(offset)
 		}
 	}
@@ -156,7 +153,7 @@ func (m Model) header() string {
 	if m.refreshFailure != nil {
 		facts = "NOT REFRESHED · last committed ledger " + revision + " · " + archived
 	}
-	if (m.screen == sliceScreen || m.screen == diagnosticsScreen) && m.detail.TotalLineCount() > m.detail.Height {
+	if m.screen == diagnosticsScreen && m.detail.TotalLineCount() > m.detail.Height {
 		facts += fmt.Sprintf(" · scrolled %d%%", int(m.detail.ScrollPercent()*100))
 	}
 	if m.screen == documentScreen && m.currentDocument != nil {
@@ -216,13 +213,20 @@ func (m Model) listBody(height int) string {
 	if len(preview) == 0 {
 		preview = []string{"No entry is selected."}
 	}
+	previewLines := func(width int) []string {
+		if content.facts != nil {
+			lines, _ := renderSliceFacts(content.facts, width, -1)
+			return lines
+		}
+		return wrapLines(preview, width)
+	}
 	if width >= wideLayout {
 		// The list widens beyond half the terminal, up to three fifths, to
 		// fit its rows; the preview wraps into the rest.
 		listWidth := min(max(content.width()+paneFrame, width/2), width*3/5)
 		return top + lipgloss.JoinHorizontal(lipgloss.Top,
 			pane(content.title, position, content.lines(listWidth-paneFrame, available-2), listWidth, available),
-			pane(content.previewTitle, "", wrapLines(preview, width-listWidth-paneFrame), width-listWidth, available))
+			pane(content.previewTitle, "", previewLines(width-listWidth-paneFrame), width-listWidth, available))
 	}
 	// Stacked, the list takes up to half the height and the preview the
 	// rest; a preview too short for its border gives way to the list.
@@ -232,7 +236,7 @@ func (m Model) listBody(height int) string {
 		return top + pane(content.title, position, content.lines(width-paneFrame, available-2), width, available)
 	}
 	return top + pane(content.title, position, content.lines(width-paneFrame, listHeight-2), width, listHeight) + "\n" +
-		pane(content.previewTitle, "", wrapLines(preview, width-paneFrame), width, available-listHeight)
+		pane(content.previewTitle, "", previewLines(width-paneFrame), width, available-listHeight)
 }
 
 // position is the selected entry's place among the current list's entries.
@@ -293,6 +297,8 @@ type listing struct {
 	empty        string
 	previewTitle string
 	preview      []string
+	// facts, when set, are the selected Slice's facts shown as the preview.
+	facts []factSection
 }
 
 // row is one line of a list pane: an entry's facts in columns, marked when
@@ -687,7 +693,7 @@ func (m Model) listContent() listing {
 			l.rows = append(l.rows, sliceRow(slice.Slice, slice))
 		}
 		if len(l.rows) > 0 {
-			l.preview = append(SliceSummaryLines(m.members.Slices[cursor]), "Press d to read this Proposal's documents.")
+			l.preview, l.facts = m.slicePreview()
 		}
 	case factsScreen:
 		l.context = m.findingContext()
@@ -728,14 +734,25 @@ func (m Model) listContent() listing {
 			l.rows = append(l.rows, sliceRow(name, found.match.SliceSummary, span{text: found.match.Title}))
 		}
 		if len(results) > 0 {
-			chosen := results[cursor]
-			l.preview = append([]string{"Project: " + chosen.project}, SliceSummaryLines(chosen.match.SliceSummary)...)
+			l.preview, l.facts = m.slicePreview()
 		}
 	}
 	if m.selectionMissing != "" {
-		l.cursorRow, l.preview = -1, nil
+		l.cursorRow, l.preview, l.facts = -1, nil, nil
 	}
 	return l
+}
+
+// slicePreview is the preview of the selected Slice: its facts, or why
+// they cannot be shown.
+func (m Model) slicePreview() ([]string, []factSection) {
+	if m.preview.err != nil {
+		return []string{warningStyle.Render("! Unable to show this Slice: " + m.preview.err.Error())}, nil
+	}
+	if m.preview.slice == nil {
+		return nil, nil
+	}
+	return nil, sliceSections(m.preview.slice, m.preview.reports)
 }
 
 // resultDiagnostics lists membership uncertainty separately from the

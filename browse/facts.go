@@ -111,21 +111,6 @@ func SliceSummaryLines(slice ledger.SliceSummary) []string {
 
 // SliceLines are the labeled facts of one Slice detail.
 func SliceLines(slice *ledger.SliceDetail) []string {
-	lines, _ := sliceLines(slice)
-	return lines
-}
-
-// relation is one followable relationship line of a Slice detail: its line
-// index and the recorded Slice it opens.
-type relation struct {
-	line     int
-	item     string
-	archived bool
-}
-
-// sliceLines are SliceLines with the followable relationship lines in order.
-func sliceLines(slice *ledger.SliceDetail) ([]string, []relation) {
-	var relations []relation
 	lines := []string{"Slice: " + slice.Item}
 	if slice.Readable {
 		lines = append(lines, "Title: "+slice.Title)
@@ -152,14 +137,10 @@ func sliceLines(slice *ledger.SliceDetail) ([]string, []relation) {
 			if dependency.Satisfied {
 				satisfaction = "satisfied"
 			}
-			if dependency.Recorded {
-				relations = append(relations, relation{len(lines), dependency.Item, dependency.Archived})
-			}
 			lines = append(lines, "Depends on: "+relationText(dependency.RelatedSlice, satisfaction))
 		}
 	}
 	for _, blocked := range slice.Blocks.Slices {
-		relations = append(relations, relation{len(lines), blocked.Item, blocked.Archived})
 		lines = append(lines, "Blocks: "+relationText(blocked, ""))
 	}
 	switch {
@@ -194,7 +175,7 @@ func sliceLines(slice *ledger.SliceDetail) ([]string, []relation) {
 		}
 	}
 	lines = append(lines, "Parent issue: "+attachmentText(slice.ParentIssue), "Contract documents: "+listText(slice.Documents), "Current reports: "+listText(slice.Reports), "Press d to read Slice documents; r follows the exact Claim state reference.")
-	return append(lines, diagnosticLines(slice.Diagnostics)...), relations
+	return append(lines, diagnosticLines(slice.Diagnostics)...)
 }
 
 // relationText names a related Slice with its recorded state. Qualifier

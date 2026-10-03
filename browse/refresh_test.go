@@ -56,7 +56,7 @@ func TestRefreshKeepsFilteredReportAndReadingPositionWhileFactsAdvance(t *testin
 	s.shows("New implementation evidence is readable")
 	s.hides("newer document available")
 	s.press("esc", "esc")
-	s.shows("Lifecycle: Ready for Merge")
+	s.fact("Lifecycle", "Ready for Merge")
 	s.press("esc")
 	s.shows(`name contains "cancel"`, "watchdog claim", "grouped by lifecycle", "Ready for Merge", "orders/cancel")
 }
@@ -69,7 +69,8 @@ func TestAutomaticRefreshIgnoresUncommittedEditsAndLateOldResults(t *testing.T) 
 	path := "projects/widgets/proposals/orders/cancel/state.json"
 	changeFixture(t, s.root, path, `"state": "awaiting_review"`, `"state": "rework"`)
 	s.press("R")
-	s.shows("Lifecycle: Awaiting Review", initial)
+	s.shows(initial)
+	s.fact("Lifecycle", "Awaiting Review")
 
 	// A first request completes against the old commit but is delivered last.
 	model, oldCmd := s.model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("R")})
@@ -87,9 +88,10 @@ func TestAutomaticRefreshIgnoresUncommittedEditsAndLateOldResults(t *testing.T) 
 		t.Fatal("automatic check did not schedule a refresh and another check")
 	}
 	s.send(batch[1]())
-	s.shows("Lifecycle: Rework", gitOutput(t, s.root, "rev-parse", "HEAD")[:12])
+	s.shows(gitOutput(t, s.root, "rev-parse", "HEAD")[:12])
+	s.fact("Lifecycle", "Rework")
 	s.send(oldResult)
-	s.shows("Lifecycle: Rework")
+	s.fact("Lifecycle", "Rework")
 	s.hides("NOT REFRESHED")
 }
 
@@ -97,19 +99,21 @@ func TestFailedRefreshKeepsLastViewMarkedStaleAndRecovers(t *testing.T) {
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 120, Height: 35})
 	s.press("enter", "down", "enter")
-	s.shows("Lifecycle: Awaiting Review")
+	s.fact("Lifecycle", "Awaiting Review")
 	missing := s.root + "-temporarily-missing"
 	if err := os.Rename(s.root, missing); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Rename(missing, s.root) })
 	s.press("R")
-	s.shows("NOT REFRESHED", "Refresh failed", "Lifecycle: Awaiting Review")
+	s.shows("NOT REFRESHED", "Refresh failed")
+	s.fact("Lifecycle", "Awaiting Review")
 	if err := os.Rename(missing, s.root); err != nil {
 		t.Fatal(err)
 	}
 	s.press("R")
-	s.shows("current committed ledger", "Lifecycle: Awaiting Review")
+	s.shows("current committed ledger")
+	s.fact("Lifecycle", "Awaiting Review")
 	s.hides("NOT REFRESHED", "Refresh failed")
 }
 
@@ -127,7 +131,7 @@ func TestRefreshDoesNotSilentlySelectAnotherResultWhenSelectedSliceDisappears(t 
 	s.hides("> ")
 	s.press("enter")
 	s.shows("no longer available")
-	s.hides("Slice: orders/refund")
+	s.hides("Slice  orders/refund")
 	s.press("down", "enter")
-	s.shows("Slice: orders/refund")
+	s.shows("Slice  orders/refund")
 }

@@ -30,7 +30,7 @@ func TestRefreshUpdatesCurrentClaimReferences(t *testing.T) {
 	s.shows("References (0)")
 	s.hides("current Claim state")
 	s.press("esc")
-	s.shows("Claim: none")
+	s.fact("Claim", "none")
 }
 
 func TestRefreshFailureFitsNarrowTerminal(t *testing.T) {
