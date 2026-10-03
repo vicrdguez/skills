@@ -486,11 +486,11 @@ func (m Model) results() []result {
 		}
 		for _, group := range project.Groups {
 			for _, match := range group.Slices {
-				results = append(results, result{project.Name, prefix + GroupTitle(group), match})
+				results = append(results, result{project.Name, groupHeading(prefix, group), match})
 			}
 		}
 		for _, match := range project.Undecided {
-			results = append(results, result{project.Name, prefix + UndecidedTitle, match})
+			results = append(results, result{project.Name, titleStyle.Render(prefix + UndecidedTitle), match})
 		}
 	}
 	return results

@@ -38,6 +38,31 @@ func TestDocumentsRenderInTheStyleChosenAtStartup(t *testing.T) {
 	}
 }
 
+func TestDocumentReferencesKeepMetadataInWideAndStackedPanes(t *testing.T) {
+	for _, width := range []int{140, 40} {
+		s := start(t, "widgets")
+		size := tea.WindowSizeMsg{Width: width, Height: 60}
+		s.send(size)
+		s.press("enter", "down", "enter", "d")
+		s.within(size)
+		s.row("╭─ Available documents (5)")
+		s.row("╭─ Document")
+		s.row("╰", "1/7", "╯")
+
+		s.press("down", "down", "enter", "r")
+		s.within(size)
+		s.shows("From cancel", "Latest implementation", "Exact ledger reference:")
+		s.row("╭─ References (4)")
+		s.row("╭─ Reference")
+		s.row("╰", "1/4", "╯")
+		s.press("enter")
+		s.shows("HISTORICAL")
+		s.press("esc")
+		s.shows("Implementation report", "The recorded implementation evidence", "readable.")
+		s.within(size)
+	}
+}
+
 func TestDocumentListLoadsOnlyTheDocumentSelectedForReading(t *testing.T) {
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 120, Height: 45})
