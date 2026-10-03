@@ -98,6 +98,22 @@ func TestDocumentListsMatchTheDocumentsQueryAcrossDamagedRecords(t *testing.T) {
 			t.Errorf("unreadable intent.md listed as readable: %+v", entry)
 		}
 	}
+	unreadable := map[string]ledger.DocumentKind{}
+	for _, entry := range list.Unreadable {
+		if entry.Reference.Commit != snapshot.Revision {
+			t.Errorf("unreadable %s is not identified at the listed revision: %+v", entry.Reference.Path, entry)
+		}
+		unreadable[entry.Reference.Path] = entry.Kind
+	}
+	for path, kind := range map[string]ledger.DocumentKind{
+		deliveryContractPath("widgets", "records/lost", "intent.md"):         ledger.ContractDocumentKind,
+		deliveryContractPath("widgets", "records/damaged", "behavior.md"):    ledger.ContractDocumentKind,
+		deliveryReportPath("widgets", "records/lost", ledger.ImplementPhase): ledger.ImplementReportDocumentKind,
+	} {
+		if unreadable[path] != kind {
+			t.Errorf("unreadable %s identified as %q, want %q", path, unreadable[path], kind)
+		}
+	}
 
 	for _, slice := range []string{"readback", "damaged", "lost", "nostate"} {
 		list, err := snapshot.SliceDocumentListAt("widgets", "records/"+slice, false)
@@ -194,7 +210,9 @@ func sameAsDocuments(t *testing.T, list *ledger.DocumentList, set *ledger.Docume
 			Reference: document.Reference, Report: document.Report, Decision: document.Decision, Diagnostics: document.Diagnostics,
 		})
 	}
-	if !reflect.DeepEqual(*list, want) {
+	got := *list
+	got.Unreadable = nil // The documents query reports these only as diagnostics.
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("document list differs from the documents query:\nlist: %+v\nwant: %+v", *list, want)
 	}
 }

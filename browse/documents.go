@@ -2,6 +2,7 @@ package browse
 
 import (
 	"fmt"
+	"maps"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/viewport"
@@ -10,24 +11,74 @@ import (
 	"github.com/vicrdguez/skills/ledger"
 )
 
-type documentFrame struct {
-	document          ledger.Document
-	hasDocument       bool
-	viewport          viewport.Model
-	screen            screen
-	returnScreen      screen
-	fromVersion       bool
-	versions          *ledger.ReportVersions
-	versionsReturn    screen
-	versionsCursor    int
-	renderProblem     string
-	openedContext     string
-	openedRevision    string
-	references        []ledger.LabeledReference
-	referenceOrigin   screen
-	referencesFromDoc bool
-	referenceCursor   int
-	referenceHistory  []referenceFrame
+// reader is the documents screen of one Proposal or Slice: a navigator of its
+// documents, with each report's earlier Report Versions nested under it,
+// beside the displayed document. It lives only in the running session.
+type reader struct {
+	active bool
+	list   *ledger.DocumentList
+	// versions holds the Report Versions of each loaded report group, keyed
+	// by group; a group without a key has not been loaded.
+	versions  map[string]versionLoad
+	collapsed map[string]bool
+	// unreadable marks the entries whose document could not be read when
+	// selected.
+	unreadable map[string]bool
+	entries    []entry
+	// documentFocus moves the keys from the navigator to the document.
+	documentFocus bool
+	shown         shown
+	// trail is the path back through followed references, most recent last.
+	trail []trailFrame
+}
+
+type versionLoad struct {
+	versions *ledger.ReportVersions
+	problem  string
+}
+
+// entry is one selectable navigator line: a document, a Report Version, or
+// a note about one that cannot be shown.
+type entry struct {
+	// heading names the Slice whose entries this one belongs to in a
+	// Proposal's navigator.
+	heading string
+	// id identifies the entry across refreshes.
+	id        string
+	columns   []span
+	marked    bool
+	reference *ledger.Reference
+	// note is shown in place of a document when there is none to read.
+	note []string
+	// group is the report group the entry belongs to.
+	group string
+}
+
+// shown is the displayed document, pinned until another is selected or
+// followed, with its rendering and scroll position.
+type shown struct {
+	document *ledger.Document
+	// title names the entry when no document is displayed, and lines say
+	// why.
+	title    string
+	lines    []string
+	viewport viewport.Model
+	// rendered is the width the content was last rendered at; zero renders
+	// it again.
+	rendered       int
+	renderProblem  string
+	openedContext  string
+	openedRevision string
+	newer          bool
+}
+
+// trailFrame is what a followed reference left: the displayed document and
+// the reference list it was followed from.
+type trailFrame struct {
+	shown      shown
+	references []ledger.LabeledReference
+	origin     screen
+	cursor     int
 }
 
 func (m *Model) openDocuments() {
@@ -36,51 +87,394 @@ func (m *Model) openDocuments() {
 		if m.members == nil {
 			return
 		}
-		m.docContext = proposalScreen
-		m.documents, m.failure = m.snapshot.ProposalDocumentListAt(m.project, m.proposal, m.archived)
 	case sliceScreen:
 		if m.slice == nil {
 			return
 		}
-		m.docContext = sliceScreen
-		m.documents, m.failure = m.snapshot.SliceDocumentListAt(m.project, m.item, m.archived)
 	default:
 		m.status = "Open documents from a Proposal or Slice"
 		return
 	}
-	m.screen = documentsScreen
-	m.documentHistory = nil
-	m.currentDocument = nil
-	m.references = nil
-	m.referenceHistory = nil
-	m.cursor[documentsScreen] = 0
+	m.startReader(m.screen)
+	m.screen = readerScreen
+	if m.failure == nil {
+		m.selectEntry()
+	}
+	m.layoutDetail()
+}
+
+// startReader lists the documents of the current Proposal or Slice, opened
+// from origin, with the cursor on the first.
+func (m *Model) startReader(origin screen) {
+	m.docContext = origin
+	m.reader = reader{active: true}
+	m.cursor[readerScreen] = 0
+	m.status = ""
+	m.reader, m.failure = m.readDocuments(m.snapshot)
+}
+
+// readDocuments lists the reader's documents at snapshot. It loads the
+// Report Versions of a Slice's reports, and of every report group of a
+// Proposal already expanded.
+func (m Model) readDocuments(snapshot *ledger.Snapshot) (reader, error) {
+	r := m.reader
+	var err error
+	if m.docContext == sliceScreen {
+		r.list, err = snapshot.SliceDocumentListAt(m.project, m.item, m.archived)
+	} else {
+		r.list, err = snapshot.ProposalDocumentListAt(m.project, m.proposal, m.archived)
+	}
+	if err != nil {
+		r.list, r.entries = nil, nil
+		return r, err
+	}
+	loaded := r.versions
+	r.versions = map[string]versionLoad{}
+	for _, availability := range r.list.Availability {
+		key, ok := groupKey(availability.Slice, availability.Kind)
+		if _, expanded := loaded[key]; ok && (expanded || r.list.Slice != "") {
+			r.versions[key] = loadVersions(snapshot, r.list, availability.Slice, phaseOf(availability.Kind))
+		}
+	}
+	r.entries = r.build()
+	return r, nil
+}
+
+func loadVersions(snapshot *ledger.Snapshot, list *ledger.DocumentList, slice, phase string) versionLoad {
+	versions, err := snapshot.VersionsAt(list.Project, list.Proposal+"/"+slice, phase, list.Archived)
+	if err != nil {
+		return versionLoad{problem: "Cannot discover report versions: " + err.Error()}
+	}
+	return versionLoad{versions: versions}
+}
+
+// groupKey identifies the report group of a phase report kind.
+func groupKey(slice string, kind ledger.DocumentKind) (string, bool) {
+	if kind != ledger.ImplementReportDocumentKind && kind != ledger.WatchdogReportDocumentKind {
+		return "", false
+	}
+	return slice + "/" + phaseOf(kind), true
+}
+
+func phaseOf(kind ledger.DocumentKind) string {
+	if kind == ledger.WatchdogReportDocumentKind {
+		return ledger.WatchdogPhase
+	}
+	return ledger.ImplementPhase
+}
+
+// build lists the navigator's entries: a Slice's documents, or a Proposal's
+// description followed by each Slice's documents under its name.
+func (r reader) build() []entry {
+	if r.list == nil {
+		return nil
+	}
+	if r.list.Slice != "" {
+		return r.sliceEntries(r.list.Slice, "")
+	}
+	var entries []entry
+	for _, document := range r.list.Documents {
+		if document.Slice == "" {
+			entries = append(entries, documentEntry(document, ""))
+		}
+	}
+	for _, document := range r.list.Unreadable {
+		if document.Slice == "" {
+			entries = append(entries, unreadableEntry(document, ""))
+		}
+	}
+	seen := map[string]bool{}
+	for _, availability := range r.list.Availability {
+		if !seen[availability.Slice] {
+			seen[availability.Slice] = true
+			entries = append(entries, r.sliceEntries(availability.Slice, "Slice "+availability.Slice)...)
+		}
+	}
+	return entries
+}
+
+// sliceEntries lists one Slice's contract documents, its two report groups,
+// and its Human Decision when one is active or its membership is unknown.
+func (r reader) sliceEntries(slice, heading string) []entry {
+	var entries []entry
+	for _, document := range r.list.Documents {
+		if document.Slice == slice && document.Kind == ledger.ContractDocumentKind {
+			entries = append(entries, documentEntry(document, heading))
+		}
+	}
+	for _, document := range r.list.Unreadable {
+		if document.Slice == slice && document.Kind == ledger.ContractDocumentKind {
+			entries = append(entries, unreadableEntry(document, heading))
+		}
+	}
+	entries = append(entries, r.reportEntries(slice, heading, ledger.ImplementReportDocumentKind)...)
+	entries = append(entries, r.reportEntries(slice, heading, ledger.WatchdogReportDocumentKind)...)
+	decision := entry{heading: heading, id: documentID(slice, "decision.md"), columns: texts("Human Decision")}
+	switch r.availability(slice, ledger.DecisionDocumentKind) {
+	case ledger.DocumentAvailable:
+		for _, document := range r.list.Documents {
+			if document.Slice == slice && document.Kind == ledger.DecisionDocumentKind {
+				entries = append(entries, documentEntry(document, heading))
+			}
+		}
+	case ledger.DocumentUnavailable:
+		decision.marked = true
+		decision.columns = append(decision.columns, span{"recorded but unavailable", warningStyle})
+		decision.note = []string{"The active Human Decision is recorded but cannot be read at this revision. Press d for the diagnostics."}
+		entries = append(entries, decision)
+	case ledger.DocumentUnknown:
+		decision.marked = true
+		decision.columns = append(decision.columns, span{"membership unknown", warningStyle})
+		decision.note = []string{"Whether a Human Decision is active cannot be determined at this revision. Press d for the diagnostics."}
+		entries = append(entries, decision)
+	}
+	return entries
+}
+
+func (r reader) availability(slice string, kind ledger.DocumentKind) ledger.DocumentStatus {
+	for _, availability := range r.list.Availability {
+		if availability.Slice == slice && availability.Kind == kind {
+			return availability.Status
+		}
+	}
+	return ""
+}
+
+// reportEntries lists one report group: the latest report, or why there is
+// none, then its earlier Report Versions, newest first.
+func (r reader) reportEntries(slice, heading string, kind ledger.DocumentKind) []entry {
+	key, _ := groupKey(slice, kind)
+	phase := phaseOf(kind)
+	name := "Implementation report"
+	if phase == ledger.WatchdogPhase {
+		name = "Watchdog report"
+	}
+	header := entry{heading: heading, id: documentID(slice, phase+"-report.md"), group: key, columns: texts(name)}
+	var latest *ledger.DocumentEntry
+	for index, document := range r.list.Documents {
+		if document.Slice == slice && document.Kind == kind {
+			latest = &r.list.Documents[index]
+		}
+	}
+	load, loaded := r.versions[key]
+	var versions []ledger.ReportVersion
+	if load.versions != nil {
+		versions = load.versions.Versions
+	}
+	switch {
+	case latest != nil:
+		header.reference = &latest.Reference
+		header.columns = append(header.columns, reportColumns(latest.Report)...)
+		header.marked = len(latest.Diagnostics) > 0
+	case r.availability(slice, kind) == ledger.DocumentUnavailable:
+		header.marked = true
+		header.columns = append(header.columns, span{"recorded but unavailable", warningStyle})
+		header.note = []string{"The latest " + strings.ToLower(name) + " is recorded but cannot be read at this revision. Press d for the diagnostics."}
+	case loaded && load.problem == "" && len(versions) == 0 && !load.versions.Incomplete:
+		header.columns = append(header.columns, span{"not yet available", mutedStyle})
+		header.note = []string{"No " + strings.ToLower(name) + " has been recorded yet. It is optional until its phase runs."}
+	default:
+		header.columns = append(header.columns, span{"no latest report", mutedStyle})
+		header.note = []string{"There is no latest " + strings.ToLower(name) + " at this revision. Its earlier versions, if any, are listed under it."}
+	}
+	earlier := versions
+	if latest != nil && len(earlier) > 0 {
+		// The newest version is the latest report's content.
+		earlier = earlier[1:]
+	}
+	switch {
+	case !loaded:
+		header.columns = append(header.columns, span{"[v]", mutedStyle})
+	case r.collapsed[key] && len(earlier) > 0:
+		header.columns = append(header.columns, span{fmt.Sprintf("%d earlier [v]", len(earlier)), mutedStyle})
+	}
+	entries := []entry{header}
+	if loaded && !r.collapsed[key] {
+		for _, version := range earlier {
+			commit := version.Reference.Commit
+			reference := version.Reference
+			entries = append(entries, entry{
+				heading: heading, id: header.id + " @" + commit[:min(12, len(commit))], group: key,
+				columns:   append([]span{{text: "  └ " + commit[:min(7, len(commit))]}}, reportColumns(version.Report)...),
+				marked:    len(version.Diagnostics) > 0,
+				reference: &reference,
+			})
+		}
+	}
+	switch {
+	case loaded && load.problem != "":
+		entries = append(entries, entry{heading: heading, id: header.id + " history", group: key, marked: true,
+			columns: []span{{text: "  └ "}, {"versions unavailable", warningStyle}}, note: []string{load.problem}})
+	case loaded && load.versions.Incomplete:
+		note := []string{"Local history is incomplete, so earlier versions may be missing:"}
+		for _, diagnostic := range load.versions.Diagnostics {
+			note = append(note, DiagnosticText(diagnostic))
+		}
+		entries = append(entries, entry{heading: heading, id: header.id + " history", group: key, marked: true,
+			columns: []span{{text: "  └ "}, {"history incomplete", warningStyle}}, note: note})
+	}
+	return entries
+}
+
+// reportColumns label a report by its outcome and round, or mark metadata
+// that cannot be interpreted without inventing either.
+func reportColumns(report *ledger.Report) []span {
+	if report == nil {
+		return []span{{"bad metadata", warningStyle}}
+	}
+	columns := []span{outcomeSpan(report.Outcome)}
+	if report.Round != 0 {
+		columns = append(columns, span{text: fmt.Sprintf("· round %d", report.Round)})
+	}
+	return columns
+}
+
+func documentID(slice, name string) string {
+	if slice == "" {
+		return name
+	}
+	return slice + " " + name
+}
+
+func documentEntry(document ledger.DocumentEntry, heading string) entry {
+	name := documentName(document.Reference.Path)
+	reference := document.Reference
+	result := entry{heading: heading, id: documentID(document.Slice, name), reference: &reference, marked: len(document.Diagnostics) > 0}
+	switch document.Kind {
+	case ledger.ProposalDocumentKind:
+		result.columns = texts("Proposal description")
+	case ledger.DecisionDocumentKind:
+		result.columns = texts("Human Decision")
+		if document.Decision != nil {
+			result.columns = append(result.columns, span{text: "route " + document.Decision.Route})
+		}
+	default:
+		result.columns = texts(name)
+	}
+	if len(document.Diagnostics) > 0 {
+		result.columns = append(result.columns, span{"bad metadata", warningStyle})
+	}
+	return result
+}
+
+func unreadableEntry(document ledger.DocumentEntry, heading string) entry {
+	name := documentName(document.Reference.Path)
+	return entry{
+		heading: heading, id: documentID(document.Slice, name), marked: true,
+		columns: []span{{text: name}, {"unreadable", warningStyle}},
+		note:    []string{name + " is a member of this set but cannot be read at this revision. Press d for the diagnostics."},
+	}
+}
+
+// selectEntry displays the entry at the cursor, reading its document, and
+// leaves any followed references behind.
+func (m *Model) selectEntry() {
+	r := &m.reader
+	r.trail = nil
+	s := shown{openedContext: m.currentContext(), openedRevision: m.snapshot.Revision}
+	if cursor := m.cursor[readerScreen]; cursor < len(r.entries) {
+		selected := r.entries[cursor]
+		s.title, s.lines = selected.heading, selected.note
+		if s.title != "" {
+			s.title += " · "
+		}
+		s.title += selected.columns[0].text
+		if selected.reference != nil {
+			document, err := m.snapshot.Document(*selected.reference)
+			if err != nil {
+				s.lines = []string{warningStyle.Render("! " + unavailableReference(*selected.reference, err))}
+				r.unreadable = maps.Clone(r.unreadable)
+				if r.unreadable == nil {
+					r.unreadable = map[string]bool{}
+				}
+				r.unreadable[selected.id] = true
+			}
+			s.document = document
+		}
+	} else {
+		s.lines = []string{"No document is selected."}
+	}
+	r.shown = s
+	r.shown.newer = m.documentHasNewerVersion(s.document)
 	m.status = ""
 	m.layoutDetail()
 }
 
-func (m *Model) openReferences() {
-	switch m.screen {
-	case documentScreen:
-		if m.currentDocument == nil {
+// moveEntry moves the navigator's cursor and displays the entry it reaches.
+func (m *Model) moveEntry(delta int) {
+	count := len(m.reader.entries)
+	if count == 0 {
+		return
+	}
+	cursor := min(max(m.cursor[readerScreen]+delta, 0), count-1)
+	if cursor == m.cursor[readerScreen] && m.selectionMissing == "" {
+		return
+	}
+	m.cursor[readerScreen] = cursor
+	m.selectionMissing, m.missingIdentity = "", ""
+	m.selectEntry()
+}
+
+// toggleVersions loads and shows the earlier versions of the report group at
+// the cursor, or hides and shows them again once loaded.
+func (m *Model) toggleVersions() {
+	r := &m.reader
+	cursor := m.cursor[readerScreen]
+	if cursor >= len(r.entries) || r.entries[cursor].group == "" {
+		m.status = "Select a report to show or hide its earlier versions"
+		return
+	}
+	selected := r.entries[cursor]
+	slice, phase, _ := strings.Cut(selected.group, "/")
+	if _, loaded := r.versions[selected.group]; !loaded {
+		r.versions = maps.Clone(r.versions)
+		r.versions[selected.group] = loadVersions(m.snapshot, r.list, slice, phase)
+	} else {
+		r.collapsed = maps.Clone(r.collapsed)
+		if r.collapsed == nil {
+			r.collapsed = map[string]bool{}
+		}
+		r.collapsed[selected.group] = !r.collapsed[selected.group]
+	}
+	r.entries = r.build()
+	m.status = ""
+	for index, candidate := range r.entries {
+		if candidate.id == selected.id {
+			m.cursor[readerScreen] = index
 			return
 		}
-		m.referenceHistory = append(m.referenceHistory, m.referenceFrame(documentScreen))
-		m.references = append([]ledger.LabeledReference(nil), m.currentDocument.References...)
-		m.referenceOrigin = documentScreen
-		m.referencesFromDoc = true
+	}
+	// A hidden version leaves the cursor on its report.
+	for index, candidate := range r.entries {
+		if candidate.group == selected.group {
+			m.cursor[readerScreen] = index
+			break
+		}
+	}
+	m.selectEntry()
+}
+
+func (m *Model) openReferences() {
+	switch m.screen {
+	case readerScreen:
+		document := m.reader.shown.document
+		if document == nil {
+			m.status = "The displayed entry has no document whose references to list"
+			return
+		}
+		m.references = append([]ledger.LabeledReference(nil), document.References...)
 	case sliceScreen:
-		m.docContext = sliceScreen
 		if m.slice == nil || m.slice.Claim == nil {
 			m.status = "No recorded Claim reference for this Slice"
 			return
 		}
 		m.references = []ledger.LabeledReference{{Label: "current Claim state", Reference: m.slice.Claim.Reference}}
-		m.referenceOrigin = sliceScreen
-		m.referencesFromDoc = false
+		m.docContext = sliceScreen
 	default:
-		m.status = "Open references from a report, Human Decision, or Slice Claim"
+		m.status = "Open references from a displayed document or a Slice Claim"
 		return
 	}
+	m.referenceOrigin = m.screen
 	m.screen = referencesScreen
 	m.cursor[referencesScreen] = 0
 	m.failure = nil
@@ -88,88 +482,9 @@ func (m *Model) openReferences() {
 	m.layoutDetail()
 }
 
-func (m Model) referenceFrame(returnScreen screen) referenceFrame {
-	return referenceFrame{
-		references: append([]ledger.LabeledReference(nil), m.references...),
-		origin:     m.referenceOrigin, fromDocument: m.referencesFromDoc,
-		cursor: m.cursor[referencesScreen], returnScreen: returnScreen,
-	}
-}
-
-func (m *Model) restoreReferenceFrame(frame referenceFrame) {
-	m.references = append([]ledger.LabeledReference(nil), frame.references...)
-	m.referenceOrigin, m.referencesFromDoc = frame.origin, frame.fromDocument
-	m.cursor[referencesScreen] = frame.cursor
-	m.refreshCurrentReferences()
-}
-
-// openDocument reads the selected listed document; only then is its text
-// loaded.
-func (m *Model) openDocument(entry ledger.DocumentEntry) {
-	document, err := m.snapshot.Document(entry.Reference)
-	if err != nil {
-		m.status = unavailableReference(entry.Reference, err)
-		return
-	}
-	m.currentDocument = document
-	m.openedContext, m.openedRevision = m.currentContext(), m.snapshot.Revision
-	m.newerDocument = false
-	m.documentReturn = documentsScreen
-	m.documentHistory = nil
-	m.referenceHistory = nil
-	m.renderProblem = ""
-	m.screen = documentScreen
-	m.failure = nil
-	m.status = ""
-	m.docViewport = viewport.New(m.width, m.bodyHeight(m.header(), m.footer()))
-	m.layoutDetail()
-	m.docViewport.GotoTop()
-}
-
-func (m *Model) openVersions() {
-	if m.screen != documentScreen || m.currentDocument == nil ||
-		(m.currentDocument.Kind != ledger.ImplementReportDocumentKind && m.currentDocument.Kind != ledger.WatchdogReportDocumentKind) {
-		m.status = "Open a report to browse its versions"
-		return
-	}
-	phase := ledger.ImplementPhase
-	if m.currentDocument.Kind == ledger.WatchdogReportDocumentKind {
-		phase = ledger.WatchdogPhase
-	}
-	// A selected version may predate archival, while a followed report may
-	// belong to another Slice. Keep the selected report's incarnation when
-	// reopening its history, otherwise use the exact document's location.
-	archived := m.currentDocument.Archived
-	if m.documentReturn == versionsScreen && m.versions != nil {
-		archived = m.versions.Archived
-	}
-	m.openVersionsFor(m.currentDocument.Project, m.currentDocument.Proposal+"/"+m.currentDocument.Slice,
-		phase, archived)
-}
-
-func (m *Model) openVersionsFor(project, item, phase string, archived bool) {
-	versions, err := m.snapshot.VersionsAt(project, item, phase, archived)
-	if err != nil {
-		m.status = "Cannot discover report versions: " + err.Error()
-		return
-	}
-	m.versions = versions
-	m.versionsReturn = m.screen
-	m.cursor[versionsScreen] = 0
-	m.screen = versionsScreen
-	m.status = ""
-	m.layoutDetail()
-}
-
-func (m *Model) followVersion(reference ledger.Reference) {
-	m.followReference(reference)
-	if m.screen == documentScreen && len(m.documentHistory) > 0 {
-		m.documentReturn = versionsScreen
-		m.documentHistory[len(m.documentHistory)-1].fromVersion = true
-		m.layoutDetail()
-	}
-}
-
+// followReference displays the exact referenced document in the reader,
+// remembering the reference list and the document it was followed from. A
+// Slice's Claim reference opens that Slice's reader.
 func (m *Model) followReference(reference ledger.Reference) {
 	document, err := m.snapshot.Document(reference)
 	if err != nil {
@@ -177,46 +492,86 @@ func (m *Model) followReference(reference ledger.Reference) {
 		m.status = unavailableReference(reference, err)
 		return
 	}
-	frame := documentFrame{
-		viewport: m.docViewport, screen: m.screen,
-		returnScreen: m.documentReturn, renderProblem: m.renderProblem,
-		versions: m.versions, versionsReturn: m.versionsReturn, versionsCursor: m.cursor[versionsScreen],
-		openedContext: m.openedContext, openedRevision: m.openedRevision,
-		references:      append([]ledger.LabeledReference(nil), m.references...),
-		referenceOrigin: m.referenceOrigin, referencesFromDoc: m.referencesFromDoc,
-		referenceCursor:  m.cursor[referencesScreen],
-		referenceHistory: append([]referenceFrame(nil), m.referenceHistory...),
+	if m.referenceOrigin == sliceScreen {
+		m.startReader(sliceScreen)
 	}
-	if m.currentDocument != nil {
-		frame.document, frame.hasDocument = *m.currentDocument, true
-	}
-	m.documentHistory = append(m.documentHistory, frame)
-	m.currentDocument = document
-	m.openedContext, m.openedRevision = m.currentContext(), m.snapshot.Revision
-	m.newerDocument = m.documentHasNewerVersion()
-	m.documentReturn = referencesScreen
-	m.renderProblem = ""
-	m.screen = documentScreen
+	r := &m.reader
+	r.trail = append(r.trail, trailFrame{
+		shown:      r.shown,
+		references: append([]ledger.LabeledReference(nil), m.references...),
+		origin:     m.referenceOrigin, cursor: m.cursor[referencesScreen],
+	})
+	r.shown = shown{document: document, openedContext: m.currentContext(), openedRevision: m.snapshot.Revision}
+	r.shown.newer = m.documentHasNewerVersion(document)
+	r.documentFocus = true
+	m.screen = readerScreen
 	m.failure = nil
 	m.status = ""
-	m.docViewport = viewport.New(m.width, m.bodyHeight(m.header(), m.footer()))
 	m.layoutDetail()
-	m.docViewport.GotoTop()
+}
+
+// returnAlongTrail goes back from a followed document to the reference list
+// it was followed from, with the document that list belongs to displayed
+// again at its scroll position.
+func (m *Model) returnAlongTrail() {
+	r := &m.reader
+	frame := r.trail[len(r.trail)-1]
+	r.trail = r.trail[:len(r.trail)-1]
+	r.shown = frame.shown
+	r.shown.rendered = 0
+	r.shown.newer = m.documentHasNewerVersion(r.shown.document)
+	m.references = frame.references
+	m.referenceOrigin = frame.origin
+	m.cursor[referencesScreen] = frame.cursor
+	m.refreshCurrentReferences()
+	m.screen = referencesScreen
+	m.status = ""
+	m.layoutDetail()
 }
 
 func unavailableReference(reference ledger.Reference, err error) string {
 	return fmt.Sprintf("Exact ledger reference unavailable (%s:%s): %s; no substitute was opened", reference.Commit, reference.Path, err)
 }
 
-func (m Model) documentContent(document *ledger.Document, width int) (string, string) {
-	context := strings.Replace("Context at open: "+m.openedContext, " — current lifecycle:", "\n\ncurrent lifecycle:", 1)
+// shownTitle names the displayed document, marking whether it is the
+// current one or an exact historical revision.
+func (m Model) shownTitle() string {
+	document := m.reader.shown.document
+	if document == nil {
+		return m.reader.shown.title
+	}
+	name := documentName(document.Reference.Path)
+	switch {
+	case document.Kind == ledger.ProposalDocumentKind:
+		name = "Proposal description"
+	case document.Slice != "":
+		name = document.Slice + "/" + name
+	}
+	if document.Reference.Commit == m.snapshot.Revision {
+		return name + " · current"
+	}
+	return name + " · HISTORICAL " + document.Reference.Commit[:min(12, len(document.Reference.Commit))]
+}
+
+// shownContent renders the displayed document, or why there is none, to
+// width.
+func (m Model) shownContent(width int) (string, string) {
+	if m.reader.shown.document == nil {
+		return wrap(strings.Join(m.reader.shown.lines, "\n"), width), ""
+	}
+	return m.documentContent(m.reader.shown, width)
+}
+
+func (m Model) documentContent(s shown, width int) (string, string) {
+	document := s.document
+	context := strings.Replace("Context at open: "+s.openedContext, " — current lifecycle:", "\n\ncurrent lifecycle:", 1)
 	context = strings.ReplaceAll(context, "; current ", "\n\ncurrent ")
 	preamble := []string{context, "", "## Record metadata", ""}
 	preamble = append(preamble,
 		"Document kind: "+string(document.Kind),
 		"Ledger document: "+document.Reference.Commit+":"+document.Reference.Path,
 	)
-	if document.Reference.Commit == m.openedRevision {
+	if document.Reference.Commit == s.openedRevision {
 		preamble = append(preamble, "Identity when opened: current snapshot document")
 	} else {
 		preamble = append(preamble, "Identity when opened: HISTORICAL ledger document; context above describes the ledger when opened, not a historical whole-workflow view")
@@ -329,94 +684,4 @@ func (m Model) currentContext() string {
 		context += " [archived Proposal]"
 	}
 	return context + " at current ledger " + m.snapshot.Revision[:min(len(m.snapshot.Revision), 12)]
-}
-
-func (m Model) rowsForDocumentList() []ledger.DocumentEntry {
-	if m.documents == nil {
-		return nil
-	}
-	return m.documents.Documents
-}
-
-func documentLabel(document ledger.DocumentEntry) string {
-	name := documentName(document.Reference.Path)
-	prefix := ""
-	if document.Slice != "" {
-		prefix = document.Slice + " — "
-	}
-	switch document.Kind {
-	case ledger.ProposalDocumentKind:
-		return "Proposal description"
-	case ledger.ContractDocumentKind:
-		return prefix + name + " — accepted contract"
-	case ledger.ImplementReportDocumentKind:
-		return prefix + "Latest implementation report"
-	case ledger.WatchdogReportDocumentKind:
-		return prefix + "Latest watchdog report"
-	case ledger.DecisionDocumentKind:
-		return prefix + "Current Human Decision"
-	case ledger.StateDocumentKind:
-		return prefix + "Claim state (" + name + ")"
-	default:
-		return prefix + name + " — " + string(document.Kind)
-	}
-}
-
-func documentSummary(document ledger.DocumentEntry) string {
-	if document.Report != nil {
-		text := "Outcome: " + document.Report.Outcome
-		if document.Report.Round != 0 {
-			text += fmt.Sprintf(" · round %d", document.Report.Round)
-		}
-		return text
-	}
-	if document.Decision != nil {
-		return "Route: " + document.Decision.Route + " · answered " + document.Decision.AnsweredRequest.Path
-	}
-	if len(document.Diagnostics) > 0 {
-		return "Metadata unavailable; recorded content remains readable"
-	}
-	return document.Reference.Commit + ":" + document.Reference.Path
-}
-
-func optionalDocumentNotes(documents *ledger.DocumentList) []string {
-	if documents == nil {
-		return nil
-	}
-	if documents.Slice == "" {
-		return []string{"Only documents present at this committed revision are listed; absent optional reports are not malformed records."}
-	}
-	var notes []string
-	for _, availability := range documents.Availability {
-		if availability.Slice != documents.Slice {
-			continue
-		}
-		label := optionalDocumentLabel(availability.Kind)
-		switch availability.Status {
-		case ledger.DocumentAbsent:
-			note := "not yet available (optional)."
-			if availability.Kind == ledger.DecisionDocumentKind {
-				note = "not available (optional)."
-			}
-			notes = append(notes, label+": "+note)
-		case ledger.DocumentUnavailable:
-			notes = append(notes, label+": recorded but unavailable; see diagnostics.")
-		case ledger.DocumentUnknown:
-			notes = append(notes, label+": membership unknown; see diagnostics.")
-		}
-	}
-	return notes
-}
-
-func optionalDocumentLabel(kind ledger.DocumentKind) string {
-	switch kind {
-	case ledger.ImplementReportDocumentKind:
-		return "Latest implementation report"
-	case ledger.WatchdogReportDocumentKind:
-		return "Latest watchdog report"
-	case ledger.DecisionDocumentKind:
-		return "Active Human Decision"
-	default:
-		return string(kind)
-	}
 }

@@ -30,7 +30,8 @@ func changeFixture(t *testing.T, root, relative, before, after string) {
 
 func TestRefreshKeepsFilteredReportAndReadingPositionWhileFactsAdvance(t *testing.T) {
 	s := start(t, "widgets")
-	s.send(tea.WindowSizeMsg{Width: 100, Height: 17})
+	// Narrow enough that the focused document is shown alone.
+	s.send(tea.WindowSizeMsg{Width: 99, Height: 17})
 	s.press("/", "cancel", "enter", "f")
 	s.press(downs(10)...)
 	s.press("enter", "g", "enter", "d", "down", "down", "enter")
@@ -44,17 +45,18 @@ func TestRefreshKeepsFilteredReportAndReadingPositionWhileFactsAdvance(t *testin
 	changeFixture(t, s.root, "projects/widgets/proposals/orders/refund/state.json", `"state": "ready_for_implementation"`, `"state": "merged"`)
 	commitFixture(t, s.root, "advance report and other slice")
 	s.press("R")
-	s.shows("Newer document available", "HISTORICAL document", "scrolled ")
+	s.shows("Newer document available", "cancel/implement-report.md · HISTORICAL", "scrolled ")
 	s.hides("New implementation evidence is readable")
-	if before, after := strings.Split(old, "\n"), strings.Split(s.model.View(), "\n"); strings.Join(before[2:9], "\n") != strings.Join(after[2:9], "\n") {
+	// Below the pane's title, which now marks the document historical.
+	if before, after := strings.Split(old, "\n"), strings.Split(s.model.View(), "\n"); strings.Join(before[3:9], "\n") != strings.Join(after[3:9], "\n") {
 		t.Fatalf("refresh replaced document text or reading position:\nbefore:\n%s\nafter:\n%s", old, s.model.View())
 	}
 	s.press("esc")
-	s.shows("Latest implementation report")
+	s.row("> ", "Implementation report")
 	s.press("enter")
-	s.send(tea.WindowSizeMsg{Width: 100, Height: 50})
-	s.shows("New implementation evidence is readable")
-	s.hides("newer document available")
+	s.send(tea.WindowSizeMsg{Width: 100, Height: 80})
+	s.shows("New implementation evidence is readable", "cancel/implement-report.md · current")
+	s.hides("Newer document available")
 	s.press("esc", "esc")
 	s.shows("Lifecycle: Ready for Merge")
 	s.press("esc")
