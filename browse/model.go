@@ -418,6 +418,7 @@ func (m *Model) readerKey(msg tea.KeyMsg) bool {
 			r.shown.viewport.PageDown()
 		}
 	case page:
+		// The navigator does not page; the document does once focused.
 	case msg.Type == tea.KeyEnter && !r.documentFocus:
 		if m.selectionMissing == "" && len(r.entries) > 0 {
 			m.selectEntry()

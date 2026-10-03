@@ -50,8 +50,10 @@ type entry struct {
 	reference *ledger.Reference
 	// note is shown in place of a document when there is none to read.
 	note []string
-	// group is the report group the entry belongs to.
-	group string
+	// group is the report group the entry belongs to; slice and phase
+	// identify it.
+	group        string
+	slice, phase string
 }
 
 // shown is the displayed document, pinned until another is selected or
@@ -249,7 +251,7 @@ func (r reader) reportEntries(slice, heading string, kind ledger.DocumentKind) [
 	if phase == ledger.WatchdogPhase {
 		name = "Watchdog report"
 	}
-	header := entry{heading: heading, id: documentID(slice, phase+"-report.md"), group: key, columns: texts(name)}
+	header := entry{heading: heading, id: documentID(slice, phase+"-report.md"), group: key, slice: slice, phase: phase, columns: texts(name)}
 	var latest *ledger.DocumentEntry
 	for index, document := range r.list.Documents {
 		if document.Slice == slice && document.Kind == kind {
@@ -273,13 +275,17 @@ func (r reader) reportEntries(slice, heading string, kind ledger.DocumentKind) [
 	case loaded && load.problem == "" && len(versions) == 0 && !load.versions.Incomplete:
 		header.columns = append(header.columns, span{"not yet available", mutedStyle})
 		header.note = []string{"No " + strings.ToLower(name) + " has been recorded yet. It is optional until its phase runs."}
+	case !loaded:
+		header.columns = append(header.columns, span{"no latest report", mutedStyle})
+		header.note = []string{"There is no latest " + strings.ToLower(name) + " at this revision. Press v to look for earlier versions."}
 	default:
 		header.columns = append(header.columns, span{"no latest report", mutedStyle})
-		header.note = []string{"There is no latest " + strings.ToLower(name) + " at this revision. Its earlier versions, if any, are listed under it."}
+		header.note = []string{"There is no latest " + strings.ToLower(name) + " at this revision. Its earlier versions are listed under it."}
 	}
 	earlier := versions
 	if latest != nil && len(earlier) > 0 {
-		// The newest version is the latest report's content.
+		// Report Versions are listed newest first, so the first is the
+		// latest report's own content.
 		earlier = earlier[1:]
 	}
 	switch {
@@ -294,7 +300,7 @@ func (r reader) reportEntries(slice, heading string, kind ledger.DocumentKind) [
 			commit := version.Reference.Commit
 			reference := version.Reference
 			entries = append(entries, entry{
-				heading: heading, id: header.id + " @" + commit[:min(12, len(commit))], group: key,
+				heading: heading, id: header.id + " @" + commit[:min(12, len(commit))], group: key, slice: slice, phase: phase,
 				columns:   append([]span{{text: "  └ " + commit[:min(7, len(commit))]}}, reportColumns(version.Report)...),
 				marked:    len(version.Diagnostics) > 0,
 				reference: &reference,
@@ -303,14 +309,14 @@ func (r reader) reportEntries(slice, heading string, kind ledger.DocumentKind) [
 	}
 	switch {
 	case loaded && load.problem != "":
-		entries = append(entries, entry{heading: heading, id: header.id + " history", group: key, marked: true,
+		entries = append(entries, entry{heading: heading, id: header.id + " history", group: key, slice: slice, phase: phase, marked: true,
 			columns: []span{{text: "  └ "}, {"versions unavailable", warningStyle}}, note: []string{load.problem}})
 	case loaded && load.versions.Incomplete:
 		note := []string{"Local history is incomplete, so earlier versions may be missing:"}
 		for _, diagnostic := range load.versions.Diagnostics {
 			note = append(note, DiagnosticText(diagnostic))
 		}
-		entries = append(entries, entry{heading: heading, id: header.id + " history", group: key, marked: true,
+		entries = append(entries, entry{heading: heading, id: header.id + " history", group: key, slice: slice, phase: phase, marked: true,
 			columns: []span{{text: "  └ "}, {"history incomplete", warningStyle}}, note: note})
 	}
 	return entries
@@ -383,11 +389,7 @@ func (m *Model) selectEntry() {
 			document, err := m.snapshot.Document(*selected.reference)
 			if err != nil {
 				s.lines = []string{warningStyle.Render("! " + unavailableReference(*selected.reference, err))}
-				r.unreadable = maps.Clone(r.unreadable)
-				if r.unreadable == nil {
-					r.unreadable = map[string]bool{}
-				}
-				r.unreadable[selected.id] = true
+				r.unreadable = with(r.unreadable, selected.id, true)
 			}
 			s.document = document
 		}
@@ -398,6 +400,17 @@ func (m *Model) selectEntry() {
 	r.shown.newer = m.documentHasNewerVersion(s.document)
 	m.status = ""
 	m.layoutDetail()
+}
+
+// with is a copy of marks with key set to value, so a model copied before
+// the change keeps its own marks.
+func with(marks map[string]bool, key string, value bool) map[string]bool {
+	marks = maps.Clone(marks)
+	if marks == nil {
+		marks = map[string]bool{}
+	}
+	marks[key] = value
+	return marks
 }
 
 // moveEntry moves the navigator's cursor and displays the entry it reaches.
@@ -425,22 +438,21 @@ func (m *Model) toggleVersions() {
 		return
 	}
 	selected := r.entries[cursor]
-	slice, phase, _ := strings.Cut(selected.group, "/")
 	if _, loaded := r.versions[selected.group]; !loaded {
 		r.versions = maps.Clone(r.versions)
-		r.versions[selected.group] = loadVersions(m.snapshot, r.list, slice, phase)
+		r.versions[selected.group] = loadVersions(m.snapshot, r.list, selected.slice, selected.phase)
 	} else {
-		r.collapsed = maps.Clone(r.collapsed)
-		if r.collapsed == nil {
-			r.collapsed = map[string]bool{}
-		}
-		r.collapsed[selected.group] = !r.collapsed[selected.group]
+		r.collapsed = with(r.collapsed, selected.group, !r.collapsed[selected.group])
 	}
 	r.entries = r.build()
 	m.status = ""
 	for index, candidate := range r.entries {
 		if candidate.id == selected.id {
 			m.cursor[readerScreen] = index
+			if candidate.reference == nil {
+				// A note can change with what was found.
+				m.selectEntry()
+			}
 			return
 		}
 	}

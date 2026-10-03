@@ -89,7 +89,7 @@ func TestDocumentListLoadsOnlyTheDocumentSelectedForReading(t *testing.T) {
 	s.shows("Exact ledger reference unavailable", "cancel/intent.md", "no substitute was opened")
 	s.hides("Cancellation intent")
 	s.row("! ", "intent.md")
-	s.press(append(strings.Fields(strings.Repeat("k ", 6)), "enter")...)
+	s.press(append(repeat("k", 6), "enter")...)
 	s.shows("Exact ledger reference unavailable", "substitute was opened")
 	s.hides("Proposal description stays readable")
 }

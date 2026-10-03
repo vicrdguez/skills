@@ -202,7 +202,7 @@ func TestReaderPinsTheDisplayedDocumentWhenANewReviewLands(t *testing.T) {
 	s.row("> ", "Watchdog report", "pass", "· round 2")
 	s.row("└ "+first[:7], "rework", "· round 1")
 	s.press("enter")
-	s.press(strings.Fields(strings.Repeat("pgdown ", 10))...)
+	s.press(repeat("pgdown", 10)...)
 	s.shows("cancel/watchdog-report.md · current", "Review 2 of cancellation")
 	s.hides("Newer document available", "HISTORICAL "+second[:12])
 }
@@ -269,4 +269,16 @@ func TestReaderFitsNarrowAndWideTerminals(t *testing.T) {
 	for _, s := range fits(t, [][]string{{"enter", "down", "enter", "d"}, {"down", "down"}, {"enter", "pgdown"}, {"r"}, {"enter"}, {"esc", "esc"}, {"d"}}) {
 		s.shows("! slice widgets/orders/cancel")
 	}
+}
+
+func TestReaderLooksForAnAbsentProposalReportsHistoryOnRequest(t *testing.T) {
+	s := start(t, "widgets")
+	s.send(tea.WindowSizeMsg{Width: 180, Height: 60})
+	s.press("enter", "d")
+	s.press(downs(13)...)
+	s.row("> ", "Implementation report", "no latest report", "[v]")
+	s.shows("Press v to look for earlier versions")
+	s.press("v")
+	s.row("> ", "Implementation report", "not yet available")
+	s.shows("has been recorded yet")
 }

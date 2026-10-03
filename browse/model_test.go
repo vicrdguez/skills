@@ -292,7 +292,7 @@ func TestBrowserReadsReportsFollowsExactHistoricalReferencesAndPreservesScroll(t
 	s.hides("Watchdog bytes remain readable")
 	s.press("esc", "r", "enter")
 	s.shows("cancel/state.json · HISTORICAL", "current lifecycle: Awaiting Review", "current Claim: watchdog reservation", "current Dependencies: legacy/old (Merged)")
-	s.press(strings.Fields(strings.Repeat("pgdown ", 10))...)
+	s.press(repeat("pgdown", 10)...)
 	s.shows("ready_for_implementation")
 	s.press("esc", "esc")
 	s.shows("cancel/implement-report.md · current", "scrolled ", "current committed ledger")
@@ -686,7 +686,11 @@ func TestBrowserFitsNarrowAndWideTerminals(t *testing.T) {
 }
 
 func downs(count int) []string {
-	return strings.Fields(strings.Repeat("down ", count))
+	return repeat("down", count)
+}
+
+func repeat(key string, count int) []string {
+	return strings.Fields(strings.Repeat(key+" ", count))
 }
 
 func TestBrowserNavigatesFromClaimFactToSlices(t *testing.T) {
