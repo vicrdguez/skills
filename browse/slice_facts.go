@@ -133,7 +133,7 @@ func sliceSections(slice *ledger.SliceDetail, reports []phaseReport) []factSecti
 			status.facts = append(status.facts, plainFact("Claim", "none"))
 		} else {
 			status.facts = append(status.facts,
-				styledFact("Claim", claimSpan(slice.Claim.Phase), span{text: strings.TrimPrefix(claimText(slice.Claim.Phase, slice.Claim.Basis), slice.Claim.Phase)}),
+				styledFact("Claim", claimSpan(slice.Claim.Phase), span{text: claimDetail(slice.Claim.Basis)}),
 				plainFact("Claim state", slice.Claim.Reference.Commit+":"+slice.Claim.Reference.Path))
 		}
 		status.facts = append(status.facts, plainFact("Branch", orUnknown(slice.Branch)))
@@ -212,12 +212,9 @@ func sliceSections(slice *ledger.SliceDetail, reports []phaseReport) []factSecti
 	sections := []factSection{identity, status, relationships, links, documents}
 	if len(slice.Diagnostics) > 0 {
 		diagnostics := factSection{title: "Diagnostics"}
-		for _, line := range diagnosticLines(slice.Diagnostics) {
-			style := lipgloss.NewStyle()
-			if strings.HasPrefix(line, "! ") {
-				style = warningStyle
-			}
-			diagnostics.facts = append(diagnostics.facts, styledFact("", span{line, style}))
+		diagnostics.facts = append(diagnostics.facts, plainFact("", "Incomplete: "+incompleteText(slice.Diagnostics)+"; the facts above omit them"))
+		for _, diagnostic := range slice.Diagnostics {
+			diagnostics.facts = append(diagnostics.facts, styledFact("", span{DiagnosticText(diagnostic), warningStyle}))
 		}
 		sections = append(sections, diagnostics)
 	}

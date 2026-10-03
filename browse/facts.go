@@ -329,7 +329,12 @@ func claimText(phase, basis string) string {
 	if phase == "" {
 		return "none"
 	}
-	text := phase + " reservation"
+	return phase + claimDetail(basis)
+}
+
+// claimDetail follows a Claim's phase: its basis and what a Claim is.
+func claimDetail(basis string) string {
+	text := " reservation"
 	if basis != "" {
 		text += " at ledger basis " + basis
 	}

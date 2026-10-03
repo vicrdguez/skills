@@ -890,9 +890,12 @@ func (m *Model) syncPreview() {
 		return
 	case m.screen == proposalScreen && m.members != nil && cursor < len(m.members.Slices):
 		project, item, archived = m.project, m.members.Slices[cursor].Item, m.archived
-	case m.screen == resultsScreen && m.search != nil && cursor < len(m.results()):
-		chosen := m.results()[cursor]
-		project, item, archived = chosen.project, chosen.match.Item, chosen.match.Archived
+	case m.screen == resultsScreen && m.search != nil:
+		results := m.results()
+		if cursor >= len(results) {
+			return
+		}
+		project, item, archived = results[cursor].project, results[cursor].match.Item, results[cursor].match.Archived
 	default:
 		return
 	}

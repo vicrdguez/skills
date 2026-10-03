@@ -180,3 +180,26 @@ func TestLongSliceDetailKeepsHintsAndScrollPositionOutOfItsFacts(t *testing.T) {
 		}
 	}
 }
+
+func TestSliceFactsKeepTargetCompletionDecisionAndPendingPush(t *testing.T) {
+	s := start(t, "gadgets", func(root string) {
+		write(t, root, "projects/gadgets/proposals/tools/hammer/state.json", `{"state": "merged", "title": "Hammer", "branch": "hammer",
+			"integration_target": {"repository": "acme/gadgets", "branch": "main"},
+			"completion": {"submission": {"repository": "acme/gadgets", "number": 7}, "target": {"repository": "acme/gadgets", "branch": "main"},
+				"merge_commit": "`+strings.Repeat("e", 40)+`", "source_head": "`+strings.Repeat("f", 40)+`"},
+			"decision": true, "publication": {"push": {"status": "pending", "detail": "ledger push awaits the remote"}}}`)
+	})
+	s.send(tea.WindowSizeMsg{Width: 200, Height: 60})
+	s.press("enter")
+	for _, view := range []string{"preview", "detail"} {
+		s.fact("Target", "acme/gadgets main")
+		s.fact("Completion", "acme/gadgets#7 into main, merge commit "+strings.Repeat("e", 40))
+		s.shows("source head " + strings.Repeat("f", 40))
+		s.fact("Decision", "active Human Decision")
+		s.fact("Pending push", "pending ledger push awaits the remote")
+		if view == "preview" {
+			s.shows("d proposal documents")
+			s.press("enter")
+		}
+	}
+}
