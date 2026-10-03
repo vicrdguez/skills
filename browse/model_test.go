@@ -272,7 +272,7 @@ func TestBrowserShowsArchivedProposalsOnRequest(t *testing.T) {
 
 func TestBrowserReadsReportsFollowsExactHistoricalReferencesAndPreservesScroll(t *testing.T) {
 	s := start(t, "widgets")
-	s.send(tea.WindowSizeMsg{Width: 100, Height: 50})
+	s.send(tea.WindowSizeMsg{Width: 140, Height: 120})
 	s.press("enter", "down", "enter", "d", "down", "down", "enter")
 	s.shows("Implementation report", "Outcome: awaiting_review", "Source repository revisions", "Ledger input references",
 		"The recorded implementation evidence is readable", "current lifecycle: Awaiting Review")
@@ -291,17 +291,18 @@ func TestBrowserReadsReportsFollowsExactHistoricalReferencesAndPreservesScroll(t
 	s.shows("Exact ledger reference unavailable", strings.Repeat("c", 40), "watchdog-report.md", "no substitute was opened")
 	s.hides("Watchdog bytes remain readable")
 	s.press("esc", "r", "enter")
-	s.shows("HISTORICAL", "current lifecycle: Awaiting Review", "current Claim: watchdog reservation", "current Dependencies: legacy/old (Merged)")
-	s.send(tea.KeyMsg{Type: tea.KeyPgDown})
+	s.shows("cancel/state.json · HISTORICAL", "current lifecycle: Awaiting Review", "current Claim: watchdog reservation", "current Dependencies: legacy/old (Merged)")
+	s.press(repeat("pgdown", 10)...)
 	s.shows("ready_for_implementation")
-	s.press("esc")
-	s.shows("Latest implementation", "scrolled ", "current committed ledger")
+	s.press("esc", "esc")
+	s.shows("cancel/implement-report.md · current", "scrolled ", "current committed ledger")
+	s.hides("scrolled 0%")
 
 	// The latest malformed report remains selectable and readable, while its
 	// schema failure is visible and never supplies invented metadata.
 	s.press("esc")
-	s.send(tea.WindowSizeMsg{Width: 100, Height: 50})
-	s.press("down", "enter")
+	s.send(tea.WindowSizeMsg{Width: 140, Height: 120})
+	s.press("down")
 	s.shows("Metadata diagnostic", "watchdog report metadata is", "unreadable", "Watchdog bytes remain readable", "watchdog reservation")
 	s.hides("Outcome:")
 	if len(s.opened) != 0 {
@@ -313,18 +314,18 @@ func TestBrowserSelectsEarlierReportVersionAndReturnsToCurrentContext(t *testing
 	s := start(t, "widgets", func(root string) {
 		write(t, root, "projects/widgets/proposals/orders/cancel/implement-report.md", "---\nschema: 88\n---\nOlder recorded reasoning.\n")
 	})
-	s.send(tea.WindowSizeMsg{Width: 120, Height: 40})
-	s.press("enter", "down", "enter", "d", "down", "down", "enter")
-	s.shows("Latest implementation report", "current lifecycle: Awaiting Review")
-	s.press("v")
-	s.shows("report versions (2)", "awaiting_review", "Exact ledger version:")
-	s.press("down", "enter")
+	s.send(tea.WindowSizeMsg{Width: 120, Height: 80})
+	s.press("enter", "down", "enter", "d", "down", "down")
+	s.shows("cancel/implement-report.md · current", "current lifecycle: Awaiting Review")
+	s.row("> ", "Implementation report", "awaiting_review")
+	s.row("! ", "└", "bad metadata")
+	s.press("down")
 	s.shows("HISTORICAL", "Older recorded reasoning", "Metadata diagnostic", "current lifecycle: Awaiting Review")
 	s.send(tea.WindowSizeMsg{Width: 84, Height: 19})
-	s.shows("HISTORICAL", "current committed ledger")
-	s.press("esc")
-	s.send(tea.WindowSizeMsg{Width: 120, Height: 40})
-	s.shows("current document", "current lifecycle: Awaiting Review", "awaiting_review")
+	s.row("> ", "└")
+	s.press("up")
+	s.send(tea.WindowSizeMsg{Width: 120, Height: 80})
+	s.shows("cancel/implement-report.md · current", "current lifecycle: Awaiting Review", "awaiting_review")
 	if len(s.opened) != 0 {
 		t.Fatalf("version navigation opened external URLs: %v", s.opened)
 	}
@@ -341,24 +342,17 @@ func TestBrowserFindsReportHistoryWhenLatestReportWasRemoved(t *testing.T) {
 	}
 	git(t, root, "add", "-A")
 	git(t, root, "commit", "-q", "-m", "remove latest report")
-	store, err := ledger.Open(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	snapshot, err := store.Snapshot()
-	if err != nil {
-		t.Fatal(err)
-	}
-	s := &session{t: t, model: browse.New(snapshot, browse.Options{Project: "widgets"})}
-	s.send(tea.WindowSizeMsg{Width: 120, Height: 40})
-	s.press("enter", "down", "enter", "d", "down", "down", "down", "down")
-	s.shows("Implementation report versions", "no latest report")
-	s.press("enter")
-	s.shows("implement report versions (2)")
-	s.press("enter")
+	s := &session{t: t, model: browse.New(snapshotAfterChange(t, root), browse.Options{Project: "widgets"})}
+	s.send(tea.WindowSizeMsg{Width: 120, Height: 80})
+	s.press("enter", "down", "enter", "d", "down", "down")
+	s.row("> ", "Implementation report", "no latest report")
+	s.hides("not yet available")
+	s.row("└", "awaiting_review")
+	s.row("! ", "└", "bad metadata")
+	s.press("down")
 	s.shows("HISTORICAL", "The recorded implementation evidence is readable", "current lifecycle: Awaiting Review")
-	s.press("esc", "esc")
-	s.shows("Implementation report versions")
+	s.press("down")
+	s.shows("HISTORICAL", "Older implementation reasoning")
 }
 
 func snapshotAfterChange(t *testing.T, root string) *ledger.Snapshot {
@@ -390,17 +384,16 @@ func TestBrowserKeepsArchivedReportIdentityAfterOpeningAnEarlierVersion(t *testi
 	git(t, root, "add", "-A")
 	git(t, root, "commit", "-q", "-m", "active replacement")
 	s := &session{t: t, model: browse.New(snapshotAfterChange(t, root), browse.Options{Project: "widgets"})}
-	s.send(tea.WindowSizeMsg{Width: 120, Height: 45})
+	s.send(tea.WindowSizeMsg{Width: 120, Height: 80})
 	s.press("a")
 	s.shows("Proposals (3)", "orders [archived]")
-	s.press("down", "down", "enter", "down", "enter", "d", "down", "down", "enter", "v")
-	s.shows("report versions (2)")
-	s.hides("Active replacement report")
-	s.press("down", "enter")
+	s.press("down", "down", "enter", "down", "enter", "d", "down", "down")
+	s.row("> ", "Implementation report", "awaiting_review")
+	s.row("! ", "└", "bad metadata")
+	s.hides("Active replacement report", "versions unavailable", "history incomplete")
+	s.press("down")
 	s.shows("Earlier implementation reasoning", "HISTORICAL")
-	s.press("v")
-	s.shows("report versions (2)")
-	s.hides("Cannot discover report versions")
+	s.hides("Active replacement report")
 }
 
 func TestBrowserBrowsesActiveReportInProjectNamedArchive(t *testing.T) {
@@ -410,9 +403,9 @@ func TestBrowserBrowsesActiveReportInProjectNamedArchive(t *testing.T) {
 	git(t, root, "commit", "-q", "-m", "rename project archive")
 	s := &session{t: t, model: browse.New(snapshotAfterChange(t, root), browse.Options{Project: "archive"})}
 	s.send(tea.WindowSizeMsg{Width: 120, Height: 40})
-	s.press("enter", "down", "enter", "d", "down", "down", "enter", "v")
-	s.shows("implement report versions (1)")
-	s.hides("Cannot discover report versions")
+	s.press("enter", "down", "enter", "d", "down", "down")
+	s.row("> ", "Implementation report", "awaiting_review")
+	s.hides("versions unavailable", "history incomplete", "└")
 }
 
 func TestBrowserFollowsAnArchivedReportReferenceWithoutUsingTheCurrentSliceLocation(t *testing.T) {
@@ -441,16 +434,13 @@ func TestBrowserFollowsAnArchivedReportReferenceWithoutUsingTheCurrentSliceLocat
 	git(t, root, "add", "-A")
 	git(t, root, "commit", "-q", "-m", "later archived report and reference")
 	s := &session{t: t, model: browse.New(snapshotAfterChange(t, root), browse.Options{Project: "widgets"})}
-	s.send(tea.WindowSizeMsg{Width: 120, Height: 45})
+	s.send(tea.WindowSizeMsg{Width: 120, Height: 80})
 	s.press("enter", "down", "enter", "d", "down", "down", "enter", "r", "down", "down", "enter")
-	s.shows("Earlier archived watchdog report", "HISTORICAL")
-	s.press("v")
-	s.shows("watchdog report versions (2)")
-	s.press("down", "enter")
-	s.shows("Earlier archived watchdog report", "HISTORICAL", "current lifecycle: Awaiting Review")
-	s.press("v")
-	s.shows("watchdog report versions (2)")
-	s.hides("Cannot discover report versions")
+	// The followed report keeps its archived incarnation: it is named and
+	// compared at its own location, not the current Slice's.
+	s.shows("Earlier archived watchdog report", "old/watchdog-report.md · HISTORICAL "+previous[:12],
+		"Newer document available", "current lifecycle: Awaiting Review")
+	s.hides("Later archived watchdog report")
 }
 
 func TestBrowserReturnsFromNestedVersionsToTheDocumentList(t *testing.T) {
@@ -462,46 +452,43 @@ func TestBrowserReturnsFromNestedVersionsToTheDocumentList(t *testing.T) {
 	git(t, root, "add", "-A")
 	git(t, root, "commit", "-q", "-m", "remove latest report")
 	s := &session{t: t, model: browse.New(snapshotAfterChange(t, root), browse.Options{Project: "widgets"})}
-	s.send(tea.WindowSizeMsg{Width: 120, Height: 40})
-	s.press("enter", "down", "enter", "d", "down", "down", "down", "down", "enter")
-	s.shows("implement report versions (1)")
-	s.press("enter")
-	s.shows("HISTORICAL", "The recorded implementation evidence is readable")
-	s.press("v")
-	s.shows("implement report versions (1)")
-	s.press("enter", "esc")
-	s.shows("HISTORICAL", "The recorded implementation evidence is readable")
+	s.send(tea.WindowSizeMsg{Width: 120, Height: 80})
+	s.press("enter", "down", "enter", "d", "down", "down", "down", "tab")
+	s.shows("▶ cancel/implement-report.md · HISTORICAL", "The recorded implementation evidence is readable")
 	s.press("esc")
-	s.shows("implement report versions (1)")
+	s.shows("▶ Documents", "cancel/implement-report.md · HISTORICAL")
+	s.row("> ", "└", "awaiting_review")
 	s.press("esc")
-	s.shows("Implementation report versions", "no latest report")
-	s.hides("Document:", "Cannot discover report versions")
+	s.shows("Slice: orders/cancel")
+	s.hides("Cannot discover report versions")
 }
 
 func TestBrowserFollowsDecisionAndClaimReferencesWithoutChangingSliceContext(t *testing.T) {
 	s := start(t, "widgets")
-	s.send(tea.WindowSizeMsg{Width: 100, Height: 50})
+	s.send(tea.WindowSizeMsg{Width: 140, Height: 120})
 	s.press("enter", "down", "enter", "d", "down", "down", "down", "down", "enter")
 	s.shows("Human Decision", "Route: implement", "The human direction remains available as Markdown", "Answered request:")
 	s.press("r", "enter")
 	s.shows("HISTORICAL", "ready_for_implementation", "current lifecycle: Awaiting", "current Claim: watchdog reservation")
-	s.press("esc", "esc", "esc")
+	s.press("esc", "esc", "esc", "esc")
 	s.shows("Slice: orders/cancel", "Lifecycle: Awaiting Review", "Claim state reference:")
 	s.press("r", "enter")
-	s.shows("projects/widgets/proposals/orders/cancel/state.json", "lifecycle: Awaiting Review", "current Claim: watchdog reservation", "Dependencies: legacy/old (Merged)")
+	s.shows("cancel/state.json · current", "lifecycle: Awaiting Review", "current Claim: watchdog reservation", "Dependencies: legacy/old (Merged)")
 	s.press("esc", "esc")
 	s.shows("Slice: orders/cancel", "Lifecycle: Awaiting Review", "Depends on: legacy/old [archived] — Old work (Merged; satisfied)")
 }
 
 func TestBrowserFollowsClaimInputsWithoutRewindingCurrentSlice(t *testing.T) {
 	s := start(t, "widgets")
-	s.send(tea.WindowSizeMsg{Width: 120, Height: 45})
+	s.send(tea.WindowSizeMsg{Width: 120, Height: 80})
 	s.press("enter", "down", "enter", "r", "enter")
-	s.shows("Claim state (state.json)", "Claim input ledger references", "current lifecycle: Awaiting Review")
+	s.shows("cancel/state.json · current", "Claim input ledger references", "current lifecycle: Awaiting Review")
 	s.press("r")
 	s.shows("References (1)", "contract", "intent.md")
 	s.press("enter")
 	s.shows("HISTORICAL", "Cancellation intent", "current lifecycle: Awaiting Review", "current Claim: watchdog reservation", "legacy/old (Merged)")
+	s.press("esc")
+	s.shows("References (1)", "contract")
 	s.press("esc", "esc")
 	s.shows("References (1)", "current Claim state")
 	s.press("esc")
@@ -515,14 +502,16 @@ func TestBrowserReturnsFromNestedEmptyReferencesToTheOriginatingClaimReference(t
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 100, Height: 40})
 	s.press("enter", "down", "enter", "d", "down", "down", "enter", "r", "enter")
-	s.shows("Claim state (state.json)", "HISTORICAL")
+	s.shows("cancel/state.json · HISTORICAL")
 
 	// The earlier state has an empty Claim input set. Returning from its
 	// reference screen must restore the report reference that opened it.
 	s.press("r")
 	s.shows("References (0)", "No structured exact ledger references")
 	s.press("esc", "esc")
-	s.shows("Latest implementation report")
+	s.shows("References (4)", "claim", "state.json")
+	s.press("esc")
+	s.shows("▶ cancel/implement-report.md · current")
 	s.press("r")
 	s.shows("References (4)", "claim", "state.json")
 }
@@ -536,7 +525,9 @@ func TestBrowserKeepsHealthyDocumentsVisibleAndDiagnosticsScrollable(t *testing.
 		})
 		s.send(size)
 		s.press("enter", "d")
-		s.shows("Available documents", "> Proposal description", "diagnostics", "d to inspect")
+		s.within(size)
+		s.shows("▶ Documents", "diagnostics · d")
+		s.row("> ", "Proposal description")
 		s.send(tea.WindowSizeMsg{Width: 140, Height: 30})
 
 		s.press("d")
@@ -546,9 +537,9 @@ func TestBrowserKeepsHealthyDocumentsVisibleAndDiagnosticsScrollable(t *testing.
 		}
 		s.shows("damaged34")
 		s.press("esc")
-		s.shows("Available documents", "> Proposal description")
+		s.row("> ", "Proposal description")
 		s.press("enter")
-		s.shows("Proposal description", "Order cancellation", "Proposal description stays readable")
+		s.shows("Proposal description · current", "Order cancellation", "Proposal description stays readable")
 	}
 }
 
@@ -603,10 +594,11 @@ func TestBrowserPreservesRelationScrollAndFindingContextAcrossNestedReferences(t
 
 func TestBrowserUsesOptionalDocumentAvailabilityWithoutInventingAbsence(t *testing.T) {
 	s := start(t, "widgets")
-	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})
+	s.send(tea.WindowSizeMsg{Width: 140, Height: 60})
 	s.press(append([]string{"enter", "down", "enter", "d"}, downs(3)...)...)
-	s.shows("Latest watchdog report", "Metadata unavailable; recorded content remains readable", "watchdog report metadata is", "unreadable")
-	s.hides("Latest watchdog report: not yet available", "Latest watchdog report: recorded but unavailable")
+	s.row("> ! ", "Watchdog report", "bad metadata")
+	s.shows("watchdog report metadata is", "unreadable", "Watchdog bytes remain readable")
+	s.hides("not yet available", "recorded but unavailable")
 
 	s = start(t, "widgets", func(root string) {
 		write(t, root, "projects/widgets/proposals/orders/nostate/intent.md", "# Intent\n")
@@ -614,8 +606,9 @@ func TestBrowserUsesOptionalDocumentAvailabilityWithoutInventingAbsence(t *testi
 	})
 	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})
 	s.press("enter", "down", "down", "enter", "d")
-	s.shows("Active Human Decision: membership unknown", "see diagnostics")
-	s.hides("Active Human Decision: not available (optional)")
+	s.row("! ", "Human Decision", "membership unknown")
+	s.press(downs(4)...)
+	s.shows("Whether a Human Decision is active cannot be determined")
 }
 
 func TestBrowserReadsArchivedDocumentsAndNamesAbsentOptionalRecords(t *testing.T) {
@@ -624,9 +617,13 @@ func TestBrowserReadsArchivedDocumentsAndNamesAbsentOptionalRecords(t *testing.T
 	s.shows("Archived description", "archived Proposal", "Legacy proposal")
 
 	s = start(t, "widgets")
+	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})
 	s.press("enter", "down", "down", "enter", "d")
-	s.shows("Latest implementation report: not yet available", "Latest watchdog report: not yet available", "Active Human Decision: not available")
-	s.hides("Metadata diagnostic", "malformed record")
+	s.row("Implementation report", "not yet available")
+	s.row("Watchdog report", "not yet available")
+	s.hides("Human Decision", "Metadata diagnostic", "malformed record", "no latest report")
+	s.press("down", "down")
+	s.shows("has been recorded yet")
 }
 
 func TestBrowserOpensRecordedAttachmentsOnlyOnExplicitAction(t *testing.T) {
@@ -689,7 +686,11 @@ func TestBrowserFitsNarrowAndWideTerminals(t *testing.T) {
 }
 
 func downs(count int) []string {
-	return strings.Fields(strings.Repeat("down ", count))
+	return repeat("down", count)
+}
+
+func repeat(key string, count int) []string {
+	return strings.Fields(strings.Repeat(key+" ", count))
 }
 
 func TestBrowserNavigatesFromClaimFactToSlices(t *testing.T) {
@@ -822,7 +823,7 @@ func TestBrowserOpensTheSelectedArchivedSliceWhenNamesCollide(t *testing.T) {
 	s.press("enter")
 	s.shows("Slice: orders/cancel", "Title: Archived cancellation", "Location: archived proposal", "Lifecycle: Merged")
 	s.press("d", "enter")
-	s.shows("Find slices › widgets › orders/cancel", "intent.md — accepted contract", "Archived cancellation intent")
+	s.shows("Find slices › widgets › orders/cancel", "cancel/intent.md · current", "Archived cancellation intent")
 	s.hides("Cancellation intent.")
 	s.press("esc", "esc")
 	s.shows("Slice: orders/cancel", "Title: Archived cancellation", "Lifecycle: Merged")
@@ -931,7 +932,7 @@ func TestBrowserFollowsRelationshipsAndRestoresContext(t *testing.T) {
 	s.shows("skl browse › Projects › widgets › legacy › old", "archived hidden", "Slice: legacy/old",
 		"Location: archived proposal", "Lifecycle: Merged", "> Blocks: orders/cancel — Cancel orders (Awaiting Review)")
 	s.press("d", "enter")
-	s.shows("intent.md — accepted contract")
+	s.shows("old/intent.md · current")
 	s.press("esc", "esc")
 	s.shows("skl browse › Projects › widgets › legacy › old", "Slice: legacy/old", "> Blocks: orders/cancel")
 	s.press("a")

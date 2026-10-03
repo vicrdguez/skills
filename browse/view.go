@@ -30,8 +30,8 @@ func (m Model) View() string {
 		body = wrap(warningStyle.Render("! Unable to show this view: "+m.failure.Error()), m.width)
 	case m.screen == sliceScreen || m.screen == diagnosticsScreen:
 		body = m.detail.View()
-	case m.screen == documentScreen:
-		body = m.docViewport.View()
+	case m.screen == readerScreen:
+		body = m.readerBody(height)
 	default:
 		body = m.listBody(height)
 	}
@@ -42,8 +42,9 @@ func (m Model) bodyHeight(header, footer string) int {
 	return max(m.height-lipgloss.Height(header)-lipgloss.Height(footer), 3)
 }
 
-// layoutDetail fits both viewports to the current terminal and marks the
-// Slice's selected followable relationship as well as styling it.
+// layoutDetail fits the detail and document viewports to the current
+// terminal and marks the Slice's selected followable relationship as well as
+// styling it.
 func (m *Model) layoutDetail() {
 	height := m.bodyHeight(m.header(), m.footer())
 	m.detail.Width, m.detail.Height = m.width, height
@@ -84,19 +85,26 @@ func (m *Model) layoutDetail() {
 		}
 	}
 
-	m.docViewport.Width, m.docViewport.Height = m.width, height
-	if m.screen == documentScreen && m.currentDocument != nil {
-		offset := m.docViewport.YOffset
-		content, problem := m.documentContent(m.currentDocument, m.width)
-		m.renderProblem = problem
-		m.docViewport.SetContent(content)
-		m.docViewport.SetYOffset(offset)
+	if m.screen == readerScreen {
+		// The document is rendered again only when its width changes.
+		s := &m.reader.shown
+		width, paneHeight := m.documentPane(height)
+		s.viewport.Width, s.viewport.Height = max(width-paneFrame, 1), max(paneHeight-2, 1)
+		if s.rendered != s.viewport.Width {
+			offset := s.viewport.YOffset
+			content, problem := m.shownContent(s.viewport.Width)
+			s.renderProblem, s.rendered = problem, s.viewport.Width
+			// Long unbroken text, such as an exact reference, wraps rather
+			// than being cut at the pane's edge.
+			s.viewport.SetContent(wrap(content, s.viewport.Width))
+			s.viewport.SetYOffset(offset)
+		}
 	}
 }
 
 func (m Model) header() string {
 	context := m.screen
-	if isDocumentOverlay(m.screen) || (m.screen == diagnosticsScreen && m.diagnosticReturn == documentsScreen) {
+	if isDocumentOverlay(m.screen) || (m.screen == diagnosticsScreen && m.diagnosticReturn == readerScreen) {
 		context = m.docContext
 	}
 	var path []string
@@ -123,24 +131,15 @@ func (m Model) header() string {
 		}
 	}
 	switch m.screen {
-	case documentsScreen:
+	case readerScreen:
 		path = append(path, "documents")
-	case versionsScreen:
-		path = append(path, "report versions")
 	case referencesScreen:
-		if m.referencesFromDoc && m.currentDocument != nil {
-			path = append(path, documentLabel(m.currentDocument.Entry()))
+		if m.referenceOrigin == readerScreen {
+			path = append(path, "documents", m.shownTitle())
 		}
 		path = append(path, "references")
-	case documentScreen:
-		if m.documentReturn == referencesScreen {
-			path = append(path, "references")
-		}
-		if m.currentDocument != nil {
-			path = append(path, documentLabel(m.currentDocument.Entry()))
-		}
 	case diagnosticsScreen:
-		if m.diagnosticReturn == documentsScreen {
+		if m.diagnosticReturn == readerScreen {
 			path = append(path, "documents", "diagnostics")
 		}
 	}
@@ -159,20 +158,6 @@ func (m Model) header() string {
 	if (m.screen == sliceScreen || m.screen == diagnosticsScreen) && m.detail.TotalLineCount() > m.detail.Height {
 		facts += fmt.Sprintf(" · scrolled %d%%", int(m.detail.ScrollPercent()*100))
 	}
-	if m.screen == documentScreen && m.currentDocument != nil {
-		identity := "current document"
-		if m.currentDocument.Reference.Commit != m.snapshot.Revision {
-			identity = "HISTORICAL document"
-		}
-		facts += " · " + identity
-		if m.docViewport.TotalLineCount() > m.docViewport.Height {
-			facts += fmt.Sprintf(" · scrolled %d%%", int(m.docViewport.ScrollPercent()*100))
-		}
-		if m.newerDocument {
-			facts += " · newer document available"
-		}
-		facts += " · ref " + m.currentDocument.Reference.Commit[:min(len(m.currentDocument.Reference.Commit), 12)]
-	}
 	return truncate(titleStyle.Render("skl browse › "+strings.Join(path, " › ")), m.width) + "\n" +
 		truncate(mutedStyle.Render(facts), m.width)
 }
@@ -188,11 +173,11 @@ func (m Model) footer() string {
 	if m.selectionMissing != "" {
 		lines = append(lines, wrap(warningStyle.Render("! "+m.selectionMissing), m.width))
 	}
-	if m.screen == documentScreen && m.newerDocument {
-		lines = append(lines, wrap("Newer document available; esc to documents and select latest", m.width))
+	if m.screen == readerScreen && m.reader.shown.newer {
+		lines = append(lines, wrap("Newer document available; select its entry and press enter to read it", m.width))
 	}
-	if m.screen == documentScreen && m.renderProblem != "" {
-		lines = append(lines, wrap(warningStyle.Render("! "+m.renderProblem+"; showing recorded text"), m.width))
+	if m.screen == readerScreen && m.reader.shown.renderProblem != "" {
+		lines = append(lines, wrap(warningStyle.Render("! "+m.reader.shown.renderProblem+"; showing recorded text"), m.width))
 	}
 	if m.typing != nil {
 		lines = append(lines, wrap(titleStyle.Render("Search names: ")+*m.typing+"█  (enter apply · esc cancel)", m.width))
@@ -235,6 +220,70 @@ func (m Model) listBody(height int) string {
 		pane(content.previewTitle, "", wrapLines(preview, width-paneFrame), width, available-listHeight)
 }
 
+// focusMark marks the title of the reader pane the keys act in, so focus
+// never relies on colour alone.
+const focusMark = "▶ "
+
+// readerBody renders the reader: the navigator beside the displayed document
+// when the terminal is wide, and the focused one alone when it is narrow.
+func (m Model) readerBody(height int) string {
+	r := m.reader
+	navigatorTitle, documentTitle := "Documents", m.shownTitle()
+	if r.documentFocus {
+		documentTitle = focusMark + documentTitle
+	} else {
+		navigatorTitle = focusMark + navigatorTitle
+	}
+	note := m.position()
+	if r.list != nil && len(r.list.Diagnostics) > 0 {
+		note = fmt.Sprintf("! %s · d · %s", plural(len(r.list.Diagnostics), "diagnostic"), note)
+	}
+	scroll := ""
+	if r.shown.viewport.TotalLineCount() > r.shown.viewport.Height {
+		scroll = fmt.Sprintf("scrolled %d%%", int(r.shown.viewport.ScrollPercent()*100))
+	}
+	documentWidth, _ := m.documentPane(height)
+	document := pane(documentTitle, scroll, strings.Split(r.shown.viewport.View(), "\n"), documentWidth, height)
+	navigatorWidth := m.width - documentWidth
+	if m.width < wideLayout {
+		if r.documentFocus {
+			return document
+		}
+		navigatorWidth = m.width
+	}
+	navigator := pane(navigatorTitle, note, m.navigator().lines(navigatorWidth-paneFrame, height-2), navigatorWidth, height)
+	if m.width < wideLayout {
+		return navigator
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, navigator, document)
+}
+
+// documentPane is the size of the document pane in a reader body of height
+// lines. Beside the navigator it takes what the navigator leaves: the
+// navigator fits its entries in up to nine twentieths of the terminal.
+func (m Model) documentPane(height int) (int, int) {
+	if m.width < wideLayout {
+		return m.width, height
+	}
+	return m.width - min(max(m.navigator().width()+paneFrame, 24), m.width*9/20), height
+}
+
+// navigator lists the reader's entries, each Slice's under its heading.
+func (m Model) navigator() listing {
+	l := listing{empty: "No documents are listed at this committed revision. Press d for the diagnostics, if any.", cursorRow: -1}
+	entries := m.reader.entries
+	for index, item := range entries {
+		if item.heading != "" && (index == 0 || item.heading != entries[index-1].heading) {
+			l.rows = append(l.rows, row{heading: titleStyle.Render(item.heading)})
+		}
+		if index == m.cursor[readerScreen] && m.selectionMissing == "" {
+			l.cursorRow = len(l.rows)
+		}
+		l.rows = append(l.rows, row{marked: item.marked || m.reader.unreadable[item.id], columns: item.columns})
+	}
+	return l
+}
+
 // position is the selected entry's place among the current list's entries.
 func (m Model) position() string {
 	count := m.rows()
@@ -270,6 +319,7 @@ func pane(title, note string, lines []string, width, height int) string {
 	}
 	bottom := "╰" + strings.Repeat("─", max(width-2, 0)) + "╯"
 	if note != "" {
+		note = truncate(note, max(width-6, 1))
 		bottom = "╰" + strings.Repeat("─", max(width-5-lipgloss.Width(note), 0)) + " " + note + " ─╯"
 	}
 	return strings.Join(append(framed, edge(bottom)), "\n")
@@ -585,72 +635,11 @@ func (m Model) listContent() listing {
 		if len(l.rows) > 0 {
 			l.preview = ProposalLines(m.inventory.Proposals[cursor])
 		}
-	case documentsScreen:
-		if m.docContext == proposalScreen {
-			l.context = []string{"Documents for Proposal " + m.project + "/" + m.proposal}
-		} else {
-			l.context = []string{"Documents for Slice " + m.project + "/" + m.item}
-		}
-		if m.documents != nil && m.documents.Archived {
-			l.context = append(l.context, "Archive documents · current ledger revision "+m.documents.Revision)
-		}
-		l.title = fmt.Sprintf("Available documents (%d)", len(m.rowsForDocumentList()))
-		l.previewTitle = "Document"
-		l.empty = "No readable documents are available at this committed revision. See diagnostics, if any."
-		if m.documents != nil {
-			if count := len(m.documents.Diagnostics); count > 0 {
-				l.context = append(l.context, warningStyle.Render(fmt.Sprintf("! %d diagnostics · d to inspect", count)))
-			}
-			l.context = append(l.context, optionalDocumentNotes(m.documents)...)
-			for _, document := range m.documents.Documents {
-				l.rows = append(l.rows, row{columns: texts(documentLabel(document))})
-			}
-			if m.documents.Slice != "" {
-				l.rows = append(l.rows, row{columns: texts("Implementation report versions")}, row{columns: texts("Watchdog report versions")})
-			}
-			if cursor < len(m.documents.Documents) {
-				document := m.documents.Documents[cursor]
-				l.preview = []string{documentSummary(document), "Exact ledger identity: " + document.Reference.Commit + ":" + document.Reference.Path}
-				if len(document.Diagnostics) > 0 {
-					l.preview = append(l.preview, diagnosticLines(document.Diagnostics)...)
-				}
-				l.preview = append(l.preview, "Enter reads this committed document; d opens this set's diagnostics.")
-			} else if len(l.rows) > 0 {
-				l.preview = []string{"Enter discovers this phase's locally available content versions, even when no latest report exists."}
-			}
-		}
-	case versionsScreen:
-		l.context = []string{"Report content changes · newest first · exact ledger references; current Slice facts remain at the snapshot revision."}
-		l.previewTitle = "Version"
-		if m.versions != nil {
-			if m.versions.Incomplete {
-				l.context = append(l.context, warningStyle.Render("! Local history incomplete: "+m.versions.Diagnostics[0].Problem))
-			} else if len(m.versions.Diagnostics) > 0 {
-				l.context = append(l.context, warningStyle.Render(fmt.Sprintf("! %d version metadata diagnostics; select a version for details", len(m.versions.Diagnostics))))
-			}
-			l.title = fmt.Sprintf("%s report versions (%d)", m.versions.Phase, len(m.versions.Versions))
-			l.empty = "No locally available report content versions."
-			for _, version := range m.versions.Versions {
-				label := version.Reference.Commit[:min(12, len(version.Reference.Commit))]
-				if version.Report != nil {
-					label += " · " + version.Report.Outcome
-					if version.Report.Round != 0 {
-						label += fmt.Sprintf(" · round %d", version.Report.Round)
-					}
-				}
-				l.rows = append(l.rows, row{columns: texts(label + " · " + version.Reference.Path)})
-			}
-			if len(l.rows) > 0 {
-				version := m.versions.Versions[cursor]
-				l.preview = []string{"Exact ledger version: " + version.Reference.Commit + ":" + version.Reference.Path, "Enter reads this version; esc returns to the open report."}
-				l.preview = append(l.preview, diagnosticLines(version.Diagnostics)...)
-			}
-		}
 	case referencesScreen:
 		l.context = []string{"Structured ledger references · exact commit and path; unavailable references are never replaced."}
-		if m.referencesFromDoc && m.currentDocument != nil {
-			l.context = append(l.context, "From "+documentLabel(m.currentDocument.Entry()))
-			l.context = append(l.context, diagnosticLines(m.currentDocument.Diagnostics)...)
+		if document := m.reader.shown.document; m.referenceOrigin == readerScreen && document != nil {
+			l.context = append(l.context, "From "+m.shownTitle())
+			l.context = append(l.context, diagnosticLines(document.Diagnostics)...)
 		} else if m.slice == nil || m.slice.Claim == nil {
 			l.context = append(l.context, "No current Slice Claim at ledger revision "+m.snapshot.Revision)
 		} else {
@@ -749,11 +738,11 @@ func (m Model) resultDiagnostics() []ledger.Diagnostic {
 }
 
 func (m Model) activeDiagnostics() []ledger.Diagnostic {
-	if m.diagnosticReturn == documentsScreen {
-		if m.documents == nil {
+	if m.diagnosticReturn == readerScreen {
+		if m.reader.list == nil {
 			return nil
 		}
-		return m.documents.Diagnostics
+		return m.reader.list.Diagnostics
 	}
 	return m.resultDiagnostics()
 }

@@ -34,9 +34,9 @@ func (m Model) selectedIdentity(at screen) string {
 			row := m.results()[cursor]
 			return row.project + "/" + row.match.Item + locationKey(row.match.Archived)
 		}
-	case documentsScreen:
-		if m.documents != nil && cursor < len(m.documents.Documents) {
-			return m.documents.Documents[cursor].Reference.Path
+	case readerScreen:
+		if cursor < len(m.reader.entries) {
+			return m.reader.entries[cursor].id
 		}
 	}
 	return ""
@@ -82,8 +82,9 @@ func missingRecord(err error) bool {
 }
 
 // publish stages all facts used by the visible screen at the new revision
-// before changing the selected view. An opened document is never reselected:
-// only its surrounding current facts and its available-document list advance.
+// before changing the selected view. The displayed document is never
+// replaced: only its surrounding current facts and the reader's navigator
+// advance.
 func (m *Model) publish(snapshot *ledger.Snapshot) {
 	previous := *m
 	staged := *m
@@ -91,7 +92,7 @@ func (m *Model) publish(snapshot *ledger.Snapshot) {
 	staged.snapshot = snapshot
 	staged.selectionMissing, staged.missingIdentity, staged.missingScreen = "", "", 0
 	at := m.screen
-	overlay := isDocumentOverlay(at) || (at == diagnosticsScreen && m.diagnosticReturn == documentsScreen)
+	overlay := isDocumentOverlay(at) || (at == diagnosticsScreen && m.diagnosticReturn == readerScreen)
 	if overlay {
 		at = m.docContext
 	} else if at == diagnosticsScreen {
@@ -106,30 +107,24 @@ func (m *Model) publish(snapshot *ledger.Snapshot) {
 	if staged.failure != nil {
 		staged.selectionMissing = "Selected entity is no longer available at the new ledger revision; go back to choose another"
 		staged.missingScreen = at
-		staged.overview, staged.inventory, staged.members, staged.slice, staged.search, staged.documents = nil, nil, nil, nil, nil, nil
+		staged.overview, staged.inventory, staged.members, staged.slice, staged.search = nil, nil, nil, nil, nil
+		staged.reader.list, staged.reader.entries = nil, nil
 	} else if at == overviewScreen || at == projectScreen || at == proposalScreen || at == resultsScreen {
 		staged.preserveSelection(previous, at)
 	}
-	if overlay && staged.failure == nil {
-		var err error
-		if m.docContext == sliceScreen {
-			staged.documents, err = snapshot.SliceDocumentListAt(m.project, m.item, m.archived)
-		} else {
-			staged.documents, err = snapshot.ProposalDocumentListAt(m.project, m.proposal, m.archived)
-		}
+	if overlay && staged.failure == nil && m.reader.active {
+		reader, err := staged.readDocuments(snapshot)
 		if err != nil && !missingRecord(err) {
 			m.refreshFailure = err
 			return
 		}
+		staged.reader = reader
 		if err != nil {
-			staged.documents = nil
 			staged.selectionMissing = "Document selection is no longer available at the new ledger revision"
-			staged.missingScreen = documentsScreen
-		}
-		if staged.documents != nil {
-			// The viewer and its references can outlive their return-list row.
-			staged.screen = documentsScreen
-			staged.preserveSelection(previous, documentsScreen)
+			staged.missingScreen = readerScreen
+		} else {
+			staged.screen = readerScreen
+			staged.preserveSelection(previous, readerScreen)
 			staged.screen = at
 		}
 	}
@@ -154,11 +149,9 @@ func (m *Model) publish(snapshot *ledger.Snapshot) {
 		if at == sliceScreen && m.screen != diagnosticsScreen {
 			staged.detail.SetYOffset(previous.detail.YOffset)
 		}
-		// Keep an exact opened document's rendered text, selection and scroll.
-		staged.docViewport = previous.docViewport
-		staged.renderProblem = previous.renderProblem
 		staged.failure = nil
-		staged.newerDocument = staged.documentHasNewerVersion()
+		staged.reader.shown.newer = staged.documentHasNewerVersion(staged.reader.shown.document)
+		staged.layoutDetail()
 	}
 	if m.screen == diagnosticsScreen {
 		staged.layoutDetail()
@@ -168,10 +161,10 @@ func (m *Model) publish(snapshot *ledger.Snapshot) {
 	*m = staged
 }
 
-// A current Claim reference is a fact of the selected snapshot, not of the
-// pinned document or the return frame that originally opened it.
+// A current Claim reference is a fact of the selected snapshot, not of a
+// displayed document or the return path that originally opened it.
 func (m *Model) refreshCurrentReferences() {
-	if m.referencesFromDoc || m.referenceOrigin != sliceScreen {
+	if m.referenceOrigin != sliceScreen {
 		return
 	}
 	m.references = nil
@@ -181,30 +174,34 @@ func (m *Model) refreshCurrentReferences() {
 	m.cursor[referencesScreen] = 0
 }
 
-// documentHasNewerVersion compares the open document's text with the
+// documentHasNewerVersion compares a displayed document's text with the
 // current committed text of the same document, read at its listed location.
-func (m Model) documentHasNewerVersion() bool {
-	if m.currentDocument == nil {
+func (m Model) documentHasNewerVersion(document *ledger.Document) bool {
+	if document == nil {
 		return false
 	}
 	// Exact referenced documents (notably state.json) need not occur in the
 	// current document list; their current committed path is the same one.
-	current := ledger.Reference{Commit: m.snapshot.Revision, Path: m.currentDocument.Reference.Path}
-	for _, entry := range m.rowsForDocumentList() {
-		if entry.Project == m.currentDocument.Project && entry.Proposal == m.currentDocument.Proposal &&
-			entry.Slice == m.currentDocument.Slice && entry.Kind == m.currentDocument.Kind &&
-			documentName(entry.Reference.Path) == documentName(m.currentDocument.Reference.Path) {
+	current := ledger.Reference{Commit: m.snapshot.Revision, Path: document.Reference.Path}
+	var listed []ledger.DocumentEntry
+	if m.reader.list != nil {
+		listed = m.reader.list.Documents
+	}
+	for _, entry := range listed {
+		if entry.Project == document.Project && entry.Proposal == document.Proposal &&
+			entry.Slice == document.Slice && entry.Kind == document.Kind &&
+			documentName(entry.Reference.Path) == documentName(document.Reference.Path) {
 			// An archive move lists the same document at another path; it is
 			// newer only if its bytes changed.
 			current = entry.Reference
 			break
 		}
 	}
-	if current == m.currentDocument.Reference {
+	if current == document.Reference {
 		return false
 	}
-	document, err := m.snapshot.Document(current)
-	return err == nil && document.Contents != m.currentDocument.Contents
+	latest, err := m.snapshot.Document(current)
+	return err == nil && latest.Contents != document.Contents
 }
 
 func documentName(path string) string {
