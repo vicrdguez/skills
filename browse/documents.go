@@ -200,7 +200,7 @@ func (r reader) build() []entry {
 			reference := version.Reference
 			entries = append(entries, entry{
 				heading: heading, id: id + " @" + reference.Commit, followed: true,
-				columns: append([]span{{text: "  └ " + reference.Commit[:min(7, len(reference.Commit))]}}, reportColumns(version.Report)...),
+				columns: append([]span{{text: "  └ " + short(reference.Commit, 7)}}, reportColumns(version.Report)...),
 				marked:  len(version.Diagnostics) > 0, reference: &reference,
 			})
 		}
@@ -362,13 +362,11 @@ func (r reader) reportEntries(slice, heading string, kind ledger.DocumentKind) [
 	entries := []entry{header}
 	if loaded && !r.collapsed[key] {
 		for _, version := range earlier {
-			// Short reference labels repeat slicing elsewhere; a shared
-			// presentation helper could keep their widths consistent.
 			commit := version.Reference.Commit
 			reference := version.Reference
 			entries = append(entries, entry{
-				heading: heading, id: header.id + " @" + commit[:min(12, len(commit))], group: key, slice: slice, phase: phase,
-				columns:   append([]span{{text: "  └ " + commit[:min(7, len(commit))]}}, reportColumns(version.Report)...),
+				heading: heading, id: header.id + " @" + short(commit, 12), group: key, slice: slice, phase: phase,
+				columns:   append([]span{{text: "  └ " + short(commit, 7)}}, reportColumns(version.Report)...),
 				marked:    len(version.Diagnostics) > 0,
 				reference: &reference,
 			})
@@ -694,7 +692,7 @@ func (m Model) shownTitle() string {
 	if document.Reference.Commit == m.snapshot.Revision {
 		return name + " · current"
 	}
-	return name + " · HISTORICAL " + document.Reference.Commit[:min(12, len(document.Reference.Commit))]
+	return name + " · HISTORICAL " + short(document.Reference.Commit, 12)
 }
 
 // shownContent renders the displayed document, or why there is none, to
@@ -827,5 +825,5 @@ func (m Model) currentContext() string {
 	if m.docContext == proposalScreen && m.members != nil && m.members.Proposal.Archived {
 		context += " [archived Proposal]"
 	}
-	return context + " at current ledger " + m.snapshot.Revision[:min(len(m.snapshot.Revision), 12)]
+	return context + " at current ledger " + short(m.snapshot.Revision, 12)
 }

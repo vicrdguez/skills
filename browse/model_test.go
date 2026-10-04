@@ -248,20 +248,6 @@ func (s *session) footerOmits(helps ...string) {
 	}
 }
 
-// fitsIn fails when the view overflows a terminal of size.
-func (s *session) fitsIn(size tea.WindowSizeMsg) {
-	s.t.Helper()
-	view := s.model.View()
-	if height := lipgloss.Height(view); height > size.Height {
-		s.t.Fatalf("%dx%d view is %d lines tall:\n%s", size.Width, size.Height, height, view)
-	}
-	for _, line := range strings.Split(view, "\n") {
-		if width := lipgloss.Width(line); width > size.Width {
-			s.t.Fatalf("%dx%d view line is %d wide: %q", size.Width, size.Height, width, line)
-		}
-	}
-}
-
 func TestBrowserNavigatesProjectsProposalsAndSliceFacts(t *testing.T) {
 	s := start(t, "")
 	s.send(tea.WindowSizeMsg{Width: 120, Height: 40})
@@ -402,7 +388,7 @@ func TestBrowserKeepsHistoricalDocumentIdentityAndScrollInView(t *testing.T) {
 				width, header, reference, revision)
 		}
 		s.row("╰", "scrolled ")
-		s.fitsIn(size)
+		s.within(size)
 	}
 }
 
@@ -737,7 +723,7 @@ func TestBrowserNarrowFooterKeepsHelpAndHelpShowsEveryBinding(t *testing.T) {
 		"/ search names", "f find by lifecycle or claim", "g toggle grouping", "w toggle scope",
 		"d diagnostics", "d documents", "r references", "v show/hide versions", "i open issue", "p open PR",
 		"R refresh ledger", "? help", "q quit")
-	s.fitsIn(size)
+	s.within(size)
 }
 
 func TestBrowserKeyListYieldsTheBodyToAStatusNotice(t *testing.T) {
@@ -749,7 +735,7 @@ func TestBrowserKeyListYieldsTheBodyToAStatusNotice(t *testing.T) {
 	if header := s.header(); !strings.Contains(header, "archived shown") {
 		t.Fatalf("first line %q with every binding listed, want the header saying archived shown", header)
 	}
-	s.fitsIn(size)
+	s.within(size)
 }
 
 func TestBrowserPreservesRelationScrollAndFindingContextAcrossNestedReferences(t *testing.T) {

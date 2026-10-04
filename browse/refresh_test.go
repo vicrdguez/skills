@@ -112,14 +112,14 @@ func TestFailedRefreshStaysLoudUntilARefreshSucceeds(t *testing.T) {
 			t.Fatalf("%d-column header %q, want NOT REFRESHED %s", size.Width, header, revision)
 		}
 		s.shows("Slice: orders/cancel", "! Refresh failed; displayed facts are")
-		s.fitsIn(size)
+		s.within(size)
 		// Listing every binding keeps the marker and the reason in view.
 		s.press("?")
 		if header := s.header(); !strings.HasSuffix(header, "NOT REFRESHED "+revision) {
 			t.Fatalf("%d-column header %q with every binding listed, want NOT REFRESHED %s", size.Width, header, revision)
 		}
 		s.shows("! Refresh failed; displayed facts are", "↑/k up")
-		s.fitsIn(size)
+		s.within(size)
 		s.press("?") // Close the key list again.
 		if err := os.Rename(missing, s.root); err != nil {
 			t.Fatal(err)
@@ -167,7 +167,7 @@ func TestFailedRefreshPrioritizesWarningOverDocumentContextAtNarrowWidths(t *tes
 			}
 		}
 		s.shows("Refresh failed; displayed", "configured ledger")
-		s.fitsIn(size)
+		s.within(size)
 	}
 	if err := os.Rename(missing, s.root); err != nil {
 		t.Fatal(err)
