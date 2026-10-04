@@ -44,9 +44,9 @@ func TestRefreshKeepsFilteredReportAndReadingPositionWhileFactsAdvance(t *testin
 	changeFixture(t, s.root, "projects/widgets/proposals/orders/refund/state.json", `"state": "ready_for_implementation"`, `"state": "merged"`)
 	commitFixture(t, s.root, "advance report and other slice")
 	s.press("R")
-	s.shows("Newer document available", "HISTORICAL document", "scrolled ")
+	s.shows("Newer document available", "HISTORICAL ", "scrolled ")
 	s.hides("New implementation evidence is readable")
-	if before, after := strings.Split(old, "\n"), strings.Split(s.model.View(), "\n"); strings.Join(before[2:9], "\n") != strings.Join(after[2:9], "\n") {
+	if before, after := strings.Split(old, "\n"), strings.Split(s.model.View(), "\n"); strings.Join(before[1:8], "\n") != strings.Join(after[1:8], "\n") {
 		t.Fatalf("refresh replaced document text or reading position:\nbefore:\n%s\nafter:\n%s", old, s.model.View())
 	}
 	s.press("esc")
@@ -54,7 +54,7 @@ func TestRefreshKeepsFilteredReportAndReadingPositionWhileFactsAdvance(t *testin
 	s.press("enter")
 	s.send(tea.WindowSizeMsg{Width: 100, Height: 50})
 	s.shows("New implementation evidence is readable")
-	s.hides("newer document available")
+	s.hides("Newer document available")
 	s.press("esc", "esc")
 	s.fact("Lifecycle", "Ready for Merge")
 	s.press("esc")
@@ -95,25 +95,92 @@ func TestAutomaticRefreshIgnoresUncommittedEditsAndLateOldResults(t *testing.T) 
 	s.hides("NOT REFRESHED")
 }
 
-func TestFailedRefreshKeepsLastViewMarkedStaleAndRecovers(t *testing.T) {
+func TestFailedRefreshStaysLoudUntilARefreshSucceeds(t *testing.T) {
+	for _, size := range []tea.WindowSizeMsg{{Width: 40, Height: 14}, {Width: 140, Height: 35}} {
+		s := start(t, "widgets")
+		s.send(size)
+		s.press("enter", "down", "enter")
+		s.shows("Slice  orders/cancel")
+		revision := gitOutput(t, s.root, "rev-parse", "HEAD")[:12]
+		missing := s.root + "-temporarily-missing"
+		if err := os.Rename(s.root, missing); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Rename(missing, s.root) })
+		s.press("R")
+		if header := s.header(); !strings.HasSuffix(header, "NOT REFRESHED "+revision) {
+			t.Fatalf("%d-column header %q, want NOT REFRESHED %s", size.Width, header, revision)
+		}
+		s.shows("Slice  orders/cancel", "! Refresh failed; displayed facts are")
+		s.fitsIn(size)
+		// Listing every binding keeps the marker and the reason in view.
+		s.press("?")
+		if header := s.header(); !strings.HasSuffix(header, "NOT REFRESHED "+revision) {
+			t.Fatalf("%d-column header %q with every binding listed, want NOT REFRESHED %s", size.Width, header, revision)
+		}
+		s.shows("! Refresh failed; displayed facts are", "↑/k up")
+		s.fitsIn(size)
+		s.press("?") // Close the key list again.
+		if err := os.Rename(missing, s.root); err != nil {
+			t.Fatal(err)
+		}
+		s.press("R")
+		if header := s.header(); !strings.HasSuffix(header, " "+revision) {
+			t.Fatalf("%d-column header %q after recovery, want %s", size.Width, header, revision)
+		}
+		s.shows("Slice  orders/cancel")
+		s.hides("NOT REFRESHED", "Refresh failed")
+	}
+}
+
+func TestFailedRefreshPrioritizesWarningOverDocumentContextAtNarrowWidths(t *testing.T) {
 	s := start(t, "widgets")
-	s.send(tea.WindowSizeMsg{Width: 120, Height: 35})
-	s.press("enter", "down", "enter")
-	s.fact("Lifecycle", "Awaiting Review")
+	s.send(tea.WindowSizeMsg{Width: 80, Height: 14})
+	s.press("enter", "down", "enter", "a", "d", "down", "down", "enter", "r", "enter", "pgdown")
+	reference := gitOutput(t, s.root, "rev-parse", "HEAD~1")[:7]
+	revision := gitOutput(t, s.root, "rev-parse", "HEAD")[:7]
 	missing := s.root + "-temporarily-missing"
 	if err := os.Rename(s.root, missing); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Rename(missing, s.root) })
 	s.press("R")
-	s.shows("NOT REFRESHED", "Refresh failed")
-	s.fact("Lifecycle", "Awaiting Review")
+	for _, width := range []int{48, 43, 40, 30} {
+		size := tea.WindowSizeMsg{Width: width, Height: 14}
+		s.send(size)
+		header := s.header()
+		if !strings.Contains(header, "NOT REFRESHED "+revision) {
+			t.Fatalf("%d-column failed-refresh header %q lacks last committed revision", width, header)
+		}
+		switch width {
+		case 48:
+			if !strings.Contains(header, "HIST "+reference) || !strings.Contains(header, "archived") || !strings.Contains(header, "%") {
+				t.Fatalf("%d-column header %q lost document, archive or scroll context", width, header)
+			}
+		case 43:
+			if !strings.Contains(header, "HIST "+reference) || !strings.Contains(header, "archived") || strings.Contains(header, "%") {
+				t.Fatalf("%d-column header %q should drop scroll before archive and document context", width, header)
+			}
+		case 40:
+			if !strings.Contains(header, "HIST "+reference) || strings.Contains(header, "archived") || strings.Contains(header, "%") {
+				t.Fatalf("%d-column header %q should retain document identity after scroll and archive yield", width, header)
+			}
+		case 30:
+			if strings.Contains(header, "HIST") || strings.Contains(header, "archived") || strings.Contains(header, "%") {
+				t.Fatalf("%d-column header %q should retain the warning after context yields", width, header)
+			}
+		}
+		s.shows("Refresh failed; displayed", "configured ledger")
+		s.fitsIn(size)
+	}
 	if err := os.Rename(missing, s.root); err != nil {
 		t.Fatal(err)
 	}
+	s.send(tea.WindowSizeMsg{Width: 40, Height: 14})
 	s.press("R")
-	s.shows("current committed ledger")
-	s.fact("Lifecycle", "Awaiting Review")
+	if header := s.header(); !strings.Contains(header, "HIST") || !strings.Contains(header, reference) || !strings.Contains(header, "archived") || !strings.Contains(header, "%") {
+		t.Fatalf("after recovery, document context did not return to 40-column header: %q", header)
+	}
 	s.hides("NOT REFRESHED", "Refresh failed")
 }
 

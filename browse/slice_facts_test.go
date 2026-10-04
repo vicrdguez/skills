@@ -158,7 +158,7 @@ func TestLongSliceDetailKeepsHintsAndScrollPositionOutOfItsFacts(t *testing.T) {
 	s.send(tea.WindowSizeMsg{Width: 80, Height: 16})
 	s.press("enter", "down", "enter", "down", "down")
 	lines := strings.Split(s.text(), "\n")
-	if header := lines[1]; strings.Contains(header, "scrolled") {
+	if header := lines[0]; strings.Contains(header, "scrolled") || strings.Contains(header, "%") {
 		t.Fatalf("the header repeats the scroll position: %q", header)
 	}
 	border := ""
@@ -170,9 +170,10 @@ func TestLongSliceDetailKeepsHintsAndScrollPositionOutOfItsFacts(t *testing.T) {
 	if !strings.Contains(border, "scrolled ") || strings.Contains(border, "scrolled 0%") {
 		t.Fatalf("the pane border lacks the scroll position: %q\n%s", border, s.text())
 	}
-	s.shows("d documents", "r claim reference")
+	s.shows("d documents", "? help")
 
 	s.send(tea.WindowSizeMsg{Width: 120, Height: 80})
+	s.shows("d documents", "r claim reference")
 	facts := strings.ToLower(paneText(s.text(), "Slice"))
 	for _, hint := range []string{"press", "dtoread", "rfollows", "toselect"} {
 		if strings.Contains(facts, hint) {

@@ -15,7 +15,7 @@ func TestUnrelatedCommitDoesNotClaimAReportHasAChangedVersion(t *testing.T) {
 	changeFixture(t, s.root, "projects/widgets/proposals/orders/refund/state.json", `"state": "ready_for_implementation"`, `"state": "merged"`)
 	commitFixture(t, s.root, "advance another slice")
 	s.press("R")
-	s.shows("HISTORICAL document", "The recorded implementation evidence is readable")
+	s.shows("HISTORICAL ", "The recorded implementation evidence is readable")
 	s.hides("Newer document available")
 	s.press("esc", "esc")
 	s.shows("Blocks      orders/refund", "Merged")
