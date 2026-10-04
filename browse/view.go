@@ -269,6 +269,8 @@ func (m Model) documentPane(height int) (int, int) {
 }
 
 // navigator lists the reader's entries, each Slice's under its heading.
+// Rebuilding the listing for sizing and rendering repeats presentation work;
+// cache it if larger document sets make cursor movement perceptibly slow.
 func (m Model) navigator() listing {
 	l := listing{empty: "No documents are listed at this committed revision. Press d for the diagnostics, if any.", cursorRow: -1}
 	entries := m.reader.entries

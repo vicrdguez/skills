@@ -30,6 +30,16 @@ type reader struct {
 	shown         shown
 	// trail is the path back through followed references, most recent last.
 	trail []trailFrame
+	// followed adds the displayed report's own versions to the navigator
+	// on request, retaining the document and cursor to return to.
+	followed *followedVersions
+}
+
+type followedVersions struct {
+	document *ledger.Document
+	load     versionLoad
+	shown    shown
+	originID string
 }
 
 type versionLoad struct {
@@ -54,6 +64,7 @@ type entry struct {
 	// identify it.
 	group        string
 	slice, phase string
+	followed     bool
 }
 
 // shown is the displayed document, pinned until another is selected or
@@ -81,6 +92,8 @@ type trailFrame struct {
 	references []ledger.LabeledReference
 	origin     screen
 	cursor     int
+	followed   *followedVersions
+	entryID    string
 }
 
 func (m *Model) openDocuments() {
@@ -118,6 +131,8 @@ func (m *Model) startReader(origin screen) {
 // readDocuments lists the reader's documents at snapshot. It loads the
 // Report Versions of a Slice's reports, and of every report group of a
 // Proposal already expanded.
+// Slice opening still loads both histories synchronously; lazy expansion
+// would reduce opening latency on large ledgers.
 func (m Model) readDocuments(snapshot *ledger.Snapshot) (reader, error) {
 	r := m.reader
 	var err error
@@ -137,6 +152,11 @@ func (m Model) readDocuments(snapshot *ledger.Snapshot) (reader, error) {
 		if _, expanded := loaded[key]; ok && (expanded || r.list.Slice != "") {
 			r.versions[key] = loadVersions(snapshot, r.list, availability.Slice, phaseOf(availability.Kind))
 		}
+	}
+	if r.followed != nil {
+		followed := *r.followed
+		followed.load = loadFollowedVersions(snapshot, followed.document)
+		r.followed = &followed
 	}
 	r.entries = r.build()
 	return r, nil
@@ -168,6 +188,51 @@ func phaseOf(kind ledger.DocumentKind) string {
 // build lists the navigator's entries: a Slice's documents, or a Proposal's
 // description followed by each Slice's documents under its name.
 func (r reader) build() []entry {
+	entries := r.baseEntries()
+	if r.followed == nil {
+		return entries
+	}
+	followed := r.followed
+	heading := "Followed report versions: " + followed.document.Reference.Path
+	id := "followed " + followed.document.Reference.Path
+	if versions := followed.load.versions; versions != nil {
+		for _, version := range versions.Versions {
+			reference := version.Reference
+			entries = append(entries, entry{
+				heading: heading, id: id + " @" + reference.Commit, followed: true,
+				columns: append([]span{{text: "  └ " + reference.Commit[:min(7, len(reference.Commit))]}}, reportColumns(version.Report)...),
+				marked:  len(version.Diagnostics) > 0, reference: &reference,
+			})
+		}
+	}
+	var notes []string
+	switch {
+	case followed.load.problem != "":
+		notes = []string{followed.load.problem}
+	case followed.load.versions.Incomplete:
+		notes = []string{"Local history is incomplete, so earlier versions may be missing:"}
+		for _, diagnostic := range followed.load.versions.Diagnostics {
+			notes = append(notes, DiagnosticText(diagnostic))
+		}
+	case len(followed.load.versions.Versions) == 0:
+		notes = []string{"No locally available Report Versions were found."}
+	}
+	if len(notes) > 0 {
+		entries = append(entries, entry{heading: heading, id: id + " history", followed: true,
+			columns: texts("Report Version availability"), marked: true, note: notes})
+	}
+	return entries
+}
+
+func loadFollowedVersions(snapshot *ledger.Snapshot, document *ledger.Document) versionLoad {
+	versions, err := snapshot.VersionsAt(document.Project, document.Proposal+"/"+document.Slice, phaseOf(document.Kind), document.Archived)
+	if err != nil {
+		return versionLoad{problem: "Cannot discover report versions: " + err.Error()}
+	}
+	return versionLoad{versions: versions}
+}
+
+func (r reader) baseEntries() []entry {
 	if r.list == nil {
 		return nil
 	}
@@ -297,6 +362,8 @@ func (r reader) reportEntries(slice, heading string, kind ledger.DocumentKind) [
 	entries := []entry{header}
 	if loaded && !r.collapsed[key] {
 		for _, version := range earlier {
+			// Short reference labels repeat slicing elsewhere; a shared
+			// presentation helper could keep their widths consistent.
 			commit := version.Reference.Commit
 			reference := version.Reference
 			entries = append(entries, entry{
@@ -376,7 +443,11 @@ func unreadableEntry(document ledger.DocumentEntry, heading string) entry {
 // leaves any followed references behind.
 func (m *Model) selectEntry() {
 	r := &m.reader
-	r.trail = nil
+	cursor := m.cursor[readerScreen]
+	if cursor >= len(r.entries) || !r.entries[cursor].followed {
+		r.trail, r.followed = nil, nil
+		r.entries = r.build()
+	}
 	s := shown{openedContext: m.currentContext(), openedRevision: m.snapshot.Revision}
 	if cursor := m.cursor[readerScreen]; cursor < len(r.entries) {
 		selected := r.entries[cursor]
@@ -432,6 +503,24 @@ func (m *Model) moveEntry(delta int) {
 // the cursor, or hides and shows them again once loaded.
 func (m *Model) toggleVersions() {
 	r := &m.reader
+	if r.followed != nil {
+		m.closeFollowedVersions()
+		return
+	}
+	if r.documentFocus && len(r.trail) > 0 {
+		document := r.shown.document
+		if document == nil || (document.Kind != ledger.ImplementReportDocumentKind && document.Kind != ledger.WatchdogReportDocumentKind) {
+			m.status = "The displayed document is not a phase report"
+			return
+		}
+		r.followed = &followedVersions{document: document, load: loadFollowedVersions(m.snapshot, document),
+			shown: r.shown, originID: m.selectedIdentity(readerScreen)}
+		m.cursor[readerScreen] = len(r.entries)
+		r.entries = r.build()
+		r.documentFocus = false
+		m.selectEntry()
+		return
+	}
 	cursor := m.cursor[readerScreen]
 	if cursor >= len(r.entries) || r.entries[cursor].group == "" {
 		m.status = "Select a report to show or hide its earlier versions"
@@ -464,6 +553,34 @@ func (m *Model) toggleVersions() {
 		}
 	}
 	m.selectEntry()
+}
+
+// closeFollowedVersions returns to the exact document and navigator cursor
+// from before its versions were opened, without consuming a reference frame.
+func (m *Model) closeFollowedVersions() {
+	r := &m.reader
+	followed := r.followed
+	r.followed = nil
+	r.entries = r.build()
+	r.shown = followed.shown
+	r.shown.rendered = 0
+	r.shown.newer = m.documentHasNewerVersion(r.shown.document)
+	r.documentFocus = true
+	m.restoreEntry(followed.originID)
+	m.status = ""
+}
+
+func (m *Model) restoreEntry(id string) {
+	for index, candidate := range m.reader.entries {
+		if candidate.id == id {
+			m.cursor[readerScreen] = index
+			m.selectionMissing, m.missingIdentity = "", ""
+			return
+		}
+	}
+	m.cursor[readerScreen] = 0
+	m.missingIdentity, m.missingScreen = id, readerScreen
+	m.selectionMissing = "Selected " + id + " is no longer available in these results; move to select another"
 }
 
 func (m *Model) openReferences() {
@@ -512,7 +629,14 @@ func (m *Model) followReference(reference ledger.Reference) {
 		shown:      r.shown,
 		references: append([]ledger.LabeledReference(nil), m.references...),
 		origin:     m.referenceOrigin, cursor: m.cursor[referencesScreen],
+		followed: r.followed, entryID: m.selectedIdentity(readerScreen),
 	})
+	if r.followed != nil {
+		id := r.followed.originID
+		r.followed = nil
+		r.entries = r.build()
+		m.restoreEntry(id)
+	}
 	r.shown = shown{document: document, openedContext: m.currentContext(), openedRevision: m.snapshot.Revision}
 	r.shown.newer = m.documentHasNewerVersion(document)
 	r.documentFocus = true
@@ -529,6 +653,14 @@ func (m *Model) returnAlongTrail() {
 	r := &m.reader
 	frame := r.trail[len(r.trail)-1]
 	r.trail = r.trail[:len(r.trail)-1]
+	r.followed = frame.followed
+	if r.followed != nil {
+		followed := *r.followed
+		followed.load = loadFollowedVersions(m.snapshot, followed.document)
+		r.followed = &followed
+	}
+	r.entries = r.build()
+	m.restoreEntry(frame.entryID)
 	r.shown = frame.shown
 	r.shown.rendered = 0
 	r.shown.newer = m.documentHasNewerVersion(r.shown.document)

@@ -413,9 +413,14 @@ func TestBrowserFollowsAnArchivedReportReferenceWithoutUsingTheCurrentSliceLocat
 	fixtureLedger(t, func(directory string) {
 		root = directory
 		write(t, directory, "projects/widgets/archive/legacy/old/watchdog-report.md", "Earlier archived watchdog report.\n")
+		write(t, directory, "projects/widgets/proposals/legacy/proposal.json", `{"accepted": "2024-01-01T00:00:00Z"}`)
+		write(t, directory, "projects/widgets/proposals/legacy/proposal.md", "Active replacement proposal.\n")
+		write(t, directory, "projects/widgets/proposals/legacy/old/state.json", `{"state": "merged", "title": "Replacement", "branch": "replacement"}`)
+		write(t, directory, "projects/widgets/proposals/legacy/old/watchdog-report.md", "Unrelated active replacement report.\n")
 	})
 	previous := gitOutput(t, root, "rev-parse", "HEAD")
 	watchdogPath := "projects/widgets/archive/legacy/old/watchdog-report.md"
+	recorded := gitOutput(t, root, "log", "-1", "--format=%H", "--", watchdogPath)
 	currentPath := "projects/widgets/proposals/orders/cancel"
 	report, err := ledger.FormatReport(ledger.ImplementPhase, ledger.Report{
 		Schema: 1, Outcome: "awaiting_review",
@@ -435,12 +440,32 @@ func TestBrowserFollowsAnArchivedReportReferenceWithoutUsingTheCurrentSliceLocat
 	git(t, root, "commit", "-q", "-m", "later archived report and reference")
 	s := &session{t: t, model: browse.New(snapshotAfterChange(t, root), browse.Options{Project: "widgets"})}
 	s.send(tea.WindowSizeMsg{Width: 120, Height: 80})
-	s.press("enter", "down", "enter", "d", "down", "down", "enter", "r", "down", "down", "enter")
+	s.press("down", "enter", "down", "enter", "d", "down", "down", "enter", "r", "down", "down", "enter")
 	// The followed report keeps its archived incarnation: it is named and
 	// compared at its own location, not the current Slice's.
 	s.shows("Earlier archived watchdog report", "old/watchdog-report.md · HISTORICAL "+previous[:12],
 		"Newer document available", "current lifecycle: Awaiting Review")
 	s.hides("Later archived watchdog report")
+	followed := s.model.View()
+	s.press("v")
+	s.shows("Followed report versions", recorded[:7])
+	s.hides("Unrelated active replacement report")
+	// The cursor selects the latest version, then the earlier one, in the
+	// reader itself; the unrelated implementation group stays expanded.
+	s.press("enter")
+	s.shows("Later archived watchdog report", "old/watchdog-report.md")
+	s.press("esc", "down", "enter")
+	s.shows("Earlier archived watchdog report", "HISTORICAL "+recorded[:12])
+	s.hides("Later archived watchdog report")
+	s.press("esc", "v")
+	if after := s.model.View(); after != followed {
+		t.Fatalf("closing followed versions did not restore the followed document:\nbefore:\n%s\nafter:\n%s", followed, after)
+	}
+	s.press("esc")
+	s.shows("References (3)", "watchdog")
+	s.press("esc")
+	s.shows("Current implementation reasoning", "cancel/implement-report.md · current")
+	s.row("> ", "Implementation report", "awaiting_review")
 }
 
 func TestBrowserReturnsFromNestedVersionsToTheDocumentList(t *testing.T) {

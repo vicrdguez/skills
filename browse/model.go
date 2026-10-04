@@ -426,6 +426,12 @@ func (m *Model) readerKey(msg tea.KeyMsg) bool {
 		r.documentFocus = true
 	case key.Matches(msg, m.keys.Focus):
 		r.documentFocus = true
+	case key.Matches(msg, m.keys.Back) && r.followed != nil:
+		if r.documentFocus {
+			r.documentFocus = false
+		} else {
+			m.closeFollowedVersions()
+		}
 	case key.Matches(msg, m.keys.Back) && r.documentFocus && len(r.trail) > 0:
 		m.returnAlongTrail()
 		return true
