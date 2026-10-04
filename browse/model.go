@@ -84,25 +84,23 @@ type Options struct {
 }
 
 type keyMap struct {
-	Up, Down, Enter, Back, Focus, Page, Next, Previous, Projects, Archived, Search, Facts, Group, Scope, Diagnostics, Documents, References, Versions, Issue, PullRequest, Refresh, Help, Quit key.Binding
+	Up, Down, PageUp, PageDown, Enter, Back, Focus, Next, Previous, Projects, Archived, Search, Facts, Group, Scope, Diagnostics, Documents, References, Versions, Issue, PullRequest, Refresh, Help, Quit key.Binding
 }
 
-func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Enter, k.Focus, k.Back, k.Page, k.Documents, k.References, k.Versions, k.Projects, k.Refresh, k.Help, k.Next, k.Archived, k.Issue, k.PullRequest, k.Quit, k.Search, k.Facts}
-}
-
-func (k keyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Up, k.Down, k.Enter, k.Back}, {k.Focus, k.Page}, {k.Next, k.Previous}, {k.Projects, k.Archived}, {k.Search, k.Facts, k.Group, k.Scope, k.Diagnostics}, {k.Documents, k.References, k.Versions}, {k.Issue, k.PullRequest, k.Refresh}, {k.Help, k.Quit}}
+// all lists every binding in the order `?` shows them.
+func (k keyMap) all() []key.Binding {
+	return []key.Binding{k.Up, k.Down, k.PageUp, k.PageDown, k.Enter, k.Back, k.Focus, k.Next, k.Previous, k.Projects, k.Archived, k.Search, k.Facts, k.Group, k.Scope, k.Diagnostics, k.Documents, k.References, k.Versions, k.Issue, k.PullRequest, k.Refresh, k.Help, k.Quit}
 }
 
 func newKeyMap() keyMap {
 	return keyMap{
 		Up:          key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "up")),
 		Down:        key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),
+		PageUp:      key.NewBinding(key.WithKeys("pgup"), key.WithHelp("pgup", "page up")),
+		PageDown:    key.NewBinding(key.WithKeys("pgdown"), key.WithHelp("pgdown", "page down")),
 		Enter:       key.NewBinding(key.WithKeys("enter", "right", "l"), key.WithHelp("enter", "open")),
 		Back:        key.NewBinding(key.WithKeys("esc", "backspace", "left", "h"), key.WithHelp("esc", "back")),
 		Focus:       key.NewBinding(key.WithKeys("tab", "right", "l"), key.WithHelp("tab/→", "focus document")),
-		Page:        key.NewBinding(key.WithKeys("pgup", "pgdown"), key.WithHelp("pgup/pgdn", "page")),
 		Next:        key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next relation")),
 		Previous:    key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "previous relation")),
 		Projects:    key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "switch project")),
@@ -112,9 +110,9 @@ func newKeyMap() keyMap {
 		Versions:    key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "show/hide versions")),
 		Search:      key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search names")),
 		Facts:       key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "find by lifecycle or claim")),
-		Group:       key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "group by proposal/lifecycle")),
-		Scope:       key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "project/every project")),
-		Diagnostics: key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "result diagnostics")),
+		Group:       key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "toggle grouping")),
+		Scope:       key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "toggle scope")),
+		Diagnostics: key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "diagnostics")),
 		Issue:       key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "open issue")),
 		PullRequest: key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "open PR")),
 		Refresh:     key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "refresh ledger")),
@@ -216,7 +214,6 @@ func New(snapshot *ledger.Snapshot, options Options) Model {
 		parent:   map[screen]screen{sliceScreen: proposalScreen},
 		width:    80, height: 24, status: options.Notice,
 	}
-	model.help.Width = model.width
 	if model.open == nil {
 		model.open = systemOpen
 	}
@@ -227,29 +224,64 @@ func New(snapshot *ledger.Snapshot, options Options) Model {
 	return model
 }
 
-func (m Model) helpKeys() keyMap {
+// footerKeys lists the bindings that act on the current screen, mirroring
+// the conditions in key. The most specific come first, so a narrow footer
+// trims the general ones. Movement (up, down, page, shift+tab) acts widely
+// and is left to `?`, keeping the room for the screen's actions.
+func (m Model) footerKeys() []key.Binding {
 	keys := m.keys
-	keys.Diagnostics.SetEnabled(false)
-	keys.Focus.SetEnabled(false)
-	keys.Page.SetEnabled(false)
-	keys.Versions.SetEnabled(false)
-	switch m.screen {
-	case resultsScreen:
-		keys.Documents = key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "result diagnostics"))
-	case readerScreen:
-		keys.Enter = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "read selected"))
-		keys.Back = key.NewBinding(key.WithKeys("esc", "left"), key.WithHelp("esc/←", "navigator/back"))
-		keys.Documents = key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "diagnostics"))
-		keys.Focus.SetEnabled(true)
-		keys.Page.SetEnabled(true)
-		keys.Versions.SetEnabled(true)
-		for _, binding := range []*key.Binding{&keys.Next, &keys.Previous, &keys.Archived, &keys.Search, &keys.Facts, &keys.Group, &keys.Scope, &keys.Issue, &keys.PullRequest} {
-			binding.SetEnabled(false)
+	var bindings []key.Binding
+	add := func(binding key.Binding, acts bool) {
+		if acts {
+			bindings = append(bindings, binding)
 		}
-	case diagnosticsScreen:
-		keys.Documents.SetEnabled(false)
 	}
-	return keys
+	relations := len(m.relations()) > 0
+	follow := keys.Enter
+	follow.SetHelp("enter", "follow relation")
+	add(follow, relations)
+	if m.screen == readerScreen {
+		keys.Enter.SetHelp("enter", "read selected")
+		keys.Back.SetHelp("esc/←", "navigator/back")
+	}
+	add(keys.Enter, m.screen != sliceScreen && m.canEnter() && (m.screen != readerScreen || !m.reader.documentFocus))
+	add(keys.Focus, m.screen == readerScreen && !m.reader.documentFocus)
+	add(keys.Next, relations)
+	add(keys.Back, m.screen != overviewScreen)
+	add(keys.Group, m.finding())
+	add(keys.Scope, m.finding() && (m.query.Project != "" || m.project != ""))
+	diagnostics := keys.Diagnostics
+	if m.screen == resultsScreen {
+		diagnostics.SetHelp("d", "result diagnostics")
+	}
+	add(diagnostics, m.screen == resultsScreen || m.screen == readerScreen)
+	add(keys.Documents, (m.screen == proposalScreen && m.members != nil) || (m.screen == sliceScreen && m.slice != nil))
+	add(keys.References, (m.screen == readerScreen && m.reader.shown.document != nil) ||
+		(m.screen == sliceScreen && m.slice != nil && m.slice.Claim != nil))
+	versions := false
+	if m.screen == readerScreen {
+		cursor := m.cursor[readerScreen]
+		versions = cursor < len(m.reader.entries) && m.reader.entries[cursor].group != ""
+		if m.reader.documentFocus && len(m.reader.trail) > 0 {
+			document := m.reader.shown.document
+			versions = document != nil && (document.Kind == ledger.ImplementReportDocumentKind || document.Kind == ledger.WatchdogReportDocumentKind)
+		}
+		versions = versions || m.reader.followed != nil
+	}
+	add(keys.Versions, versions)
+	issue := keys.Issue
+	if m.screen == proposalScreen {
+		issue.SetHelp("i", "open parent issue")
+	}
+	_, _, issueRecorded := m.attachmentLink(true)
+	add(issue, issueRecorded)
+	_, _, pullRequestRecorded := m.attachmentLink(false)
+	add(keys.PullRequest, pullRequestRecorded)
+	add(keys.Facts, !m.inDocuments() && m.screen != factsScreen)
+	add(keys.Search, !m.inDocuments())
+	add(keys.Archived, !m.inDocuments())
+	add(keys.Projects, m.screen != overviewScreen)
+	return append(bindings, keys.Refresh, keys.Quit)
 }
 
 // Refresh requests are asynchronous so a slow ledger read cannot stall
@@ -280,7 +312,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		m.help.Width = msg.Width
 		m.layoutDetail()
 	case refreshTick:
 		return m, tea.Batch(refreshTimer(), m.requestRefresh())
@@ -330,7 +361,7 @@ func (m Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	finding := m.finding()
-	documentOverlay := isDocumentOverlay(m.screen) || (m.screen == diagnosticsScreen && m.diagnosticReturn == readerScreen)
+	documentOverlay := m.inDocuments()
 	switch {
 	case key.Matches(msg, m.keys.Quit):
 		return m, tea.Quit
@@ -341,9 +372,9 @@ func (m Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.move(-1)
 	case key.Matches(msg, m.keys.Down):
 		m.move(1)
-	case msg.String() == "pgup" && (m.screen == sliceScreen || m.screen == diagnosticsScreen):
+	case key.Matches(msg, m.keys.PageUp) && (m.screen == sliceScreen || m.screen == diagnosticsScreen):
 		m.detail.PageUp()
-	case msg.String() == "pgdown" && (m.screen == sliceScreen || m.screen == diagnosticsScreen):
+	case key.Matches(msg, m.keys.PageDown) && (m.screen == sliceScreen || m.screen == diagnosticsScreen):
 		m.detail.PageDown()
 	case key.Matches(msg, m.keys.Next) && m.screen == sliceScreen:
 		m.selectRelation(1)
@@ -569,6 +600,12 @@ func (m Model) isFindingScreen(screen screen) bool {
 	return screen == factsScreen || screen == resultsScreen || (screen == diagnosticsScreen && m.diagnosticReturn == resultsScreen) || (screen == sliceScreen && m.parent[sliceScreen] == resultsScreen)
 }
 
+// inDocuments reports whether the current screen belongs to a Proposal's or
+// Slice's documents, including their diagnostics.
+func (m Model) inDocuments() bool {
+	return isDocumentOverlay(m.screen) || (m.screen == diagnosticsScreen && m.diagnosticReturn == readerScreen)
+}
+
 func isDocumentOverlay(screen screen) bool {
 	return screen == readerScreen || screen == referencesScreen
 }
@@ -617,8 +654,13 @@ func (m *Model) toggleScope() {
 	m.load()
 }
 
+// canEnter reports whether the current list has a selected entry to open.
+func (m Model) canEnter() bool {
+	return m.selectionMissing == "" && m.failure == nil && m.rows() > 0
+}
+
 func (m *Model) enter() {
-	if m.selectionMissing != "" || m.failure != nil || m.rows() == 0 {
+	if !m.canEnter() {
 		return
 	}
 	selected := m.cursor[m.screen]
@@ -826,29 +868,39 @@ func (m *Model) load() {
 // current Slice's issue or pull request, or the current Proposal's parent
 // issue. Nothing is opened without this action.
 func (m *Model) openAttachment(issue bool) tea.Cmd {
-	var attachment *ledger.ForgeAttachment
-	noun := "pull request"
+	noun, url, ok := m.attachmentLink(issue)
 	switch {
-	case m.screen == sliceScreen && m.slice != nil && issue:
-		attachment, noun = m.slice.Issue, "issue"
-	case m.screen == sliceScreen && m.slice != nil:
-		attachment = m.slice.Submission
-	case m.screen == proposalScreen && m.members != nil && issue:
-		attachment, noun = m.members.Proposal.ParentIssue, "parent issue"
-	default:
+	case noun == "":
 		m.status = "Open an issue or pull request from a Slice, or a parent issue from a Proposal"
 		return nil
-	}
-	url, ok := pullRequestURL(attachment)
-	if issue {
-		url, ok = issueURL(attachment)
-	}
-	if !ok {
+	case !ok:
 		m.status = "No recorded " + noun + " attachment to open"
 		return nil
 	}
 	open := m.open
 	return func() tea.Msg { return openedMsg{url: url, err: open(url)} }
+}
+
+// attachmentLink names the attachment an issue or pull request request opens
+// on the current screen, with its URL when one is recorded. The noun is empty
+// on a screen without such an attachment.
+func (m Model) attachmentLink(issue bool) (noun, url string, ok bool) {
+	var attachment *ledger.ForgeAttachment
+	switch {
+	case m.screen == sliceScreen && m.slice != nil && issue:
+		attachment, noun = m.slice.Issue, "issue"
+	case m.screen == sliceScreen && m.slice != nil:
+		attachment, noun = m.slice.Submission, "pull request"
+	case m.screen == proposalScreen && m.members != nil && issue:
+		attachment, noun = m.members.Proposal.ParentIssue, "parent issue"
+	default:
+		return "", "", false
+	}
+	url, ok = pullRequestURL(attachment)
+	if issue {
+		url, ok = issueURL(attachment)
+	}
+	return noun, url, ok
 }
 
 // systemOpen asks the operating system to open url in the external browser.

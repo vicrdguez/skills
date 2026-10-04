@@ -66,13 +66,12 @@ func TestReaderShowsTheNavigatorBesideTheSelectedDocument(t *testing.T) {
 
 	s.press("down", "down", "down", "tab", "pgdown")
 	s.row("╰", "scrolled ", "╯")
-	if facts := strings.Split(s.text(), "\n")[1]; strings.Contains(facts, "scrolled") {
+	if facts := strings.Split(s.text(), "\n")[0]; strings.Contains(facts, "scrolled") {
 		t.Fatalf("the header repeats the scroll position: %q", facts)
 	}
-	s.shows("tab/→ focus document", "esc/← navigator/back", "pgup/pgdn page", "d diagnostics", "r references")
+	s.shows("esc/← navigator/back", "d diagnostics", "r references", "? help")
 	s.press("?")
-	s.shows("v show/hide versions")
-	s.hides("search names", "next relation")
+	s.shows("tab/→ focus document", "pgup page up", "pgdown page down", "v show/hide versions")
 }
 
 func TestReaderNestsEarlierReportVersionsUnderTheLatestByOutcomeAndRound(t *testing.T) {

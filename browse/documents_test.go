@@ -49,6 +49,11 @@ func TestDocumentReferencesKeepMetadataInWideAndStackedPanes(t *testing.T) {
 		s.within(size)
 		s.row("╭─ ▶ Documents")
 		s.row("╰", "1/5", "╯")
+		s.footerLists("? help")
+		revision := gitOutput(t, s.root, "rev-parse", "HEAD")[:12]
+		if header := s.header(); !strings.HasSuffix(header, " "+revision) || strings.Contains(header, "archived") {
+			t.Fatalf("reader header %q, want current ledger %s and no archive marker", header, revision)
+		}
 
 		s.press("down", "down", "enter", "r")
 		s.within(size)
@@ -56,6 +61,7 @@ func TestDocumentReferencesKeepMetadataInWideAndStackedPanes(t *testing.T) {
 		s.row("╭─ References (4)")
 		s.row("╭─ Reference")
 		s.row("╰", "1/4", "╯")
+		s.footerLists("? help")
 		s.press("enter")
 		s.shows("HISTORICAL")
 		s.within(size)

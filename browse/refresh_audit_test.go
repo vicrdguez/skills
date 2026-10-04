@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 func TestRefreshUpdatesCurrentClaimReferences(t *testing.T) {
@@ -31,20 +30,4 @@ func TestRefreshUpdatesCurrentClaimReferences(t *testing.T) {
 	s.hides("current Claim state")
 	s.press("esc")
 	s.shows("Claim: none")
-}
-
-func TestRefreshFailureFitsNarrowTerminal(t *testing.T) {
-	s := start(t, "widgets")
-	s.send(tea.WindowSizeMsg{Width: 40, Height: 14})
-	missing := s.root + "-missing"
-	if err := os.Rename(s.root, missing); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Rename(missing, s.root) })
-	s.press("R")
-	s.shows("NOT REFRESHED")
-	view := s.model.View()
-	if lipgloss.Height(view) > 14 {
-		t.Fatalf("failure hides browsing context in narrow terminal (%d lines):\n%s", lipgloss.Height(view), view)
-	}
 }
