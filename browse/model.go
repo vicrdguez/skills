@@ -156,8 +156,12 @@ type Model struct {
 	inventory *ledger.ProjectInventory
 	members   *ledger.ProposalDetail
 	slice     *ledger.SliceDetail
-	search    *ledger.SliceSearch
-	failure   error
+	// sliceReports are the opened Slice's latest report outcomes.
+	sliceReports []phaseReport
+	// preview holds the facts of the Slice selected in a Slice list.
+	preview slicePreview
+	search  *ledger.SliceSearch
+	failure error
 
 	docContext             screen
 	documents              *ledger.DocumentList
@@ -241,6 +245,7 @@ func New(snapshot *ledger.Snapshot, options Options) Model {
 		model.screen, model.project = projectScreen, options.Project
 	}
 	model.load()
+	model.syncPreview()
 	return model
 }
 
@@ -250,6 +255,13 @@ func New(snapshot *ledger.Snapshot, options Options) Model {
 // and is left to `?`, keeping the room for the screen's actions.
 func (m Model) footerKeys() []key.Binding {
 	keys := m.keys
+	switch m.screen {
+	case proposalScreen:
+		keys.Documents.SetHelp("d", "proposal documents")
+	case sliceScreen:
+		keys.Documents.SetHelp("d", "documents")
+		keys.References.SetHelp("r", "claim reference")
+	}
 	var bindings []key.Binding
 	add := func(binding key.Binding, acts bool) {
 		if acts {
@@ -314,6 +326,13 @@ func (m *Model) requestRefresh() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	model, command := m.update(msg)
+	next := model.(Model)
+	next.syncPreview()
+	return next, command
+}
+
+func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -842,8 +861,7 @@ func (m Model) relations() []relation {
 	if m.screen != sliceScreen || m.slice == nil || m.failure != nil {
 		return nil
 	}
-	_, relations := sliceLines(m.slice)
-	return relations
+	return sliceRelations(m.slice)
 }
 
 // switchProject returns to the overview with the current Project selected.
@@ -879,6 +897,9 @@ func (m *Model) load() {
 		m.members, m.failure = m.snapshot.ProposalAt(m.project, m.proposal, m.archived)
 	case sliceScreen:
 		m.slice, m.failure = m.snapshot.SliceAt(m.project, m.item, m.archived)
+		if m.failure == nil {
+			m.sliceReports = latestReports(m.snapshot.SliceDocumentListAt(m.project, m.item, m.archived))
+		}
 	case factsScreen, resultsScreen, diagnosticsScreen:
 		m.query.IncludeArchived = m.includeArchived
 		m.search, m.failure = m.snapshot.FindSlices(m.query)
@@ -888,6 +909,46 @@ func (m *Model) load() {
 	}
 	m.layoutDetail()
 	m.detail.GotoTop()
+}
+
+// slicePreview is the facts of the Slice selected in a Slice list, read once
+// per selection and revision rather than on every redraw.
+type slicePreview struct {
+	key     string
+	slice   *ledger.SliceDetail
+	reports []phaseReport
+	err     error
+}
+
+// syncPreview reads the facts of the Slice selected on a Proposal's Slices
+// or in the find results, unless they are already read at this revision.
+func (m *Model) syncPreview() {
+	var project, item string
+	var archived bool
+	cursor := m.cursor[m.screen]
+	switch {
+	case m.failure != nil || m.selectionMissing != "":
+		return
+	case m.screen == proposalScreen && m.members != nil && cursor < len(m.members.Slices):
+		project, item, archived = m.project, m.members.Slices[cursor].Item, m.archived
+	case m.screen == resultsScreen && m.search != nil:
+		results := m.results()
+		if cursor >= len(results) {
+			return
+		}
+		project, item, archived = results[cursor].project, results[cursor].match.Item, results[cursor].match.Archived
+	default:
+		return
+	}
+	key := m.snapshot.Revision + " " + project + "/" + item + locationKey(archived)
+	if m.preview.key == key {
+		return
+	}
+	m.preview = slicePreview{key: key}
+	m.preview.slice, m.preview.err = m.snapshot.SliceAt(project, item, archived)
+	if m.preview.err == nil {
+		m.preview.reports = latestReports(m.snapshot.SliceDocumentListAt(project, item, archived))
+	}
 }
 
 // openAttachment builds the explicit external-browser request for the
