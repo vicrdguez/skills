@@ -58,7 +58,7 @@ func TestRefreshKeepsFilteredReportAndReadingPositionWhileFactsAdvance(t *testin
 	s.shows("New implementation evidence is readable", "cancel/implement-report.md · current")
 	s.hides("Newer document available")
 	s.press("esc", "esc")
-	s.shows("Lifecycle: Ready for Merge")
+	s.fact("Lifecycle", "Ready for Merge")
 	s.press("esc")
 	s.shows(`name contains "cancel"`, "watchdog claim", "grouped by lifecycle", "Ready for Merge", "orders/cancel")
 }
@@ -71,7 +71,8 @@ func TestAutomaticRefreshIgnoresUncommittedEditsAndLateOldResults(t *testing.T) 
 	path := "projects/widgets/proposals/orders/cancel/state.json"
 	changeFixture(t, s.root, path, `"state": "awaiting_review"`, `"state": "rework"`)
 	s.press("R")
-	s.shows("Lifecycle: Awaiting Review", initial)
+	s.shows(initial)
+	s.fact("Lifecycle", "Awaiting Review")
 
 	// A first request completes against the old commit but is delivered last.
 	model, oldCmd := s.model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("R")})
@@ -89,9 +90,10 @@ func TestAutomaticRefreshIgnoresUncommittedEditsAndLateOldResults(t *testing.T) 
 		t.Fatal("automatic check did not schedule a refresh and another check")
 	}
 	s.send(batch[1]())
-	s.shows("Lifecycle: Rework", gitOutput(t, s.root, "rev-parse", "HEAD")[:12])
+	s.shows(gitOutput(t, s.root, "rev-parse", "HEAD")[:12])
+	s.fact("Lifecycle", "Rework")
 	s.send(oldResult)
-	s.shows("Lifecycle: Rework")
+	s.fact("Lifecycle", "Rework")
 	s.hides("NOT REFRESHED")
 }
 
@@ -100,7 +102,7 @@ func TestFailedRefreshStaysLoudUntilARefreshSucceeds(t *testing.T) {
 		s := start(t, "widgets")
 		s.send(size)
 		s.press("enter", "down", "enter")
-		s.shows("Slice: orders/cancel")
+		s.shows("Slice  orders/cancel")
 		revision := gitOutput(t, s.root, "rev-parse", "HEAD")[:12]
 		missing := s.root + "-temporarily-missing"
 		if err := os.Rename(s.root, missing); err != nil {
@@ -111,7 +113,7 @@ func TestFailedRefreshStaysLoudUntilARefreshSucceeds(t *testing.T) {
 		if header := s.header(); !strings.HasSuffix(header, "NOT REFRESHED "+revision) {
 			t.Fatalf("%d-column header %q, want NOT REFRESHED %s", size.Width, header, revision)
 		}
-		s.shows("Slice: orders/cancel", "! Refresh failed; displayed facts are")
+		s.shows("Slice  orders/cancel", "! Refresh failed; displayed facts are")
 		s.within(size)
 		// Listing every binding keeps the marker and the reason in view.
 		s.press("?")
@@ -128,7 +130,7 @@ func TestFailedRefreshStaysLoudUntilARefreshSucceeds(t *testing.T) {
 		if header := s.header(); !strings.HasSuffix(header, " "+revision) {
 			t.Fatalf("%d-column header %q after recovery, want %s", size.Width, header, revision)
 		}
-		s.shows("Slice: orders/cancel")
+		s.shows("Slice  orders/cancel")
 		s.hides("NOT REFRESHED", "Refresh failed")
 	}
 }
@@ -194,7 +196,7 @@ func TestRefreshDoesNotSilentlySelectAnotherResultWhenSelectedSliceDisappears(t 
 	s.hides("> ")
 	s.press("enter")
 	s.shows("no longer available")
-	s.hides("Slice: orders/refund")
+	s.hides("Slice  orders/refund")
 	s.press("down", "enter")
-	s.shows("Slice: orders/refund")
+	s.shows("Slice  orders/refund")
 }

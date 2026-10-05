@@ -68,20 +68,17 @@ func unknownClaimSpan() span {
 	return span{"claim unknown", warningStyle}
 }
 
-// reportOutcomeLifecycles gives each report outcome the look of the
-// lifecycle it leads to, so an outcome reads in the lifecycle colours.
-var reportOutcomeLifecycles = map[string]string{
+// outcomeLifecycles lend each recorded report outcome the colour and weight
+// of a lifecycle; the outcome keeps its own text and no lifecycle glyph, so
+// it never reads as the Slice's lifecycle.
+var outcomeLifecycles = map[string]string{
 	"pass":                ledger.ReadyForMerge,
 	ledger.Rework:         ledger.Rework,
 	ledger.NeedsHuman:     ledger.NeedsHuman,
 	ledger.AwaitingReview: ledger.AwaitingReview,
 }
 
-// outcomeSpan names a report outcome by its text, coloured like its
-// lifecycle when it has one.
+// outcomeSpan names a report's outcome as the report recorded it.
 func outcomeSpan(outcome string) span {
-	if lifecycle, ok := reportOutcomeLifecycles[outcome]; ok {
-		return span{outcome, lifecycleLooks[lifecycle].style}
-	}
-	return span{text: outcome}
+	return span{outcome, lifecycleLooks[outcomeLifecycles[outcome]].style}
 }

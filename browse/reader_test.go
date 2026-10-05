@@ -200,7 +200,18 @@ func TestReaderPinsTheDisplayedDocumentWhenANewReviewLands(t *testing.T) {
 	s.press("esc")
 	s.row("> ", "Watchdog report", "pass", "· round 2")
 	s.row("└ "+first[:7], "rework", "· round 1")
-	s.press("enter")
+
+	// Leaving the pinned reader restores current sectioned facts, not the
+	// outcome of the historical report that remained displayed on refresh.
+	s.press("esc")
+	s.send(tea.WindowSizeMsg{Width: 140, Height: 80})
+	s.fact("Watchdog", "pass · round 2")
+	s.fact("Lifecycle", "Awaiting Review")
+	s.press("esc")
+	s.fact("Watchdog", "pass · round 2")
+	s.fact("Lifecycle", "Awaiting Review")
+
+	s.press("enter", "d", "down", "down", "down", "enter")
 	s.press(repeat("pgdown", 10)...)
 	s.shows("cancel/watchdog-report.md · current", "Review 2 of cancellation")
 	s.hides("Newer document available", "HISTORICAL "+second[:12])
