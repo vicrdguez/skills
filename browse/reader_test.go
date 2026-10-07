@@ -40,13 +40,14 @@ func review(t *testing.T, root, outcome string, round uint64, body string) strin
 }
 
 // reviewed starts at widgets after the cancel Slice's watchdog report was
-// recorded at rework round 1, rework round 2 and pass round 3, returning the
-// session and the three recording commits.
+// recorded at rework round 1, rework round 2 and pass round 3, each longer
+// than a pane, returning the session and the three recording commits.
 func reviewed(t *testing.T) (*session, []string) {
 	s := start(t, "widgets")
 	var commits []string
 	for round, outcome := range []string{"rework", "rework", "pass"} {
-		commits = append(commits, review(t, s.root, outcome, uint64(round+1), fmt.Sprintf("Review %d of cancellation.\n", round+1)))
+		body := fmt.Sprintf("Review %d of cancellation.\n\n", round+1) + strings.Repeat("Reviewed line.\n\n", 30)
+		commits = append(commits, review(t, s.root, outcome, uint64(round+1), body))
 	}
 	s.model = browse.New(snapshotAfterChange(t, s.root), browse.Options{Project: "widgets"})
 	return s, commits
@@ -58,7 +59,7 @@ func TestReaderShowsTheNavigatorBesideTheSelectedDocument(t *testing.T) {
 	s.send(size)
 	s.press("enter", "down", "enter", "d")
 	s.within(size)
-	s.row("╭─ ▶ Documents", "╭─ cancel/intent.md · current")
+	s.row("╭─ ▶ ", "cancel · ", "◐ Awaiting Review", "▸ watchdog claim", "╭─ cancel/intent.md · current")
 	s.row("> ", "intent.md")
 	s.row("Implementation report", "awaiting_review")
 	s.row("Watchdog report", "pass")
@@ -104,9 +105,11 @@ func TestReaderNestsEarlierReportVersionsUnderTheLatestByOutcomeAndRound(t *test
 	}
 
 	s.press(downs(4)...)
-	s.shows("cancel/watchdog-report.md · HISTORICAL "+commits[1][:12], "Review 2 of cancellation", "Outcome: rework")
+	s.row("╭─ ", "watchdog-report.md · HISTORICAL "+commits[1][:12], "rework", "round 2")
+	s.shows("Review 2 of cancellation")
 	s.press("down")
-	s.shows("cancel/watchdog-report.md · HISTORICAL "+commits[0][:12], "Review 1 of cancellation")
+	s.row("╭─ ", "watchdog-report.md · HISTORICAL "+commits[0][:12], "rework", "round 1")
+	s.shows("Review 1 of cancellation")
 }
 
 func TestReaderExpandsAProposalsReportVersionsOnRequest(t *testing.T) {
@@ -145,7 +148,7 @@ func TestReaderCursorSelectsAndFocusMovesBetweenPanes(t *testing.T) {
 	s.press("j")
 	s.row("> ", "Watchdog report")
 	s.press("esc")
-	s.shows("▶ Documents", "cancel/watchdog-report.md")
+	s.row("╭─ ▶ ", "Awaiting Review", "╭─ ", "watchdog-report.md")
 	s.row("> ", "Watchdog report")
 	s.press("esc")
 	if after := s.model.View(); after != before {
@@ -163,8 +166,9 @@ func TestReaderShowsOnePaneAtATimeWhenNarrow(t *testing.T) {
 
 	s.send(narrow)
 	s.within(narrow)
-	s.shows("▶ cancel/implement-report.md", "scrolled ")
-	s.hides("Documents")
+	s.row("╭─ ▶ ", "t.md · current")
+	s.shows("scrolled ")
+	s.hides("Awaiting Review")
 	s.send(wide)
 	if after := s.model.View(); after != before {
 		t.Fatalf("resizing changed the selected entry or scroll position:\nbefore:\n%s\nafter:\n%s", before, after)
@@ -173,16 +177,17 @@ func TestReaderShowsOnePaneAtATimeWhenNarrow(t *testing.T) {
 	s.send(narrow)
 	s.press("esc")
 	s.within(narrow)
-	s.shows("▶ Documents")
+	s.row("╭─ ▶ ", "Awaiting Review")
 	s.row("> ", "Implementation")
-	s.hides("cancel/implement-report.md")
+	s.hides("implement-report.md")
 	s.press("enter")
-	s.shows("▶ cancel/implement-report.md")
+	s.row("╭─ ▶ ", "t.md · current")
 }
 
 func TestReaderPinsTheDisplayedDocumentWhenANewReviewLands(t *testing.T) {
 	s := start(t, "widgets")
-	first := review(t, s.root, "rework", 1, "Review 1 of cancellation.\n")
+	padding := strings.Repeat("Reviewed line.\n\n", 30)
+	first := review(t, s.root, "rework", 1, "Review 1 of cancellation.\n\n"+padding)
 	s.model = browse.New(snapshotAfterChange(t, s.root), browse.Options{Project: "widgets"})
 	// Narrow enough that the focused document is shown alone.
 	s.send(tea.WindowSizeMsg{Width: 99, Height: 20})
@@ -190,7 +195,7 @@ func TestReaderPinsTheDisplayedDocumentWhenANewReviewLands(t *testing.T) {
 	s.shows("cancel/watchdog-report.md · current", "scrolled ")
 	before := strings.Split(s.model.View(), "\n")
 
-	second := review(t, s.root, "pass", 2, "Review 2 of cancellation.\n")
+	second := review(t, s.root, "pass", 2, "Review 2 of cancellation.\n\n"+padding)
 	s.press("R")
 	s.shows("Newer document available", "cancel/watchdog-report.md · HISTORICAL "+first[:12], "scrolled ")
 	// Below the pane's title, which now marks the document historical.
@@ -231,7 +236,8 @@ func TestReaderFollowsAConsumedContractReferenceAndReturns(t *testing.T) {
 	s.shows("References (3)", "contract")
 	s.press("down", "enter")
 	base := gitOutput(t, s.root, "rev-list", "--max-parents=0", "HEAD")
-	s.shows("▶ cancel/intent.md · HISTORICAL "+base[:12], "Context at open")
+	s.row("╭─ ", "Awaiting Review", "╭─ ▶ cancel/intent.md · HISTORICAL "+base[:12])
+	s.shows("Cancellation intent")
 	s.row("> ", "Watchdog report")
 	s.press("esc")
 	s.shows("References (3)", "contract")

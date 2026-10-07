@@ -8,6 +8,8 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/glamour/styles"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/vicrdguez/skills/ledger"
 )
 
@@ -33,6 +35,10 @@ type reader struct {
 	// followed adds the displayed report's own versions to the navigator
 	// on request, retaining the document and cursor to return to.
 	followed *followedVersions
+	// details shows the displayed document's metadata in place of its text,
+	// which keeps its scroll position underneath.
+	details     bool
+	detailsView viewport.Model
 }
 
 type followedVersions struct {
@@ -78,11 +84,9 @@ type shown struct {
 	viewport viewport.Model
 	// rendered is the width the content was last rendered at; zero renders
 	// it again.
-	rendered       int
-	renderProblem  string
-	openedContext  string
-	openedRevision string
-	newer          bool
+	rendered      int
+	renderProblem string
+	newer         bool
 }
 
 // trailFrame is what a followed reference left: the displayed document and
@@ -446,7 +450,7 @@ func (m *Model) selectEntry() {
 		r.trail, r.followed = nil, nil
 		r.entries = r.build()
 	}
-	s := shown{openedContext: m.currentContext(), openedRevision: m.snapshot.Revision}
+	var s shown
 	if cursor := m.cursor[readerScreen]; cursor < len(r.entries) {
 		selected := r.entries[cursor]
 		s.title, s.lines = selected.heading, selected.note
@@ -635,7 +639,7 @@ func (m *Model) followReference(reference ledger.Reference) {
 		r.entries = r.build()
 		m.restoreEntry(id)
 	}
-	r.shown = shown{document: document, openedContext: m.currentContext(), openedRevision: m.snapshot.Revision}
+	r.shown = shown{document: document}
 	r.shown.newer = m.documentHasNewerVersion(document)
 	r.documentFocus = true
 	m.screen = readerScreen
@@ -682,17 +686,140 @@ func (m Model) shownTitle() string {
 	if document == nil {
 		return m.reader.shown.title
 	}
-	name := documentName(document.Reference.Path)
+	return documentLabel(document, true) + " · " + m.identityForms(document)[0]
+}
+
+// documentLabel names a document, with its Slice when full.
+func documentLabel(document *ledger.Document, full bool) string {
 	switch {
 	case document.Kind == ledger.ProposalDocumentKind:
-		name = "Proposal description"
-	case document.Slice != "":
-		name = document.Slice + "/" + name
+		return "Proposal description"
+	case full && document.Slice != "":
+		return document.Slice + "/" + documentName(document.Reference.Path)
 	}
-	if document.Reference.Commit == m.snapshot.Revision {
-		return name + " · current"
+	return documentName(document.Reference.Path)
+}
+
+func (m Model) identityForms(document *ledger.Document) []string {
+	if commit := document.Reference.Commit; commit != m.snapshot.Revision {
+		return []string{"HISTORICAL " + short(commit, 12), "HIST " + short(commit, 7)}
 	}
-	return name + " · HISTORICAL " + short(document.Reference.Commit, 12)
+	return []string{"current"}
+}
+
+// documentTitle is the document pane's title within width: the displayed
+// document's name and identity, then what a reader needs at a glance from
+// its metadata.
+func (m Model) documentTitle(width int) string {
+	document := m.reader.shown.document
+	if document == nil {
+		return m.reader.shown.title
+	}
+	plain := lipgloss.NewStyle()
+	names := []string{documentLabel(document, true)}
+	// Only a document of the reader's own Slice is named without it.
+	if m.docContext == sliceScreen && document.Project == m.project && document.Proposal+"/"+document.Slice == m.item {
+		names = append(names, documentLabel(document, false))
+	}
+	parts := []indicator{{plain, names}, {plain, m.identityForms(document)}}
+	if report := document.Report; report != nil {
+		outcome := outcomeSpan(report.Outcome)
+		parts = append(parts, indicator{outcome.style, []string{outcome.text}})
+		if report.Round != 0 {
+			parts = append(parts, indicator{plain, []string{fmt.Sprintf("round %d", report.Round)}})
+		}
+	}
+	if decision := document.Decision; decision != nil {
+		parts = append(parts, indicator{plain, []string{"route " + decision.Route}})
+	}
+	if claim := document.Claim; claim != nil {
+		parts = append(parts, indicator{claimStyle, []string{"▸ " + claim.Phase + " claim", "▸ " + claim.Phase}})
+	}
+	if m.reader.shown.newer {
+		parts = append(parts, indicator{plain, []string{"newer available", "newer"}})
+	}
+	switch {
+	case metadataUnreadable(document):
+		parts = append(parts, indicator{warningStyle, []string{"! metadata unreadable", "! unreadable"}})
+	case len(document.Diagnostics) > 0:
+		parts = append(parts, indicator{warningStyle, []string{"! " + plural(len(document.Diagnostics), "diagnostic"), "!"}})
+	}
+	return fitTitle(parts, width)
+}
+
+// navigatorTitle names the reader's Proposal or Slice with its current
+// facts, which follow each refresh while the displayed document stays
+// pinned.
+func (m Model) navigatorTitle(width int) string {
+	plain := lipgloss.NewStyle()
+	if m.docContext != sliceScreen {
+		parts := []indicator{{plain, []string{"Proposal " + m.proposal, m.proposal}}}
+		if m.members != nil && m.members.Proposal.Archived {
+			parts = append(parts, indicator{mutedStyle, []string{"archived"}})
+		}
+		return fitTitle(parts, width)
+	}
+	name := strings.TrimPrefix(m.item, m.proposal+"/")
+	parts := []indicator{{plain, []string{"Slice " + name, name}}}
+	if m.slice != nil {
+		lifecycle, claim := unknownLifecycleSpan(), indicator{warningStyle, []string{unknownClaimSpan().text}}
+		if m.slice.Readable {
+			lifecycle, claim = lifecycleSpan(m.slice.Lifecycle), indicator{plain, []string{claimLabels[ledger.ClaimNone]}}
+			if m.slice.Claim != nil {
+				phase := m.slice.Claim.Phase
+				claim = indicator{claimStyle, []string{"▸ " + phase + " claim", "▸ " + phase}}
+			}
+		}
+		parts = append(parts, indicator{lifecycle.style, []string{lifecycle.text}}, claim)
+	}
+	return fitTitle(parts, width)
+}
+
+// fitTitle renders a pane title's parts in the longest forms that fit
+// width. The name takes its shorter form first, then the other parts from
+// the last. When even the shortest forms do not fit, the name gives way from
+// its start so that the facts after it stay in view.
+func fitTitle(parts []indicator, width int) string {
+	levels := make([]int, len(parts))
+	render := func(from int) string {
+		texts := make([]string, 0, len(parts))
+		for index, part := range parts[from:] {
+			texts = append(texts, part.style.Render(part.forms[levels[from+index]]))
+		}
+		return strings.Join(texts, " · ")
+	}
+	order := []int{0}
+	for index := len(parts) - 1; index > 0; index-- {
+		order = append(order, index)
+	}
+	for _, index := range order {
+		if title := render(0); lipgloss.Width(title) <= width {
+			return title
+		}
+		levels[index] = len(parts[index].forms) - 1
+	}
+	if title := render(0); lipgloss.Width(title) <= width {
+		return title
+	}
+	rest := ""
+	if len(parts) > 1 {
+		rest = " · " + render(1)
+	}
+	return parts[0].style.Render(keepEnd(parts[0].forms[levels[0]], max(width-lipgloss.Width(rest), 1))) + rest
+}
+
+// metadataUnreadable reports whether a document's recorded metadata could
+// not be interpreted, so that only its recorded text and diagnostics remain.
+func metadataUnreadable(document *ledger.Document) bool {
+	switch document.Kind {
+	case ledger.ImplementReportDocumentKind, ledger.WatchdogReportDocumentKind:
+		return document.Report == nil
+	case ledger.DecisionDocumentKind:
+		return document.Decision == nil
+	case ledger.StateDocumentKind:
+		return document.Claim == nil && len(document.Diagnostics) > 0
+	}
+	return false
 }
 
 // shownContent renders the displayed document, or why there is none, to
@@ -701,78 +828,20 @@ func (m Model) shownContent(width int) (string, string) {
 	if m.reader.shown.document == nil {
 		return wrap(strings.Join(m.reader.shown.lines, "\n"), width), ""
 	}
-	return m.documentContent(m.reader.shown, width)
+	return m.documentContent(m.reader.shown.document, width)
 }
 
-func (m Model) documentContent(s shown, width int) (string, string) {
-	document := s.document
-	context := strings.Replace("Context at open: "+s.openedContext, " — current lifecycle:", "\n\ncurrent lifecycle:", 1)
-	context = strings.ReplaceAll(context, "; current ", "\n\ncurrent ")
-	preamble := []string{context, "", "## Record metadata", ""}
-	preamble = append(preamble,
-		"Document kind: "+string(document.Kind),
-		"Ledger document: "+document.Reference.Commit+":"+document.Reference.Path,
-	)
-	if document.Reference.Commit == s.openedRevision {
-		preamble = append(preamble, "Identity when opened: current snapshot document")
-	} else {
-		preamble = append(preamble, "Identity when opened: HISTORICAL ledger document; context above describes the ledger when opened, not a historical whole-workflow view")
+// documentContent is the authored document alone, from its first line: a
+// report's or decision's body without its frontmatter, a state record as its
+// recorded JSON, and the recorded text in full when its metadata cannot be
+// interpreted.
+func (m Model) documentContent(document *ledger.Document, width int) (string, string) {
+	if metadataUnreadable(document) {
+		return document.Contents, ""
 	}
-
-	if report := document.Report; report != nil {
-		phase := "Implementation"
-		if document.Kind == ledger.WatchdogReportDocumentKind {
-			phase = "Watchdog"
-		}
-		preamble = append(preamble, "", "### "+phase+" report", "Schema: "+fmt.Sprint(report.Schema), "Outcome: "+report.Outcome)
-		if report.Round != 0 {
-			preamble = append(preamble, fmt.Sprintf("Review round: %d", report.Round))
-		}
-		if report.Source.Head != "" || report.Source.Target != "" || report.Source.Reviewed != "" {
-			preamble = append(preamble, "", "Source repository revisions:")
-			if report.Source.Head != "" {
-				preamble = append(preamble, "  Candidate head: "+report.Source.Head)
-			}
-			if report.Source.Target != "" {
-				preamble = append(preamble, "  Integration target: "+report.Source.Target)
-			}
-			if report.Source.Reviewed != "" {
-				preamble = append(preamble, "  Reviewed source revision: "+report.Source.Reviewed)
-			}
-		}
-		if len(document.References) > 0 {
-			preamble = append(preamble, "", "Ledger input references:")
-			for _, reference := range document.References {
-				preamble = append(preamble, "  "+reference.Label+": "+reference.Reference.Commit+":"+reference.Reference.Path)
-			}
-		}
-	}
-	if claim := document.Claim; claim != nil {
-		preamble = append(preamble, "", "### Recorded Claim", "Phase: "+claim.Phase, "Basis (ledger revision): "+claim.Basis)
-		if len(document.References) > 0 {
-			preamble = append(preamble, "", "Claim input ledger references:")
-			for _, reference := range document.References {
-				preamble = append(preamble, "  "+reference.Label+": "+reference.Reference.Commit+":"+reference.Reference.Path)
-			}
-		}
-	}
-	if decision := document.Decision; decision != nil {
-		preamble = append(preamble,
-			"", "### Human Decision", "Schema: "+fmt.Sprint(decision.Schema),
-			"Project: "+decision.Project, "Slice: "+decision.Item, "Route: "+decision.Route,
-			"Answered request: "+decision.AnsweredRequest.Commit+":"+decision.AnsweredRequest.Path,
-		)
-	}
-	for _, diagnostic := range document.Diagnostics {
-		preamble = append(preamble, "", "! Metadata diagnostic: "+DiagnosticText(diagnostic))
-	}
-
 	body := document.Body
 	if document.Kind == ledger.StateDocumentKind {
 		body = "```json\n" + document.Contents + "\n```"
-	}
-	if body != "" {
-		preamble = append(preamble, "", "---", "", body)
 	}
 	style := styles.LightStyle
 	if m.darkBackground {
@@ -780,50 +849,94 @@ func (m Model) documentContent(s shown, width int) (string, string) {
 	}
 	renderer, err := glamour.NewTermRenderer(glamour.WithStandardStyle(style), glamour.WithWordWrap(max(width, 1)))
 	if err != nil {
-		return strings.Join(preamble, "\n"), "Markdown renderer unavailable: " + err.Error()
+		return body, "Markdown renderer unavailable: " + err.Error()
 	}
-	rendered, err := renderer.Render(strings.Join(preamble, "\n"))
+	rendered, err := renderer.Render(body)
 	if err != nil {
-		return strings.Join(preamble, "\n"), "Markdown rendering failed: " + err.Error()
+		return body, "Markdown rendering failed: " + err.Error()
 	}
-	return rendered, ""
+	// The renderer opens with blank lines of its own.
+	lines := strings.Split(rendered, "\n")
+	for len(lines) > 1 && strings.TrimSpace(ansi.Strip(lines[0])) == "" {
+		lines = lines[1:]
+	}
+	return strings.Join(lines, "\n"), ""
 }
 
-func (m Model) currentContext() string {
-	context := m.project
-	if m.proposal != "" {
-		context += "/" + m.proposal
+// detailsOpen reports whether the details panel shows, which it does only
+// while a document is displayed.
+func (r reader) detailsOpen() bool {
+	return r.details && r.shown.document != nil
+}
+
+// toggleDetails opens the details panel at its top, or closes it.
+func (m *Model) toggleDetails() {
+	r := &m.reader
+	if r.shown.document == nil {
+		m.status = "The displayed entry has no document whose details to show"
+		return
 	}
-	if m.docContext == sliceScreen && m.item != "" {
-		context += "/" + strings.TrimPrefix(m.item, m.proposal+"/")
-		if m.slice != nil {
-			if m.slice.Readable {
-				context += " — current lifecycle: " + lifecycleLabel(m.slice.Lifecycle)
-				if m.slice.Claim == nil {
-					context += "; current Claim: none"
-				} else {
-					context += "; current Claim: " + m.slice.Claim.Phase + " reservation"
-				}
-				if len(m.slice.Dependencies) == 0 {
-					context += "; current Dependencies: none"
-				} else {
-					states := make([]string, 0, len(m.slice.Dependencies))
-					for _, dependency := range m.slice.Dependencies {
-						if dependency.Problem != "" {
-							states = append(states, dependency.Item+" (unknown)")
-						} else {
-							states = append(states, dependency.Item+" ("+lifecycleLabel(dependency.Lifecycle)+")")
-						}
-					}
-					context += "; current Dependencies: " + strings.Join(states, ", ")
-				}
-			} else {
-				context += " — current lifecycle, Claim, and Dependencies unknown"
-			}
+	r.details = !r.detailsOpen()
+	r.detailsView.SetYOffset(0)
+	m.status = ""
+}
+
+// detailsLines are the displayed document's recorded metadata beyond its
+// title: its full identity, each structured field, and its diagnostics.
+func detailsLines(document *ledger.Document) []string {
+	heading := titleStyle.Render
+	lines := []string{
+		heading("Ledger document"),
+		"  Commit: " + document.Reference.Commit,
+		"  Path: " + document.Reference.Path,
+		"  Kind: " + string(document.Kind),
+	}
+	references := func(title string) {
+		if len(document.References) == 0 {
+			return
+		}
+		lines = append(lines, "", heading(title))
+		for _, reference := range document.References {
+			lines = append(lines, "  "+reference.Label, "    Commit: "+reference.Reference.Commit, "    Path: "+reference.Reference.Path)
 		}
 	}
-	if m.docContext == proposalScreen && m.members != nil && m.members.Proposal.Archived {
-		context += " [archived Proposal]"
+	if report := document.Report; report != nil {
+		lines = append(lines, "", fmt.Sprintf("Schema: %d", report.Schema))
+		source := report.Source
+		if source.Head != "" || source.Target != "" || source.Reviewed != "" {
+			lines = append(lines, "", heading("Source repository revisions (not ledger revisions)"))
+			for _, revision := range []struct{ label, value string }{
+				{"Candidate head", source.Head}, {"Integration Target", source.Target}, {"Reviewed revision", source.Reviewed},
+			} {
+				if revision.value != "" {
+					lines = append(lines, "  "+revision.label+": "+revision.value)
+				}
+			}
+		}
+		references("Consumed ledger references")
 	}
-	return context + " at current ledger " + short(m.snapshot.Revision, 12)
+	if decision := document.Decision; decision != nil {
+		lines = append(lines, "",
+			fmt.Sprintf("Schema: %d", decision.Schema),
+			"Project: "+decision.Project,
+			"Slice: "+decision.Item,
+			"", heading("Answered request"),
+			"  Commit: "+decision.AnsweredRequest.Commit,
+			"  Path: "+decision.AnsweredRequest.Path,
+		)
+	}
+	switch claim := document.Claim; {
+	case claim != nil:
+		lines = append(lines, "", "Claim basis (ledger revision): "+claim.Basis)
+		references("Claim input references")
+	case document.Kind == ledger.StateDocumentKind && !metadataUnreadable(document):
+		lines = append(lines, "", "No Claim is recorded.")
+	}
+	if len(document.Diagnostics) > 0 {
+		lines = append(lines, "", heading("Diagnostics"))
+		for _, diagnostic := range document.Diagnostics {
+			lines = append(lines, warningStyle.Render("! "+DiagnosticText(diagnostic)))
+		}
+	}
+	return lines
 }

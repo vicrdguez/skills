@@ -47,7 +47,7 @@ func TestDocumentReferencesKeepMetadataInWideAndStackedPanes(t *testing.T) {
 		s.send(size)
 		s.press("enter", "down", "enter", "d")
 		s.within(size)
-		s.row("╭─ ▶ Documents")
+		s.row("╭─ ▶ ", "Awaiting Review")
 		s.row("╰", "1/5", "╯")
 		s.footerLists("? help")
 		revision := gitOutput(t, s.root, "rev-parse", "HEAD")[:12]
@@ -63,12 +63,12 @@ func TestDocumentReferencesKeepMetadataInWideAndStackedPanes(t *testing.T) {
 		s.row("╰", "1/4", "╯")
 		s.footerLists("? help")
 		s.press("enter")
-		s.shows("HISTORICAL")
+		s.shows("HIST")
 		s.within(size)
 		s.press("esc")
 		s.row("╭─ References (4)")
 		s.press("esc")
-		s.shows("▶ cancel/implement-report.md")
+		s.row("╭─ ▶ ", "t.md · current · awaiting_review")
 		s.within(size)
 	}
 }
@@ -169,8 +169,9 @@ func TestArchivedDocumentIsNewerOnlyWhenItsBytesChanged(t *testing.T) {
 	s.press("a", "down", "enter", "down", "enter", "d", "down", "down")
 	s.shows("cancel/implement-report.md · current", "The recorded implementation evidence is readable")
 	s.press("down", "down", "r", "down", "down", "enter")
-	s.shows("cancel/implement-report.md · HISTORICAL "+commit[:12], "The recorded implementation evidence is readable")
+	s.row("implement-report.md · HIST", commit[:7])
+	s.shows("The recorded implementation evidence is readable")
 	s.hides("Newer document available")
 	s.press("esc", "esc", "esc", "up")
-	s.shows("HISTORICAL", "Earlier implementation reasoning", "Newer document available")
+	s.shows("HIST", "Earlier implementation reasoning", "Newer document available")
 }

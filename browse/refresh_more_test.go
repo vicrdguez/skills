@@ -15,7 +15,7 @@ func TestUnrelatedCommitDoesNotClaimAReportHasAChangedVersion(t *testing.T) {
 	changeFixture(t, s.root, "projects/widgets/proposals/orders/refund/state.json", `"state": "ready_for_implementation"`, `"state": "merged"`)
 	commitFixture(t, s.root, "advance another slice")
 	s.press("R")
-	s.shows("cancel/implement-report.md · HISTORICAL", "The recorded implementation evidence is readable")
+	s.shows("implement-report.md · HISTORICAL", "The recorded implementation evidence is readable")
 	s.hides("Newer document available")
 	s.press("esc", "esc")
 	s.shows("Blocks      orders/refund", "Merged")
@@ -31,8 +31,9 @@ func TestOpenedDocumentSurvivesRemovalWithoutPresentingOldDocumentsAsCurrent(t *
 	commitFixture(t, s.root, "remove slice")
 	s.press("R")
 	s.shows("The recorded implementation evidence is readable", "Selected entity is no longer available",
-		"cancel/implement-report.md · HISTORICAL")
+		"implement-report.md · HISTORICAL")
 	s.press("esc")
-	s.shows("▶ Documents", "0/0", "No documents are", "no longer available", "The recorded implementation evidence is readable")
+	s.row("╭─ ▶ ", "cancel")
+	s.shows("0/0", "No documents are", "no longer available", "The recorded implementation evidence is readable")
 	s.hides("Implementation report  awaiting_review")
 }

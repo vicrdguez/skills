@@ -55,7 +55,7 @@ func TestRefreshKeepsFilteredReportAndReadingPositionWhileFactsAdvance(t *testin
 	s.row("> ", "Implementation report")
 	s.press("enter")
 	s.send(tea.WindowSizeMsg{Width: 100, Height: 80})
-	s.shows("New implementation evidence is readable", "cancel/implement-report.md · current")
+	s.shows("New implementation evidence is readable", "implement-report.md · current")
 	s.hides("Newer document available")
 	s.press("esc", "esc")
 	s.fact("Lifecycle", "Ready for Merge")
@@ -150,24 +150,16 @@ func TestFailedRefreshPrioritizesWarningOverDocumentContextAtNarrowWidths(t *tes
 	for _, width := range []int{48, 43, 40, 30} {
 		size := tea.WindowSizeMsg{Width: width, Height: 14}
 		s.send(size)
+		// The document's identity stays on its pane's title, so the header
+		// keeps the warning and yields only the archive marker.
 		header := s.header()
-		if !strings.Contains(header, "NOT REFRESHED "+revision) {
-			t.Fatalf("%d-column failed-refresh header %q lacks last committed revision", width, header)
+		if !strings.Contains(header, "NOT REFRESHED "+revision) || strings.Contains(header, "HIST") || strings.Contains(header, "%") {
+			t.Fatalf("%d-column failed-refresh header %q, want the last committed revision without document context or scroll", width, header)
 		}
-		switch width {
-		case 48, 43:
-			if !strings.Contains(header, "HIST "+reference) || !strings.Contains(header, "archived") || strings.Contains(header, "%") {
-				t.Fatalf("%d-column header %q should show archive and document context without repeating scroll", width, header)
-			}
-		case 40:
-			if !strings.Contains(header, "HIST "+reference) || strings.Contains(header, "archived") || strings.Contains(header, "%") {
-				t.Fatalf("%d-column header %q should retain document identity after scroll and archive yield", width, header)
-			}
-		case 30:
-			if strings.Contains(header, "HIST") || strings.Contains(header, "archived") || strings.Contains(header, "%") {
-				t.Fatalf("%d-column header %q should retain the warning after context yields", width, header)
-			}
+		if width >= 43 && !strings.Contains(header, "archived") {
+			t.Fatalf("%d-column failed-refresh header %q lacks the archive marker", width, header)
 		}
+		s.row("╭─ ▶ ", "HIST "+reference)
 		s.shows("Refresh failed; displayed", "configured ledger")
 		s.within(size)
 	}
@@ -176,9 +168,10 @@ func TestFailedRefreshPrioritizesWarningOverDocumentContextAtNarrowWidths(t *tes
 	}
 	s.send(tea.WindowSizeMsg{Width: 40, Height: 14})
 	s.press("R")
-	if header := s.header(); !strings.Contains(header, "HIST") || !strings.Contains(header, reference) || !strings.Contains(header, "archived") || strings.Contains(header, "%") {
-		t.Fatalf("after recovery, document context did not return to 40-column header without repeated scroll: %q", header)
+	if header := s.header(); !strings.Contains(header, "archived") || strings.Contains(header, "%") {
+		t.Fatalf("after recovery, the archive marker did not return to the 40-column header without repeated scroll: %q", header)
 	}
+	s.row("╭─ ▶ ", "HIST "+reference)
 	s.hides("NOT REFRESHED", "Refresh failed")
 }
 

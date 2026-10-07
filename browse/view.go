@@ -110,6 +110,12 @@ func (m *Model) layoutDetail() {
 			s.viewport.SetContent(wrap(content, s.viewport.Width))
 			s.viewport.SetYOffset(offset)
 		}
+		if r := &m.reader; r.detailsOpen() {
+			offset := r.detailsView.YOffset
+			r.detailsView.Width, r.detailsView.Height = s.viewport.Width, s.viewport.Height
+			r.detailsView.SetContent(wrap(strings.Join(detailsLines(s.document), "\n"), s.viewport.Width))
+			r.detailsView.SetYOffset(offset)
+		}
 	}
 }
 
@@ -158,8 +164,8 @@ func (m Model) header() string {
 	}
 	// Each indicator has a full form and shorter ones. A narrow terminal
 	// first gives up the breadcrumb, then uses the shorter forms, so every
-	// indicator stays in view. The footer already says when a newer document
-	// is available.
+	// indicator stays in view. The displayed document's identity belongs on
+	// its pane's title.
 	var indicators []indicator
 	scrolled := func(view viewport.Model) {
 		if view.TotalLineCount() > view.Height {
@@ -167,20 +173,12 @@ func (m Model) header() string {
 			indicators = append(indicators, indicator{mutedStyle, []string{"scrolled " + percent, percent}})
 		}
 	}
-	document := m.screen == readerScreen && m.reader.shown.document != nil
 	if m.screen == diagnosticsScreen {
 		scrolled(m.detail)
 	}
 	// The reader's document scroll position belongs only on its pane border.
 	if m.includeArchived {
 		indicators = append(indicators, indicator{mutedStyle, []string{"archived shown", "archived"}})
-	}
-	if document {
-		identity := indicator{mutedStyle, []string{"current document", "current"}}
-		if commit := m.reader.shown.document.Reference.Commit; commit != m.snapshot.Revision {
-			identity.forms = append(refForms("HISTORICAL ", commit), "HIST "+short(commit, 7))
-		}
-		indicators = append(indicators, identity)
 	}
 	revision := indicator{mutedStyle, refForms("", m.snapshot.Revision)}
 	if m.refreshFailure != nil {
@@ -211,6 +209,11 @@ func (m Model) footer() string {
 	}
 	if m.screen == readerScreen && m.reader.shown.newer {
 		lines = append(lines, wrap("Newer document available; select its entry and press enter to read it", m.width))
+	}
+	if document := m.reader.shown.document; m.screen == readerScreen && document != nil {
+		for _, diagnostic := range document.Diagnostics {
+			lines = append(lines, wrap(warningStyle.Render("! Metadata diagnostic: "+DiagnosticText(diagnostic)), m.width))
+		}
 	}
 	if m.screen == readerScreen && m.reader.shown.renderProblem != "" {
 		lines = append(lines, wrap(warningStyle.Render("! "+m.reader.shown.renderProblem+"; showing recorded text"), m.width))
@@ -319,34 +322,53 @@ const focusMark = "▶ "
 // when the terminal is wide, and the focused one alone when it is narrow.
 func (m Model) readerBody(height int) string {
 	r := m.reader
-	navigatorTitle, documentTitle := "Documents", m.shownTitle()
-	if r.documentFocus {
-		documentTitle = focusMark + documentTitle
+	documentWidth, _ := m.documentPane(height)
+	navigatorWidth := m.width - documentWidth
+	if m.width < wideLayout {
+		navigatorWidth = m.width
+	}
+	// The pane the keys act in carries the focus mark, and its title fits
+	// what the mark leaves of the room a pane gives its title.
+	mark := func(focused bool) string {
+		if focused {
+			return focusMark
+		}
+		return ""
+	}
+	titleRoom := func(width int, mark string) int {
+		return width - 5 - lipgloss.Width(mark)
+	}
+	var document string
+	if r.detailsOpen() {
+		title := focusMark + "Details · " + documentLabel(r.shown.document, true)
+		document = pane(title, scrollNote(r.detailsView), strings.Split(r.detailsView.View(), "\n"), documentWidth, height)
 	} else {
-		navigatorTitle = focusMark + navigatorTitle
+		mark := mark(r.documentFocus)
+		title := mark + m.documentTitle(titleRoom(documentWidth, mark))
+		document = pane(title, scrollNote(r.shown.viewport), strings.Split(r.shown.viewport.View(), "\n"), documentWidth, height)
+	}
+	navigatorMark := mark(!r.documentFocus && !r.detailsOpen())
+	if m.width < wideLayout && navigatorMark == "" {
+		return document
 	}
 	note := m.position()
 	if r.list != nil && len(r.list.Diagnostics) > 0 {
 		note = fmt.Sprintf("! %s · d · %s", plural(len(r.list.Diagnostics), "diagnostic"), note)
 	}
-	scroll := ""
-	if r.shown.viewport.TotalLineCount() > r.shown.viewport.Height {
-		scroll = fmt.Sprintf("scrolled %d%%", int(r.shown.viewport.ScrollPercent()*100))
-	}
-	documentWidth, _ := m.documentPane(height)
-	document := pane(documentTitle, scroll, strings.Split(r.shown.viewport.View(), "\n"), documentWidth, height)
-	navigatorWidth := m.width - documentWidth
-	if m.width < wideLayout {
-		if r.documentFocus {
-			return document
-		}
-		navigatorWidth = m.width
-	}
+	navigatorTitle := navigatorMark + m.navigatorTitle(titleRoom(navigatorWidth, navigatorMark))
 	navigator := pane(navigatorTitle, note, m.navigator().lines(navigatorWidth-paneFrame, height-2), navigatorWidth, height)
 	if m.width < wideLayout {
 		return navigator
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, navigator, document)
+}
+
+// scrollNote is a pane's scroll position, when its content overflows it.
+func scrollNote(view viewport.Model) string {
+	if view.TotalLineCount() <= view.Height {
+		return ""
+	}
+	return fmt.Sprintf("scrolled %d%%", int(view.ScrollPercent()*100))
 }
 
 // documentPane is the size of the document pane in a reader body of height

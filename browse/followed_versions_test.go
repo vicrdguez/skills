@@ -54,7 +54,11 @@ func TestReaderFollowsActiveReportVersionsAcrossProjectsAndReturnsThroughNestedR
 			s.shows("Followed report versions", earlier[:7])
 			s.within(size)
 			s.press("enter")
-			s.shows("Later hammer implementation", "current lifecycle: Awaiting", "Review")
+			s.shows("Later hammer implementation")
+			if width >= 100 {
+				// The navigator keeps the cancel Slice's current facts.
+				s.row("╭─ ", "Awaiting Review", "╭─ ")
+			}
 			version := s.model.View()
 			s.press("r", "down", "enter")
 			s.shows("Cancellation intent")
