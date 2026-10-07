@@ -106,6 +106,9 @@ _Avoid_: Phase report, implementation ledger, durable project knowledge
 An **Agent Worker**'s recorded outcome, evidence, and input references for one implementation or **Watchdog Review** phase. Its outcome is distinct from the resulting **Workflow State**.
 _Avoid_: Agent transcript, workflow state
 
+**Run Metadata**:
+The recorded execution context and measured effort of a **Worker Session** that produced a **Phase Report**, optionally including its participating child agents but excluding its **Supervisor**. It is observational evidence for later evaluation, not a prerequisite for a phase handoff or proof that its measurements are valid.
+
 **Report Version**:
 A recorded content revision of a **Phase Report**, including its metadata and authored body. Relocating a report or changing unrelated records does not create a new Report Version.
 
