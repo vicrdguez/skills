@@ -30,7 +30,7 @@ func TestOverlappingRefreshesCannotPublishAnOlderCommittedRevision(t *testing.T)
 
 func TestRemovedSliceDocumentReturnsToUnavailableFactsThenHealthyParent(t *testing.T) {
 	s := start(t, "widgets")
-	s.send(tea.WindowSizeMsg{Width: 120, Height: 40})
+	s.send(tea.WindowSizeMsg{Width: 120, Height: 80})
 	s.press("enter", "down", "enter", "d", "down", "down", "enter")
 	if err := os.RemoveAll(filepath.Join(s.root, "projects/widgets/proposals/orders/cancel")); err != nil {
 		t.Fatal(err)
@@ -48,7 +48,7 @@ func TestRemovedSliceDocumentReturnsToUnavailableFactsThenHealthyParent(t *testi
 
 func TestRemovedProposalDocumentReturnsThroughUnavailableContext(t *testing.T) {
 	s := start(t, "widgets")
-	s.send(tea.WindowSizeMsg{Width: 120, Height: 40})
+	s.send(tea.WindowSizeMsg{Width: 120, Height: 80})
 	s.press("enter", "d", "enter")
 	if err := os.RemoveAll(filepath.Join(s.root, "projects/widgets/proposals/orders")); err != nil {
 		t.Fatal(err)
@@ -65,24 +65,26 @@ func TestRemovedProposalDocumentReturnsThroughUnavailableContext(t *testing.T) {
 
 func TestRemovedSelectedDocumentHasAnExplicitSafeReturnList(t *testing.T) {
 	s := start(t, "widgets")
-	s.send(tea.WindowSizeMsg{Width: 120, Height: 40})
+	s.send(tea.WindowSizeMsg{Width: 120, Height: 80})
 	s.press("enter", "down", "enter", "d", "down", "down", "down", "down", "enter")
 	s.shows("Human Decision")
 	if err := os.Remove(filepath.Join(s.root, "projects/widgets/proposals/orders/cancel/decision.md")); err != nil {
 		t.Fatal(err)
 	}
+	changeFixture(t, s.root, "projects/widgets/proposals/orders/cancel/state.json", `"decision": true,`, "")
 	commitFixture(t, s.root, "remove decision")
 	s.press("R")
 	s.press("esc")
-	s.shows("Available documents (4)", "no longer available")
-	s.hides("Current Human Decision")
-	s.press("down", "enter")
-	s.shows("behavior.md", "Cancellation behavior")
+	s.row("╰", "-/4", "╯")
+	s.shows("no longer available", "cancel/decision.md · HISTORICAL")
+	s.hides("Human Decision         route")
+	s.press("down")
+	s.shows("cancel/behavior.md · current", "Cancellation behavior")
 }
 
 func TestDocumentDiagnosticsStayDiagnosticsWhenFactsAdvance(t *testing.T) {
 	s := start(t, "widgets")
-	s.send(tea.WindowSizeMsg{Width: 120, Height: 40})
+	s.send(tea.WindowSizeMsg{Width: 120, Height: 80})
 	s.press("enter", "down", "enter", "d", "d")
 	s.shows("watchdog report metadata", "diagnostics")
 	changeFixture(t, s.root, "projects/widgets/proposals/orders/refund/state.json", `"state": "ready_for_implementation"`, `"state": "merged"`)
@@ -95,9 +97,9 @@ func TestDocumentDiagnosticsStayDiagnosticsWhenFactsAdvance(t *testing.T) {
 
 func TestCurrentClaimReferencesStayCurrentWhenLeavingExactDocument(t *testing.T) {
 	s := start(t, "widgets")
-	s.send(tea.WindowSizeMsg{Width: 120, Height: 40})
+	s.send(tea.WindowSizeMsg{Width: 120, Height: 80})
 	s.press("enter", "down", "enter", "r", "enter")
-	s.shows("Claim state")
+	s.shows("cancel/state.json · current")
 	path := "projects/widgets/proposals/orders/cancel/state.json"
 	content, err := os.ReadFile(filepath.Join(s.root, path))
 	if err != nil {
@@ -117,7 +119,7 @@ func TestCurrentClaimReferencesStayCurrentWhenLeavingExactDocument(t *testing.T)
 
 func TestDocumentReturnKeepsMissingFilteredSliceIdentity(t *testing.T) {
 	s := start(t, "widgets")
-	s.send(tea.WindowSizeMsg{Width: 120, Height: 40})
+	s.send(tea.WindowSizeMsg{Width: 120, Height: 80})
 	s.press("f", "down", "down", "enter", "enter", "d", "down", "down", "enter")
 	s.shows("The recorded implementation evidence is readable")
 	changeFixture(t, s.root, "projects/widgets/proposals/orders/cancel/state.json", `"state": "awaiting_review"`, `"state": "rework"`)
@@ -133,7 +135,7 @@ func TestDocumentReturnKeepsMissingFilteredSliceIdentity(t *testing.T) {
 
 func TestSearchAcceptsCapitalRefreshKeyAsText(t *testing.T) {
 	s := start(t, "widgets")
-	s.send(tea.WindowSizeMsg{Width: 120, Height: 40})
+	s.send(tea.WindowSizeMsg{Width: 120, Height: 80})
 	s.press("/", "R", "efund", "enter")
 	s.shows(`name contains "Refund"`, "orders/refund")
 }

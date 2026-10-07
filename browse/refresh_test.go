@@ -30,7 +30,8 @@ func changeFixture(t *testing.T, root, relative, before, after string) {
 
 func TestRefreshKeepsFilteredReportAndReadingPositionWhileFactsAdvance(t *testing.T) {
 	s := start(t, "widgets")
-	s.send(tea.WindowSizeMsg{Width: 100, Height: 17})
+	// Narrow enough that the focused document is shown alone.
+	s.send(tea.WindowSizeMsg{Width: 99, Height: 17})
 	s.press("/", "cancel", "enter", "f")
 	s.press(downs(10)...)
 	s.press("enter", "g", "enter", "d", "down", "down", "enter")
@@ -44,16 +45,17 @@ func TestRefreshKeepsFilteredReportAndReadingPositionWhileFactsAdvance(t *testin
 	changeFixture(t, s.root, "projects/widgets/proposals/orders/refund/state.json", `"state": "ready_for_implementation"`, `"state": "merged"`)
 	commitFixture(t, s.root, "advance report and other slice")
 	s.press("R")
-	s.shows("Newer document available", "HISTORICAL ", "scrolled ")
+	s.shows("Newer document available", "cancel/implement-report.md · HISTORICAL", "scrolled ")
 	s.hides("New implementation evidence is readable")
-	if before, after := strings.Split(old, "\n"), strings.Split(s.model.View(), "\n"); strings.Join(before[1:8], "\n") != strings.Join(after[1:8], "\n") {
+	// Below the pane's title, which now marks the document historical.
+	if before, after := strings.Split(old, "\n"), strings.Split(s.model.View(), "\n"); strings.Join(before[2:8], "\n") != strings.Join(after[2:8], "\n") {
 		t.Fatalf("refresh replaced document text or reading position:\nbefore:\n%s\nafter:\n%s", old, s.model.View())
 	}
 	s.press("esc")
-	s.shows("Latest implementation report")
+	s.row("> ", "Implementation report")
 	s.press("enter")
-	s.send(tea.WindowSizeMsg{Width: 100, Height: 50})
-	s.shows("New implementation evidence is readable")
+	s.send(tea.WindowSizeMsg{Width: 100, Height: 80})
+	s.shows("New implementation evidence is readable", "cancel/implement-report.md · current")
 	s.hides("Newer document available")
 	s.press("esc", "esc")
 	s.fact("Lifecycle", "Ready for Merge")
@@ -112,14 +114,14 @@ func TestFailedRefreshStaysLoudUntilARefreshSucceeds(t *testing.T) {
 			t.Fatalf("%d-column header %q, want NOT REFRESHED %s", size.Width, header, revision)
 		}
 		s.shows("Slice  orders/cancel", "! Refresh failed; displayed facts are")
-		s.fitsIn(size)
+		s.within(size)
 		// Listing every binding keeps the marker and the reason in view.
 		s.press("?")
 		if header := s.header(); !strings.HasSuffix(header, "NOT REFRESHED "+revision) {
 			t.Fatalf("%d-column header %q with every binding listed, want NOT REFRESHED %s", size.Width, header, revision)
 		}
 		s.shows("! Refresh failed; displayed facts are", "↑/k up")
-		s.fitsIn(size)
+		s.within(size)
 		s.press("?") // Close the key list again.
 		if err := os.Rename(missing, s.root); err != nil {
 			t.Fatal(err)
@@ -153,13 +155,9 @@ func TestFailedRefreshPrioritizesWarningOverDocumentContextAtNarrowWidths(t *tes
 			t.Fatalf("%d-column failed-refresh header %q lacks last committed revision", width, header)
 		}
 		switch width {
-		case 48:
-			if !strings.Contains(header, "HIST "+reference) || !strings.Contains(header, "archived") || !strings.Contains(header, "%") {
-				t.Fatalf("%d-column header %q lost document, archive or scroll context", width, header)
-			}
-		case 43:
+		case 48, 43:
 			if !strings.Contains(header, "HIST "+reference) || !strings.Contains(header, "archived") || strings.Contains(header, "%") {
-				t.Fatalf("%d-column header %q should drop scroll before archive and document context", width, header)
+				t.Fatalf("%d-column header %q should show archive and document context without repeating scroll", width, header)
 			}
 		case 40:
 			if !strings.Contains(header, "HIST "+reference) || strings.Contains(header, "archived") || strings.Contains(header, "%") {
@@ -171,15 +169,15 @@ func TestFailedRefreshPrioritizesWarningOverDocumentContextAtNarrowWidths(t *tes
 			}
 		}
 		s.shows("Refresh failed; displayed", "configured ledger")
-		s.fitsIn(size)
+		s.within(size)
 	}
 	if err := os.Rename(missing, s.root); err != nil {
 		t.Fatal(err)
 	}
 	s.send(tea.WindowSizeMsg{Width: 40, Height: 14})
 	s.press("R")
-	if header := s.header(); !strings.Contains(header, "HIST") || !strings.Contains(header, reference) || !strings.Contains(header, "archived") || !strings.Contains(header, "%") {
-		t.Fatalf("after recovery, document context did not return to 40-column header: %q", header)
+	if header := s.header(); !strings.Contains(header, "HIST") || !strings.Contains(header, reference) || !strings.Contains(header, "archived") || strings.Contains(header, "%") {
+		t.Fatalf("after recovery, document context did not return to 40-column header without repeated scroll: %q", header)
 	}
 	s.hides("NOT REFRESHED", "Refresh failed")
 }

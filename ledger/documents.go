@@ -81,6 +81,9 @@ type DocumentSet struct {
 	Availability []DocumentAvailability `json:"availability"`
 	Diagnostics  []Diagnostic           `json:"diagnostics,omitempty"`
 	Incomplete   bool                   `json:"incomplete"`
+	// unreadable identifies member documents that could not be listed; the
+	// diagnostics explain why.
+	unreadable []DocumentEntry
 }
 
 // DocumentEntry is one listed document: its identity and the metadata that
@@ -110,6 +113,9 @@ type DocumentList struct {
 	Documents    []DocumentEntry
 	Availability []DocumentAvailability
 	Diagnostics  []Diagnostic
+	// Unreadable identifies member documents left out of Documents because
+	// they could not be read; Diagnostics explain why.
+	Unreadable []DocumentEntry
 }
 
 // ProposalDocumentListAt lists a Proposal's documents without reading prose
@@ -197,7 +203,7 @@ func (v *Snapshot) listingRead(paths []string) documentRead {
 func (set *DocumentSet) list() *DocumentList {
 	list := &DocumentList{
 		Revision: set.Revision, Project: set.Project, Proposal: set.Proposal, Slice: set.Slice, Archived: set.Archived,
-		Documents: make([]DocumentEntry, 0, len(set.Documents)), Availability: set.Availability, Diagnostics: set.Diagnostics,
+		Documents: make([]DocumentEntry, 0, len(set.Documents)), Availability: set.Availability, Diagnostics: set.Diagnostics, Unreadable: set.unreadable,
 	}
 	for _, document := range set.Documents {
 		list.Documents = append(list.Documents, document.Entry())
@@ -414,6 +420,11 @@ func addDocument(result *DocumentSet, read documentRead, documentPath string, ki
 	document, err := read(documentPath)
 	if err != nil {
 		result.addDiagnostic(Diagnostic{Scope: scope, Subject: subject, Problem: "cannot read document " + documentPath + ": " + err.Error()})
+		project, proposal, slice, kind, _ := recordDocumentIdentity(documentPath)
+		result.unreadable = append(result.unreadable, DocumentEntry{
+			Kind: kind, Project: project, Proposal: proposal, Slice: slice,
+			Reference: Reference{Commit: result.Revision, Path: documentPath},
+		})
 		return false
 	}
 	// The record tree selects membership and the path determines format; this
@@ -421,6 +432,9 @@ func addDocument(result *DocumentSet, read documentRead, documentPath string, ki
 	// document returned by the exact-reference reader.
 	if document.Kind != kind {
 		result.addDiagnostic(Diagnostic{Scope: scope, Subject: subject, Problem: "document " + documentPath + " has an unexpected record kind"})
+		result.unreadable = append(result.unreadable, DocumentEntry{
+			Kind: kind, Project: document.Project, Proposal: document.Proposal, Slice: document.Slice, Reference: document.Reference,
+		})
 		return false
 	}
 	result.Documents = append(result.Documents, *document)

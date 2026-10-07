@@ -25,10 +25,8 @@ const (
 	factsScreen
 	resultsScreen
 	diagnosticsScreen
-	documentsScreen
+	readerScreen
 	referencesScreen
-	versionsScreen
-	documentScreen
 )
 
 // factOption is one navigable lifecycle or Claim fact of the facts screen.
@@ -86,12 +84,12 @@ type Options struct {
 }
 
 type keyMap struct {
-	Up, Down, PageUp, PageDown, Enter, Back, Next, Previous, Projects, Archived, Search, Facts, Group, Scope, Diagnostics, Documents, References, Versions, Issue, PullRequest, Refresh, Help, Quit key.Binding
+	Up, Down, PageUp, PageDown, Enter, Back, Focus, Next, Previous, Projects, Archived, Search, Facts, Group, Scope, Diagnostics, Documents, References, Versions, Issue, PullRequest, Refresh, Help, Quit key.Binding
 }
 
 // all lists every binding in the order `?` shows them.
 func (k keyMap) all() []key.Binding {
-	return []key.Binding{k.Up, k.Down, k.PageUp, k.PageDown, k.Enter, k.Back, k.Next, k.Previous, k.Projects, k.Archived, k.Search, k.Facts, k.Group, k.Scope, k.Diagnostics, k.Documents, k.References, k.Versions, k.Issue, k.PullRequest, k.Refresh, k.Help, k.Quit}
+	return []key.Binding{k.Up, k.Down, k.PageUp, k.PageDown, k.Enter, k.Back, k.Focus, k.Next, k.Previous, k.Projects, k.Archived, k.Search, k.Facts, k.Group, k.Scope, k.Diagnostics, k.Documents, k.References, k.Versions, k.Issue, k.PullRequest, k.Refresh, k.Help, k.Quit}
 }
 
 func newKeyMap() keyMap {
@@ -102,13 +100,14 @@ func newKeyMap() keyMap {
 		PageDown:    key.NewBinding(key.WithKeys("pgdown"), key.WithHelp("pgdown", "page down")),
 		Enter:       key.NewBinding(key.WithKeys("enter", "right", "l"), key.WithHelp("enter", "open")),
 		Back:        key.NewBinding(key.WithKeys("esc", "backspace", "left", "h"), key.WithHelp("esc", "back")),
+		Focus:       key.NewBinding(key.WithKeys("tab", "right", "l"), key.WithHelp("tab/→", "focus document")),
 		Next:        key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next relation")),
 		Previous:    key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "previous relation")),
 		Projects:    key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "switch project")),
 		Archived:    key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "toggle archived")),
 		Documents:   key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "documents")),
 		References:  key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "references")),
-		Versions:    key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "report versions")),
+		Versions:    key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "show/hide versions")),
 		Search:      key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search names")),
 		Facts:       key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "find by lifecycle or claim")),
 		Group:       key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "toggle grouping")),
@@ -131,7 +130,6 @@ type Model struct {
 	keys           keyMap
 	help           help.Model
 	detail         viewport.Model
-	docViewport    viewport.Model
 
 	location
 	// selectedRow is the detail row where the selected relationship starts.
@@ -163,24 +161,15 @@ type Model struct {
 	search  *ledger.SliceSearch
 	failure error
 
+	// docContext is the Proposal or Slice screen the reader was opened from.
 	docContext             screen
-	documents              *ledger.DocumentList
+	reader                 reader
 	diagnosticReturn       screen
 	diagnosticOriginDetail viewport.Model
-	currentDocument        *ledger.Document
-	documentReturn         screen
-	documentHistory        []documentFrame
 	references             []ledger.LabeledReference
-	referenceOrigin        screen
-	referencesFromDoc      bool
-	referenceHistory       []referenceFrame
-	versions               *ledger.ReportVersions
-	versionsReturn         screen
-	renderProblem          string
-	// Opened document presentation is anchored at opening, not rewritten by
-	// a later current-facts refresh.
-	openedContext  string
-	openedRevision string
+	// referenceOrigin is the screen the reference list was opened from: the
+	// reader or a Slice's Claim.
+	referenceOrigin screen
 
 	refreshRequest   uint64
 	refreshHandled   uint64
@@ -188,7 +177,6 @@ type Model struct {
 	selectionMissing string
 	missingIdentity  string
 	missingScreen    screen
-	newerDocument    bool
 
 	width, height int
 	status        string
@@ -215,14 +203,6 @@ type frame struct {
 	offset int
 }
 
-type referenceFrame struct {
-	references   []ledger.LabeledReference
-	origin       screen
-	fromDocument bool
-	cursor       int
-	returnScreen screen
-}
-
 // openedMsg reports the outcome of one explicit external-browser request.
 type openedMsg struct {
 	url string
@@ -233,7 +213,7 @@ type openedMsg struct {
 func New(snapshot *ledger.Snapshot, options Options) Model {
 	model := Model{
 		snapshot: snapshot, open: options.Open, darkBackground: options.DarkBackground, keys: newKeyMap(), help: help.New(),
-		detail: viewport.New(80, 10), docViewport: viewport.New(80, 10),
+		detail:   viewport.New(80, 10),
 		location: location{cursor: map[screen]int{}},
 		parent:   map[screen]screen{sliceScreen: proposalScreen},
 		width:    80, height: 24, status: options.Notice,
@@ -272,7 +252,12 @@ func (m Model) footerKeys() []key.Binding {
 	follow := keys.Enter
 	follow.SetHelp("enter", "follow relation")
 	add(follow, relations)
-	add(keys.Enter, m.screen != sliceScreen && m.canEnter())
+	if m.screen == readerScreen {
+		keys.Enter.SetHelp("enter", "read selected")
+		keys.Back.SetHelp("esc/←", "navigator/back")
+	}
+	add(keys.Enter, m.screen != sliceScreen && m.canEnter() && (m.screen != readerScreen || !m.reader.documentFocus))
+	add(keys.Focus, m.screen == readerScreen && !m.reader.documentFocus)
 	add(keys.Next, relations)
 	add(keys.Back, m.screen != overviewScreen)
 	add(keys.Group, m.finding())
@@ -281,11 +266,21 @@ func (m Model) footerKeys() []key.Binding {
 	if m.screen == resultsScreen {
 		diagnostics.SetHelp("d", "result diagnostics")
 	}
-	add(diagnostics, m.screen == resultsScreen || m.screen == documentsScreen)
+	add(diagnostics, m.screen == resultsScreen || m.screen == readerScreen)
 	add(keys.Documents, (m.screen == proposalScreen && m.members != nil) || (m.screen == sliceScreen && m.slice != nil))
-	add(keys.References, (m.screen == documentScreen && m.currentDocument != nil) ||
+	add(keys.References, (m.screen == readerScreen && m.reader.shown.document != nil) ||
 		(m.screen == sliceScreen && m.slice != nil && m.slice.Claim != nil))
-	add(keys.Versions, m.readingReport())
+	versions := false
+	if m.screen == readerScreen {
+		cursor := m.cursor[readerScreen]
+		versions = cursor < len(m.reader.entries) && m.reader.entries[cursor].group != ""
+		if m.reader.documentFocus && len(m.reader.trail) > 0 {
+			document := m.reader.shown.document
+			versions = document != nil && (document.Kind == ledger.ImplementReportDocumentKind || document.Kind == ledger.WatchdogReportDocumentKind)
+		}
+		versions = versions || m.reader.followed != nil
+	}
+	add(keys.Versions, versions)
 	issue := keys.Issue
 	if m.screen == proposalScreen {
 		issue.SetHelp("i", "open parent issue")
@@ -381,6 +376,9 @@ func (m Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if key.Matches(msg, m.keys.Refresh) {
 		return m, m.requestRefresh()
 	}
+	if m.screen == readerScreen && m.readerKey(msg) {
+		return m, nil
+	}
 	finding := m.finding()
 	documentOverlay := m.inDocuments()
 	switch {
@@ -397,10 +395,6 @@ func (m Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.detail.PageUp()
 	case key.Matches(msg, m.keys.PageDown) && (m.screen == sliceScreen || m.screen == diagnosticsScreen):
 		m.detail.PageDown()
-	case key.Matches(msg, m.keys.PageUp) && m.screen == documentScreen:
-		m.docViewport.PageUp()
-	case key.Matches(msg, m.keys.PageDown) && m.screen == documentScreen:
-		m.docViewport.PageDown()
 	case key.Matches(msg, m.keys.Next) && m.screen == sliceScreen:
 		m.selectRelation(1)
 	case key.Matches(msg, m.keys.Previous) && m.screen == sliceScreen:
@@ -435,12 +429,8 @@ func (m Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.load()
 	case key.Matches(msg, m.keys.Scope) && finding:
 		m.toggleScope()
-	case key.Matches(msg, m.keys.Diagnostics) && (m.screen == resultsScreen || m.screen == documentsScreen):
-		m.diagnosticReturn = m.screen
-		m.diagnosticOriginDetail = m.detail
-		m.screen = diagnosticsScreen
-		m.layoutDetail()
-		m.detail.GotoTop()
+	case key.Matches(msg, m.keys.Diagnostics) && m.screen == resultsScreen:
+		m.openDiagnostics()
 	case key.Matches(msg, m.keys.Issue):
 		return m, m.openAttachment(true)
 	case key.Matches(msg, m.keys.PullRequest):
@@ -449,10 +439,74 @@ func (m Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.openDocuments()
 	case key.Matches(msg, m.keys.References):
 		m.openReferences()
-	case key.Matches(msg, m.keys.Versions):
-		m.openVersions()
 	}
 	return m, nil
+}
+
+// readerKey handles the keys that act in the reader, reporting whether msg
+// was one. The navigator's cursor selects; with the document focused, the
+// movement keys scroll it and back returns along followed references, then
+// to the navigator.
+func (m *Model) readerKey(msg tea.KeyMsg) bool {
+	r := &m.reader
+	page := msg.String() == "pgup" || msg.String() == "pgdown"
+	switch {
+	case key.Matches(msg, m.keys.Up, m.keys.Down) && r.documentFocus:
+		if key.Matches(msg, m.keys.Up) {
+			r.shown.viewport.LineUp(1)
+		} else {
+			r.shown.viewport.LineDown(1)
+		}
+	case key.Matches(msg, m.keys.Up):
+		m.moveEntry(-1)
+	case key.Matches(msg, m.keys.Down):
+		m.moveEntry(1)
+	case page && r.documentFocus:
+		if msg.String() == "pgup" {
+			r.shown.viewport.PageUp()
+		} else {
+			r.shown.viewport.PageDown()
+		}
+	case page:
+		// The navigator does not page; the document does once focused.
+	case msg.Type == tea.KeyEnter && !r.documentFocus:
+		if m.selectionMissing == "" && len(r.entries) > 0 {
+			m.selectEntry()
+		}
+		r.documentFocus = true
+	case key.Matches(msg, m.keys.Focus):
+		r.documentFocus = true
+	case key.Matches(msg, m.keys.Back) && r.followed != nil:
+		if r.documentFocus {
+			r.documentFocus = false
+		} else {
+			m.closeFollowedVersions()
+		}
+	case key.Matches(msg, m.keys.Back) && r.documentFocus && len(r.trail) > 0:
+		m.returnAlongTrail()
+		return true
+	case key.Matches(msg, m.keys.Back) && r.documentFocus:
+		r.documentFocus = false
+	case key.Matches(msg, m.keys.Diagnostics):
+		m.openDiagnostics()
+		return true
+	case key.Matches(msg, m.keys.Versions):
+		m.toggleVersions()
+	default:
+		return false
+	}
+	m.layoutDetail()
+	return true
+}
+
+// openDiagnostics shows the current results' or documents' diagnostics,
+// keeping the view to return to.
+func (m *Model) openDiagnostics() {
+	m.diagnosticReturn = m.screen
+	m.diagnosticOriginDetail = m.detail
+	m.screen = diagnosticsScreen
+	m.layoutDetail()
+	m.detail.GotoTop()
 }
 
 func (m *Model) move(delta int) {
@@ -462,13 +516,6 @@ func (m *Model) move(delta int) {
 			m.detail.LineUp(1)
 		} else {
 			m.detail.LineDown(1)
-		}
-		return
-	case documentScreen:
-		if delta < 0 {
-			m.docViewport.LineUp(1)
-		} else {
-			m.docViewport.LineDown(1)
 		}
 		return
 	}
@@ -503,20 +550,10 @@ func (m Model) rows() int {
 		if m.search != nil {
 			return len(m.results())
 		}
-	case documentsScreen:
-		if m.documents != nil {
-			count := len(m.documents.Documents)
-			if m.documents.Slice != "" {
-				count += 2 // Each phase history remains accessible if its latest report is absent.
-			}
-			return count
-		}
+	case readerScreen:
+		return len(m.reader.entries)
 	case referencesScreen:
 		return len(m.references)
-	case versionsScreen:
-		if m.versions != nil {
-			return len(m.versions.Versions)
-		}
 	}
 	return 0
 }
@@ -585,16 +622,11 @@ func (m Model) isFindingScreen(screen screen) bool {
 // inDocuments reports whether the current screen belongs to a Proposal's or
 // Slice's documents, including their diagnostics.
 func (m Model) inDocuments() bool {
-	return isDocumentOverlay(m.screen) || (m.screen == diagnosticsScreen && m.diagnosticReturn == documentsScreen)
+	return isDocumentOverlay(m.screen) || (m.screen == diagnosticsScreen && m.diagnosticReturn == readerScreen)
 }
 
 func isDocumentOverlay(screen screen) bool {
-	switch screen {
-	case documentsScreen, referencesScreen, versionsScreen, documentScreen:
-		return true
-	default:
-		return false
-	}
+	return screen == readerScreen || screen == referencesScreen
 }
 
 // find opens target within finding. Finding started from the hierarchy
@@ -673,22 +705,8 @@ func (m *Model) enter() {
 		chosen := m.results()[selected]
 		m.project, m.proposal, m.item, m.archived = chosen.project, chosen.match.Proposal, chosen.match.Item, chosen.match.Archived
 		m.screen, m.parent[sliceScreen], m.relation = sliceScreen, resultsScreen, 0
-	case documentsScreen:
-		if selected < len(m.documents.Documents) {
-			m.openDocument(m.documents.Documents[selected])
-		} else {
-			phase := ledger.ImplementPhase
-			if selected > len(m.documents.Documents) {
-				phase = ledger.WatchdogPhase
-			}
-			m.openVersionsFor(m.project, m.item, phase, m.archived)
-		}
-		return
 	case referencesScreen:
 		m.followReference(m.references[selected].Reference)
-		return
-	case versionsScreen:
-		m.followVersion(m.versions.Versions[selected].Reference)
 		return
 	}
 	m.status = ""
@@ -742,57 +760,15 @@ func (m *Model) back() {
 		m.detail = m.diagnosticOriginDetail
 	case factsScreen, resultsScreen:
 		m.screen = m.parent[m.screen]
-	case documentsScreen:
+	case readerScreen:
 		m.screen = m.docContext
 		m.failure = nil
-	case versionsScreen:
-		m.screen = m.versionsReturn
 	case referencesScreen:
-		if len(m.referenceHistory) > 0 {
-			previous := m.referenceHistory[len(m.referenceHistory)-1]
-			m.referenceHistory = m.referenceHistory[:len(m.referenceHistory)-1]
-			m.restoreReferenceFrame(previous)
-			m.screen = previous.returnScreen
-		} else {
-			m.screen = m.referenceOrigin
-		}
+		m.screen = m.referenceOrigin
 		m.failure = nil
-	case documentScreen:
-		if len(m.documentHistory) > 0 {
-			frame := m.documentHistory[len(m.documentHistory)-1]
-			m.documentHistory = m.documentHistory[:len(m.documentHistory)-1]
-			if frame.hasDocument {
-				document := frame.document
-				m.currentDocument = &document
-			} else {
-				m.currentDocument = nil
-			}
-			m.docViewport = frame.viewport
-			m.documentReturn, m.renderProblem = frame.returnScreen, frame.renderProblem
-			m.versions, m.versionsReturn, m.cursor[versionsScreen] = frame.versions, frame.versionsReturn, frame.versionsCursor
-			m.openedContext, m.openedRevision = frame.openedContext, frame.openedRevision
-			m.newerDocument = m.documentHasNewerVersion()
-			m.references = append([]ledger.LabeledReference(nil), frame.references...)
-			m.referenceOrigin, m.referencesFromDoc = frame.referenceOrigin, frame.referencesFromDoc
-			m.cursor[referencesScreen] = frame.referenceCursor
-			m.referenceHistory = append([]referenceFrame(nil), frame.referenceHistory...)
-			m.refreshCurrentReferences()
-			if frame.hasDocument {
-				if count := len(m.referenceHistory); count > 0 && !frame.fromVersion {
-					previous := m.referenceHistory[count-1]
-					m.referenceHistory = m.referenceHistory[:count-1]
-					m.restoreReferenceFrame(previous)
-				}
-				m.screen = documentScreen
-			} else {
-				m.screen = frame.screen
-			}
-		} else {
-			m.screen = m.documentReturn
-			m.currentDocument, m.renderProblem = nil, ""
-			m.newerDocument = false
-		}
-		m.failure = nil
+	}
+	if !isDocumentOverlay(m.screen) && m.screen != diagnosticsScreen {
+		m.reader = reader{}
 	}
 
 	if isDocumentOverlay(m.screen) || (fromDocumentOverlay && m.screen == diagnosticsScreen) {
@@ -869,10 +845,8 @@ func (m Model) relations() []relation {
 func (m *Model) switchProject() {
 	m.screen, m.status, m.history = overviewScreen, "", nil
 	m.contextHistory = nil
-	m.docContext, m.documents, m.currentDocument = overviewScreen, nil, nil
-	m.documentHistory, m.references, m.referenceHistory, m.versions = nil, nil, nil, nil
+	m.docContext, m.reader, m.references, m.referenceOrigin = overviewScreen, reader{}, nil, overviewScreen
 	m.selectionMissing, m.missingIdentity = "", ""
-	m.referenceOrigin, m.referencesFromDoc = overviewScreen, false
 	m.load()
 	if m.overview == nil {
 		return
