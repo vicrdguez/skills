@@ -102,7 +102,7 @@ func (m *Model) layoutDetail() {
 		width, paneHeight := m.documentPane(height)
 		// A narrow title takes further lines from the pane.
 		rows := func(title string) int {
-			return max(paneHeight-1-lipgloss.Height(title), 1)
+			return max(paneRows(title, paneHeight), 1)
 		}
 		s.viewport.Width, s.viewport.Height = max(width-paneFrame, 1), rows(focusTitle(m.reader.documentFocus, width, m.documentTitle))
 		if s.rendered != s.viewport.Width {
@@ -221,7 +221,9 @@ func (m Model) footer() string {
 		if count := len(document.Diagnostics); count > 1 {
 			label = fmt.Sprintf("! Metadata diagnostic 1 of %d: ", count)
 		}
-		text := strings.Join(strings.Fields(DiagnosticText(document.Diagnostics[0])), " ")
+		// The diagnostic's scope is the displayed document's, so its problem
+		// alone leads with the cause.
+		text := strings.Join(strings.Fields(document.Diagnostics[0].Problem), " ")
 		lines = append(lines, truncate(warningStyle.Render(label+text), m.width))
 	}
 	if m.screen == readerScreen && m.reader.shown.renderProblem != "" {
@@ -349,8 +351,7 @@ func (m Model) readerBody(height int) string {
 		note = fmt.Sprintf("! %s · d · %s", plural(len(r.list.Diagnostics), "diagnostic"), note)
 	}
 	navigatorTitle := focusTitle(!r.documentFocus && !r.detailsOpen(), navigatorWidth, m.navigatorTitle)
-	rows := height - 1 - lipgloss.Height(navigatorTitle)
-	navigator := pane(navigatorTitle, note, m.navigator().lines(navigatorWidth-paneFrame, rows), navigatorWidth, height)
+	navigator := pane(navigatorTitle, note, m.navigator().lines(navigatorWidth-paneFrame, paneRows(navigatorTitle, height)), navigatorWidth, height)
 	if m.width < wideLayout {
 		return navigator
 	}
@@ -447,8 +448,7 @@ func pane(title, note string, lines []string, width, height int) string {
 		}
 		framed = append(framed, edge(corners[0])+titleStyle.Render(line)+edge(" "+strings.Repeat("─", max(width-5-lipgloss.Width(line), 0))+corners[1]))
 	}
-	rows := height - 1 - len(framed)
-	for index := 0; index < rows; index++ {
+	for index := range paneRows(title, height) {
 		line := ""
 		if index < len(lines) {
 			line = truncate(lines[index], inner)
@@ -461,6 +461,12 @@ func pane(title, note string, lines []string, width, height int) string {
 		bottom = "╰" + strings.Repeat("─", max(width-5-lipgloss.Width(note), 0)) + " " + note + " ─╯"
 	}
 	return strings.Join(append(framed, edge(bottom)), "\n")
+}
+
+// paneRows is how many content lines a pane height lines tall shows below
+// its title and above its bottom edge.
+func paneRows(title string, height int) int {
+	return max(height-1-lipgloss.Height(title), 0)
 }
 
 func wrapLines(lines []string, width int) []string {

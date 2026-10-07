@@ -112,6 +112,15 @@ func TestReaderNarrowTitleKeepsEveryFactOnFurtherLines(t *testing.T) {
 	if first := s.firstDocumentLine(); first != "Review 2 of cancellation." {
 		t.Fatalf("below its title, the narrow pane starts with %q, want the report's first line:\n%s", first, s.text())
 	}
+	// Narrower still, the name gives way from its start to keep its identity
+	// beside it.
+	narrower := tea.WindowSizeMsg{Width: 30, Height: 14}
+	s.send(narrower)
+	s.within(narrower)
+	s.row("╭─ ▶ …", ".md · HIST "+commits[1][:7]+" ")
+	s.row("├─ rework · round 2 ")
+	s.row("├─ newer ")
+	s.send(narrow)
 	// The navigator's title keeps the Slice's facts the same way.
 	s.press("esc")
 	s.row("╭─ ▶ Slice cancel · ", "Awaiting Review")
@@ -121,13 +130,20 @@ func TestReaderNarrowTitleKeepsEveryFactOnFurtherLines(t *testing.T) {
 func TestReaderTitleMarksADiagnosticOnReadableMetadata(t *testing.T) {
 	s := start(t, "widgets", func(root string) {
 		write(t, root, cancelPath+"state.json", `{"state": "ready_for_implementation", "title": "Cancel orders", "branch": "feat/cancel",
-			"claim": {"phase": "implement", "basis": "3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c", "inputs": {"contract": [{"commit": "3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c", "path": "notes/elsewhere.md"}]}}}`)
+			"claim": {"phase": "implement", "basis": "3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c", "inputs": {"contract": [{"commit": "3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c", "path": "notes/elsewhere.md"}], "implement": {"commit": "3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c", "path": "notes/other.md"}}}}`)
 	})
 	base := gitOutput(t, s.root, "rev-list", "--max-parents=0", "HEAD")
 	s.send(tea.WindowSizeMsg{Width: 160, Height: 40})
 	s.press("enter", "down", "enter", "d", "down", "down", "enter", "r", "enter")
-	s.row("╭─ ", "cancel/state.json · HISTORICAL "+base[:12], "▸ implement claim", "! 1 diagnostic ─")
-	s.shows("! Metadata diagnostic:", "Claim contract reference is not a ledger record document path")
+	s.row("╭─ ", "cancel/state.json · HISTORICAL "+base[:12], "▸ implement claim", "! 2 diagnostics ─")
+	// The footer leads with the first diagnostic's cause; the details list
+	// each.
+	s.row("! Metadata diagnostic 1 of 2: Claim contract reference is not a ledger record document path")
+	s.hides("Claim implement reference")
+	s.press("m")
+	s.row("Diagnostics")
+	s.row("│ ! slice widgets/orders/cancel: Claim contract reference is not a ledger record document path")
+	s.row("│ ! slice widgets/orders/cancel: Claim implement reference is not a ledger record document path")
 }
 
 func TestReaderDetailsPanelShowsTheRemainingMetadataAndKeepsThePlace(t *testing.T) {

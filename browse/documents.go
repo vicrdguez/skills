@@ -780,46 +780,38 @@ func (m Model) navigatorTitle(width int) string {
 // fitTitle renders a pane title's parts on as few lines of width as hold
 // them, in the longest forms that fit. A line holds as many leading parts as
 // fit in their shortest forms, and the rest continue on the next line. The
-// first line always holds the name and the part after it, a document's
-// identity. Unlike the header's indicators, no part is dropped, so a narrow
-// title keeps every fact.
+// first line always holds the first two parts, such as a document's name and
+// its identity, or a Slice's name and its lifecycle. Unlike the header's
+// indicators, no part is dropped, so a narrow title keeps every fact.
 func fitTitle(parts []indicator, width int) string {
 	return strings.Join(titleLines(parts, width, min(len(parts), 2)), "\n")
 }
 
 // titleLines fits parts on lines of width, the first line holding at least
-// least of them. When even their shortest forms do not fit, the first of them
-// gives way from its start.
-func titleLines(parts []indicator, width, least int) []string {
+// its leading count of them.
+func titleLines(parts []indicator, width, leading int) []string {
 	if len(parts) == 0 {
 		return nil
 	}
 	count := len(parts)
 	line, fits := fitLine(parts, width)
-	for !fits && count > least {
+	for !fits && count > leading {
 		count--
 		line, fits = fitLine(parts[:count], width)
-	}
-	if !fits {
-		rest := ""
-		for _, part := range parts[1:count] {
-			rest += " · " + part.style.Render(part.forms[len(part.forms)-1])
-		}
-		first := parts[0]
-		line = first.style.Render(keepEnd(first.forms[len(first.forms)-1], max(width-lipgloss.Width(rest), 1))) + rest
 	}
 	return append([]string{line}, titleLines(parts[count:], width, 1)...)
 }
 
 // fitLine renders parts on one line in the longest forms that fit width, and
 // reports whether they fit. The first part takes its shorter form first, then
-// the other parts from the last.
+// the other parts from the last. When even the shortest forms do not fit, the
+// first part gives way from its start.
 func fitLine(parts []indicator, width int) (string, bool) {
 	levels := make([]int, len(parts))
-	render := func() string {
+	render := func(from int) string {
 		texts := make([]string, 0, len(parts))
-		for index, part := range parts {
-			texts = append(texts, part.style.Render(part.forms[levels[index]]))
+		for index, part := range parts[from:] {
+			texts = append(texts, part.style.Render(part.forms[levels[from+index]]))
 		}
 		return strings.Join(texts, " · ")
 	}
@@ -828,13 +820,20 @@ func fitLine(parts []indicator, width int) (string, bool) {
 		order = append(order, index)
 	}
 	for _, index := range order {
-		if line := render(); lipgloss.Width(line) <= width {
+		if line := render(0); lipgloss.Width(line) <= width {
 			return line, true
 		}
 		levels[index] = len(parts[index].forms) - 1
 	}
-	line := render()
-	return line, lipgloss.Width(line) <= width
+	if line := render(0); lipgloss.Width(line) <= width {
+		return line, true
+	}
+	rest := ""
+	if len(parts) > 1 {
+		rest = " · " + render(1)
+	}
+	first := parts[0]
+	return first.style.Render(keepEnd(first.forms[levels[0]], max(width-lipgloss.Width(rest), 1))) + rest, false
 }
 
 // metadataUnreadable reports whether a document's recorded metadata could
@@ -973,7 +972,7 @@ func detailsLines(document *ledger.Document) []string {
 	if len(document.Diagnostics) > 0 {
 		lines = append(lines, "", heading("Diagnostics"))
 		for _, diagnostic := range document.Diagnostics {
-			lines = append(lines, warningStyle.Render("! "+DiagnosticText(diagnostic)))
+			lines = append(lines, warningStyle.Render(DiagnosticText(diagnostic)))
 		}
 	}
 	return lines
