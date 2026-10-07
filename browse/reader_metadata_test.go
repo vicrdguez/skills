@@ -11,12 +11,17 @@ import (
 	"github.com/vicrdguez/skills/browse"
 )
 
-// firstDocumentLine is the first line inside the document pane of a reader
-// narrow enough to show the focused document alone.
+// firstDocumentLine is the first line inside the document pane, below its
+// title, of a reader narrow enough to show the focused document alone.
 func (s *session) firstDocumentLine() string {
 	s.t.Helper()
-	lines := strings.Split(s.text(), "\n")
-	return strings.TrimSpace(strings.Trim(lines[2], "│"))
+	for _, line := range strings.Split(s.text(), "\n")[1:] {
+		if strings.HasPrefix(line, "│") {
+			return strings.TrimSpace(strings.Trim(line, "│"))
+		}
+	}
+	s.t.Fatalf("the document pane shows no line:\n%s", s.text())
+	return ""
 }
 
 // documentPane is the right-hand pane of a wide reader's body: from its
@@ -94,6 +99,23 @@ func TestReaderTitleShowsWhatAReaderNeedsAtAGlance(t *testing.T) {
 	s.row("╭─ ", "cancel/state.json · HISTORICAL", "▸ watchdog claim")
 	s.press("esc", "esc", "esc", "up")
 	s.row("╭─ ", "cancel/watchdog-report.md · current · ", "! metadata unreadable")
+}
+
+func TestReaderNarrowTitleKeepsEveryFactOnFurtherLines(t *testing.T) {
+	s, commits := reviewed(t)
+	narrow := tea.WindowSizeMsg{Width: 40, Height: 14}
+	s.send(narrow)
+	s.press("enter", "down", "enter", "d", "down", "down", "down", "down", "enter")
+	s.within(narrow)
+	s.row("╭─ ▶ watchdog-report.md · HIST " + commits[1][:7] + " ")
+	s.row("├─ rework · round 2 · newer ")
+	if first := s.firstDocumentLine(); first != "Review 2 of cancellation." {
+		t.Fatalf("below its title, the narrow pane starts with %q, want the report's first line:\n%s", first, s.text())
+	}
+	// The navigator's title keeps the Slice's facts the same way.
+	s.press("esc")
+	s.row("╭─ ▶ Slice cancel · ", "Awaiting Review")
+	s.row("├─ ", "watchdog claim")
 }
 
 func TestReaderTitleMarksADiagnosticOnReadableMetadata(t *testing.T) {
@@ -199,7 +221,8 @@ func TestReaderNavigatorTitleFollowsRefreshWhileTheDocumentStaysPinned(t *testin
 	s = start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 160, Height: 30})
 	s.press("enter", "enter", "d")
-	s.row("╭─ ", "▶ ", "ken · ", "! lifecycle unknown", "claim unknown")
+	s.row("╭─ ", "▶ Slice broken · ", "! lifecycle unknown")
+	s.row("├─ ", "claim unknown")
 }
 
 func TestReaderShowsUnreadableMetadataAsItsRecordedText(t *testing.T) {
@@ -222,4 +245,25 @@ func TestReaderShowsUnreadableMetadataAsItsRecordedText(t *testing.T) {
 	s.shows("Commit: "+gitOutput(t, s.root, "rev-parse", "HEAD"), "Path: "+cancelPath+"watchdog-report.md",
 		"Diagnostics", "watchdog report metadata is unreadable")
 	s.hides("Schema:", "Source repository revisions")
+}
+
+func TestReaderNarrowUnreadableDocumentAndDetailsStayReadable(t *testing.T) {
+	s := start(t, "widgets")
+	narrow := tea.WindowSizeMsg{Width: 40, Height: 14}
+	s.send(narrow)
+	s.press("enter", "down", "enter", "d", "down", "down", "down", "enter")
+	s.within(narrow)
+	if first := s.firstDocumentLine(); first != "---" {
+		t.Fatalf("the narrow unreadable report starts with %q, want its recorded frontmatter:\n%s", first, s.text())
+	}
+	s.shows("schema: unsupported", "! Metadata diagnostic: ")
+	s.press("pgdown")
+	s.shows("Malformed metadata does not hide")
+
+	// The details panel scrolls to the diagnostic in full.
+	s.press("m")
+	s.shows("Ledger document", "Commit:")
+	s.press("pgdown", "pgdown")
+	s.within(narrow)
+	s.shows("field unknown_field not", "documented schema-1 fields with", "exact types", "scrolled 100%")
 }

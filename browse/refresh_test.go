@@ -159,7 +159,7 @@ func TestFailedRefreshPrioritizesWarningOverDocumentContextAtNarrowWidths(t *tes
 		if width >= 43 && !strings.Contains(header, "archived") {
 			t.Fatalf("%d-column failed-refresh header %q lacks the archive marker", width, header)
 		}
-		s.row("╭─ ▶ ", "HIST "+reference)
+		s.row("╭─ ▶ ", "HIST", reference)
 		s.shows("Refresh failed; displayed", "configured ledger")
 		s.within(size)
 	}
@@ -171,7 +171,7 @@ func TestFailedRefreshPrioritizesWarningOverDocumentContextAtNarrowWidths(t *tes
 	if header := s.header(); !strings.Contains(header, "archived") || strings.Contains(header, "%") {
 		t.Fatalf("after recovery, the archive marker did not return to the 40-column header without repeated scroll: %q", header)
 	}
-	s.row("╭─ ▶ ", "HIST "+reference)
+	s.row("╭─ ▶ ", "HIST", reference)
 	s.hides("NOT REFRESHED", "Refresh failed")
 }
 

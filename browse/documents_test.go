@@ -68,7 +68,8 @@ func TestDocumentReferencesKeepMetadataInWideAndStackedPanes(t *testing.T) {
 		s.press("esc")
 		s.row("╭─ References (4)")
 		s.press("esc")
-		s.row("╭─ ▶ ", "t.md · current · awaiting_review")
+		s.row("╭─ ▶ ", "implement-report.md · current")
+		s.row("─ ", "awaiting_review ─")
 		s.within(size)
 	}
 }

@@ -777,18 +777,49 @@ func (m Model) navigatorTitle(width int) string {
 	return fitTitle(parts, width)
 }
 
-// fitTitle renders a pane title's parts in the longest forms that fit
-// width. The name takes its shorter form first, then the other parts from
-// the last. When even the shortest forms do not fit, the name gives way from
-// its start, and the pane cuts what still does not fit from the end; the
-// details panel repeats every fact a title can lose. Unlike the header's
-// indicators, no part is dropped whole, since the identity follows the name.
+// fitTitle renders a pane title's parts on as few lines of width as hold
+// them, in the longest forms that fit. A line holds as many leading parts as
+// fit in their shortest forms, and the rest continue on the next line. The
+// first line always holds the name and the part after it, a document's
+// identity. Unlike the header's indicators, no part is dropped, so a narrow
+// title keeps every fact.
 func fitTitle(parts []indicator, width int) string {
+	return strings.Join(titleLines(parts, width, min(len(parts), 2)), "\n")
+}
+
+// titleLines fits parts on lines of width, the first line holding at least
+// least of them. When even their shortest forms do not fit, the first of them
+// gives way from its start.
+func titleLines(parts []indicator, width, least int) []string {
+	if len(parts) == 0 {
+		return nil
+	}
+	count := len(parts)
+	line, fits := fitLine(parts, width)
+	for !fits && count > least {
+		count--
+		line, fits = fitLine(parts[:count], width)
+	}
+	if !fits {
+		rest := ""
+		for _, part := range parts[1:count] {
+			rest += " · " + part.style.Render(part.forms[len(part.forms)-1])
+		}
+		first := parts[0]
+		line = first.style.Render(keepEnd(first.forms[len(first.forms)-1], max(width-lipgloss.Width(rest), 1))) + rest
+	}
+	return append([]string{line}, titleLines(parts[count:], width, 1)...)
+}
+
+// fitLine renders parts on one line in the longest forms that fit width, and
+// reports whether they fit. The first part takes its shorter form first, then
+// the other parts from the last.
+func fitLine(parts []indicator, width int) (string, bool) {
 	levels := make([]int, len(parts))
-	render := func(from int) string {
+	render := func() string {
 		texts := make([]string, 0, len(parts))
-		for index, part := range parts[from:] {
-			texts = append(texts, part.style.Render(part.forms[levels[from+index]]))
+		for index, part := range parts {
+			texts = append(texts, part.style.Render(part.forms[levels[index]]))
 		}
 		return strings.Join(texts, " · ")
 	}
@@ -797,19 +828,13 @@ func fitTitle(parts []indicator, width int) string {
 		order = append(order, index)
 	}
 	for _, index := range order {
-		if title := render(0); lipgloss.Width(title) <= width {
-			return title
+		if line := render(); lipgloss.Width(line) <= width {
+			return line, true
 		}
 		levels[index] = len(parts[index].forms) - 1
 	}
-	if title := render(0); lipgloss.Width(title) <= width {
-		return title
-	}
-	rest := ""
-	if len(parts) > 1 {
-		rest = " · " + render(1)
-	}
-	return parts[0].style.Render(keepEnd(parts[0].forms[levels[0]], max(width-lipgloss.Width(rest), 1))) + rest
+	line := render()
+	return line, lipgloss.Width(line) <= width
 }
 
 // metadataUnreadable reports whether a document's recorded metadata could
@@ -890,8 +915,8 @@ func (m *Model) toggleDetails() {
 }
 
 // detailsLines are the displayed document's recorded metadata: its full
-// identity, each structured field, including those its title shows while
-// they fit, and its diagnostics.
+// identity, each structured field, including those its title shows, and its
+// diagnostics.
 func detailsLines(document *ledger.Document) []string {
 	heading := titleStyle.Render
 	lines := []string{

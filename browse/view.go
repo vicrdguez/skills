@@ -100,7 +100,11 @@ func (m *Model) layoutDetail() {
 		// The document is rendered again only when its width changes.
 		s := &m.reader.shown
 		width, paneHeight := m.documentPane(height)
-		s.viewport.Width, s.viewport.Height = max(width-paneFrame, 1), max(paneHeight-2, 1)
+		// A narrow title takes further lines from the pane.
+		rows := func(title string) int {
+			return max(paneHeight-1-lipgloss.Height(title), 1)
+		}
+		s.viewport.Width, s.viewport.Height = max(width-paneFrame, 1), rows(focusTitle(m.reader.documentFocus, width, m.documentTitle))
 		if s.rendered != s.viewport.Width {
 			offset := s.viewport.YOffset
 			content, problem := m.shownContent(s.viewport.Width)
@@ -112,7 +116,7 @@ func (m *Model) layoutDetail() {
 		}
 		if r := &m.reader; r.detailsOpen() {
 			offset := r.detailsView.YOffset
-			r.detailsView.Width, r.detailsView.Height = s.viewport.Width, s.viewport.Height
+			r.detailsView.Width, r.detailsView.Height = s.viewport.Width, rows(m.documentPaneTitle(width))
 			r.detailsView.SetContent(wrap(strings.Join(detailsLines(s.document), "\n"), s.viewport.Width))
 			r.detailsView.SetYOffset(offset)
 		}
@@ -210,10 +214,15 @@ func (m Model) footer() string {
 	if m.screen == readerScreen && m.reader.shown.newer {
 		lines = append(lines, wrap("Newer document available; select its entry and press enter to read it", m.width))
 	}
-	if document := m.reader.shown.document; m.screen == readerScreen && document != nil {
-		for _, diagnostic := range document.Diagnostics {
-			lines = append(lines, wrap(warningStyle.Render("! Metadata diagnostic: "+DiagnosticText(diagnostic)), m.width))
+	// A displayed document's diagnostics take one line, so that they never
+	// crowd out the document; the details panel shows each in full.
+	if document := m.reader.shown.document; m.screen == readerScreen && document != nil && len(document.Diagnostics) > 0 {
+		label := "! Metadata diagnostic: "
+		if count := len(document.Diagnostics); count > 1 {
+			label = fmt.Sprintf("! Metadata diagnostic 1 of %d: ", count)
 		}
+		text := strings.Join(strings.Fields(DiagnosticText(document.Diagnostics[0])), " ")
+		lines = append(lines, truncate(warningStyle.Render(label+text), m.width))
 	}
 	if m.screen == readerScreen && m.reader.shown.renderProblem != "" {
 		lines = append(lines, wrap(warningStyle.Render("! "+m.reader.shown.renderProblem+"; showing recorded text"), m.width))
@@ -327,40 +336,45 @@ func (m Model) readerBody(height int) string {
 	if m.width < wideLayout {
 		navigatorWidth = m.width
 	}
-	// The pane the keys act in carries the focus mark, and its title fits
-	// what the mark leaves of the room a pane gives its title.
-	mark := func(focused bool) string {
-		if focused {
-			return focusMark
-		}
-		return ""
-	}
-	titleRoom := func(width int, mark string) int {
-		return width - 5 - lipgloss.Width(mark)
-	}
-	var document string
+	view := r.shown.viewport
 	if r.detailsOpen() {
-		title := focusMark + "Details · " + documentLabel(r.shown.document, true)
-		document = pane(title, scrollNote(r.detailsView), strings.Split(r.detailsView.View(), "\n"), documentWidth, height)
-	} else {
-		mark := mark(r.documentFocus)
-		title := mark + m.documentTitle(titleRoom(documentWidth, mark))
-		document = pane(title, scrollNote(r.shown.viewport), strings.Split(r.shown.viewport.View(), "\n"), documentWidth, height)
+		view = r.detailsView
 	}
-	navigatorMark := mark(!r.documentFocus && !r.detailsOpen())
-	if m.width < wideLayout && navigatorMark == "" {
+	document := pane(m.documentPaneTitle(documentWidth), scrollNote(view), strings.Split(view.View(), "\n"), documentWidth, height)
+	if m.width < wideLayout && (r.documentFocus || r.detailsOpen()) {
 		return document
 	}
 	note := m.position()
 	if r.list != nil && len(r.list.Diagnostics) > 0 {
 		note = fmt.Sprintf("! %s · d · %s", plural(len(r.list.Diagnostics), "diagnostic"), note)
 	}
-	navigatorTitle := navigatorMark + m.navigatorTitle(titleRoom(navigatorWidth, navigatorMark))
-	navigator := pane(navigatorTitle, note, m.navigator().lines(navigatorWidth-paneFrame, height-2), navigatorWidth, height)
+	navigatorTitle := focusTitle(!r.documentFocus && !r.detailsOpen(), navigatorWidth, m.navigatorTitle)
+	rows := height - 1 - lipgloss.Height(navigatorTitle)
+	navigator := pane(navigatorTitle, note, m.navigator().lines(navigatorWidth-paneFrame, rows), navigatorWidth, height)
 	if m.width < wideLayout {
 		return navigator
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, navigator, document)
+}
+
+// documentPaneTitle is the title of a document pane width cells wide: the
+// details panel's while it is open, and otherwise the displayed document's.
+func (m Model) documentPaneTitle(width int) string {
+	r := m.reader
+	if r.detailsOpen() {
+		return focusMark + "Details · " + documentLabel(r.shown.document, true)
+	}
+	return focusTitle(r.documentFocus, width, m.documentTitle)
+}
+
+// focusTitle is the title of a pane width cells wide, carrying the focus mark
+// when the keys act in the pane, and fitted to the room the mark leaves.
+func focusTitle(focused bool, width int, title func(width int) string) string {
+	mark := ""
+	if focused {
+		mark = focusMark
+	}
+	return mark + title(width-5-lipgloss.Width(mark))
 }
 
 // scrollNote is a pane's scroll position, when its content overflows it.
@@ -419,13 +433,22 @@ const paneFrame = 4
 
 // pane frames lines in a rounded border exactly width cells wide and height
 // lines tall, with its title in the top edge and note, when set, in the
-// bottom edge. Lines beyond its height are clipped.
+// bottom edge. Each further line of the title continues on an edge of its
+// own below the top. Lines beyond its height are clipped.
 func pane(title, note string, lines []string, width, height int) string {
 	inner := max(width-paneFrame, 1)
-	title = truncate(title, max(width-5, 1))
 	edge := mutedStyle.Render
-	framed := []string{edge("╭─ ") + titleStyle.Render(title) + edge(" "+strings.Repeat("─", max(width-5-lipgloss.Width(title), 0))+"╮")}
-	for index := 0; index < height-2; index++ {
+	var framed []string
+	for index, line := range strings.Split(title, "\n") {
+		line = truncate(line, max(width-5, 1))
+		corners := [2]string{"├─ ", "┤"}
+		if index == 0 {
+			corners = [2]string{"╭─ ", "╮"}
+		}
+		framed = append(framed, edge(corners[0])+titleStyle.Render(line)+edge(" "+strings.Repeat("─", max(width-5-lipgloss.Width(line), 0))+corners[1]))
+	}
+	rows := height - 1 - len(framed)
+	for index := 0; index < rows; index++ {
 		line := ""
 		if index < len(lines) {
 			line = truncate(lines[index], inner)
