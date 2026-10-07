@@ -261,8 +261,9 @@ func (m Model) footerKeys() []key.Binding {
 			keys.Back.SetHelp("esc/←", "close details")
 		}
 	}
-	add(keys.Enter, m.screen != sliceScreen && m.canEnter() && (m.screen != readerScreen || !m.reader.documentFocus))
-	add(keys.Focus, m.screen == readerScreen && !m.reader.documentFocus)
+	details := m.screen == readerScreen && m.reader.detailsOpen()
+	add(keys.Enter, m.screen != sliceScreen && m.canEnter() && (m.screen != readerScreen || !m.reader.documentFocus) && !details)
+	add(keys.Focus, m.screen == readerScreen && !m.reader.documentFocus && !details)
 	add(keys.Next, relations)
 	add(keys.Back, m.screen != overviewScreen)
 	add(keys.Group, m.finding())
@@ -286,7 +287,7 @@ func (m Model) footerKeys() []key.Binding {
 		}
 		versions = versions || m.reader.followed != nil
 	}
-	add(keys.Versions, versions)
+	add(keys.Versions, versions && !details)
 	issue := keys.Issue
 	if m.screen == proposalScreen {
 		issue.SetHelp("i", "open parent issue")
@@ -453,39 +454,37 @@ func (m Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // was one. The navigator's cursor selects; with the document focused, the
 // movement keys scroll it and back returns along followed references, then
 // to the navigator. While the details panel is open, the movement keys
-// scroll it and back closes it.
+// scroll it, back closes it, and the keys that would select or focus another
+// place wait until it closes.
 func (m *Model) readerKey(msg tea.KeyMsg) bool {
 	r := &m.reader
 	page := msg.String() == "pgup" || msg.String() == "pgdown"
 	details := r.detailsOpen()
+	view := &r.shown.viewport
+	if details {
+		view = &r.detailsView
+	}
+	scrolls := details || r.documentFocus
 	switch {
 	case key.Matches(msg, m.keys.Details):
 		m.toggleDetails()
 	case details && key.Matches(msg, m.keys.Back):
 		r.details = false
-	case details && key.Matches(msg, m.keys.Up):
-		r.detailsView.LineUp(1)
-	case details && key.Matches(msg, m.keys.Down):
-		r.detailsView.LineDown(1)
-	case details && msg.String() == "pgup":
-		r.detailsView.PageUp()
-	case details && msg.String() == "pgdown":
-		r.detailsView.PageDown()
-	case key.Matches(msg, m.keys.Up, m.keys.Down) && r.documentFocus:
-		if key.Matches(msg, m.keys.Up) {
-			r.shown.viewport.LineUp(1)
-		} else {
-			r.shown.viewport.LineDown(1)
-		}
+	case details && (msg.Type == tea.KeyEnter || key.Matches(msg, m.keys.Enter, m.keys.Focus, m.keys.Versions)):
+		// The panel holds the reader's place until it closes.
+	case key.Matches(msg, m.keys.Up) && scrolls:
+		view.LineUp(1)
+	case key.Matches(msg, m.keys.Down) && scrolls:
+		view.LineDown(1)
 	case key.Matches(msg, m.keys.Up):
 		m.moveEntry(-1)
 	case key.Matches(msg, m.keys.Down):
 		m.moveEntry(1)
-	case page && r.documentFocus:
+	case page && scrolls:
 		if msg.String() == "pgup" {
-			r.shown.viewport.PageUp()
+			view.PageUp()
 		} else {
-			r.shown.viewport.PageDown()
+			view.PageDown()
 		}
 	case page:
 		// The navigator does not page; the document does once focused.

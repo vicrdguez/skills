@@ -19,6 +19,23 @@ func (s *session) firstDocumentLine() string {
 	return strings.TrimSpace(strings.Trim(lines[2], "│"))
 }
 
+// documentPane is the right-hand pane of a wide reader's body: from its
+// title to its bottom edge.
+func documentPane(text string) string {
+	lines := strings.Split(text, "\n")
+	var pane []string
+	for _, line := range lines[1 : len(lines)-1] {
+		if at := strings.LastIndex(line, "│ "); strings.HasPrefix(strings.TrimSpace(line), "│") && at > 0 {
+			pane = append(pane, line[at:])
+		} else if at := strings.LastIndex(line, "╭─"); at > 0 {
+			pane = append(pane, line[at:])
+		} else if at := strings.LastIndex(line, "╰"); at > 0 {
+			pane = append(pane, line[at:])
+		}
+	}
+	return strings.Join(pane, "\n")
+}
+
 func TestReaderDocumentPaneStartsOnTheAuthoredFirstLine(t *testing.T) {
 	s := start(t, "widgets")
 	review(t, s.root, "pass", 1, "## Review findings\n\nThe cancellation is sound.\n")
@@ -112,12 +129,14 @@ func TestReaderDetailsPanelShowsTheRemainingMetadataAndKeepsThePlace(t *testing.
 	if after := s.model.View(); after != before {
 		t.Fatalf("opening and closing the details changed the reader:\nbefore:\n%s\nafter:\n%s", before, after)
 	}
-	s.press("m", "pgdown", "esc")
+	// Keys that would select or focus elsewhere wait for the panel to close.
+	s.press("m", "pgdown", "enter", "tab", "v", "esc")
 	if after := s.model.View(); after != before {
-		t.Fatalf("back did not close the details onto the same reader:\nbefore:\n%s\nafter:\n%s", before, after)
+		t.Fatalf("the details changed the reader's place:\nbefore:\n%s\nafter:\n%s", before, after)
 	}
 
-	// A narrow terminal shows the panel alone, scrolling within it.
+	// A narrow terminal shows the panel alone, scrolling within it, and it
+	// holds every fact a shortened title can lose.
 	narrow := tea.WindowSizeMsg{Width: 40, Height: 14}
 	s.send(narrow)
 	s.press("m")
@@ -125,6 +144,7 @@ func TestReaderDetailsPanelShowsTheRemainingMetadataAndKeepsThePlace(t *testing.
 	s.shows("▶ Details · cancel/watchdog-", "Ledger document", "scrolled 0%")
 	s.press("pgdown")
 	s.hides("scrolled 0%")
+	s.shows("Outcome: pass", "Review round: 3")
 	s.press("?")
 	s.shows("m details")
 }
@@ -134,12 +154,12 @@ func TestReaderDetailsShowADecisionsAndAClaimsRecordedMetadata(t *testing.T) {
 	base := gitOutput(t, s.root, "rev-list", "--max-parents=0", "HEAD")
 	s.send(tea.WindowSizeMsg{Width: 140, Height: 50})
 	s.press("enter", "down", "enter", "d", "down", "down", "down", "down", "enter", "m")
-	s.shows("Schema: 1", "Project: widgets", "Slice: orders/cancel", "Answered request",
+	s.shows("Schema: 1", "Route: implement", "Project: widgets", "Slice: orders/cancel", "Answered request",
 		"Commit: "+base, "Path: "+cancelPath+"state.json")
 
 	// The panel follows the displayed document along a followed reference.
 	s.press("r", "enter")
-	s.shows("▶ Details · cancel/state.json", "Commit: "+base, "Claim basis (ledger revision): "+strings.Repeat("3c", 20))
+	s.shows("▶ Details · cancel/state.json", "Commit: "+base, "Claim phase: watchdog", "Claim basis (ledger revision): "+strings.Repeat("3c", 20))
 	// The current Claim's state record lists its inputs.
 	s = start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 140, Height: 50})
@@ -180,23 +200,6 @@ func TestReaderNavigatorTitleFollowsRefreshWhileTheDocumentStaysPinned(t *testin
 	s.send(tea.WindowSizeMsg{Width: 160, Height: 30})
 	s.press("enter", "enter", "d")
 	s.row("╭─ ", "▶ ", "ken · ", "! lifecycle unknown", "claim unknown")
-}
-
-// documentPane is the right-hand pane of a wide reader's body: from its
-// title to its bottom edge.
-func documentPane(text string) string {
-	lines := strings.Split(text, "\n")
-	var pane []string
-	for _, line := range lines[1 : len(lines)-1] {
-		if at := strings.LastIndex(line, "│ "); strings.HasPrefix(strings.TrimSpace(line), "│") && at > 0 {
-			pane = append(pane, line[at:])
-		} else if at := strings.LastIndex(line, "╭─"); at > 0 {
-			pane = append(pane, line[at:])
-		} else if at := strings.LastIndex(line, "╰"); at > 0 {
-			pane = append(pane, line[at:])
-		}
-	}
-	return strings.Join(pane, "\n")
 }
 
 func TestReaderShowsUnreadableMetadataAsItsRecordedText(t *testing.T) {

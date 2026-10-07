@@ -689,7 +689,8 @@ func (m Model) shownTitle() string {
 	return documentLabel(document, true) + " · " + m.identityForms(document)[0]
 }
 
-// documentLabel names a document, with its Slice when full.
+// documentLabel names a document; full names it with its Slice, and
+// otherwise by its file name alone.
 func documentLabel(document *ledger.Document, full bool) string {
 	switch {
 	case document.Kind == ledger.ProposalDocumentKind:
@@ -700,6 +701,8 @@ func documentLabel(document *ledger.Document, full bool) string {
 	return documentName(document.Reference.Path)
 }
 
+// identityForms mark a document current, or historical at its ledger
+// commit, in forms from full to shortest.
 func (m Model) identityForms(document *ledger.Document) []string {
 	if commit := document.Reference.Commit; commit != m.snapshot.Revision {
 		return []string{"HISTORICAL " + short(commit, 12), "HIST " + short(commit, 7)}
@@ -733,7 +736,7 @@ func (m Model) documentTitle(width int) string {
 		parts = append(parts, indicator{plain, []string{"route " + decision.Route}})
 	}
 	if claim := document.Claim; claim != nil {
-		parts = append(parts, indicator{claimStyle, []string{"▸ " + claim.Phase + " claim", "▸ " + claim.Phase}})
+		parts = append(parts, claimIndicator(claim.Phase))
 	}
 	if m.reader.shown.newer {
 		parts = append(parts, indicator{plain, []string{"newer available", "newer"}})
@@ -766,8 +769,7 @@ func (m Model) navigatorTitle(width int) string {
 		if m.slice.Readable {
 			lifecycle, claim = lifecycleSpan(m.slice.Lifecycle), indicator{plain, []string{claimLabels[ledger.ClaimNone]}}
 			if m.slice.Claim != nil {
-				phase := m.slice.Claim.Phase
-				claim = indicator{claimStyle, []string{"▸ " + phase + " claim", "▸ " + phase}}
+				claim = claimIndicator(m.slice.Claim.Phase)
 			}
 		}
 		parts = append(parts, indicator{lifecycle.style, []string{lifecycle.text}}, claim)
@@ -778,7 +780,9 @@ func (m Model) navigatorTitle(width int) string {
 // fitTitle renders a pane title's parts in the longest forms that fit
 // width. The name takes its shorter form first, then the other parts from
 // the last. When even the shortest forms do not fit, the name gives way from
-// its start so that the facts after it stay in view.
+// its start, and the pane cuts what still does not fit from the end; the
+// details panel repeats every fact a title can lose. Unlike the header's
+// indicators, no part is dropped whole, since the identity follows the name.
 func fitTitle(parts []indicator, width int) string {
 	levels := make([]int, len(parts))
 	render := func(from int) string {
@@ -810,6 +814,10 @@ func fitTitle(parts []indicator, width int) string {
 
 // metadataUnreadable reports whether a document's recorded metadata could
 // not be interpreted, so that only its recorded text and diagnostics remain.
+// It follows the ledger's parseMetadata, which leaves a report's or
+// decision's metadata unset when it fails, and gives a state record without a
+// Claim diagnostics only when its JSON cannot be read. A document whose bytes
+// could not be confirmed fails the same way and carries that diagnostic.
 func metadataUnreadable(document *ledger.Document) bool {
 	switch document.Kind {
 	case ledger.ImplementReportDocumentKind, ledger.WatchdogReportDocumentKind:
@@ -881,8 +889,9 @@ func (m *Model) toggleDetails() {
 	m.status = ""
 }
 
-// detailsLines are the displayed document's recorded metadata beyond its
-// title: its full identity, each structured field, and its diagnostics.
+// detailsLines are the displayed document's recorded metadata: its full
+// identity, each structured field, including those its title shows while
+// they fit, and its diagnostics.
 func detailsLines(document *ledger.Document) []string {
 	heading := titleStyle.Render
 	lines := []string{
@@ -901,7 +910,10 @@ func detailsLines(document *ledger.Document) []string {
 		}
 	}
 	if report := document.Report; report != nil {
-		lines = append(lines, "", fmt.Sprintf("Schema: %d", report.Schema))
+		lines = append(lines, "", fmt.Sprintf("Schema: %d", report.Schema), "Outcome: "+report.Outcome)
+		if report.Round != 0 {
+			lines = append(lines, fmt.Sprintf("Review round: %d", report.Round))
+		}
 		source := report.Source
 		if source.Head != "" || source.Target != "" || source.Reviewed != "" {
 			lines = append(lines, "", heading("Source repository revisions (not ledger revisions)"))
@@ -918,6 +930,7 @@ func detailsLines(document *ledger.Document) []string {
 	if decision := document.Decision; decision != nil {
 		lines = append(lines, "",
 			fmt.Sprintf("Schema: %d", decision.Schema),
+			"Route: "+decision.Route,
 			"Project: "+decision.Project,
 			"Slice: "+decision.Item,
 			"", heading("Answered request"),
@@ -927,7 +940,7 @@ func detailsLines(document *ledger.Document) []string {
 	}
 	switch claim := document.Claim; {
 	case claim != nil:
-		lines = append(lines, "", "Claim basis (ledger revision): "+claim.Basis)
+		lines = append(lines, "", "Claim phase: "+claim.Phase, "Claim basis (ledger revision): "+claim.Basis)
 		references("Claim input references")
 	case document.Kind == ledger.StateDocumentKind && !metadataUnreadable(document):
 		lines = append(lines, "", "No Claim is recorded.")

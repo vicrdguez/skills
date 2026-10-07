@@ -62,6 +62,12 @@ func claimSpan(phase string) span {
 	return span{"▸ " + phase, claimStyle}
 }
 
+// claimIndicator marks the phase a recorded Claim reserves in a pane title,
+// naming it a Claim where there is room.
+func claimIndicator(phase string) indicator {
+	return indicator{claimStyle, []string{"▸ " + phase + " claim", "▸ " + phase}}
+}
+
 // unknownClaimSpan names a Claim that cannot be read, so it never reads as
 // unclaimed.
 func unknownClaimSpan() span {
