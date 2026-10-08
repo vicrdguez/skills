@@ -38,11 +38,11 @@ Check: {{if eq .Procedure "rework"}}every active finding has its resolving commi
 
 When the focused checks pass, merge the target once:
 
-1. `git -C {{quote .Worktree}} fetch {{quote .Remote}} main`
+1. `git -C {{quote .Worktree}} fetch {{quote .Remote}} {{quote .TargetBranch}}`
 2. `git -C {{quote .Worktree}} rev-parse FETCH_HEAD` prints the full SHA of `<observed-target-sha>`, this round's cutoff.
 3. `git -C {{quote .Worktree}} merge --no-edit <observed-target-sha>`, then resolve any conflicts.
 
-If the fetch fails, use the last target preparation or inspection reported{{if .RecordedTarget}}, or the recorded target `{{.RecordedTarget}}`,{{end}} as `<observed-target-sha>`, and record the evidence as local-only. When a conflict needs a consequential choice, pause. When `main` moves later, keep the cutoff.
+If the fetch fails, use the last target preparation or inspection reported{{if .RecordedTarget}}, or the recorded target `{{.RecordedTarget}}`,{{end}} as `<observed-target-sha>`, and record the evidence as local-only. When a conflict needs a consequential choice, pause. When `{{.TargetBranch}}` moves later, keep the cutoff.
 
 Check: the merge is committed and `git status` is clean.
 

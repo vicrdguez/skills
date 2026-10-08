@@ -25,10 +25,10 @@ var ErrPresentationUncertain = errors.New("pull request presentation outcome is 
 // Current, when set, reports whether the selected local result still stands;
 // the adapter consults it before each additional forge write.
 type PullPresentation struct {
-	Number                    int
-	Title, Body, Branch, Head string
-	Approved                  bool
-	Current                   func() error `json:"-"`
+	Number                          int
+	Title, Body, Branch, Head, Base string
+	Approved                        bool
+	Current                         func() error `json:"-"`
 }
 
 type DeliveryForge interface {
@@ -43,23 +43,24 @@ type DeliveryForge interface {
 // ReviewCount is the Work Item's completed Watchdog Reviews, recorded by its
 // latest review report; an implementation report's own round is always zero.
 type CurrentResult struct {
-	Item        string           `json:"item"`
-	Lifecycle   string           `json:"lifecycle"`
-	Phase       string           `json:"phase"`
-	Outcome     string           `json:"outcome"`
-	Round       uint64           `json:"round,omitempty"`
-	ReviewCount uint64           `json:"review_count"`
-	Report      Reference        `json:"report"`
-	Contract    []Reference      `json:"contract"`
-	Implement   *Reference       `json:"implement,omitempty"`
-	Watchdog    *Reference       `json:"watchdog,omitempty"`
-	Decision    *Reference       `json:"decision,omitempty"`
-	Source      SourceRevisions  `json:"source"`
-	Branch      string           `json:"branch"`
-	Approved    bool             `json:"approved"`
-	Submission  *ForgeAttachment `json:"submission,omitempty"`
-	Issue       *ForgeAttachment `json:"issue,omitempty"`
-	Claimed     bool             `json:"claimed,omitempty"`
+	Item        string             `json:"item"`
+	Lifecycle   string             `json:"lifecycle"`
+	Phase       string             `json:"phase"`
+	Outcome     string             `json:"outcome"`
+	Round       uint64             `json:"round,omitempty"`
+	ReviewCount uint64             `json:"review_count"`
+	Report      Reference          `json:"report"`
+	Contract    []Reference        `json:"contract"`
+	Implement   *Reference         `json:"implement,omitempty"`
+	Watchdog    *Reference         `json:"watchdog,omitempty"`
+	Decision    *Reference         `json:"decision,omitempty"`
+	Source      SourceRevisions    `json:"source"`
+	Branch      string             `json:"branch"`
+	Target      *IntegrationTarget `json:"integration_target,omitempty"`
+	Approved    bool               `json:"approved"`
+	Submission  *ForgeAttachment   `json:"submission,omitempty"`
+	Issue       *ForgeAttachment   `json:"issue,omitempty"`
+	Claimed     bool               `json:"claimed,omitempty"`
 
 	title, contents string
 }
@@ -79,7 +80,7 @@ func SelectCurrentResult(s *Store, repository github.RepositoryID, item string) 
 	if err != nil {
 		return CurrentResult{}, refuse("Work Item "+item+" has no committed phase result to present", "complete an implementation handoff before presenting a pull request")
 	}
-	result := CurrentResult{Item: item, Lifecycle: state.State, Phase: ImplementPhase, Report: Reference{Commit: head, Path: implementPath}, Branch: state.Branch, Submission: state.Submission, Issue: state.Issue, Claimed: state.Claim != nil, title: state.Title, contents: implementation}
+	result := CurrentResult{Item: item, Lifecycle: state.State, Phase: ImplementPhase, Report: Reference{Commit: head, Path: implementPath}, Branch: state.Branch, Target: state.Target, Submission: state.Submission, Issue: state.Issue, Claimed: state.Claim != nil, title: state.Title, contents: implementation}
 	reviewPath := directory + "/" + WatchdogPhase + "-report.md"
 	if review, err := showPath(s, head, reviewPath); err == nil {
 		parsed, _, err := ParseReport(WatchdogPhase, []byte(review))
@@ -119,6 +120,9 @@ func (r CurrentResult) superseded(s *Store, repository github.RepositoryID) erro
 	}
 	if current.Phase != r.Phase || current.Lifecycle != r.Lifecycle || current.contents != r.contents {
 		return refuse("a later local "+current.Phase+" result supersedes the selected "+r.Phase+" result", "present the current view with public prose authored for it")
+	}
+	if current.Target == nil || r.Target == nil || *current.Target != *r.Target {
+		return refuse("the recorded Integration Target changed since selection", "select the current result again")
 	}
 	if !sameAttachment(current.Issue, r.Issue) {
 		return refuse("the recorded issue attachment changed since this result was selected", "select the current view again to present it with the recorded issue's footer")
@@ -208,7 +212,10 @@ func presentSelected(ctx context.Context, s *Store, repository github.Repository
 	if selected.Issue != nil {
 		body += fmt.Sprintf("\n\nCloses #%d", selected.Issue.Number)
 	}
-	presented, err := forge.PresentPull(ctx, PullPresentation{Number: number, Title: selected.title, Body: body, Branch: selected.Branch, Head: selected.Source.Head, Approved: selected.Approved, Current: current})
+	if selected.Target == nil || selected.Target.Branch == "" || selected.Target.Repository != repository.Owner+"/"+repository.Name {
+		return pending("the selected Slice has no valid recorded Integration Target")
+	}
+	presented, err := forge.PresentPull(ctx, PullPresentation{Number: number, Title: selected.title, Body: body, Branch: selected.Branch, Head: selected.Source.Head, Base: selected.Target.Branch, Approved: selected.Approved, Current: current})
 	if err != nil {
 		if errors.Is(err, ErrPresentationUncertain) {
 			return PublicationNote{Status: IssueUncertain, Detail: err.Error()}, nil, false
@@ -219,7 +226,7 @@ func presentSelected(ctx context.Context, s *Store, repository github.Repository
 		return pending("forge returned no valid Submission attachment")
 	}
 	attachment := &ForgeAttachment{Repository: repository.Owner + "/" + repository.Name, Number: presented}
-	record, recorded, err := s.recordSubmission(repository, selected.Item, attachment)
+	record, recorded, err := s.recordSubmission(repository, selected.Item, attachment, *selected.Target)
 	if err != nil {
 		return pending(fmt.Sprintf("pull request #%d presents the %s result, but recording its association is pending: %v", presented, selected.Phase, err))
 	}
@@ -234,7 +241,7 @@ func presentSelected(ctx context.Context, s *Store, repository github.Repository
 // integration destination on the then-current record, preserving every later
 // result, Decision, and Claim. A different known association is never
 // reassigned.
-func (s *Store) recordSubmission(repository github.RepositoryID, item string, attachment *ForgeAttachment) (SliceState, bool, error) {
+func (s *Store) recordSubmission(repository github.RepositoryID, item string, attachment *ForgeAttachment, expected IntegrationTarget) (SliceState, bool, error) {
 	var state SliceState
 	recorded := false
 	err := s.withMutation(func() error {
@@ -244,10 +251,11 @@ func (s *Store) recordSubmission(repository github.RepositoryID, item string, at
 		if err != nil {
 			return err
 		}
-		// PresentPull only creates/validates main in this repository. Bind that
-		// destination with the exact owned attachment, including when this is a
-		// later presentation of an already attached result.
-		target := &IntegrationTarget{Repository: attachment.Repository, Branch: "main"}
+		// A Submission is attached only to its already recorded Slice target.
+		target := state.Target
+		if target == nil || target.Branch == "" || target.Repository != attachment.Repository || *target != expected {
+			return refuse("Work Item has no valid recorded Integration Target", "repair the selected target before attaching a Submission")
+		}
 		if state.Submission != nil && !sameAttachment(state.Submission, attachment) {
 			return refuse(fmt.Sprintf("Work Item %s already records Submission %s#%d", item, state.Submission.Repository, state.Submission.Number), "preserve both attachments and reconcile with human direction")
 		}
@@ -257,7 +265,7 @@ func (s *Store) recordSubmission(repository github.RepositoryID, item string, at
 		if err := s.requireCleanPaths(directory + "/state.json"); err != nil {
 			return err
 		}
-		state.Submission, state.Target = attachment, target
+		state.Submission = attachment
 		if err := writeJSON(filepath.Join(s.Root, directory, "state.json"), state); err != nil {
 			return err
 		}

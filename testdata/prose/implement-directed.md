@@ -166,7 +166,7 @@ Check: every active finding has its resolving commit and distinguishing check, a
 
 When the focused checks pass, merge the target once:
 
-1. `git -C '/work/widgets/.worktrees/widget-dashboard' fetch 'origin' main`
+1. `git -C '/work/widgets/.worktrees/widget-dashboard' fetch 'origin' 'main'`
 2. `git -C '/work/widgets/.worktrees/widget-dashboard' rev-parse FETCH_HEAD` prints the full SHA of `<observed-target-sha>`, this round's cutoff.
 3. `git -C '/work/widgets/.worktrees/widget-dashboard' merge --no-edit <observed-target-sha>`, then resolve any conflicts.
 

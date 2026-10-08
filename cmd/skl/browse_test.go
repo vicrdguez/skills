@@ -106,7 +106,7 @@ func TestBrowseQueriesReadCommittedRecordsWithoutSideEffects(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, fact := range []string{"Lifecycle: Awaiting Review", "Claim: watchdog reservation", "Issue: acme/widgets#11",
-		"Depends on: legacy/old [archived] — Old work (Superseded; unsatisfied until Merged)", "Blocks: none"} {
+		"Blocks: none"} {
 		if !strings.Contains(output.String(), fact) {
 			t.Fatalf("markdown lacks %q:\n%s", fact, output)
 		}

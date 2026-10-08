@@ -36,6 +36,9 @@ func deliveryCommands(phase string, newBackend backendFactory, stdout io.Writer)
 			implementationFormatFlag(),
 		}, Action: func(c *cli.Context) error { return runDelivery(c, phase, name, newBackend, stdout) }}
 		if name == "next" {
+			if phase == ledger.ImplementPhase {
+				command.Flags = append(command.Flags, &cli.BoolFlag{Name: "auto", Usage: "open the Proposal Branch at the first implement Claim"})
+			}
 			command.Flags = append(command.Flags, waitFlags()...)
 			command.Flags = append(command.Flags, dispatchFlags()...)
 			command.Aliases = []string{"start"}
@@ -168,7 +171,7 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 				return ledger.Selection{}, err
 			}
 			selectionAttempted = true
-			execution, err := ledger.StartDeliveryContext(c.Context, store, repository.Repository, phase)
+			execution, err := ledger.StartDeliveryContext(c.Context, store, repository.Repository, phase, phase == ledger.ImplementPhase && c.Bool("auto"))
 			if execution == nil {
 				return ledger.Selection{Status: ledger.NoWork}, err
 			}
@@ -212,7 +215,7 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 	var source *workflow.DeliverySource
 	required, target, previous := deliverySourceInputs(execution, phase)
 	if operation == "prepare" {
-		observed, err := workflow.PrepareDeliverySource(repository.Root, repository.Remote, execution.State.Branch, required, target)
+		observed, err := workflow.PrepareDeliverySource(repository.Root, repository.Remote, execution.State.Branch, required, target, execution.State.Target.Branch)
 		if err != nil {
 			return refusal(err)
 		}

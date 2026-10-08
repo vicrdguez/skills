@@ -26,6 +26,7 @@ type DeliveryFacts struct {
 	Remote                string                    `json:"remote"`
 	Item                  string                    `json:"item"`
 	Branch                string                    `json:"branch"`
+	TargetBranch          string                    `json:"target_branch"`
 	Worktree              string                    `json:"worktree"`
 	ResultDirectory       string                    `json:"result_directory"`
 	Claim                 string                    `json:"claim"`

@@ -101,7 +101,11 @@ func loopCommand(t *testing.T, entry string) []string {
 		if regexp.MustCompile(`^\$\d+$`).MatchString(value) {
 			value = ""
 		}
-		if value != "" {
+		if slot[1] == "--auto" {
+			if value == "true" {
+				words = append(words, "--auto")
+			}
+		} else if value != "" {
 			words = append(words, slot[1], value)
 		}
 	}
@@ -170,7 +174,7 @@ func TestInstallWritesDispatchLoopsForPiAndOpenCode(t *testing.T) {
 			piWant := cases["pi"][operation]
 			i := 0
 			for position, flag := range piWant {
-				if !strings.HasPrefix(flag, "--") || flag == "--dispatch" || flag == "--wait" || flag == "--mode" {
+				if !strings.HasPrefix(flag, "--") || flag == "--dispatch" || flag == "--wait" || flag == "--mode" || flag == "--auto" {
 					continue
 				}
 				i++
@@ -191,6 +195,19 @@ func TestInstallWritesDispatchLoopsForPiAndOpenCode(t *testing.T) {
 					t.Errorf("%s %s slot %d runs %q, want %q", harness, operation, i, got, overridden)
 				}
 			}
+		}
+	}
+	for _, harness := range []string{"pi", "opencode"} {
+		entry := readFile(t, filepath.Join(home, fmt.Sprintf(entryPoints[harness], "implement-loop")))
+		custom := entry
+		if harness == "pi" {
+			custom = strings.Replace(custom, "${5:-false}", "true", 1)
+		} else {
+			custom = strings.Replace(custom, "$5", "true", 1)
+		}
+		want := append(slices.Clone(cases[harness]["implement-loop"]), "--auto")
+		if got := loopCommand(t, custom); !slices.Equal(got, want) {
+			t.Errorf("%s Auto Mode adapter runs %q, want %q", harness, got, want)
 		}
 	}
 	for _, harness := range []string{"codex", "claude"} {

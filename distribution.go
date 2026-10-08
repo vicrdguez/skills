@@ -52,10 +52,10 @@ var adapters = []adapter{
 // Loop adapters are installed only into pi and OpenCode. Their outcomes own
 // the continuation; the entry points only supply dispatch arguments.
 var loopAdapters = []adapter{
-	{name: "implement-loop", command: "skl implement next --dispatch --wait", slots: []string{"worker-model", "worker-thinking", "reviewer-model", "reviewer-thinking"}, loop: true,
-		defaults: map[string]string{"worker-model": "openai-codex/gpt-6-sol", "worker-thinking": "xhigh", "reviewer-model": "openai-codex/gpt-6-astra", "reviewer-thinking": "low"}},
-	{name: "implement-team-loop", command: "skl implement next --mode team --dispatch --wait", slots: []string{"worker-model", "worker-thinking", "helper-model", "helper-thinking", "reviewer-model", "reviewer-thinking"}, loop: true,
-		defaults: map[string]string{"worker-model": "openai-codex/gpt-6-sol", "worker-thinking": "xhigh", "helper-model": "openai-codex/gpt-6-luna", "helper-thinking": "xhigh", "reviewer-model": "openai-codex/gpt-6-sol", "reviewer-thinking": "xhigh"}},
+	{name: "implement-loop", command: "skl implement next --dispatch --wait", slots: []string{"worker-model", "worker-thinking", "reviewer-model", "reviewer-thinking", "auto"}, loop: true,
+		defaults: map[string]string{"worker-model": "openai-codex/gpt-6-sol", "worker-thinking": "xhigh", "reviewer-model": "openai-codex/gpt-6-astra", "reviewer-thinking": "low", "auto": "false"}},
+	{name: "implement-team-loop", command: "skl implement next --mode team --dispatch --wait", slots: []string{"worker-model", "worker-thinking", "helper-model", "helper-thinking", "reviewer-model", "reviewer-thinking", "auto"}, loop: true,
+		defaults: map[string]string{"worker-model": "openai-codex/gpt-6-sol", "worker-thinking": "xhigh", "helper-model": "openai-codex/gpt-6-luna", "helper-thinking": "xhigh", "reviewer-model": "openai-codex/gpt-6-sol", "reviewer-thinking": "xhigh", "auto": "false"}},
 	{name: "watchdog-loop", command: "skl watchdog next --dispatch --wait", slots: []string{"worker-model", "worker-thinking"}, loop: true,
 		defaults: map[string]string{"worker-model": "openai-codex/gpt-6-astra", "worker-thinking": "high"}},
 }
@@ -147,6 +147,7 @@ type installData struct {
 	Frontmatter string
 	Loop        bool
 	Arguments   string
+	AutoSlot    bool
 	LegacyOwner []byte
 }
 
@@ -195,7 +196,7 @@ func Install(home string) (InstallOutcome, error) {
 			}
 			command, keys, arguments := target.entry(a, frontmatter)
 			adapterPath := filepath.Join(home, fmt.Sprintf(target.entryPoint, a.name))
-			data := installData{Command: command, Protocol: AdapterProtocol, Frontmatter: keys, Loop: a.loop, Arguments: arguments}
+			data := installData{Command: command, Protocol: AdapterProtocol, Frontmatter: keys, Loop: a.loop, Arguments: arguments, AutoSlot: slices.Contains(a.slots, "auto")}
 			if a.loop && target.skills == ".pi/agent/skills" {
 				data.LegacyOwner = piMarker
 			}

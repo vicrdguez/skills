@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -38,7 +39,14 @@ type DeliverySource struct {
 // Initial preparation may pass an empty requiredHead. A missing required
 // revision or Integration Target is a concrete refusal, never a fabricated
 // branch.
-func PrepareDeliverySource(root, remote, branch, requiredHead, recordedTarget string) (DeliverySource, error) {
+func PrepareDeliverySource(root, remote, branch, requiredHead, recordedTarget string, targetBranch ...string) (DeliverySource, error) {
+	selected := "main"
+	if len(targetBranch) > 0 {
+		selected = targetBranch[0]
+	}
+	if len(targetBranch) > 1 || !validConventionalBranch(root, selected) {
+		return DeliverySource{}, Refuse("invalid recorded Integration Target branch")
+	}
 	if !validConventionalBranch(root, branch) {
 		return DeliverySource{}, Refuse("invalid conventional branch identity; repair the Work Item attachment")
 	}
@@ -49,8 +57,45 @@ func PrepareDeliverySource(root, remote, branch, requiredHead, recordedTarget st
 	// Each fetch records its own selected identity; a concurrent preparation in
 	// the same checkout must not change which commit this caller observes.
 	fetchedMain, mainErr := deliveryFetch(root, remote, "main")
+	fetchedTarget, targetErr := fetchedMain, mainErr
+	if selected != "main" {
+		fetchedTarget, targetErr = deliveryFetch(root, remote, selected)
+		if targetErr != nil && remote != "" {
+			// Only an observed absent ref may be initialized. A failed fetch by
+			// itself does not distinguish absence from a transport failure.
+			check := exec.Command("git", "-C", root, "ls-remote", "--exit-code", remote, "refs/heads/"+selected)
+			_, checkErr := check.Output()
+			var exit *exec.ExitError
+			if errors.As(checkErr, &exit) && exit.ExitCode() == 2 {
+				if fetchedMain == "" {
+					return DeliverySource{}, Refuse("Proposal Branch " + selected + " is absent and main could not be fetched; retry when the remote is available")
+				}
+				// The empty lease prevents a race from moving an existing branch.
+				if err := gitOK(root, "push", "--force-with-lease=refs/heads/"+selected+":", remote, fetchedMain+":refs/heads/"+selected); err != nil {
+					// Another worker may have created it; use that worker's head.
+					fetchedTarget, targetErr = deliveryFetch(root, remote, selected)
+					if targetErr != nil {
+						return DeliverySource{}, Refuse("Proposal Branch creation was not confirmed: " + err.Error())
+					}
+				} else {
+					fetchedTarget, targetErr = deliveryFetch(root, remote, selected)
+				}
+			} else if checkErr != nil {
+				return DeliverySource{}, Refuse("cannot determine whether Proposal Branch " + selected + " exists: " + checkErr.Error())
+			} else {
+				// A concurrent creator made it visible after the fetch.
+				fetchedTarget, targetErr = deliveryFetch(root, remote, selected)
+			}
+		}
+	}
 	fetchedBranch, branchErr := deliveryFetch(root, remote, branch)
 	status := deliveryFetchStatus(remote, branch, mainErr, branchErr)
+	if selected != "main" {
+		status = deliveryFetchStatus(remote, selected, mainErr, targetErr)
+		if branchErr != nil {
+			status += "; " + branch + " is not available from the remote: " + branchErr.Error()
+		}
+	}
 	required := ""
 	if requiredHead != "" {
 		required = deliveryResolveCommit(root, requiredHead)
@@ -58,17 +103,17 @@ func PrepareDeliverySource(root, remote, branch, requiredHead, recordedTarget st
 			return DeliverySource{}, Refuse("required source revision " + requiredHead + " is unavailable after fetching; restore that exact input before preparing the branch")
 		}
 	}
-	target := fetchedMain
+	target := fetchedTarget
 	if recordedTarget != "" {
 		target = deliveryResolveCommit(root, recordedTarget)
 		if target == "" {
 			return DeliverySource{}, Refuse("recorded Integration Target " + recordedTarget + " is unavailable; restore that exact input instead of substituting a newer target")
 		}
-	} else if target == "" && remote != "" {
+	} else if target == "" && remote != "" && selected == "main" {
 		target = deliveryResolveCommit(root, "refs/remotes/"+remote+"/main")
 	}
 	if target == "" {
-		return DeliverySource{}, Refuse("Integration Target is unavailable; fetch " + deliveryRefName(remote, "main") + " or supply its last observed revision and retry")
+		return DeliverySource{}, Refuse("Integration Target is unavailable; fetch " + deliveryRefName(remote, selected) + " or supply its last observed revision and retry")
 	}
 	head := deliveryResolveCommit(root, "refs/heads/"+branch)
 	if head == "" {

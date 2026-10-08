@@ -170,7 +170,7 @@ func sliceSections(slice *ledger.SliceDetail, reports []phaseReport) []factSecti
 	}
 	if slice.Readable {
 		for _, dependency := range slice.Dependencies {
-			satisfaction := "unsatisfied until Merged"
+			satisfaction := "unsatisfied until Merged into main, this Proposal Branch, or a Proposal Branch completed into main"
 			if dependency.Satisfied {
 				satisfaction = "satisfied"
 			}

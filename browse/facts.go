@@ -91,6 +91,7 @@ func ProposalLines(proposal ledger.ProposalSummary) []string {
 	lines = append(lines,
 		"Accepted: "+orUnknown(proposal.Accepted),
 		"Proposal Branch: "+orNone(proposal.Branch),
+		"Integration target: "+proposalTargetText(proposal.Target),
 		"Location: "+locationText(proposal.Archived, proposal.Retired),
 		"Delivery: "+deliveryText(proposal),
 		"Slices: "+tallyText(proposal.Tally),
@@ -100,6 +101,13 @@ func ProposalLines(proposal ledger.ProposalSummary) []string {
 }
 
 // SliceSummaryLines are the labeled facts of one Proposal member.
+func proposalTargetText(target *ledger.IntegrationTarget) string {
+	if target == nil {
+		return "none"
+	}
+	return target.Repository + " " + target.Branch
+}
+
 func SliceSummaryLines(slice ledger.SliceSummary) []string {
 	lines := []string{"Slice: " + slice.Item}
 	if slice.Readable {
@@ -134,7 +142,7 @@ func SliceLines(slice *ledger.SliceDetail) []string {
 			lines = append(lines, "Dependencies: none")
 		}
 		for _, dependency := range slice.Dependencies {
-			satisfaction := "unsatisfied until Merged"
+			satisfaction := "unsatisfied until Merged into main, this Proposal Branch, or a Proposal Branch completed into main"
 			if dependency.Satisfied {
 				satisfaction = "satisfied"
 			}

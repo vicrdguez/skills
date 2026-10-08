@@ -98,9 +98,18 @@ func (l *deliveryLedger) addSlice(project, proposal, slice, state string, depend
 	sliceDirectory := filepath.Join(proposalDirectory, slice)
 	deliveryWrite(l.t, filepath.Join(sliceDirectory, "intent.md"), "intent of "+slice+"\n")
 	deliveryWrite(l.t, filepath.Join(sliceDirectory, "behavior.md"), "behavior of "+slice+"\n")
-	l.writeStateValue(project, proposal, slice, ledger.SliceState{
-		State: state, Title: slice, Branch: slice, Dependencies: dependencies,
-	})
+	record := ledger.SliceState{State: state, Title: slice, Branch: slice, Dependencies: dependencies}
+	if state == ledger.Merged {
+		var identity ledger.ProjectIdentity
+		data, err := os.ReadFile(filepath.Join(l.root, "projects", project, "project.json"))
+		if err != nil || json.Unmarshal(data, &identity) != nil {
+			l.t.Fatal("Merged fixture needs a Project identity")
+		}
+		target := ledger.IntegrationTarget{Repository: identity.Repository, Branch: "main"}
+		record.Target = &target
+		record.Completion = &ledger.TerminalEvidence{Target: target}
+	}
+	l.writeStateValue(project, proposal, slice, record)
 }
 
 // addFile writes an extra ledger file. The caller commits.
