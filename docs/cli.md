@@ -28,7 +28,7 @@ skl skill --resource ledger-submission.md --input result_directory=/tmp/r --inpu
 skl skill --resource ledger-review.md --input result_directory=/tmp/r --input round=2 --input reviewed_head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa watchdog
 ```
 
-Resource names are exact and relative to the skill's resource directory. Parameterized resources take repeated `--input name=value`; `--describe-inputs` lists accepted names, types and choices without rendering. Plain `skl skill implement` and `skl skill watchdog` refuse, because those Procedures only make sense for a selected and claimed Slice; use `skl implement next` and `skl watchdog next`.
+Resource names are exact and relative to the skill's resource directory. Parameterized resources take repeated `--input name=value`; `--describe-inputs` lists accepted names, types and choices without rendering. Plain `skl skill implement` and `skl skill watchdog` refuse, because those Procedures only make sense for a selected and claimed Slice; use `skl implement next` and `skl watchdog next`. Invoke `walkthrough <proposal>` or `walkthrough <proposal>/<slice>` through its installed Skill Stub to tour recorded commitments, delivered code, findings and open Manual Verification one stop at a time. It uses read-only `skl browse`, `skl ledger show` and git inspections, and makes no changes.
 
 ## Accepting a proposal
 
