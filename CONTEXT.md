@@ -117,8 +117,12 @@ An **Agent Worker**'s explicit statement that an identified **Contract Item** is
 _Avoid_: Implied completion, contract checkbox mutation, engine judgment
 
 **Proposal**:
-An approved definition of one change materialized as one or more **Work Items**, with a **Coordination Item** for multi-slice work and explicit Dependencies between its Work Items. Changed contractual obligations require a replacement Proposal rather than rewriting the existing contracts.
+An approved definition of one change materialized as one or more **Work Items**, with a **Coordination Item** for multi-slice work and explicit Dependencies between its Work Items. After acceptance it changes only through an **Amendment**.
 _Avoid_: Work item, implementation ledger
+
+**Amendment**:
+A human-directed change to an accepted **Proposal**, recorded as one ledger revision: added **Slices**, replaced **Contracts** of never-claimed Slices, changed **Dependencies** of unclaimed Slices, and supersession of unclaimed Slices. It never writes a claimed or **Merged** Slice.
+_Avoid_: Re-acceptance, contract edit, replacement proposal
 
 **Slice**:
 One accepted unit of a **Proposal** whose identity remains stable from acceptance through merge or supersession. Issues, submissions, branches, worktrees, and contract documents are attachments or projections of it.
@@ -128,7 +132,7 @@ _Avoid_: Agent session, issue, pull request
 An existing name for a **Slice**, with the same identity and meaning rather than a separate entity. **Slice** is the preferred term.
 
 **Contract**:
-The frozen obligations accepted for one **Work Item**, covering its agreed behavior, architecture, delivery requirements, and **Manual Verification**. Changed obligations require renewed proposal rather than amendment of the existing Contract.
+The obligations accepted for one **Work Item**, covering its agreed behavior, architecture, delivery requirements, and **Manual Verification**, frozen from the Work Item's first **Claim**. Before that Claim an **Amendment** may replace it; after it, changed obligations need a replacement Slice.
 _Avoid_: Mutable plan, implementation ledger, incidental implementation detail
 
 **Contract Item**:
@@ -144,7 +148,7 @@ The destination branch in a **Consumer Repository** into which the **Merge Autho
 _Avoid_: Target snapshot, submitted revision
 
 **Dependency**:
-A relationship in which one **Work Item** cannot become eligible until every blocking Work Item is **Merged** into `main` or into the dependent's own **Proposal Branch**. A blocker Merged only into another Proposal's open Proposal Branch does not satisfy it.
+A relationship in which one **Work Item** cannot become eligible until every blocking Work Item is **Merged** into `main` or into the dependent's own **Proposal Branch**. A blocker Merged only into another Proposal's open Proposal Branch does not satisfy it. Dependencies are human direction rather than part of the **Contract**; an **Amendment** may change them on any unclaimed, unmerged Slice.
 _Avoid_: Ready-for-merge prerequisite
 
 **Claim**:
@@ -168,7 +172,7 @@ The paused **Workflow State** for a decision automation cannot make. Any existin
 _Avoid_: Failed, abandoned
 
 **Human Decision**:
-Explicitly authorized human direction answering an identified request for judgment and specifying how the **Workflow** should continue within the accepted contract. Changed contractual obligations require renewed proposal rather than amendment of the existing Work Item's contract.
+Explicitly authorized human direction answering an identified request for judgment and specifying how the **Workflow** should continue within the accepted contract. A Decision never changes contractual obligations; those go through an **Amendment** or a renewed Proposal.
 _Avoid_: Inferred approval, agent recommendation
 
 **Decision Inbox**:
@@ -180,7 +184,7 @@ The observed terminal **Workflow State** in which the accepted code change has e
 _Avoid_: Ready for merge, approved, engine-owned merge phase
 
 **Superseded**:
-The terminal **Workflow State** of an abandoned Work Item whose replacement requires renewed exploration and proposal.
+The terminal **Workflow State** of a Work Item abandoned by human direction, through a **Human Decision** or an **Amendment**. Its records stay in place; any replacement is a new Slice.
 _Avoid_: Needs human, merged
 
 **Merge Authority**:
@@ -342,3 +346,7 @@ _Avoid_: Local Git helper, GitHub cache
 > **Developer:** Can I switch a Proposal from per-slice delivery to Auto Mode halfway?
 >
 > **Domain expert:** Yes. The next Auto Mode Claim opens the Proposal Branch from a main that already holds the merged Slices. Once open, every Slice that starts implementation targets it whatever the lane's mode, so later Slices build on their Dependencies.
+
+> **Developer:** Review found a gap in a Slice nobody has started. Do I need a new Proposal?
+>
+> **Domain expert:** No. An Amendment adds Slices, replaces the Contract of a never-claimed Slice, or rewires Dependencies, as long as it writes no claimed Slice. A claimed Slice's Contract is frozen; supersede it and add a replacement Slice instead.
