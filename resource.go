@@ -34,6 +34,7 @@ type submissionData struct {
 	ResultDirectory string
 	Procedure       string
 	ReviewCount     uint64
+	Mode            string
 }
 
 type ledgerReviewData struct {
@@ -41,6 +42,21 @@ type ledgerReviewData struct {
 	Round           uint64
 	ReviewedHead    string
 	ReworkPauses    bool
+}
+
+// runMetadataData is what the shared Run Metadata block renders from. Mode is
+// empty for a phase without Implement's standard and team modes.
+type runMetadataData struct {
+	ResultDirectory string
+	Mode            string
+}
+
+func (d submissionData) RunMetadata() runMetadataData {
+	return runMetadataData{ResultDirectory: d.ResultDirectory, Mode: d.Mode}
+}
+
+func (d ledgerReviewData) RunMetadata() runMetadataData {
+	return runMetadataData{ResultDirectory: d.ResultDirectory}
 }
 
 type issuePublicationData struct {
@@ -112,6 +128,7 @@ func resourceSpecFor(resource string) resourceSpec {
 			{flag: &cli.StringFlag{Name: "result_directory", Required: true, Usage: resultDirectoryUsage, Destination: &data.ResultDirectory}},
 			{flag: &cli.StringFlag{Name: "procedure", Required: true, Usage: "Which submission procedure to render.", Destination: &data.Procedure}, choices: []string{"initial", "resumed", "rework"}},
 			{flag: &cli.Uint64Flag{Name: "review_count", Required: true, Usage: "Completed Work Item reviews before this submission.", Destination: &data.ReviewCount}},
+			{flag: &cli.StringFlag{Name: "mode", Usage: "Implement mode of this submission.", Destination: &data.Mode}, choices: []string{StandardMode, TeamMode}},
 		}, validate: func(resource string) error {
 			return checkResultDirectory(resource, data.ResultDirectory)
 		}}

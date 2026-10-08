@@ -44,7 +44,9 @@ func CurrentReport(s *Store, repository github.RepositoryID, item, phase string)
 // HandoffDelivery commits the report and resulting state/Claim together. The
 // caller validates source Git identities before entering this local mutation.
 // Completion prose remains opaque; only the semantic outcome chooses state.
-func HandoffDelivery(s *Store, repository github.RepositoryID, item, phase, claimCommit string, source SourceRevisions, outcome, body string) (*DeliveryResult, error) {
+// Run Metadata is recorded with a new report but never compared on replay, so
+// a retry returns the recorded report with its original observations.
+func HandoffDelivery(s *Store, repository github.RepositoryID, item, phase, claimCommit string, source SourceRevisions, outcome, body string, run any) (*DeliveryResult, error) {
 	var result *DeliveryResult
 	err := s.withMutation(func() error {
 		state, directory, head, err := s.deliveryState(repository, item)
@@ -84,10 +86,10 @@ func HandoffDelivery(s *Store, repository github.RepositoryID, item, phase, clai
 		if err := s.requireCleanPaths(directory); err != nil {
 			return err
 		}
-		report := Report{Schema: 1, Outcome: outcome, Source: source, Ledger: ReportInputs{
+		report := Report{Schema: ReportSchema, Outcome: outcome, Source: source, Ledger: ReportInputs{
 			Claim: execution.Claim, Contract: execution.State.Claim.Inputs.Contract,
 			Implement: execution.State.Claim.Inputs.Implement, Watchdog: execution.State.Claim.Inputs.Watchdog, Decision: execution.State.Claim.Inputs.Decision,
-		}}
+		}, Run: PortableRun(run)}
 		if phase == WatchdogPhase {
 			if execution.Implement == nil {
 				return refuse("review handoff has no consumed implementation report", "restore the fixed implementation evidence")

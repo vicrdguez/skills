@@ -64,7 +64,7 @@ Show every widget's health on one dashboard page.
 
 ```
 ---
-schema: 1
+schema: 2
 outcome: awaiting_review
 source:
   head: 0000000000000000000000000000000000000002
@@ -103,7 +103,7 @@ No findings.
 
 ```
 ---
-schema: 1
+schema: 2
 outcome: rework
 source:
   head: 0000000000000000000000000000000000000004
@@ -154,11 +154,11 @@ A finding keeps its Work-Item-local `W<n>` across rounds: list resolved ones as 
 
 ## Verdict
 
-Write the report as `skl skill --resource ledger-review.md --input result_directory='/tmp/skl-watchdog-result' --input round=2 --input reviewed_head='0000000000000000000000000000000000000002' --input rework_pauses=true watchdog` instructs, then submit with `skl watchdog submit --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --body '/tmp/skl-watchdog-result/watchdog-report.md' --public-body '/tmp/skl-watchdog-result/public.md' --outcome <pass|rework|needs-human>`:
+Write the report as `skl skill --resource ledger-review.md --input result_directory='/tmp/skl-watchdog-result' --input round=2 --input reviewed_head='0000000000000000000000000000000000000002' --input rework_pauses=true watchdog` instructs, then submit with `skl watchdog submit --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --body '/tmp/skl-watchdog-result/watchdog-report.md' --public-body '/tmp/skl-watchdog-result/public.md' --run-metadata '/tmp/skl-watchdog-result/run.json' --outcome <pass|rework|needs-human>`:
 
 - `pass` only when no `BLOCK` or `HUMAN` finding is active;
 - `rework` when a `BLOCK` finding is active;
-- `needs-human` when a human decision is required: `skl watchdog submit --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --body '/tmp/skl-watchdog-result/watchdog-report.md' --public-body '/tmp/skl-watchdog-result/public.md' --outcome needs-human`.
+- `needs-human` when a human decision is required: `skl watchdog submit --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --body '/tmp/skl-watchdog-result/watchdog-report.md' --public-body '/tmp/skl-watchdog-result/public.md' --run-metadata '/tmp/skl-watchdog-result/run.json' --outcome needs-human`.
 
 On `pass`, you may add Debt Markers for `NOTE` findings: short, self-contained code comments with no PR number, finding ID or ledger reference. Then confirm `git diff` shows only comments, run the Post-Marker Check (each touched file's formatter or parser, plus `git diff --check`), commit, and submit with `--head <final-sha>`.
 

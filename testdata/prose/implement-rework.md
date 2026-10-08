@@ -55,7 +55,7 @@ Show every widget's health on one dashboard page.
 
 ```
 ---
-schema: 1
+schema: 2
 outcome: awaiting_review
 source:
   head: 0000000000000000000000000000000000000002
@@ -88,7 +88,7 @@ No findings.
 
 ```
 ---
-schema: 1
+schema: 2
 outcome: rework
 source:
   head: 0000000000000000000000000000000000000002
@@ -156,19 +156,19 @@ Check: every `F<n>` has a disposition, and the last Full Gate ran on the final s
 
 ## 5. Report
 
-Retrieve the report template with `skl skill --resource ledger-submission.md --input result_directory='/tmp/skl-implement-result' --input procedure=rework --input review_count=1 implement`, and write the documents it describes. Commit all source changes.
+Retrieve the report template with `skl skill --resource ledger-submission.md --input result_directory='/tmp/skl-implement-result' --input procedure=rework --input review_count=1 --input mode=standard implement`, and write the documents it describes. Commit all source changes.
 
 Check: `implement-report.md` and `public.md` exist in `/tmp/skl-implement-result`, and `git status` is clean.
 
 ## 6. Submit
 
-Submit with `skl implement submit --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --body '/tmp/skl-implement-result/implement-report.md' --public-body '/tmp/skl-implement-result/public.md' --head <final-source-sha> --target <observed-target-sha>`.
+Submit with `skl implement submit --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --body '/tmp/skl-implement-result/implement-report.md' --public-body '/tmp/skl-implement-result/public.md' --run-metadata '/tmp/skl-implement-result/run.json' --head <final-source-sha> --target <observed-target-sha>`.
 
 Check: submit reports the work awaiting review.
 
 ## Pause for a human decision
 
-Finish the unblocked work and write the blocking report from the step 5 template. Then pause with `skl implement needs-human --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --body '/tmp/skl-implement-result/implement-report.md' --public-body '/tmp/skl-implement-result/public.md' --head <branch-head> --target <observed-target-sha>`, using the preparation target as `<observed-target-sha>` until step 3 records one. Leave a conflicted merge in place.
+Finish the unblocked work and write the blocking report from the step 5 template. Then pause with `skl implement needs-human --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --body '/tmp/skl-implement-result/implement-report.md' --public-body '/tmp/skl-implement-result/public.md' --run-metadata '/tmp/skl-implement-result/run.json' --head <branch-head> --target <observed-target-sha>`, using the preparation target as `<observed-target-sha>` until step 3 records one. Leave a conflicted merge in place.
 
 Check: the pause reports the work waiting on a human.
 

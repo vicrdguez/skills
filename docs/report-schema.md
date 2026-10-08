@@ -1,11 +1,12 @@
-# Phase report schema 1
+# Phase report schema 2
 
 `implement-report.md` and `watchdog-report.md` are the durable phase results a
 worker produces and the next phase consumes. Both use the same persisted
-format: schema-1 YAML frontmatter followed by an opaque Markdown body. The
+format: schema-2 YAML frontmatter followed by an opaque Markdown body. The
 engine writes and reads the file in the private ledger; a worker submits its
 judgment and evidence through the semantic command and never navigates or edits
-the ledger record.
+the ledger record. Historical schema-1 reports, which predate Run Metadata,
+remain readable unchanged; the engine never rewrites them.
 
 ## Persisted shape
 
@@ -13,7 +14,7 @@ Implementation report:
 
 ```text
 ---
-schema: 1
+schema: 2
 outcome: awaiting_review
 source:
   head: 4f3c8a1d5b6e7092c4d8e0f1a2b3c4d5e6f70819
@@ -25,6 +26,19 @@ ledger:
   contract:
     - commit: 2b7e6f5a4d3c2b1a09876543210fedcba9876543
       path: projects/payments/proposals/add-refunds/refund/behavior.md
+run:
+  skl:
+    revision: 0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c
+  harness:
+    name: pi
+  mode: standard
+  elapsed_ms: 420000
+  worker:
+    model: example-model
+  usage:
+    coverage: worker_only
+    input_tokens: 85000
+    output_tokens: 9000
 ---
 # Implementation
 ```
@@ -33,7 +47,7 @@ Watchdog report:
 
 ```text
 ---
-schema: 1
+schema: 2
 outcome: pass
 round: 2
 source:
@@ -62,7 +76,7 @@ closing delimiter, every later `---` belongs to the opaque body.
 
 ## Fields
 
-Schema 1 supports SHA-1 repositories: every source and ledger commit identity
+Schemas 1 and 2 support SHA-1 repositories: every source and ledger commit identity
 is exactly 40 lowercase hexadecimal characters. SHA-256 repository identities
 are not supported by this schema; resources and handoffs refuse them.
 
@@ -74,7 +88,7 @@ its meaning at that revision.
 
 | Field | Type | Required | Owner |
 | --- | --- | --- | --- |
-| `schema` | integer | always, exactly `1` | engine |
+| `schema` | integer | always: `2` when written, `1` in historical reports | engine |
 | `outcome` | string | always | worker, through the semantic command |
 | `source.head` | commit SHA | see phase rules | worker evidence, engine-recorded |
 | `source.target` | commit SHA | see phase rules | worker evidence, engine-recorded |
@@ -85,12 +99,46 @@ its meaning at that revision.
 | `ledger.watchdog` | Reference | optional | engine |
 | `ledger.decision` | Reference | optional | engine |
 | `round` | integer | watchdog only, at least `1` | engine bookkeeping |
+| `run` | Run Metadata | never; schema 2 only | worker observations, `run.skl` from the engine |
 
 `round` counts completed independent reviews, not attempts and not
 publications. It is omitted from an implementation report; a watchdog
 report at round zero is refused. `ledger.watchdog` and `ledger.decision`
 appear only when that prior review or recorded human direction was actually
 consumed.
+
+## Run Metadata
+
+`run` holds optional observations of the reporting Worker Session for later
+evaluation. Every field is optional, and absence means the value was not
+available, never zero. The types below are reporting conventions: the engine
+records whatever values and types it receives, including unfamiliar keys, and
+never validates them or lets them affect a workflow decision.
+
+| Path under `run` | Convention and meaning |
+| --- | --- |
+| `skl.version`, `skl.revision` | Strings: the submitting binary's module version and build revision, supplied by the CLI when available. Not a Consumer Repository revision. |
+| `harness.name`, `harness.version` | Strings: the reporting worker's Agent Harness. |
+| `mode` | String: `standard` or `team` for Implement; absent for Watchdog. |
+| `elapsed_ms` | Integer: the reporting session's elapsed milliseconds through sampling just before submission, including tools, tests and waiting for children; excludes earlier interrupted sessions. Not Claim age. |
+| `worker.provider`, `worker.model`, `worker.reasoning` | Strings: the reporting worker's observed execution identity and settings. |
+| `usage.coverage` | String: `worker_only`, `partial` or `complete`, relative to the associated worker or child. |
+| `usage.input_tokens`, `usage.output_tokens`, `usage.cache_read_tokens`, `usage.cache_write_tokens` | Integers: the harness's latest available counters. |
+| `usage.input_tokens_include_cache` | Boolean: whether input tokens include cached input; absent when unknown. |
+| `usage.tool_calls` | Integer: harness-reported tool calls for that coverage. |
+| `children[]` | Available child observations, not a complete inventory: free-form `role`, `provider`, `model`, `reasoning`, `elapsed_ms` and a `usage` block with the root conventions. |
+
+Root and child counters may overlap and are never summed by the engine.
+
+The worker writes its observations as one JSON value to the file passed with
+`--run-metadata`; the CLI adds `skl` when that value is an object. A missing
+file records no worker observations. An unreadable or undecodable file is
+reported on standard error and left out, and the handoff continues. Readers
+convert a non-string mapping key or a non-finite number to text so readback
+never fails on observational data.
+
+Run Metadata takes no part in completed-handoff replay: an otherwise identical
+retry returns the recorded report with its original observations.
 
 ## Repository context
 
@@ -132,9 +180,12 @@ is the only machine outcome channel.
 ## Refusal
 
 An incompatible report is refused explicitly rather than reinterpreted. This
-covers an unknown phase, a `schema` other than `1`, an absent or malformed
+covers an unknown phase, a `schema` other than `1` or `2`, `run` in a schema-1
+report, an absent or malformed
 required field, a wrong YAML scalar type, a commit or path that is not a valid
 identity, a second YAML document, and fields that do not belong to the phase
 (for example a review round or a reviewed revision in an implementation
-report). A missing or unrecognized schema never silently defaults to `1`, and
-stored history is never rewritten to match a newer format.
+report). A missing or unrecognized schema never silently defaults to a supported one,
+and stored history is never rewritten to match a newer format. Binaries that
+predate schema 2 refuse schema-2 reports and must be upgraded to consume them.
+Refusal never applies to values within `run`.
