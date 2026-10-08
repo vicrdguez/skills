@@ -194,7 +194,7 @@ func ParseDecision(data []byte) (DecisionRecord, string, error) {
 			"keep exactly one YAML document between the --- delimiters",
 		)
 	}
-	if err := checkScalarTags("decision", frontmatter, map[string]bool{"schema": true}); err != nil {
+	if err := checkScalarTags("decision", frontmatter, map[string]bool{"schema": true}, ""); err != nil {
 		return DecisionRecord{}, "", err
 	}
 	if err := validateDecision(record); err != nil {

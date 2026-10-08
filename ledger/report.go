@@ -9,7 +9,6 @@ import (
 	"math"
 	"path"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -105,6 +104,14 @@ func FormatReport(phase string, report Report, body string) ([]byte, error) {
 	if err := validateReport(phase, report); err != nil {
 		return nil, err
 	}
+	if report.Run != nil {
+		var run yaml.Node
+		if err := run.Encode(report.Run); err != nil {
+			return nil, fmt.Errorf("encode %s report Run Metadata: %w", phase, err)
+		}
+		quoteMergeKeys(&run)
+		report.Run = &run
+	}
 	var frontmatter bytes.Buffer
 	encoder := yaml.NewEncoder(&frontmatter)
 	encoder.SetIndent(2)
@@ -171,30 +178,41 @@ func ParseReport(phase string, data []byte) (Report, string, error) {
 	if err := validateReport(phase, report); err != nil {
 		return Report{}, "", err
 	}
-	report.Run = PortableRun(report.Run)
+	report.Run = portableRun(report.Run)
 	return report, string(body), nil
 }
 
-// PortableRun returns supplied Run Metadata in a form every reader can encode
+// quoteMergeKeys quotes every << mapping key so a reader keeps it as an
+// ordinary observed key instead of merging mappings.
+func quoteMergeKeys(node *yaml.Node) {
+	for index, child := range node.Content {
+		if node.Kind == yaml.MappingNode && index%2 == 0 && child.Value == "<<" {
+			child.Tag, child.Style = "!!str", yaml.DoubleQuotedStyle
+		}
+		quoteMergeKeys(child)
+	}
+}
+
+// portableRun normalizes supplied Run Metadata, in place where it can, into a form every reader can encode
 // as YAML and JSON, without judging it. Integers stay integers; a mapping key
 // or number those encodings cannot carry keeps its text instead of failing a
 // later readback.
-func PortableRun(value any) any {
+func portableRun(value any) any {
 	switch value := value.(type) {
 	case map[string]any:
 		for key, item := range value {
-			value[key] = PortableRun(item)
+			value[key] = portableRun(item)
 		}
 		return value
 	case map[any]any:
 		converted := make(map[string]any, len(value))
 		for key, item := range value {
-			converted[fmt.Sprint(key)] = PortableRun(item)
+			converted[fmt.Sprint(key)] = portableRun(item)
 		}
 		return converted
 	case []any:
 		for index, item := range value {
-			value[index] = PortableRun(item)
+			value[index] = portableRun(item)
 		}
 		return value
 	case json.Number:
@@ -202,7 +220,7 @@ func PortableRun(value any) any {
 			return integer
 		}
 		if number, err := value.Float64(); err == nil {
-			return PortableRun(number)
+			return portableRun(number)
 		}
 		return value.String()
 	case float64:
@@ -261,8 +279,8 @@ func checkReportScalars(frontmatter []byte) error {
 
 // checkScalarTags verifies documented scalar tags. integers names the fields
 // that must carry a YAML integer; every other non-null scalar must be text,
-// except within the top-level fields named by untyped.
-func checkScalarTags(kind string, frontmatter []byte, integers map[string]bool, untyped ...string) error {
+// except within the top-level field named by untyped.
+func checkScalarTags(kind string, frontmatter []byte, integers map[string]bool, untyped string) error {
 	var document yaml.Node
 	if err := yaml.Unmarshal(frontmatter, &document); err != nil {
 		return err
@@ -287,7 +305,7 @@ func checkScalarTags(kind string, frontmatter []byte, integers map[string]bool, 
 		if node.Kind == yaml.MappingNode {
 			for i := 0; i < len(node.Content); i += 2 {
 				name := node.Content[i].Value
-				if field == "" && slices.Contains(untyped, name) {
+				if field == "" && untyped != "" && name == untyped {
 					continue
 				}
 				if field != "" {
@@ -328,14 +346,8 @@ func validateReport(phase string, report Report) error {
 	}
 	if report.Schema != ReportSchema && report.Schema != reportSchemaWithoutRun {
 		return refuse(
-			"report schema "+strconv.Itoa(report.Schema)+" is not a supported schema (1 or 2)",
-			"write schema as the bare integer 2; a different version requires a CLI that understands it",
-		)
-	}
-	if report.Schema == reportSchemaWithoutRun && report.Run != nil {
-		return refuse(
-			"schema-1 report records Run Metadata",
-			"record run only in a schema-2 report",
+			fmt.Sprintf("report schema %d is not a supported schema (%d or %d)", report.Schema, reportSchemaWithoutRun, ReportSchema),
+			fmt.Sprintf("write schema as the bare integer %d; a different version requires a CLI that understands it", ReportSchema),
 		)
 	}
 	if err := validateReference("claim reference", report.Ledger.Claim); err != nil {

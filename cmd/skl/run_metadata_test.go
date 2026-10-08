@@ -33,6 +33,18 @@ func runMetadataApp(t *testing.T) (ledgerCLI, *bytes.Buffer) {
 	return ledgerCLI{app: newApp(factory, bytes.NewReader(nil), &output, &notices), out: &output}, &notices
 }
 
+// runMetadataSlice accepts one Slice ready for implementation and returns the
+// ledger clone, a CLI with separate notices, and the source repository.
+func runMetadataSlice(t *testing.T) (fixture *ledgerFixture, cli ledgerCLI, notices *bytes.Buffer, source, target string) {
+	t.Helper()
+	fixture = newLedgerFixture(t)
+	forge := newForgeServer(t)
+	source, target = deliverySourceRepo(t)
+	deliveryAcceptFixture(t, forge, source)
+	cli, notices = runMetadataApp(t)
+	return fixture, cli, notices, source, target
+}
+
 // withBuildInfo stands in for the submitting binary's build information.
 func withBuildInfo(t *testing.T, info *debug.BuildInfo) {
 	t.Helper()
@@ -115,11 +127,7 @@ func recordedRun(t *testing.T, cli ledgerCLI, phase string) any {
 }
 
 func TestRunMetadataIsRecordedWithBothPhaseReports(t *testing.T) {
-	newLedgerFixture(t)
-	forge := newForgeServer(t)
-	source, target := deliverySourceRepo(t)
-	deliveryAcceptFixture(t, forge, source)
-	cli, notices := runMetadataApp(t)
+	_, cli, notices, source, target := runMetadataSlice(t)
 	withBuildInfo(t, &debug.BuildInfo{Main: debug.Module{Version: "(devel)"}, Settings: []debug.BuildSetting{{Key: "vcs.revision", Value: runTestRevision}}})
 
 	// Questionable values, a partial child list and an unfamiliar key are
@@ -188,6 +196,11 @@ func TestRunMetadataProblemsNeverBlockTheHandoff(t *testing.T) {
 			noticed: true,
 		},
 		{
+			name: "a YAML merge key stays an ordinary key",
+			run:  func(t *testing.T) string { return runFile(t, `{"<<":"x","usage":{"<<":{"input_tokens":1}}}`) },
+			want: `{"<<":"x","usage":{"<<":{"input_tokens":1}}}`,
+		},
+		{
 			name: "a non-object keeps its value without identity",
 			run:  func(t *testing.T) string { return runFile(t, `["unexpected"]`) },
 			info: &debug.BuildInfo{Settings: []debug.BuildSetting{{Key: "vcs.revision", Value: runTestRevision}}},
@@ -195,11 +208,7 @@ func TestRunMetadataProblemsNeverBlockTheHandoff(t *testing.T) {
 		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			newLedgerFixture(t)
-			forge := newForgeServer(t)
-			source, target := deliverySourceRepo(t)
-			deliveryAcceptFixture(t, forge, source)
-			cli, notices := runMetadataApp(t)
+			_, cli, notices, source, target := runMetadataSlice(t)
 			withBuildInfo(t, testCase.info)
 
 			claim, head := startRunImplementation(t, cli, source)
@@ -227,11 +236,7 @@ func TestRunMetadataProblemsNeverBlockTheHandoff(t *testing.T) {
 }
 
 func TestRunMetadataLeavesAuthoritativeRefusalsInPlace(t *testing.T) {
-	fixture := newLedgerFixture(t)
-	forge := newForgeServer(t)
-	source, target := deliverySourceRepo(t)
-	deliveryAcceptFixture(t, forge, source)
-	cli, _ := runMetadataApp(t)
+	fixture, cli, _, source, target := runMetadataSlice(t)
 
 	claim, head := startRunImplementation(t, cli, source)
 	divergent := deliveryTrimmed(t, source, "commit-tree", deliveryTrimmed(t, source, "rev-parse", head+"^{tree}"), "-m", "divergent root")
@@ -249,11 +254,7 @@ func TestRunMetadataLeavesAuthoritativeRefusalsInPlace(t *testing.T) {
 }
 
 func TestRunMetadataRetryReturnsTheRecordedReport(t *testing.T) {
-	newLedgerFixture(t)
-	forge := newForgeServer(t)
-	source, target := deliverySourceRepo(t)
-	deliveryAcceptFixture(t, forge, source)
-	cli, _ := runMetadataApp(t)
+	_, cli, _, source, target := runMetadataSlice(t)
 	withBuildInfo(t, &debug.BuildInfo{Main: debug.Module{Version: "v1.0.0"}})
 
 	claim, head := startRunImplementation(t, cli, source)
@@ -280,11 +281,7 @@ func TestRunMetadataRetryReturnsTheRecordedReport(t *testing.T) {
 }
 
 func TestSchemaOneReportIsConsumedUnchanged(t *testing.T) {
-	fixture := newLedgerFixture(t)
-	forge := newForgeServer(t)
-	source, target := deliverySourceRepo(t)
-	deliveryAcceptFixture(t, forge, source)
-	cli, _ := runMetadataApp(t)
+	fixture, cli, _, source, target := runMetadataSlice(t)
 
 	state := deliveryPersistedState(t, fixture.clone)
 	state.State = ledger.AwaitingReview

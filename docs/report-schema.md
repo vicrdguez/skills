@@ -133,9 +133,11 @@ Root and child counters may overlap and are never summed by the engine.
 The worker writes its observations as one JSON value to the file passed with
 `--run-metadata`; the CLI adds `skl` when that value is an object. A missing
 file records no worker observations. An unreadable or undecodable file is
-reported on standard error and left out, and the handoff continues. Readers
-convert a non-string mapping key or a non-finite number to text so readback
-never fails on observational data.
+reported on standard error and left out, and the handoff continues. The writer
+quotes a `<<` key so it stays an ordinary key, and a value that still would
+not read back is left out rather than blocking the handoff. Readers convert a
+non-string mapping key or a non-finite number to text so readback never fails
+on observational data.
 
 Run Metadata takes no part in completed-handoff replay: an otherwise identical
 retry returns the recorded report with its original observations.
@@ -180,8 +182,7 @@ is the only machine outcome channel.
 ## Refusal
 
 An incompatible report is refused explicitly rather than reinterpreted. This
-covers an unknown phase, a `schema` other than `1` or `2`, `run` in a schema-1
-report, an absent or malformed
+covers an unknown phase, a `schema` other than `1` or `2`, an absent or malformed
 required field, a wrong YAML scalar type, a commit or path that is not a valid
 identity, a second YAML document, and fields that do not belong to the phase
 (for example a review round or a reviewed revision in an implementation

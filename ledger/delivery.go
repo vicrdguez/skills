@@ -89,7 +89,7 @@ func HandoffDelivery(s *Store, repository github.RepositoryID, item, phase, clai
 		report := Report{Schema: ReportSchema, Outcome: outcome, Source: source, Ledger: ReportInputs{
 			Claim: execution.Claim, Contract: execution.State.Claim.Inputs.Contract,
 			Implement: execution.State.Claim.Inputs.Implement, Watchdog: execution.State.Claim.Inputs.Watchdog, Decision: execution.State.Claim.Inputs.Decision,
-		}, Run: PortableRun(run)}
+		}, Run: portableRun(run)}
 		if phase == WatchdogPhase {
 			if execution.Implement == nil {
 				return refuse("review handoff has no consumed implementation report", "restore the fixed implementation evidence")
@@ -110,6 +110,14 @@ func HandoffDelivery(s *Store, repository github.RepositoryID, item, phase, clai
 			return err
 		}
 		contents, err := FormatReport(phase, report, body)
+		if err == nil && report.Run != nil {
+			// Observations never block the handoff: Run Metadata that would not
+			// read back is left out rather than recorded.
+			if _, _, readErr := ParseReport(phase, contents); readErr != nil {
+				report.Run = nil
+				contents, err = FormatReport(phase, report, body)
+			}
+		}
 		if err != nil {
 			return err
 		}
