@@ -19,6 +19,29 @@ import (
 
 type backendFactory func(github.RepositoryID) (setup.Backend, error)
 
+// Release builds stamp this with -ldflags "-X main.releaseVersion=v0.5.0".
+// Leave it empty for module installs and checkout builds.
+var releaseVersion string
+
+func buildVersion() string {
+	if releaseVersion != "" {
+		return releaseVersion
+	}
+	if info, ok := buildInfo(); ok {
+		// Go 1.27 may assign a pseudo-version to a checkout build. Unlike
+		// version-suffixed module installs, those builds carry VCS settings.
+		for _, setting := range info.Settings {
+			if setting.Key == "vcs" {
+				return "development"
+			}
+		}
+		if version := info.Main.Version; version != "" && version != "(devel)" {
+			return version
+		}
+	}
+	return "development"
+}
+
 func newApp(newBackend backendFactory, stdin io.Reader, stdout, stderr io.Writer) *stageApp {
 	return newAppWithSkillHome(newBackend, stdin, stdout, stderr, "")
 }
@@ -26,6 +49,7 @@ func newApp(newBackend backendFactory, stdin io.Reader, stdout, stderr io.Writer
 func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, stderr io.Writer, home string) *stageApp {
 	app := cli.NewApp()
 	app.Name = "skl"
+	app.Version = buildVersion()
 	app.Writer = stdout
 	app.ErrWriter = stderr
 	app.Commands = []*cli.Command{{
