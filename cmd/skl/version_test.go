@@ -45,33 +45,28 @@ func TestVersionIdentifiesModuleInstallsAndCheckoutBuilds(t *testing.T) {
 }
 
 func TestReleaseBuildVersionStampOverridesCheckoutMetadata(t *testing.T) {
-	binary := filepath.Join(t.TempDir(), "skl")
-	build := exec.Command("go", "build", "-ldflags=-X main.releaseVersion=v0.5.0", "-o", binary, ".")
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build stamped release: %v\n%s", err, output)
-	}
-	command := exec.Command(binary, "--version")
-	output, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("release skl --version: %v\n%s", err, output)
-	}
-	if got, want := string(output), "skl version v0.5.0\n"; got != want {
+	if got, want := versionFromBuild(t, "-ldflags=-X main.releaseVersion=v0.5.0"), "skl version v0.5.0\n"; got != want {
 		t.Fatalf("release skl --version = %q, want %q", got, want)
 	}
 }
 
 func TestUnstampedCheckoutBuildIdentifiesDevelopment(t *testing.T) {
-	binary := filepath.Join(t.TempDir(), "skl")
-	build := exec.Command("go", "build", "-buildvcs=false", "-o", binary, ".")
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build checkout: %v\n%s", err, output)
-	}
-	command := exec.Command(binary, "--version")
-	output, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("checkout skl --version: %v\n%s", err, output)
-	}
-	if got, want := string(output), "skl version development\n"; got != want {
+	if got, want := versionFromBuild(t, "-buildvcs=false"), "skl version development\n"; got != want {
 		t.Fatalf("checkout skl --version = %q, want %q", got, want)
 	}
+}
+
+func versionFromBuild(t *testing.T, flags ...string) string {
+	t.Helper()
+	binary := filepath.Join(t.TempDir(), "skl")
+	args := append([]string{"build"}, flags...)
+	args = append(args, "-o", binary, ".")
+	if output, err := exec.Command("go", args...).CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, output)
+	}
+	output, err := exec.Command(binary, "--version").CombinedOutput()
+	if err != nil {
+		t.Fatalf("skl --version: %v\n%s", err, output)
+	}
+	return string(output)
 }
