@@ -45,3 +45,28 @@ its assets. Humans own merging, tagging, recovery and the first release; this
 workflow does not change Workflow Ledger publication or configuration.
 
 See [README installation](../README.md#install) for binary and Go installation.
+
+## Version identity and source installation
+
+`skl --version` identifies the build rather than reporting a hard-coded current
+release for every installation:
+
+- Release binaries report their release tag.
+- `go install` at a version tag reports that module version.
+- `go install` at `main` reports the Go-derived version of the resolved commit;
+  Go does not preserve the literal branch query.
+- Local checkout builds report an explicit development identity.
+
+Source installation remains supported:
+
+```sh
+go install github.com/vicrdguez/skills/cmd/skl@main
+go install github.com/vicrdguez/skills/cmd/skl@v0.5.0
+```
+
+## Scope
+
+The initial release mechanism is a small GitHub Actions workflow. It does not
+introduce a release framework, installer script, package-manager integration,
+Windows artifacts, or prerelease support. Initial publication of `v0.5.0`
+remains a human-triggered action after the release support is merged.
