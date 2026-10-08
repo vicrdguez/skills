@@ -134,8 +134,9 @@ The worker writes its observations as one JSON value to the file passed with
 `--run-metadata`; the CLI adds `skl` when that value is an object. A missing
 file records no worker observations. An unreadable or undecodable file is
 reported on standard error and left out, and the handoff continues. The writer
-quotes a `<<` key so it stays an ordinary key, and a value that still would
-not read back is left out rather than blocking the handoff. Readers convert a
+quotes a `<<` key so it stays an ordinary key, records a number that YAML
+cannot carry exactly as its supplied text, and leaves out a value that still
+would not read back rather than blocking the handoff. Readers convert a
 non-string mapping key or a non-finite number to text so readback never fails
 on observational data.
 

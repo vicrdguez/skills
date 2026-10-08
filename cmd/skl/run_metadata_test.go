@@ -79,14 +79,21 @@ func runFile(t *testing.T, contents string) string {
 	return path
 }
 
-// decodeRun turns a JSON literal into the generic value a reader exposes.
+// decodeRun turns a JSON literal into the generic value a reader exposes,
+// keeping each number's exact digits so a rounded value never compares equal.
 func decodeRun(t *testing.T, literal string) any {
 	t.Helper()
 	var value any
-	if err := json.Unmarshal([]byte(literal), &value); err != nil {
+	if err := decodeExact(literal, &value); err != nil {
 		t.Fatal(err)
 	}
 	return value
+}
+
+func decodeExact(literal string, value any) error {
+	decoder := json.NewDecoder(strings.NewReader(literal))
+	decoder.UseNumber()
+	return decoder.Decode(value)
 }
 
 // recordedRun reads the committed report's Run Metadata back through the
@@ -108,7 +115,7 @@ func recordedRun(t *testing.T, cli ledgerCLI, phase string) any {
 			} `json:"documents"`
 		} `json:"documents"`
 	}
-	if err := json.Unmarshal([]byte(text), &outcome); err != nil {
+	if err := decodeExact(text, &outcome); err != nil {
 		t.Fatalf("decode documents %q: %v", text, err)
 	}
 	for _, document := range outcome.Documents.Documents {
@@ -199,6 +206,13 @@ func TestRunMetadataProblemsNeverBlockTheHandoff(t *testing.T) {
 			name: "a YAML merge key stays an ordinary key",
 			run:  func(t *testing.T) string { return runFile(t, `{"<<":"x","usage":{"<<":{"input_tokens":1}}}`) },
 			want: `{"<<":"x","usage":{"<<":{"input_tokens":1}}}`,
+		},
+		{
+			name: "numbers beyond float64 keep their exact value",
+			run: func(t *testing.T) string {
+				return runFile(t, `{"usage":{"input_tokens":9223372036854775809,"output_tokens":-9223372036854775809},"tiny":1e-400,"ratio":0.1}`)
+			},
+			want: `{"usage":{"input_tokens":9223372036854775809,"output_tokens":"-9223372036854775809"},"tiny":"1e-400","ratio":0.1}`,
 		},
 		{
 			name: "a non-object keeps its value without identity",

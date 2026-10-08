@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/big"
 	"path"
 	"regexp"
 	"strconv"
@@ -195,8 +196,8 @@ func quoteMergeKeys(node *yaml.Node) {
 
 // portableRun normalizes supplied Run Metadata, in place where it can, into a form every reader can encode
 // as YAML and JSON, without judging it. Integers stay integers; a mapping key
-// or number those encodings cannot carry keeps its text instead of failing a
-// later readback.
+// or number those encodings cannot carry exactly keeps its text instead of
+// changing its value or failing a later readback.
 func portableRun(value any) any {
 	switch value := value.(type) {
 	case map[string]any:
@@ -219,8 +220,11 @@ func portableRun(value any) any {
 		if integer, err := value.Int64(); err == nil {
 			return integer
 		}
-		if number, err := value.Float64(); err == nil {
-			return portableRun(number)
+		if integer, err := strconv.ParseUint(value.String(), 10, 64); err == nil {
+			return integer
+		}
+		if number, err := value.Float64(); err == nil && exactFloat(value, number) {
+			return number
 		}
 		return value.String()
 	case float64:
@@ -229,6 +233,17 @@ func portableRun(value any) any {
 		}
 	}
 	return value
+}
+
+// exactFloat reports whether number carries the decimal value supplied as
+// text, so rounding or underflow never silently changes an observation.
+func exactFloat(text json.Number, number float64) bool {
+	supplied, ok := new(big.Rat).SetString(text.String())
+	if !ok {
+		return false
+	}
+	stored, ok := new(big.Rat).SetString(strconv.FormatFloat(number, 'g', -1, 64))
+	return ok && supplied.Cmp(stored) == 0
 }
 
 // splitReportFrontmatter separates a phase report's leading YAML frontmatter
