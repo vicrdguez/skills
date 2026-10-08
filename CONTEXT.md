@@ -136,7 +136,7 @@ An individually identified obligation or task within a **Contract**, carrying a 
 _Avoid_: Review finding, test case, document row number
 
 **Submission**:
-The proposed code changes explicitly attached to exactly one **Work Item** for independent review and human merge. A Work Item has at most one Submission; ownership is independent of names.
+The proposed code changes explicitly attached to exactly one **Work Item** for independent review and merge. A Work Item has at most one Submission; ownership is independent of names.
 _Avoid_: Work item, claim
 
 **Integration Target**:
@@ -144,7 +144,7 @@ The destination branch in a **Consumer Repository** into which the **Merge Autho
 _Avoid_: Target snapshot, submitted revision
 
 **Dependency**:
-A relationship in which one **Work Item** cannot become eligible until every blocking Work Item is **Merged**.
+A relationship in which one **Work Item** cannot become eligible until every blocking Work Item is **Merged** into `main` or into the dependent's own **Proposal Branch**. A blocker Merged only into another Proposal's open Proposal Branch does not satisfy it.
 _Avoid_: Ready-for-merge prerequisite
 
 **Claim**:
@@ -160,7 +160,7 @@ A project-scoped **Transition Operation** that selects and claims one eligible *
 _Avoid_: Read-only queue lookup, instruction rendering
 
 **Ready for Merge**:
-The endpoint of autonomous delivery, where **Watchdog Review** has passed and final integration and merge remain human-owned. It is distinct from **Merged** and does not assert that integration is conflict-free.
+The endpoint of autonomous delivery, where **Watchdog Review** has passed and final integration and merge remain human-owned, except that in **Auto Mode** the engine merges a Slice targeting an open **Proposal Branch**. It is distinct from **Merged** and does not assert that integration is conflict-free.
 _Avoid_: Done, merged
 
 **Needs Human**:
@@ -176,7 +176,7 @@ The unresolved requests attached to **Work Items** in **Needs Human** across **P
 _Avoid_: Worker queue, final review queue
 
 **Merged**:
-The observed terminal **Workflow State** in which the accepted code change has entered its **Integration Target**. It closes the Work Item and satisfies Dependencies without making merge an engine-owned phase.
+The observed terminal **Workflow State** in which the accepted code change has entered its **Integration Target**. It closes the Work Item and satisfies Dependencies; merge into `main` is never engine-owned.
 _Avoid_: Ready for merge, approved, engine-owned merge phase
 
 **Superseded**:
@@ -184,7 +184,7 @@ The terminal **Workflow State** of an abandoned Work Item whose replacement requ
 _Avoid_: Needs human, merged
 
 **Merge Authority**:
-The human who decides how to integrate an approved **Submission** after review, resolves conflicts caused by later **Integration Target** movement, and performs the final merge outside the **Workflow Engine**. This is distinct from an Agent Worker's required pre-Audit merge of one observed target revision into the work branch.
+The human who decides how to integrate an approved **Submission** after review, resolves conflicts caused by later **Integration Target** movement, and performs the final merge into `main` outside the **Workflow Engine**. The engine's merge of a passing Slice into an open **Proposal Branch** in **Auto Mode** is a **Transition Operation**, not Merge Authority. This is distinct from an Agent Worker's required pre-Audit merge of one observed target revision into the work branch.
 _Avoid_: Reviewer, agent worker
 
 **Manual Verification**:
@@ -204,8 +204,28 @@ An explicitly authorized human disposition for an existing **Review Finding** wi
 _Avoid_: Validation result, inferred intent
 
 **Coordination Item**:
-A non-claimable parent that groups multiple child Work Items, with no branch or Submission of its own. It completes when every child is **Merged**; retiring a partially delivered Proposal does not assert completion.
+A non-claimable parent that groups multiple child Work Items. It has no branch or Submission of its own until its **Proposal Branch** opens, when it carries the **Proposal Submission**. It completes when every child is **Merged**; retiring a partially delivered Proposal does not assert completion.
 _Avoid_: Work item, implementation slice
+
+**Proposal Branch**:
+The branch, named at acceptance, into which a **Proposal**'s **Slices** integrate once it is open. An implement lane in **Auto Mode** opens it from the current `main` at its first **Claim** on the Proposal; while open it is the **Integration Target** of every Slice of that Proposal that starts implementation, whatever the lane's mode; it is spent once it enters `main` or the Proposal is retired, and is never reopened.
+_Avoid_: Feature branch, epic branch, integration branch
+
+**Proposal Submission**:
+The **Submission** attached to a **Proposal** whose **Proposal Branch** is open: its pull request into `main`, a draft from the first **Slice** merge, ready once every Slice is **Merged**, with an engine-rendered body. Merging it belongs to the **Merge Authority**.
+_Avoid_: Final PR, epic PR
+
+**Auto Mode**:
+A lane invocation property, not a Proposal property. An implement lane in Auto Mode may open a **Proposal Branch**; a watchdog lane in Auto Mode merges a passing **Submission** into its open Proposal Branch as a **Transition Operation**. It changes no **Contract**, **Claim** or **Dependency** rule.
+_Avoid_: Auto proposal, autonomous proposal, checkpoint mode
+
+**Integration Merge**:
+The **Workflow Engine**'s clean merge of the open **Proposal Branch** head into a work branch while preparing a **Watchdog Review**, so that the reviewed head is the head that merges. A conflict refuses the merge and becomes a Rework **Review Finding** for the implementer; the engine never resolves conflicts.
+_Avoid_: Conflict resolution, rebase
+
+**Walkthrough**:
+A user-invoked **Procedure** that guides the human through one **Proposal** or **Slice** by its **Contract Items** over the delivered end state: architectural commitments first, then behavior, declined and debt findings, and open **Manual Verification**. It reads recorded evidence only and writes nothing.
+_Avoid_: Review, audit, final review package
 
 **Full Gate**:
 The Consumer Repository's complete test, typecheck, and lint verification run by implementers and watchdog reviewers. It remains Agent Worker behavior rather than a Workflow Engine operation.
@@ -259,6 +279,7 @@ _Avoid_: Local Git helper, GitHub cache
 
 - **Contract** names a Work Item's accepted obligations; **Workflow Ledger** names the private cross-project record. They are not interchangeable concepts.
 - "Skill" alone names what a harness discovers and activates, a **Skill Stub**. Authored workflow content is a **Procedure** or **Craft**, delivered as an **Execution Skill**.
+- **Auto Mode** belongs to a lane invocation; the **Proposal Branch** name is the only Auto Mode fact fixed at acceptance, and it is ignored until the branch opens.
 
 ## Example dialogue
 
@@ -313,3 +334,11 @@ _Avoid_: Local Git helper, GitHub cache
 > **Developer:** Who completes Manual Verification?
 >
 > **Domain expert:** The Merge Authority. The human receives the complete obligations even when the public presentation omits private operational details; the engine does not claim to verify them.
+>
+> **Developer:** Watchdog passed a Slice targeting an open Proposal Branch. Who merges it?
+>
+> **Domain expert:** In Auto Mode the Workflow Engine does, through the forge, as a Transition Operation that squash-merges the exact reviewed revision. Outside Auto Mode the Slice waits at Ready for Merge for the human, or for an Auto Mode watchdog poll to merge it. Either way the Merge Authority alone merges the Proposal Submission into main.
+>
+> **Developer:** Can I switch a Proposal from per-slice delivery to Auto Mode halfway?
+>
+> **Domain expert:** Yes. The next Auto Mode Claim opens the Proposal Branch from a main that already holds the merged Slices. Once open, every Slice that starts implementation targets it whatever the lane's mode, so later Slices build on their Dependencies.
