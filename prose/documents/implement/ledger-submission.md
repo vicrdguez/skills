@@ -30,3 +30,7 @@ Only when you pause: the question, the evidence, the options with their conseque
 Write `{{.ResultDirectory}}/public.md` separately, as the pull request body. Submitting leaves the Work Item `awaiting_review`; pausing leaves it `needs_human`. Completed reviews: {{.ReviewCount}}.
 
 {{template "pull-brief"}}
+
+# Run metadata
+
+{{template "run-metadata" .RunMetadata}}

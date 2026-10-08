@@ -70,7 +70,7 @@ Reference: `0000000000000000000000000000000000000001:projects/widgets/proposals/
 
 ```
 ---
-schema: 1
+schema: 2
 outcome: rework
 source:
   head: 0000000000000000000000000000000000000002

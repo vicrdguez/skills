@@ -116,15 +116,16 @@ func PresentDelivery(e *ledger.Execution, repository RepositoryContext, phase, o
 	}
 	private := q(filepath.Join(directory, phase+"-report.md"))
 	public := q(filepath.Join(directory, "public.md"))
-	f.SubmitCommand = command("submit") + " --body " + private + " --public-body " + public
-	f.PauseCommand = command("needs-human") + " --body " + private + " --public-body " + public
+	documents := " --body " + private + " --public-body " + public + " --run-metadata " + q(filepath.Join(directory, "run.json"))
+	f.SubmitCommand = command("submit") + documents
+	f.PauseCommand = command("needs-human") + documents
 	if phase == ledger.ImplementPhase {
 		f.SubmitCommand += " --head <final-source-sha> --target <observed-target-sha>"
 		f.PauseCommand += " --head <branch-head> --target <observed-target-sha>"
-		f.ResultResourceCommand = fmt.Sprintf("skl skill --resource ledger-submission.md --input result_directory=%s --input procedure=%s --input review_count=%d implement", q(directory), f.Procedure, f.ReviewCount)
+		f.ResultResourceCommand = fmt.Sprintf("skl skill --resource ledger-submission.md --input result_directory=%s --input procedure=%s --input review_count=%d --input mode=%s implement", q(directory), f.Procedure, f.ReviewCount, f.Mode)
 	} else {
 		f.SubmitCommand += " --outcome <pass|rework|needs-human>"
-		f.PauseCommand = command("submit") + " --body " + private + " --public-body " + public + " --outcome needs-human"
+		f.PauseCommand = command("submit") + documents + " --outcome needs-human"
 		rework, err := ledger.ReviewDestination(ledger.Rework, f.ReviewNumber)
 		if err != nil {
 			return skilldist.Packet{}, err

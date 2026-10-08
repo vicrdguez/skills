@@ -778,7 +778,7 @@ func TestDeliveryPublicationBookkeepingPreservesConcurrentLocalWork(t *testing.T
 				return fmt.Errorf("no review was selected")
 			}
 			review := ledger.SourceRevisions{Head: source.head, Target: deliveryTarget, Reviewed: source.head}
-			_, err = ledger.HandoffDelivery(store, deliveryWidgets(), deliveryPublicationItem, ledger.WatchdogPhase, watchdog.Claim.Commit, review, "pass", "concurrent review body\n")
+			_, err = ledger.HandoffDelivery(store, deliveryWidgets(), deliveryPublicationItem, ledger.WatchdogPhase, watchdog.Claim.Commit, review, "pass", "concurrent review body\n", nil)
 			return err
 		}, "the ledger mutation lock spans forge I/O: no concurrent local handoff completed")
 

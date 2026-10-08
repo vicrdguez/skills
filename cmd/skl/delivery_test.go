@@ -317,11 +317,11 @@ func TestDeliveryCLIEndToEnd(t *testing.T) {
 		t.Fatalf("committed state = %#v, want released Claim awaiting review", state)
 	}
 
-	// Rule B4: the persisted report carries schema 1, repository namespaces,
+	// Rule B4: the persisted report carries schema 2, repository namespaces,
 	// and the opaque private body byte for byte.
 	report, committedBody := deliveryCommittedReport(t, cli, submitted.Result.Report, ledger.ImplementPhase)
-	if report.Schema != 1 {
-		t.Fatalf("report schema = %d, want 1", report.Schema)
+	if report.Schema != 2 {
+		t.Fatalf("report schema = %d, want 2", report.Schema)
 	}
 	if report.Source.Head != head || report.Source.Target != target {
 		t.Fatalf("report source = %#v, want head %s target %s", report.Source, head, target)
@@ -794,7 +794,7 @@ func TestDeliveryCLIRejectsUnknownSchema(t *testing.T) {
 
 	claim := strings.Repeat("a", 40)
 	report := fmt.Sprintf(`---
-schema: 2
+schema: 3
 outcome: awaiting_review
 source:
   head: %s
@@ -816,7 +816,7 @@ body
 	before := ledgerSnapshot(t, fixture.clone)
 	refused, err := cli.deliveryJSON(t, "skl", "watchdog", "next", "--repo", source, "--format", "json")
 	if err != nil {
-		t.Fatalf("watchdog next with schema 2: %v", err)
+		t.Fatalf("watchdog next with schema 3: %v", err)
 	}
 	if refused.Status != "fix_required" || refused.Execution != nil {
 		t.Fatalf("incompatible schema = %#v, want fix_required without an execution", refused)

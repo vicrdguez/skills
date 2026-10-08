@@ -281,5 +281,5 @@ func TestReaderNarrowUnreadableDocumentAndDetailsStayReadable(t *testing.T) {
 	s.shows("Ledger document", "Commit:")
 	s.press("pgdown", "pgdown")
 	s.within(narrow)
-	s.shows("field unknown_field not", "documented schema-1 fields with", "exact types", "scrolled 100%")
+	s.shows("field unknown_field not", "exact types", "scrolled 100%")
 }

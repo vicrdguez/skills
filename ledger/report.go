@@ -2,9 +2,12 @@ package ledger
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math"
+	"math/big"
 	"path"
 	"regexp"
 	"strconv"
@@ -20,10 +23,14 @@ const (
 	WatchdogPhase  = "watchdog"
 )
 
-// ReportSchema is the only frontmatter schema this codec reads or writes. A
-// report carrying any other value belongs to a format this CLI does not
-// understand and is refused rather than reinterpreted.
-const ReportSchema = 1
+// ReportSchema is the frontmatter schema this codec writes. It also reads
+// historical schema-1 reports unchanged; a report carrying any other value
+// belongs to a format this CLI does not understand and is refused rather than
+// reinterpreted.
+const ReportSchema = 2
+
+// reportSchemaWithoutRun is the historical schema that predates Run Metadata.
+const reportSchemaWithoutRun = 1
 
 // Accepted semantic outcomes. The phase decides which subset applies; the
 // outcome is always worker judgment supplied through the semantic command,
@@ -76,25 +83,35 @@ type ReportInputs struct {
 	Decision  *Reference  `yaml:"decision,omitempty" json:"decision,omitempty"`
 }
 
-// Report is the schema-1 phase-report frontmatter. The engine supplies
-// Schema, the exact ledger references, and the completed review Round; a
-// worker supplies the semantic Outcome and, through the Markdown body, its
-// evidence and judgment.
+// Report is the phase-report frontmatter. The engine supplies Schema, the
+// exact ledger references, and the completed review Round; a worker supplies
+// the semantic Outcome and, through the Markdown body, its evidence and
+// judgment. Run holds the optional schema-2 Run Metadata: observations that
+// are preserved as supplied and never validated or consulted by the workflow.
 type Report struct {
 	Schema  int             `yaml:"schema" json:"schema"`
 	Outcome string          `yaml:"outcome" json:"outcome"`
 	Source  SourceRevisions `yaml:"source,omitempty" json:"source"`
 	Ledger  ReportInputs    `yaml:"ledger" json:"ledger"`
 	Round   uint64          `yaml:"round,omitempty" json:"round,omitempty"`
+	Run     any             `yaml:"run,omitempty" json:"run,omitempty"`
 }
 
-// FormatReport renders one schema-1 phase report: the documented YAML
+// FormatReport renders one phase report: the documented YAML
 // frontmatter followed by the Markdown body as exact bytes. It refuses an
 // invalid phase or incompatible metadata before any bytes are produced, so a
 // refused report is never persisted as an accepted record.
 func FormatReport(phase string, report Report, body string) ([]byte, error) {
 	if err := validateReport(phase, report); err != nil {
 		return nil, err
+	}
+	if report.Run != nil {
+		var run yaml.Node
+		if err := run.Encode(report.Run); err != nil {
+			return nil, fmt.Errorf("encode %s report Run Metadata: %w", phase, err)
+		}
+		quoteMergeKeys(&run)
+		report.Run = &run
 	}
 	var frontmatter bytes.Buffer
 	encoder := yaml.NewEncoder(&frontmatter)
@@ -113,10 +130,10 @@ func FormatReport(phase string, report Report, body string) ([]byte, error) {
 	return document.Bytes(), nil
 }
 
-// ParseReport reads one schema-1 phase report. Only the leading frontmatter
-// between the opening --- line and the first full-line closing --- delimiter
-// is interpreted; the body is returned byte for byte as opaque data, so
-// delimiter-looking lines or template-like instructions inside it are never
+// ParseReport reads one schema-1 or schema-2 phase report. Only the leading
+// frontmatter between the opening --- line and the first full-line closing ---
+// delimiter is interpreted; the body is returned byte for byte as opaque data,
+// so delimiter-looking lines or template-like instructions inside it are never
 // inspected. Unknown phases, unknown schemas, extra YAML documents, and
 // metadata incompatible with the phase are refused explicitly.
 func ParseReport(phase string, data []byte) (Report, string, error) {
@@ -134,12 +151,12 @@ func ParseReport(phase string, data []byte) (Report, string, error) {
 		if errors.Is(err, io.EOF) {
 			return Report{}, "", refuse(
 				"report holds no YAML frontmatter metadata",
-				"persist the documented schema-1 fields between the --- delimiters",
+				"persist the documented report fields between the --- delimiters",
 			)
 		}
 		return Report{}, "", refuse(
 			"report frontmatter is malformed: "+err.Error(),
-			"write the documented schema-1 fields with their exact types",
+			"write the documented report fields with their exact types",
 		)
 	}
 	var extra any
@@ -162,7 +179,72 @@ func ParseReport(phase string, data []byte) (Report, string, error) {
 	if err := validateReport(phase, report); err != nil {
 		return Report{}, "", err
 	}
+	report.Run = portableRun(report.Run)
 	return report, string(body), nil
+}
+
+// quoteMergeKeys quotes every << mapping key so a reader keeps it as an
+// ordinary observed key instead of merging mappings.
+func quoteMergeKeys(node *yaml.Node) {
+	for index, child := range node.Content {
+		if node.Kind == yaml.MappingNode && index%2 == 0 && child.Value == "<<" {
+			child.Tag, child.Style = "!!str", yaml.DoubleQuotedStyle
+		}
+		quoteMergeKeys(child)
+	}
+}
+
+// portableRun normalizes supplied Run Metadata, in place where it can, into a form every reader can encode
+// as YAML and JSON, without judging it. Integers stay integers; a mapping key
+// or number those encodings cannot carry exactly keeps its text instead of
+// changing its value or failing a later readback.
+func portableRun(value any) any {
+	switch value := value.(type) {
+	case map[string]any:
+		for key, item := range value {
+			value[key] = portableRun(item)
+		}
+		return value
+	case map[any]any:
+		converted := make(map[string]any, len(value))
+		for key, item := range value {
+			converted[fmt.Sprint(key)] = portableRun(item)
+		}
+		return converted
+	case []any:
+		for index, item := range value {
+			value[index] = portableRun(item)
+		}
+		return value
+	case json.Number:
+		if integer, err := value.Int64(); err == nil {
+			return integer
+		}
+		if integer, err := strconv.ParseUint(value.String(), 10, 64); err == nil {
+			return integer
+		}
+		if number, err := value.Float64(); err == nil && exactFloat(value, number) {
+			return number
+		}
+		return value.String()
+	case float64:
+		if math.IsNaN(value) || math.IsInf(value, 0) {
+			return fmt.Sprint(value)
+		}
+	}
+	return value
+}
+
+// exactFloat reports whether number reads back as the same decimal value
+// supplied as text, so rounding or underflow never silently changes an
+// observation.
+func exactFloat(text json.Number, number float64) bool {
+	supplied, ok := new(big.Rat).SetString(text.String())
+	if !ok {
+		return false
+	}
+	stored, ok := new(big.Rat).SetString(strconv.FormatFloat(number, 'g', -1, 64))
+	return ok && supplied.Cmp(stored) == 0
 }
 
 // splitReportFrontmatter separates a phase report's leading YAML frontmatter
@@ -205,14 +287,16 @@ func splitFrontmatter(kind string, data []byte) ([]byte, []byte, error) {
 
 // Struct decoding permits scalar coercions (including fractional integers).
 // Verify the persisted scalar tags as well; optional nulls retain their normal
-// absence meaning and required values are checked by validateReport.
+// absence meaning and required values are checked by validateReport. Run
+// Metadata is observational, so its values keep whatever types were supplied.
 func checkReportScalars(frontmatter []byte) error {
-	return checkScalarTags("report", frontmatter, map[string]bool{"schema": true, "round": true})
+	return checkScalarTags("report", frontmatter, map[string]bool{"schema": true, "round": true}, "run")
 }
 
 // checkScalarTags verifies documented scalar tags. integers names the fields
-// that must carry a YAML integer; every other non-null scalar must be text.
-func checkScalarTags(kind string, frontmatter []byte, integers map[string]bool) error {
+// that must carry a YAML integer; every other non-null scalar must be text,
+// except within the top-level field named by untyped.
+func checkScalarTags(kind string, frontmatter []byte, integers map[string]bool, untyped string) error {
 	var document yaml.Node
 	if err := yaml.Unmarshal(frontmatter, &document); err != nil {
 		return err
@@ -237,6 +321,9 @@ func checkScalarTags(kind string, frontmatter []byte, integers map[string]bool) 
 		if node.Kind == yaml.MappingNode {
 			for i := 0; i < len(node.Content); i += 2 {
 				name := node.Content[i].Value
+				if field == "" && untyped != "" && name == untyped {
+					continue
+				}
 				if field != "" {
 					name = field + "." + name
 				}
@@ -256,11 +343,11 @@ func checkScalarTags(kind string, frontmatter []byte, integers map[string]bool) 
 	return visit(&document, "")
 }
 
-// validatePhase refuses any phase without a schema-1 report format.
+// validatePhase refuses any phase without a report format.
 func validatePhase(phase string) error {
 	if phase != ImplementPhase && phase != WatchdogPhase {
 		return refuse(
-			"phase "+strconv.Quote(phase)+" has no schema-1 report format",
+			"phase "+strconv.Quote(phase)+" has no report format",
 			"use the "+ImplementPhase+" or "+WatchdogPhase+" phase",
 		)
 	}
@@ -273,10 +360,10 @@ func validateReport(phase string, report Report) error {
 	if err := validatePhase(phase); err != nil {
 		return err
 	}
-	if report.Schema != ReportSchema {
+	if report.Schema != ReportSchema && report.Schema != reportSchemaWithoutRun {
 		return refuse(
-			"report schema "+strconv.Itoa(report.Schema)+" is not the supported schema 1",
-			"write schema as the bare integer 1; a different version requires a CLI that understands it",
+			fmt.Sprintf("report schema %d is not a supported schema (%d or %d)", report.Schema, reportSchemaWithoutRun, ReportSchema),
+			fmt.Sprintf("write schema as the bare integer %d; a different version requires a CLI that understands it", ReportSchema),
 		)
 	}
 	if err := validateReference("claim reference", report.Ledger.Claim); err != nil {

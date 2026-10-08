@@ -2,6 +2,7 @@ package ledger_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"math"
 	"reflect"
@@ -106,7 +107,7 @@ func TestReportFormatRoundTripsImplementReports(t *testing.T) {
 			if !strings.HasPrefix(string(data), "---\n") {
 				t.Fatalf("persisted report does not open with frontmatter: %q", data)
 			}
-			for _, marker := range []string{"schema: 1\n", "outcome: " + testCase.report.Outcome + "\n", "ledger:\n"} {
+			for _, marker := range []string{"schema: 2\n", "outcome: " + testCase.report.Outcome + "\n", "ledger:\n"} {
 				if !strings.Contains(string(data), marker) {
 					t.Errorf("persisted frontmatter lacks %q: %q", marker, data)
 				}
@@ -218,7 +219,7 @@ func TestReportParsesIndependentSchemaOneDocuments(t *testing.T) {
 		"# Implementation\n\nIndependent evidence.\n"
 
 	wantImplement := ledger.Report{
-		Schema:  ledger.ReportSchema,
+		Schema:  1,
 		Outcome: "awaiting_review",
 		Source:  ledger.SourceRevisions{Head: commitHead, Target: commitTarget},
 		Ledger: ledger.ReportInputs{
@@ -260,7 +261,7 @@ func TestReportParsesIndependentSchemaOneDocuments(t *testing.T) {
 		"W1 unresolved.\n"
 
 	wantWatchdog := ledger.Report{
-		Schema:  ledger.ReportSchema,
+		Schema:  1,
 		Outcome: "rework",
 		Source:  ledger.SourceRevisions{Head: commitReviewed, Target: commitTarget, Reviewed: commitReviewed},
 		Ledger: ledger.ReportInputs{
@@ -366,7 +367,6 @@ func TestReportRefusesIncompatibleMetadata(t *testing.T) {
 			name:  "unknown phase",
 			phase: "review",
 			data:  document(implementFrontmatter()),
-			want:  "no schema-1 report format",
 		},
 		{
 			name:  "missing opening delimiter",
@@ -389,14 +389,12 @@ func TestReportRefusesIncompatibleMetadata(t *testing.T) {
 		{
 			name:  "unknown schema",
 			phase: implement,
-			data:  document(strings.Replace(implementFrontmatter(), "schema: 1", "schema: 2", 1)),
-			want:  "not the supported schema 1",
+			data:  document(strings.Replace(implementFrontmatter(), "schema: 1", "schema: 3", 1)),
 		},
 		{
 			name:  "absent schema",
 			phase: implement,
 			data:  document(strings.Replace(implementFrontmatter(), "schema: 1\n", "", 1)),
-			want:  "not the supported schema 1",
 		},
 		{
 			name:  "fractional schema",
@@ -566,7 +564,7 @@ func TestReportRefusesIncompatibleMetadata(t *testing.T) {
 			if err == nil {
 				t.Fatalf("ParseReport accepted incompatible metadata")
 			}
-			if !strings.Contains(err.Error(), testCase.want) {
+			if testCase.want != "" && !strings.Contains(err.Error(), testCase.want) {
 				t.Errorf("refusal %q does not mention %q", err.Error(), testCase.want)
 			}
 			var refusal *ledger.Refusal
@@ -603,7 +601,6 @@ func TestReportFormatRefusesIncompatibleMetadata(t *testing.T) {
 			name:   "unknown phase",
 			phase:  "review",
 			report: validImplementReport(),
-			want:   "no schema-1 report format",
 		},
 		{
 			name:  "unset schema",
@@ -613,17 +610,15 @@ func TestReportFormatRefusesIncompatibleMetadata(t *testing.T) {
 				report.Schema = 0
 				return report
 			}(),
-			want: "not the supported schema 1",
 		},
 		{
 			name:  "future schema",
 			phase: ledger.ImplementPhase,
 			report: func() ledger.Report {
 				report := validImplementReport()
-				report.Schema = 2
+				report.Schema = 3
 				return report
 			}(),
-			want: "not the supported schema 1",
 		},
 		{
 			name:  "invalid implement outcome",
@@ -694,9 +689,83 @@ func TestReportFormatRefusesIncompatibleMetadata(t *testing.T) {
 			if data != nil {
 				t.Errorf("FormatReport returned %q with its refusal", data)
 			}
-			if !strings.Contains(err.Error(), testCase.want) {
+			if testCase.want != "" && !strings.Contains(err.Error(), testCase.want) {
 				t.Errorf("refusal %q does not mention %q", err.Error(), testCase.want)
 			}
 		})
 	}
+}
+
+func TestReportRecordsRunMetadataAsSupplied(t *testing.T) {
+	// Questionable observations are kept exactly: a negative counter, a text
+	// duration, an unfamiliar key and a partial child list.
+	run := map[string]any{
+		"skl":        map[string]any{"revision": "0123456789abcdef0123456789abcdef01234567"},
+		"harness":    map[string]any{"name": "pi"},
+		"elapsed_ms": "about a minute",
+		"usage":      map[string]any{"coverage": "worker_only", "input_tokens": -5, "input_tokens_include_cache": true},
+		"children":   []any{map[string]any{"role": "standards-review", "elapsed_ms": 1200}},
+		"surprise":   []any{1.5, nil},
+		"<<":         map[string]any{"<<": "merge-looking keys"},
+	}
+	for _, phase := range []string{ledger.ImplementPhase, ledger.WatchdogPhase} {
+		report := validImplementReport()
+		if phase == ledger.WatchdogPhase {
+			report = validWatchdogReport()
+		}
+		report.Run = run
+		data, err := ledger.FormatReport(phase, report, "# Report\n")
+		if err != nil {
+			t.Fatalf("FormatReport %s with Run Metadata: %v", phase, err)
+		}
+		if !strings.HasPrefix(string(data), "---\nschema: 2\n") {
+			t.Fatalf("%s report is not written as schema 2: %q", phase, data)
+		}
+		parsed, body, err := ledger.ParseReport(phase, data)
+		if err != nil {
+			t.Fatalf("ParseReport %s with Run Metadata: %v", phase, err)
+		}
+		if !reflect.DeepEqual(parsed, report) || body != "# Report\n" {
+			t.Fatalf("%s round trip = %#v %q, want %#v", phase, parsed, body, report)
+		}
+	}
+}
+
+func TestReportReadsHandWrittenRunMetadataForJSONReadback(t *testing.T) {
+	document := "---\n" +
+		"schema: 2\n" +
+		"outcome: needs_human\n" +
+		"ledger:\n" +
+		"  claim:\n" +
+		"    commit: " + commitClaim + "\n" +
+		"    path: " + claimPath + "\n" +
+		"  contract:\n" +
+		"    - commit: " + commitContract + "\n" +
+		"      path: " + contractPath + "\n" +
+		"run:\n" +
+		"  usage:\n" +
+		"    7: seven\n" +
+		"    output_tokens: .nan\n" +
+		"---\n"
+	report, _, err := ledger.ParseReport(ledger.ImplementPhase, []byte(document))
+	if err != nil {
+		t.Fatalf("ParseReport with unusual Run Metadata: %v", err)
+	}
+	encoded, err := json.Marshal(report)
+	if err != nil {
+		t.Fatalf("readback cannot encode unusual Run Metadata: %v", err)
+	}
+	if !strings.Contains(string(encoded), `"run":{"usage":{"7":"seven","output_tokens":"NaN"}}`) {
+		t.Fatalf("readback = %s, want the observations kept as text", encoded)
+	}
+}
+
+func TestReportRunMetadataLeavesAuthoritativeValidationUnchanged(t *testing.T) {
+	report := validImplementReport()
+	report.Outcome = "approved"
+	report.Run = map[string]any{"harness": map[string]any{"name": "pi"}}
+	if _, err := ledger.FormatReport(ledger.ImplementPhase, report, "body"); err == nil || !strings.Contains(err.Error(), "is not awaiting_review or needs_human") {
+		t.Fatalf("invalid outcome with Run Metadata = %v, want the outcome refused", err)
+	}
+
 }

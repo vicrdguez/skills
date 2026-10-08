@@ -371,7 +371,7 @@ func TestLedgerStatusTerminalClaimExplicitRelease(t *testing.T) {
 				t.Fatalf("terminal work resumed: %+v", result)
 			}
 			if result, err := ledger.HandoffDelivery(store, repository, item, ledger.ImplementPhase, claim,
-				ledger.SourceRevisions{Head: sourceHead, Target: sourceHead}, ledger.AwaitingReview, "stale handoff"); err == nil {
+				ledger.SourceRevisions{Head: sourceHead, Target: sourceHead}, ledger.AwaitingReview, "stale handoff", nil); err == nil {
 				t.Fatalf("terminal work accepted a stale handoff: %+v", result)
 			}
 			if got := strings.TrimSpace(runGitOutput(t, fixture.clone, "rev-parse", "HEAD")); got != beforeRefusal {

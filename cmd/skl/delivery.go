@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"runtime/debug"
 	"strings"
 
 	"github.com/urfave/cli/v2"
@@ -29,6 +32,7 @@ func deliveryCommands(phase string, newBackend backendFactory, stdout io.Writer)
 			&cli.StringFlag{Name: "item"}, &cli.StringFlag{Name: "claim"},
 			&cli.StringFlag{Name: "head"}, &cli.StringFlag{Name: "target"},
 			&cli.StringFlag{Name: "outcome"}, &cli.PathFlag{Name: "body"}, &cli.PathFlag{Name: "public-body"}, &cli.PathFlag{Name: "result-directory"},
+			&cli.PathFlag{Name: "run-metadata", Usage: "optional JSON Run Metadata observed by the reporting Worker Session"},
 			implementationFormatFlag(),
 		}, Action: func(c *cli.Context) error { return runDelivery(c, phase, name, newBackend, stdout) }}
 		if name == "next" {
@@ -376,7 +380,7 @@ func submitDelivery(c *cli.Context, phase, operation string, repository setup.Re
 			}
 		}
 	}
-	result, err := ledger.HandoffDelivery(store, repository.Repository, c.String("item"), phase, c.String("claim"), source, outcome, string(body))
+	result, err := ledger.HandoffDelivery(store, repository.Repository, c.String("item"), phase, c.String("claim"), source, outcome, string(body), runMetadata(c))
 	if err != nil {
 		return refusal(err)
 	}
@@ -392,6 +396,73 @@ func submitDelivery(c *cli.Context, phase, operation string, repository setup.Re
 	ledger.PublishDelivery(c.Context, store, repository.Repository, repository.Root, repository.Remote, result, public, forge)
 	ledger.ReplicateDelivery(store, repository.Repository, result)
 	return emit(handoffOutput(phase, repository, result))
+}
+
+// buildInfo reads the submitting binary's build information.
+var buildInfo = debug.ReadBuildInfo
+
+// runMetadata reads the worker's optional Run Metadata and adds this binary's
+// available identity under skl. Observations never block a handoff: an absent
+// file means none were collected, and an unreadable one is reported and left
+// out. Values are kept as supplied; a non-object leaves no room for identity.
+func runMetadata(c *cli.Context) any {
+	var run any
+	if name := c.Path("run-metadata"); name != "" {
+		var err error
+		if run, err = readRunMetadata(name); err != nil {
+			fmt.Fprintf(c.App.ErrWriter, "Run Metadata left out: %v\n", err)
+		}
+	}
+	identity := map[string]any{}
+	if info, ok := buildInfo(); ok {
+		if info.Main.Version != "" && info.Main.Version != "(devel)" {
+			identity["version"] = info.Main.Version
+		}
+		for _, setting := range info.Settings {
+			if setting.Key == "vcs.revision" && setting.Value != "" {
+				identity["revision"] = setting.Value
+			}
+		}
+	}
+	if len(identity) == 0 {
+		return run
+	}
+	if run == nil {
+		run = map[string]any{}
+	}
+	fields, ok := run.(map[string]any)
+	if !ok {
+		return run
+	}
+	if supplied, ok := fields["skl"].(map[string]any); ok {
+		for key, value := range identity {
+			supplied[key] = value
+		}
+	} else {
+		fields["skl"] = identity
+	}
+	return fields
+}
+
+// readRunMetadata decodes one JSON value, keeping integers exact.
+func readRunMetadata(name string) (any, error) {
+	data, err := os.ReadFile(name)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	var run any
+	if err := decoder.Decode(&run); err != nil {
+		return nil, fmt.Errorf("decode %s: %w", name, err)
+	}
+	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("decode %s: more than one JSON value", name)
+	}
+	return run, nil
 }
 
 // handoffOutput is the outcome of one committed handoff: submitted, or paused
