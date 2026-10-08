@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -135,6 +136,14 @@ func TestReleasePublishesCompleteTaggedArtifacts(t *testing.T) {
 	}
 	state := readState(t, f.state)
 	assertPublished(t, state, f.commit)
+	embeddedProse, err := os.ReadFile("../prose/craft/testing.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	golden, err := os.ReadFile("../testdata/prose/skill-testing.md")
+	if err != nil {
+		t.Fatal(err)
+	}
 	checksums := string(state.Assets["checksums.txt"])
 	for _, target := range []struct{ os, arch string }{
 		{"darwin", "amd64"}, {"darwin", "arm64"}, {"linux", "amd64"}, {"linux", "arm64"},
@@ -180,7 +189,7 @@ func TestReleasePublishesCompleteTaggedArtifacts(t *testing.T) {
 		if settings["GOOS"] != target.os || settings["GOARCH"] != target.arch || settings["CGO_ENABLED"] != "0" || settings["-ldflags"] != "-X main.releaseVersion=v0.5.0" {
 			t.Fatalf("wrong build identity/target: %+v", settings)
 		}
-		if !bytes.Contains(binary, []byte("Tests show that the change keeps its Contract.")) {
+		if !bytes.Contains(binary, embeddedProse) {
 			t.Fatal("distributed testing prose missing from binary")
 		}
 		if target.os == runtime.GOOS && target.arch == runtime.GOARCH {
@@ -189,7 +198,7 @@ func TestReleasePublishesCompleteTaggedArtifacts(t *testing.T) {
 			}
 			cmd := exec.Command(path, "skill", "testing")
 			cmd.Dir = t.TempDir()
-			if output, err := cmd.CombinedOutput(); err != nil || !bytes.Contains(output, []byte("Tests show that the change keeps its Contract.")) {
+			if output, err := cmd.CombinedOutput(); err != nil || !bytes.Equal(output, golden) {
 				t.Fatalf("embedded prose outside checkout: %v, %s", err, output)
 			}
 		}
@@ -437,15 +446,20 @@ func TestReleaseCommandProcess(t *testing.T) {
 			}
 		}
 	case "upload":
+		clobber := slices.Contains(args[4:], "--clobber")
 		for _, file := range args[4:] {
 			if file == "--clobber" {
 				continue
+			}
+			name := filepath.Base(file)
+			if _, exists := state.Assets[name]; exists && !clobber {
+				finish(1)
 			}
 			data, err := os.ReadFile(file)
 			if err != nil {
 				t.Fatal(err)
 			}
-			state.Assets[filepath.Base(file)] = data
+			state.Assets[name] = data
 			if failure == "upload" && len(state.Assets) == 2 {
 				finish(1)
 			}
@@ -454,7 +468,9 @@ func TestReleaseCommandProcess(t *testing.T) {
 		if failure == "edit" {
 			finish(1)
 		}
-		state.Draft = false
+		if slices.Contains(args[4:], "--draft=false") {
+			state.Draft = false
+		}
 	default:
 		t.Fatalf("unexpected release operation: %v", args)
 	}
