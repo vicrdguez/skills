@@ -151,8 +151,59 @@ Run one Supervisor per phase per Project. Configure the harness to allow subagen
 
 ## Install
 
+### Download a binary (no Go toolchain)
+
+Once published, choose an archive from [GitHub Releases](https://github.com/vicrdguez/skills/releases):
+`darwin` for macOS or `linux` for Linux; `amd64` for Intel/AMD x86-64 or `arm64`
+for Apple Silicon/Linux AArch64. `uname -s` and `uname -m` help identify your host.
+The first planned release is `v0.5.0`; these downloads will work once a human
+publishes that tag.
+
+For example, on Apple Silicon macOS, in an empty working directory:
+
 ```sh
-go install github.com/vicrdguez/skills/cmd/skl@latest   # or, from a checkout: go install ./cmd/skl
+tag=v0.5.0
+archive="skl_${tag}_darwin_arm64.tar.gz"  # choose your OS and architecture
+base="https://github.com/vicrdguez/skills/releases/download/$tag"
+curl -fLO "$base/$archive"
+curl -fLO "$base/checksums.txt"
+grep -F "  ./$archive" checksums.txt | shasum -a 256 -c -
+# Continue only if the checksum reports OK.
+tar -xzf "$archive"
+mkdir -p "$HOME/.local/bin"
+install -m 755 skl "$HOME/.local/bin/skl"
+export PATH="$HOME/.local/bin:$PATH"  # also add this to your shell configuration
+skl --version
+```
+
+On Linux, `sha256sum -c -` can replace `shasum -a 256 -c -`. The archives contain
+`skl` at their root with workflow prose embedded. Building all four targets does
+not establish native execution on every target. See [release policy and draft
+recovery](docs/releases.md).
+
+### Install from source
+
+Source installs require the Go version declared in `go.mod` (currently Go 1.27)
+and Git. Install from main, or from a stable tag once it is available:
+
+```sh
+go install github.com/vicrdguez/skills/cmd/skl@main
+# Once v0.5.0 is published:
+go install github.com/vicrdguez/skills/cmd/skl@v0.5.0
+# Or, from a checkout:
+go install ./cmd/skl
+```
+
+Put Go's binary directory (`go env GOBIN`, or `$(go env GOPATH)/bin` when unset)
+on your `PATH`.
+
+### Runtime setup (both installation paths)
+
+Git and a configured private Workflow Ledger clone remain runtime prerequisites;
+GitHub-backed operations also require the GitHub CLI (`gh`) and authentication.
+A downloaded binary needs no Go toolchain at runtime.
+
+```sh
 skl install    # stubs and entry points for the harnesses you have
 ```
 
