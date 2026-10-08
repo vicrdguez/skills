@@ -33,6 +33,12 @@ func TestPrepareOpensMissingProposalBranchAtFetchedMainAndReusesIt(t *testing.T)
 	if got := gitOutput(t, remote, "rev-parse", "refs/heads/proposal/feature"); got != ahead {
 		t.Fatalf("preparation moved existing remote branch to %s; want %s", got, ahead)
 	}
+	// A later implement round retains the destination branch, not the old
+	// report's target revision: the new cutoff is the branch's current head.
+	rework, err := PrepareDeliverySource(root, "upstream", "slice-one", first.Head, main, "proposal/feature")
+	if err != nil || rework.Target != ahead || rework.Head != main {
+		t.Fatalf("rework preparation = %+v, %v; want fetched branch head %s", rework, err, ahead)
+	}
 }
 
 func TestPrepareRefusesToFabricateProposalBranchWhenMainUnavailable(t *testing.T) {

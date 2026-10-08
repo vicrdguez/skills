@@ -104,7 +104,7 @@ func PrepareDeliverySource(root, remote, branch, requiredHead, recordedTarget st
 		}
 	}
 	target := fetchedTarget
-	if recordedTarget != "" {
+	if recordedTarget != "" && (selected == "main" || target == "") {
 		target = deliveryResolveCommit(root, recordedTarget)
 		if target == "" {
 			return DeliverySource{}, Refuse("recorded Integration Target " + recordedTarget + " is unavailable; restore that exact input instead of substituting a newer target")

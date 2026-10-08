@@ -259,7 +259,7 @@ func (s *Store) recordSubmission(repository github.RepositoryID, item string, at
 		if state.Submission != nil && !sameAttachment(state.Submission, attachment) {
 			return refuse(fmt.Sprintf("Work Item %s already records Submission %s#%d", item, state.Submission.Repository, state.Submission.Number), "preserve both attachments and reconcile with human direction")
 		}
-		if state.Submission != nil && state.Target != nil && *state.Target == *target {
+		if state.Submission != nil {
 			return nil
 		}
 		if err := s.requireCleanPaths(directory + "/state.json"); err != nil {

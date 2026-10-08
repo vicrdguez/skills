@@ -91,8 +91,9 @@ type SliceState struct {
 	Decision bool `json:"decision,omitempty"`
 }
 
-// ProposalMeta is the persisted proposal.json: proposal metadata only. The
-// directory membership defines the slices; no child inventory is stored.
+// ProposalMeta is the persisted proposal.json: its accepted identity, open
+// Integration Target and eventual completion. Directory membership defines
+// the slices; no child inventory is stored.
 type ProposalMeta struct {
 	Accepted    string             `json:"accepted"`
 	Branch      string             `json:"branch,omitempty"`
