@@ -324,6 +324,7 @@ type proposalSliceSpec struct {
 
 type proposalSpec struct {
 	name        string
+	branch      string
 	description string
 	parentTitle string
 	slices      []proposalSliceSpec
@@ -334,6 +335,9 @@ type proposalSpec struct {
 func (p proposalSpec) declaration() string {
 	var builder strings.Builder
 	builder.WriteString(`{"proposal": "` + p.name + `"`)
+	if p.branch != "" {
+		builder.WriteString(`, "branch": "` + p.branch + `"`)
+	}
 	if p.parentTitle != "" {
 		builder.WriteString(`, "parent_title": "` + p.parentTitle + `"`)
 	}
@@ -883,8 +887,8 @@ func TestAcceptMultiSliceWithDependencies(t *testing.T) {
 	if len(dependencies) != 2 {
 		t.Fatalf("feature dependencies = %v", dependencies)
 	}
-	// plan.md was warranted and frozen; the parent is recorded without branch
-	// or submission of its own.
+	// plan.md was warranted and frozen; the Proposal has a Branch name,
+	// while its coordination parent has no source branch or submission.
 	if _, err := os.Stat(filepath.Join(fixture.clone, "projects", "widgets", "proposals", "dependent-work", "feature", "plan.md")); err != nil {
 		t.Fatalf("warranted plan.md not frozen: %v", err)
 	}
@@ -895,8 +899,8 @@ func TestAcceptMultiSliceWithDependencies(t *testing.T) {
 	if _, hasParent := meta["parent_issue"]; !hasParent {
 		t.Fatalf("multi-slice parent attachment missing: %v", meta)
 	}
-	if _, hasBranch := meta["branch"]; hasBranch {
-		t.Fatalf("parent owns a branch: %v", meta)
+	if meta["branch"] != "proposal/dependent-work" {
+		t.Fatalf("Proposal Branch was not recorded: %v", meta)
 	}
 	if forge.createdCount() != 3 { // two children plus the parent
 		t.Fatalf("published %d issues, want two children and a parent", forge.createdCount())

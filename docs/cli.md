@@ -32,7 +32,7 @@ Resource names are exact and relative to the skill's resource directory. Paramet
 
 ## Accepting a proposal
 
-Propose prepares an intake directory with `proposal.md`, `proposal.json` (name, optional parent title, slice titles, planned branches, dependencies) and per-slice Contract files. Public issue bodies are separate, deliberately authored files.
+Propose prepares an intake directory with `proposal.md`, `proposal.json` (name, optional top-level `branch` for the Proposal Branch, optional parent title, slice titles, planned Slice branches, dependencies), and per-slice Contract files. When omitted, the Proposal Branch defaults to `proposal/<proposal-name>`; acceptance validates it with Git and reserves it against all Project branches, including archived records. Public issue bodies are separate, deliberately authored files.
 
 ```sh
 skl ledger accept --repo <path> --proposal-dir <dir> \
@@ -95,7 +95,7 @@ skl decision retire --project <p> --proposal <proposal>
 
 ## Browsing
 
-`skl browse` opens a terminal browser over the ledger: Projects, their Proposals, and each Slice's state, Claim, dependencies, branch and attachments. It starts at the current checkout's Project when there is exactly one.
+`skl browse` opens a terminal browser over the ledger: Projects, their Proposals (including the Proposal Branch, or its absence for legacy records), and each Slice's state, Claim, dependencies, branch and attachments. It starts at the current checkout's Project when there is exactly one.
 
 To find Slices, `f` picks a lifecycle or Claim from the counted facts of the current Project (every Project from the overview), and `/` searches Project, Proposal and Slice names and Slice titles. The criteria narrow the same results together. In the results, `w` switches between the current Project and every Project, `g` groups by Proposal or lifecycle, `d` opens scrollable membership diagnostics (`esc` returns to results), and `enter` opens the Slice. Slices whose unreadable records leave a criterion undecided are listed apart, never counted as matches.
 

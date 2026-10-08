@@ -63,6 +63,7 @@ type ProposalSummary struct {
 	Retired        bool             `json:"retired"`
 	ParentTitle    string           `json:"parent_title,omitempty"`
 	Accepted       string           `json:"accepted,omitempty"`
+	Branch         string           `json:"branch"`
 	ParentIssue    *ForgeAttachment `json:"parent_issue,omitempty"`
 	FullyDelivered bool             `json:"fully_delivered"`
 	Tally
@@ -800,7 +801,7 @@ func (t *Tally) add(slice sliceRead) {
 func (r proposalRead) summary() ProposalSummary {
 	summary := ProposalSummary{
 		Name: r.tree.name, Archived: r.tree.archived, Retired: r.meta.Retired,
-		ParentTitle: r.meta.ParentTitle, Accepted: r.meta.Accepted, ParentIssue: r.meta.ParentIssue,
+		ParentTitle: r.meta.ParentTitle, Accepted: r.meta.Accepted, Branch: r.meta.Branch, ParentIssue: r.meta.ParentIssue,
 		Tally:       Tally{Lifecycles: map[string]int{}},
 		Diagnostics: append([]Diagnostic(nil), r.diagnostics...),
 	}

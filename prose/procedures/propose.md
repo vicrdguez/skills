@@ -89,9 +89,10 @@ Check: every review finding is corrected or resolved by the user.
 2. Commit durable `CONTEXT.md` and ADR changes to the target branch.
 3. Prepare one intake directory outside the source tree:
    - `proposal.md`: the durable description of the approved Proposal;
-   - `proposal.json`: `{"proposal": "<kebab-name>", "parent_title": "<multi-slice only>", "slices": [{"name": "<slug>", "title": "<issue title>", "branch": "<planned source branch>", "depends": ["<sibling slug or proposals/<proposal>/<slice>"]}]}`;
+   - `proposal.json`: `{"proposal": "<kebab-name>", "branch": "<optional Proposal Branch>", "parent_title": "<multi-slice only>", "slices": [{"name": "<slug>", "title": "<issue title>", "branch": "<planned source branch>", "depends": ["<sibling slug or proposals/<proposal>/<slice>"]}]}`;
    - one directory per slice, holding only its Contract documents.
-4. Run `skl ledger accept --repo <root> --proposal-dir <dir> --issue <slice>=<body-file>`, repeating `--issue` per slice and adding `--parent-body <file>` for multi-slice work, and follow its outcome. Acceptance records each planned branch; it creates no branch or worktree.
+   The Proposal Branch defaults to `proposal/<kebab-name>` when omitted.
+4. Run `skl ledger accept --repo <root> --proposal-dir <dir> --issue <slice>=<body-file>`, repeating `--issue` per slice and adding `--parent-body <file>` for multi-slice work, and follow its outcome. Acceptance records the Proposal Branch and each planned Slice branch; it creates no branch or worktree.
 5. Read each slice back with `skl ledger show --repo <root> --item <proposal>/<slice>`. Cite its ledger commit and path when you identify a document exactly.
 
 Check: the readback shows every slice's accepted documents.

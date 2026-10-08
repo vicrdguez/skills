@@ -116,6 +116,30 @@ func TestBrowseQueriesReadCommittedRecordsWithoutSideEffects(t *testing.T) {
 	}
 }
 
+func TestBrowseProposalShowsRecordedBranchAndLegacyAbsence(t *testing.T) {
+	fixture := browseFixture(t)
+	writeFile(t, filepath.Join(fixture.clone, "projects/widgets/proposals/orders/proposal.json"), `{"accepted":"2024-01-01T00:00:00Z","branch":"proposal/orders"}`)
+	runGit(t, fixture.clone, "add", "-A")
+	runGit(t, fixture.clone, "commit", "-q", "-m", "record proposal branch")
+	app, output := browseApp(t)
+	for _, tc := range []struct{ name, branch, text string }{
+		{"orders", "proposal/orders", "Proposal Branch: proposal/orders"},
+		{"legacy", "", "Proposal Branch: none"},
+	} {
+		result := browseQuery(t, app, output, "proposal", "--project", "widgets", "--proposal", tc.name)
+		if result.Proposal.Proposal.Branch != tc.branch || !strings.Contains(output.String(), `"branch":"`+tc.branch+`"`) {
+			t.Fatalf("JSON Proposal Branch of %s: %s", tc.name, output)
+		}
+		output.Reset()
+		if err := app.Run([]string{"skl", "browse", "proposal", "--project", "widgets", "--proposal", tc.name}); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(output.String(), tc.text) {
+			t.Fatalf("Markdown Proposal Branch of %s: %s", tc.name, output)
+		}
+	}
+}
+
 func TestBrowseCLISelectsArchivedLocationWhenNamesCollide(t *testing.T) {
 	fixture := browseFixture(t)
 	writeFile(t, filepath.Join(fixture.clone, "projects/widgets/archive/orders/proposal.json"), `{"accepted":"2023-01-01T00:00:00Z"}`)

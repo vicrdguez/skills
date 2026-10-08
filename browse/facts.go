@@ -90,6 +90,7 @@ func ProposalLines(proposal ledger.ProposalSummary) []string {
 	}
 	lines = append(lines,
 		"Accepted: "+orUnknown(proposal.Accepted),
+		"Proposal Branch: "+orNone(proposal.Branch),
 		"Location: "+locationText(proposal.Archived, proposal.Retired),
 		"Delivery: "+deliveryText(proposal),
 		"Slices: "+tallyText(proposal.Tally),
@@ -386,6 +387,13 @@ func listText(values []string) string {
 		return "none"
 	}
 	return strings.Join(values, ", ")
+}
+
+func orNone(value string) string {
+	if value == "" {
+		return "none"
+	}
+	return value
 }
 
 func orUnknown(value string) string {
