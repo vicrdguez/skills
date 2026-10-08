@@ -53,9 +53,9 @@ var adapters = []adapter{
 // the continuation; the entry points only supply dispatch arguments.
 var loopAdapters = []adapter{
 	{name: "implement-loop", command: "skl implement next --dispatch --wait", slots: []string{"worker-model", "worker-thinking", "reviewer-model", "reviewer-thinking"}, loop: true,
-		defaults: map[string]string{"worker-model": "openai-codex/gpt-6-sol", "worker-thinking": "xhigh", "reviewer-model": "openai-codex/gpt-6-astra", "reviewer-thinking": "low"}},
+		defaults: map[string]string{"worker-model": "openai-codex/gpt-6.1-sol", "worker-thinking": "high", "reviewer-model": "openai-codex/gpt-6-astra", "reviewer-thinking": "low"}},
 	{name: "implement-team-loop", command: "skl implement next --mode team --dispatch --wait", slots: []string{"worker-model", "worker-thinking", "helper-model", "helper-thinking", "reviewer-model", "reviewer-thinking"}, loop: true,
-		defaults: map[string]string{"worker-model": "openai-codex/gpt-6-sol", "worker-thinking": "xhigh", "helper-model": "openai-codex/gpt-6-luna", "helper-thinking": "xhigh", "reviewer-model": "openai-codex/gpt-6-sol", "reviewer-thinking": "xhigh"}},
+		defaults: map[string]string{"worker-model": "openai-codex/gpt-6.1-sol", "worker-thinking": "high", "helper-model": "openai-codex/gpt-6-luna", "helper-thinking": "xhigh", "reviewer-model": "openai-codex/gpt-6.1-sol", "reviewer-thinking": "high"}},
 	{name: "watchdog-loop", command: "skl watchdog next --dispatch --wait", slots: []string{"worker-model", "worker-thinking"}, loop: true,
 		defaults: map[string]string{"worker-model": "openai-codex/gpt-6-astra", "worker-thinking": "high"}},
 }
@@ -64,8 +64,8 @@ var loopAdapters = []adapter{
 var piDefaults = map[string]string{
 	"helper-model":      "openai-codex/gpt-6-luna",
 	"helper-thinking":   "xhigh",
-	"reviewer-model":    "openai-codex/gpt-6-sol",
-	"reviewer-thinking": "xhigh",
+	"reviewer-model":    "openai-codex/gpt-6.1-sol",
+	"reviewer-thinking": "high",
 }
 
 // harness is where skl installs into one supported Agent Harness. A harness

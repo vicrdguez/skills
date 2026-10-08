@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -111,10 +112,10 @@ func loopCommand(t *testing.T, entry string) []string {
 func TestInstallPassesEachModeAndItsSlotsWithPiDefaults(t *testing.T) {
 	home := t.TempDir()
 	installInto(t, home)
-	const sol, luna = "openai-codex/gpt-6-sol", "openai-codex/gpt-6-luna"
+	const sol, luna = "openai-codex/gpt-6.1-sol", "openai-codex/gpt-6-luna"
 	piDefaults := map[string][]string{
-		"implement":      {"--reviewer-model", sol, "--reviewer-thinking", "xhigh"},
-		"implement-team": {"--mode", "team", "--helper-model", luna, "--helper-thinking", "xhigh", "--reviewer-model", sol, "--reviewer-thinking", "xhigh"},
+		"implement":      {"--reviewer-model", sol, "--reviewer-thinking", "high"},
+		"implement-team": {"--mode", "team", "--helper-model", luna, "--helper-thinking", "xhigh", "--reviewer-model", sol, "--reviewer-thinking", "high"},
 	}
 	empty := map[string][]string{
 		"implement":      {"--reviewer-model", "", "--reviewer-thinking", ""},
@@ -140,11 +141,11 @@ func TestInstallPassesEachModeAndItsSlotsWithPiDefaults(t *testing.T) {
 func TestInstallWritesDispatchLoopsForPiAndOpenCode(t *testing.T) {
 	home := t.TempDir()
 	installInto(t, home)
-	const sol = "openai-codex/gpt-6-sol"
+	const sol = "openai-codex/gpt-6.1-sol"
 	cases := map[string]map[string][]string{
 		"pi": {
-			"implement-loop":      {"skl", "implement", "next", "--dispatch", "--wait", "--worker-model", sol, "--worker-thinking", "xhigh", "--reviewer-model", "openai-codex/gpt-6-astra", "--reviewer-thinking", "low"},
-			"implement-team-loop": {"skl", "implement", "next", "--mode", "team", "--dispatch", "--wait", "--worker-model", sol, "--worker-thinking", "xhigh", "--helper-model", "openai-codex/gpt-6-luna", "--helper-thinking", "xhigh", "--reviewer-model", sol, "--reviewer-thinking", "xhigh"},
+			"implement-loop":      {"skl", "implement", "next", "--dispatch", "--wait", "--worker-model", sol, "--worker-thinking", "high", "--reviewer-model", "openai-codex/gpt-6-astra", "--reviewer-thinking", "low"},
+			"implement-team-loop": {"skl", "implement", "next", "--mode", "team", "--dispatch", "--wait", "--worker-model", sol, "--worker-thinking", "high", "--helper-model", "openai-codex/gpt-6-luna", "--helper-thinking", "xhigh", "--reviewer-model", sol, "--reviewer-thinking", "high"},
 			"watchdog-loop":       {"skl", "watchdog", "next", "--dispatch", "--wait", "--worker-model", "openai-codex/gpt-6-astra", "--worker-thinking", "high"},
 		},
 		"opencode": {
@@ -198,6 +199,43 @@ func TestInstallWritesDispatchLoopsForPiAndOpenCode(t *testing.T) {
 			if _, err := os.Stat(filepath.Join(home, fmt.Sprintf(entryPoints[harness], operation))); !os.IsNotExist(err) {
 				t.Errorf("unexpected %s %s loop adapter: %v", harness, operation, err)
 			}
+		}
+	}
+}
+
+func TestInstallArtifactsDoNotSupplyOldSol(t *testing.T) {
+	home := t.TempDir()
+	installInto(t, home)
+	if err := filepath.WalkDir(home, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !entry.IsDir() && strings.Contains(readFile(t, path), "gpt-6-sol") {
+			t.Errorf("installed artifact %s supplies the old Sol model", path)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInstallPiReviewerOverridesKeepExplicitOldModel(t *testing.T) {
+	home := t.TempDir()
+	installInto(t, home)
+	for _, operation := range []string{"implement", "implement-team"} {
+		entry := readFile(t, filepath.Join(home, fmt.Sprintf(entryPoints["pi"], operation)))
+		// Fill only reviewer slots; omitted helpers keep their own defaults.
+		modelSlot, thinkingSlot := 1, 2
+		want := []string{"skl", "implement", "next"}
+		if operation == "implement-team" {
+			modelSlot, thinkingSlot = 3, 4
+			want = append(want, "--mode", "team", "--helper-model", "openai-codex/gpt-6-luna", "--helper-thinking", "xhigh")
+		}
+		entry = regexp.MustCompile(fmt.Sprintf(`\$\{%d:-[^}]*\}`, modelSlot)).ReplaceAllString(entry, "openai-codex/gpt-6-sol")
+		entry = regexp.MustCompile(fmt.Sprintf(`\$\{%d:-[^}]*\}`, thinkingSlot)).ReplaceAllString(entry, "xhigh")
+		want = append(want, "--reviewer-model", "openai-codex/gpt-6-sol", "--reviewer-thinking", "xhigh")
+		if got := invokedCommand(t, entry); !slices.Equal(got, want) {
+			t.Errorf("pi %s runs %q, want explicit choices %q", operation, got, want)
 		}
 	}
 }

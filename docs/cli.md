@@ -16,7 +16,7 @@ The path must be an existing local Git clone with at least one commit, separate 
 
 `skl setup [--repo <path>]` prepares local guidance in a Git repository: it writes the managed Workflow and Simplicity block into `AGENTS.md`, offers to link `CLAUDE.md` to it, and adds `.worktrees/` to `.gitignore`. It needs no GitHub remote, authentication or ledger configuration. Setup does not configure a ledger or adopt a Project; those are separate operations.
 
-`skl install` refreshes the owned skill stubs in `~/.pi/agent/skills`, `~/.codex/skills`, `~/.claude/skills` and `~/.config/opencode/skills`, and installs `implement`, `implement-team` and `watchdog` as Harness Adapters in each harness's native entry point: prompt templates in `~/.pi/agent/prompts/`, user-invoked skills in `~/.claude/skills/`, and commands in `~/.config/opencode/commands/`. Codex has no entry point that takes arguments, so it keeps plain stubs for those three. Every adapter runs its `next` command; `implement-team` adds `--mode team`. The Implement adapters take model and thinking arguments in order: `implement` takes the reviewer model and thinking level, and `implement-team` takes the helper's and then the reviewer's. An omitted argument passes an empty value, which `skl` treats as omitted. The pi templates default reviewers to `openai-codex/gpt-6-sol` at `xhigh` and helpers to `openai-codex/gpt-6-luna` at `xhigh`; the other harnesses ship no defaults, and Codex's `implement-team` stub passes only the mode. The installer touches only files it owns and retires the ones it used to own: the `tdd` stub and the earlier Pi runners, loop prompts and queue helper. Stubs and adapters read the running binary, so rebuild after prose changes and run `skl install` again.
+`skl install` refreshes the owned skill stubs in `~/.pi/agent/skills`, `~/.codex/skills`, `~/.claude/skills` and `~/.config/opencode/skills`, and installs `implement`, `implement-team` and `watchdog` as Harness Adapters in each harness's native entry point: prompt templates in `~/.pi/agent/prompts/`, user-invoked skills in `~/.claude/skills/`, and commands in `~/.config/opencode/commands/`. Codex has no entry point that takes arguments, so it keeps plain stubs for those three. Every adapter runs its `next` command; `implement-team` adds `--mode team`. The Implement adapters take model and thinking arguments in order: `implement` takes the reviewer model and thinking level, and `implement-team` takes the helper's and then the reviewer's. An omitted argument passes an empty value, which `skl` treats as omitted. The pi templates default reviewers to `openai-codex/gpt-6.1-sol` at `high` and helpers to `openai-codex/gpt-6-luna` at `xhigh`; the other harnesses ship no defaults, and Codex's `implement-team` stub passes only the mode. The installer touches only files it owns and retires the ones it used to own: the `tdd` stub and the earlier Pi runners, loop prompts and queue helper. Stubs and adapters read the running binary, so rebuild after prose or default changes with `go install ./cmd/skl` and run `skl install` again. This refreshes owned files without changing loaded sessions or running workers.
 
 ## Retrieving skills
 
@@ -72,6 +72,16 @@ skl implement next --dispatch --wait --repo <path> [--worker-model <m>] [--worke
 ```
 
 A Dispatch claims a Slice like `next` but answers with two bound commands instead of the Execution Skill: a worker command (`skl <phase> resume … --dispatched`) that a fresh subagent runs, and a continue command that repeats the Dispatch with `--after <claim>`. Continuation first reads how that Claim ended and proceeds only after its phase handoff. A Claim still held or released without a handoff stops the Supervisor with the Claim untouched. Model and thinking values are passed through opaquely to the harness.
+
+Pi and OpenCode install `implement-loop`, `implement-team-loop` and `watchdog-loop` adapters. Omitted Pi arguments select these defaults:
+
+| Entry point | Worker model / thinking | Helper model / thinking | Reviewer model / thinking |
+| --- | --- | --- | --- |
+| `implement-loop` | `openai-codex/gpt-6.1-sol` / `high` | — | `openai-codex/gpt-6-astra` / `low` |
+| `implement-team-loop` | `openai-codex/gpt-6.1-sol` / `high` | `openai-codex/gpt-6-luna` / `xhigh` | `openai-codex/gpt-6.1-sol` / `high` |
+| `watchdog-loop` | `openai-codex/gpt-6-astra` / `high` | — | — |
+
+Explicit model and thinking arguments keep their existing precedence, including older model identifiers. OpenCode supplies no defaults; Claude Code and Codex have no loop adapters.
 
 ## Presenting a result
 

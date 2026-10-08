@@ -143,9 +143,11 @@ Pi and OpenCode install `implement-loop` (standard Implement), `implement-team-l
 
 | Pi loop | Worker model / thinking | Helper model / thinking | Audit reviewer model / thinking |
 |---|---|---|---|
-| `implement-loop` | `openai-codex/gpt-6-sol` / `xhigh` | — | `openai-codex/gpt-6-astra` / `low` |
-| `implement-team-loop` | `openai-codex/gpt-6-sol` / `xhigh` | `openai-codex/gpt-6-luna` / `xhigh` | `openai-codex/gpt-6-sol` / `xhigh` |
+| `implement-loop` | `openai-codex/gpt-6.1-sol` / `high` | — | `openai-codex/gpt-6-astra` / `low` |
+| `implement-team-loop` | `openai-codex/gpt-6.1-sol` / `high` | `openai-codex/gpt-6-luna` / `xhigh` | `openai-codex/gpt-6.1-sol` / `high` |
 | `watchdog-loop` | `openai-codex/gpt-6-astra` / `high` | — | — |
+
+The single-item Pi `implement` and `implement-team` adapters also default their Audit reviewers to `openai-codex/gpt-6.1-sol` / `high`; `implement-team` keeps its Luna helper at `xhigh`. Explicit model and thinking arguments override these defaults, including older model identifiers. Claude Code and OpenCode supply no model or thinking defaults, and Codex keeps plain stubs.
 
 Run one Supervisor per phase per Project. Configure the harness to allow subagent depth **2**: the Supervisor dispatches a worker, and that worker's Audit dispatches reviewers. `skl install` does not configure harness subagent depth.
 
@@ -170,7 +172,7 @@ Then prepare local guidance in each repository you want to work in (ledger Proje
 skl setup    # local AGENTS.md workflow block, .worktrees/ ignore entry, optional CLAUDE.md link
 ```
 
-Rebuild the binary after editing anything under `prose/`; stubs and adapters read the running binary, not the checkout.
+After changing prose or adapter defaults, rebuild with `go install ./cmd/skl` and run `skl install` again. Stubs and adapters use the running binary, not the checkout; reinstalling refreshes owned files, not loaded sessions or running workers.
 
 To change the model defaults an entry point passes, copy its installed template to a new name and edit the copy; `skl install` only refreshes the files it wrote.
 
