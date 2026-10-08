@@ -284,7 +284,7 @@ func TestInstallSupportedSkillStubs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	wantSkills := []string{"audit", "brainstorm", "decision", "design", "domain", "explore", "propose", "shape", "testing", "writing-for-agents"}
+	wantSkills := []string{"audit", "brainstorm", "decision", "design", "domain", "explore", "propose", "shape", "testing", "walkthrough", "writing-for-agents"}
 	for _, harness := range []string{".pi/agent/skills", ".codex/skills", ".claude/skills", ".config/opencode/skills"} {
 		for _, name := range wantSkills {
 			path := filepath.Join(root, harness, name, "SKILL.md")
