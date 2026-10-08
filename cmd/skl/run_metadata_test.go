@@ -208,7 +208,7 @@ func TestRunMetadataProblemsNeverBlockTheHandoff(t *testing.T) {
 			want: `{"<<":"x","usage":{"<<":{"input_tokens":1}}}`,
 		},
 		{
-			name: "numbers beyond float64 keep their exact value",
+			name: "numbers keep their exact supplied value",
 			run: func(t *testing.T) string {
 				return runFile(t, `{"usage":{"input_tokens":9223372036854775809,"output_tokens":-9223372036854775809},"tiny":1e-400,"ratio":0.1}`)
 			},

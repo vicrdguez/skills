@@ -235,8 +235,9 @@ func portableRun(value any) any {
 	return value
 }
 
-// exactFloat reports whether number carries the decimal value supplied as
-// text, so rounding or underflow never silently changes an observation.
+// exactFloat reports whether number reads back as the same decimal value
+// supplied as text, so rounding or underflow never silently changes an
+// observation.
 func exactFloat(text json.Number, number float64) bool {
 	supplied, ok := new(big.Rat).SetString(text.String())
 	if !ok {
