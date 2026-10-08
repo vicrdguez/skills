@@ -28,6 +28,7 @@ type SliceDeclaration struct {
 // ProposalDeclaration is the parsed intake declaration of one proposal.
 type ProposalDeclaration struct {
 	Proposal    string             `json:"proposal"`
+	Branch      string             `json:"branch"`
 	ParentTitle string             `json:"parent_title"`
 	Slices      []SliceDeclaration `json:"slices"`
 	Description []byte
@@ -56,6 +57,16 @@ func LoadDeclaration(directory string, bodies map[string][]byte, parentBody []by
 	}
 	if !ValidRecordName(declaration.Proposal) {
 		return nil, refuse("proposal name "+declaration.Proposal+" is not a valid record name", "use a lowercase kebab-case name such as add-order-cancellation")
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, refuse("proposal declaration is malformed: "+err.Error(), "correct proposal.json, then retry")
+	}
+	if _, declared := fields["branch"]; !declared {
+		declaration.Branch = "proposal/" + declaration.Proposal
+	}
+	if err := validBranch(declaration.Branch); err != nil {
+		return nil, refuse("proposal "+declaration.Proposal+" has an invalid Proposal Branch "+declaration.Branch, "use a branch name Git can create")
 	}
 	if len(declaration.Slices) == 0 {
 		return nil, refuse("proposal declaration declares no slices", "declare at least one slice with its contract files")

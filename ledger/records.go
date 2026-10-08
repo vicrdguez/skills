@@ -95,6 +95,7 @@ type SliceState struct {
 // directory membership defines the slices; no child inventory is stored.
 type ProposalMeta struct {
 	Accepted    string           `json:"accepted"`
+	Branch      string           `json:"branch,omitempty"`
 	ParentTitle string           `json:"parent_title,omitempty"`
 	ParentIssue *ForgeAttachment `json:"parent_issue,omitempty"`
 	// Retired marks explicit human-directed retirement of a fully terminal,
@@ -220,6 +221,13 @@ func (s *Store) compareAccepted(project string, declaration *ProposalDeclaration
 		return refuse(
 			"proposal "+declaration.Proposal+" is already accepted with a different proposal.md",
 			"a changed Contract requires a renewed Proposal rather than in-place replacement",
+		)
+	}
+	// Historical Proposals have no recorded Proposal Branch to compare or backfill.
+	if meta.Branch != "" && meta.Branch != declaration.Branch {
+		return refuse(
+			"proposal "+declaration.Proposal+" is already accepted with a different Proposal Branch "+meta.Branch,
+			"a changed declared relationship requires a renewed Proposal rather than in-place replacement",
 		)
 	}
 	if strings.TrimSpace(meta.ParentTitle) != strings.TrimSpace(declaration.ParentTitle) {

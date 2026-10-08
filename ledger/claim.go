@@ -235,9 +235,9 @@ func StartDeliveryContext(ctx context.Context, s *Store, repository github.Repos
 	return execution, err
 }
 
-// requireBranchOwner keeps source identity unique within a Project, including
-// historical records whose worktrees or branches may still contain progress.
-// Check under the ledger mutation lock at both acceptance and acquisition.
+// requireBranchOwner keeps Proposal and Slice branch names unique within a
+// Project, including archived records. Check under the ledger mutation lock
+// at acceptance and Slice acquisition.
 func (s *Store) requireBranchOwner(project, item, branch string) error {
 	head, err := s.head()
 	if err != nil {
@@ -250,19 +250,29 @@ func (s *Store) requireBranchOwner(project, item, branch string) error {
 		return err
 	}
 	for _, path := range strings.Split(paths, "\n") {
-		if !strings.HasSuffix(path, "/state.json") {
-			continue
-		}
-		other := strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(path, active+"/"), archived+"/"), "/state.json")
-		if strings.HasPrefix(path, active+"/") && other == item {
-			continue
-		}
-		var state SliceState
-		if err := readJSONAt(s, head, path, &state); err != nil {
-			return err
-		}
-		if state.Branch == branch {
-			return refuse("planned branch "+branch+" is already owned by "+other, "give "+item+" a distinct source branch without reusing another Work Item's worktree or progress")
+		other := strings.TrimPrefix(strings.TrimPrefix(path, active+"/"), archived+"/")
+		switch {
+		case strings.HasSuffix(path, "/state.json"):
+			other = strings.TrimSuffix(other, "/state.json")
+			if strings.HasPrefix(path, active+"/") && other == item {
+				continue
+			}
+			var state SliceState
+			if err := readJSONAt(s, head, path, &state); err != nil {
+				return err
+			}
+			if state.Branch == branch {
+				return refuse("branch "+branch+" is already owned by Slice "+other, "give "+item+" a distinct branch")
+			}
+		case strings.HasSuffix(path, "/proposal.json"):
+			other = strings.TrimSuffix(other, "/proposal.json")
+			var meta ProposalMeta
+			if err := readJSONAt(s, head, path, &meta); err != nil {
+				return err
+			}
+			if meta.Branch != "" && meta.Branch == branch {
+				return refuse("branch "+branch+" is already owned by Proposal "+other, "give "+item+" a distinct branch")
+			}
 		}
 	}
 	return nil

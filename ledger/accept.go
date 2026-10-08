@@ -124,10 +124,13 @@ func Accept(ctx context.Context, store *Store, repository github.RepositoryID, d
 		} else if !os.IsNotExist(err) {
 			return err
 		} else {
-			branches := make(map[string]string, len(declaration.Slices))
+			branches := map[string]string{declaration.Branch: "Proposal " + declaration.Proposal}
+			if err := store.requireBranchOwner(project.Name, "Proposal "+declaration.Proposal, declaration.Branch); err != nil {
+				return err
+			}
 			for _, slice := range declaration.Slices {
 				if owner := branches[slice.Branch]; owner != "" {
-					return refuse("planned branch "+slice.Branch+" belongs to both "+owner+" and "+slice.Name, "give each Work Item in the Project its own source branch")
+					return refuse("branch "+slice.Branch+" belongs to both "+owner+" and Slice "+declaration.Proposal+"/"+slice.Name, "give each Proposal and Slice in the Project its own branch")
 				}
 				branches[slice.Branch] = slice.Name
 				if err := store.requireBranchOwner(project.Name, declaration.Proposal+"/"+slice.Name, slice.Branch); err != nil {
@@ -167,7 +170,7 @@ func (s *Store) freeze(project Project, declaration *ProposalDeclaration, accept
 		paths = append(paths, filepath.Join(projectPath, "project.json"))
 	}
 	if err := s.writeProposalMeta(project.Name, declaration.Proposal, ProposalMeta{
-		Accepted: accepted.UTC().Format(time.RFC3339), ParentTitle: strings.TrimSpace(declaration.ParentTitle),
+		Accepted: accepted.UTC().Format(time.RFC3339), Branch: declaration.Branch, ParentTitle: strings.TrimSpace(declaration.ParentTitle),
 	}); err != nil {
 		return err
 	}
