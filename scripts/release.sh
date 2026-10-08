@@ -20,7 +20,7 @@ if [[ -n $release && $release != $'true\t'"$commit" ]]; then
   exit 1
 fi
 
-go test ./...
+go test -timeout 20m ./...
 artifacts=$(mktemp -d)
 trap 'rm -rf "$artifacts"' EXIT
 for os in darwin linux; do

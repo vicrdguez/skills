@@ -382,7 +382,7 @@ func TestReleaseCommandProcess(t *testing.T) {
 		}
 		switch args[1] {
 		case "test":
-			if strings.Join(args[2:], " ") != "./..." {
+			if strings.Join(args[2:], " ") != "-timeout 20m ./..." {
 				t.Fatal("test gate must run the whole suite")
 			}
 			state.TestsPassed = true

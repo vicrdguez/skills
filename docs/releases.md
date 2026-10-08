@@ -16,7 +16,7 @@ are merged. Merging alone does not release. The tag workflow accepts only stable
 in `main`. Prereleases and other tags do not publish.
 
 The workflow uses Go from `go.mod`, Git, shell and tar, checks out full history
-(the prose-metrics tests need it), and runs `go test ./...`. With CGO disabled it
+(the prose-metrics tests need it), and runs `go test -timeout 20m ./...`. With CGO disabled it
 builds macOS and Linux, each for AMD64 and ARM64. Each archive is named
 `skl_<tag>_<darwin|linux>_<amd64|arm64>.tar.gz` and contains the executable `skl`
 at its root, including embedded workflow prose. `skl --version` reports the tag.
