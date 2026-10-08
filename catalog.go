@@ -149,6 +149,7 @@ var skills = map[string]skill{
 	"shape":              {"procedures/shape.md", ""},
 	"testing":            {"craft/testing.md", "craft/testing"},
 	"watchdog":           {"procedures/watchdog.md", "documents/watchdog"},
+	"walkthrough":        {"procedures/walkthrough.md", ""},
 	"writing-for-agents": {"craft/writing-for-agents.md", "craft/writing-for-agents"},
 }
 
