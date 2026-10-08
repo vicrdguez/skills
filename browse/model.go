@@ -84,12 +84,12 @@ type Options struct {
 }
 
 type keyMap struct {
-	Up, Down, PageUp, PageDown, Enter, Back, Focus, Next, Previous, Projects, Archived, Search, Facts, Group, Scope, Diagnostics, Documents, References, Versions, Issue, PullRequest, Refresh, Help, Quit key.Binding
+	Up, Down, PageUp, PageDown, Enter, Back, Focus, Next, Previous, Projects, Archived, Search, Facts, Group, Scope, Diagnostics, Documents, References, Details, Versions, Issue, PullRequest, Refresh, Help, Quit key.Binding
 }
 
 // all lists every binding in the order `?` shows them.
 func (k keyMap) all() []key.Binding {
-	return []key.Binding{k.Up, k.Down, k.PageUp, k.PageDown, k.Enter, k.Back, k.Focus, k.Next, k.Previous, k.Projects, k.Archived, k.Search, k.Facts, k.Group, k.Scope, k.Diagnostics, k.Documents, k.References, k.Versions, k.Issue, k.PullRequest, k.Refresh, k.Help, k.Quit}
+	return []key.Binding{k.Up, k.Down, k.PageUp, k.PageDown, k.Enter, k.Back, k.Focus, k.Next, k.Previous, k.Projects, k.Archived, k.Search, k.Facts, k.Group, k.Scope, k.Diagnostics, k.Documents, k.References, k.Details, k.Versions, k.Issue, k.PullRequest, k.Refresh, k.Help, k.Quit}
 }
 
 func newKeyMap() keyMap {
@@ -107,6 +107,7 @@ func newKeyMap() keyMap {
 		Archived:    key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "toggle archived")),
 		Documents:   key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "documents")),
 		References:  key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "references")),
+		Details:     key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "details")),
 		Versions:    key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "show/hide versions")),
 		Search:      key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search names")),
 		Facts:       key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "find by lifecycle or claim")),
@@ -255,9 +256,14 @@ func (m Model) footerKeys() []key.Binding {
 	if m.screen == readerScreen {
 		keys.Enter.SetHelp("enter", "read selected")
 		keys.Back.SetHelp("esc/←", "navigator/back")
+		if m.reader.detailsOpen() {
+			keys.Details.SetHelp("m", "close details")
+			keys.Back.SetHelp("esc/←", "close details")
+		}
 	}
-	add(keys.Enter, m.screen != sliceScreen && m.canEnter() && (m.screen != readerScreen || !m.reader.documentFocus))
-	add(keys.Focus, m.screen == readerScreen && !m.reader.documentFocus)
+	details := m.screen == readerScreen && m.reader.detailsOpen()
+	add(keys.Enter, m.screen != sliceScreen && m.canEnter() && (m.screen != readerScreen || !m.reader.documentFocus) && !details)
+	add(keys.Focus, m.screen == readerScreen && !m.reader.documentFocus && !details)
 	add(keys.Next, relations)
 	add(keys.Back, m.screen != overviewScreen)
 	add(keys.Group, m.finding())
@@ -270,6 +276,7 @@ func (m Model) footerKeys() []key.Binding {
 	add(keys.Documents, (m.screen == proposalScreen && m.members != nil) || (m.screen == sliceScreen && m.slice != nil))
 	add(keys.References, (m.screen == readerScreen && m.reader.shown.document != nil) ||
 		(m.screen == sliceScreen && m.slice != nil && m.slice.Claim != nil))
+	add(keys.Details, m.screen == readerScreen && m.reader.shown.document != nil)
 	versions := false
 	if m.screen == readerScreen {
 		cursor := m.cursor[readerScreen]
@@ -280,7 +287,7 @@ func (m Model) footerKeys() []key.Binding {
 		}
 		versions = versions || m.reader.followed != nil
 	}
-	add(keys.Versions, versions)
+	add(keys.Versions, versions && !details)
 	issue := keys.Issue
 	if m.screen == proposalScreen {
 		issue.SetHelp("i", "open parent issue")
@@ -446,26 +453,38 @@ func (m Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // readerKey handles the keys that act in the reader, reporting whether msg
 // was one. The navigator's cursor selects; with the document focused, the
 // movement keys scroll it and back returns along followed references, then
-// to the navigator.
+// to the navigator. While the details panel is open, the movement keys
+// scroll it, back closes it, and the keys that would select or focus another
+// place wait until it closes.
 func (m *Model) readerKey(msg tea.KeyMsg) bool {
 	r := &m.reader
 	page := msg.String() == "pgup" || msg.String() == "pgdown"
+	details := r.detailsOpen()
+	view := &r.shown.viewport
+	if details {
+		view = &r.detailsView
+	}
+	scrolls := details || r.documentFocus
 	switch {
-	case key.Matches(msg, m.keys.Up, m.keys.Down) && r.documentFocus:
-		if key.Matches(msg, m.keys.Up) {
-			r.shown.viewport.LineUp(1)
-		} else {
-			r.shown.viewport.LineDown(1)
-		}
+	case key.Matches(msg, m.keys.Details):
+		m.toggleDetails()
+	case details && key.Matches(msg, m.keys.Back):
+		r.details = false
+	case details && (msg.Type == tea.KeyEnter || key.Matches(msg, m.keys.Enter, m.keys.Focus, m.keys.Versions)):
+		// The panel holds the reader's place until it closes.
+	case key.Matches(msg, m.keys.Up) && scrolls:
+		view.LineUp(1)
+	case key.Matches(msg, m.keys.Down) && scrolls:
+		view.LineDown(1)
 	case key.Matches(msg, m.keys.Up):
 		m.moveEntry(-1)
 	case key.Matches(msg, m.keys.Down):
 		m.moveEntry(1)
-	case page && r.documentFocus:
+	case page && scrolls:
 		if msg.String() == "pgup" {
-			r.shown.viewport.PageUp()
+			view.PageUp()
 		} else {
-			r.shown.viewport.PageDown()
+			view.PageDown()
 		}
 	case page:
 		// The navigator does not page; the document does once focused.

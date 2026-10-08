@@ -100,7 +100,11 @@ func (m *Model) layoutDetail() {
 		// The document is rendered again only when its width changes.
 		s := &m.reader.shown
 		width, paneHeight := m.documentPane(height)
-		s.viewport.Width, s.viewport.Height = max(width-paneFrame, 1), max(paneHeight-2, 1)
+		// A narrow title takes further lines from the pane.
+		rows := func(title string) int {
+			return max(paneRows(title, paneHeight), 1)
+		}
+		s.viewport.Width, s.viewport.Height = max(width-paneFrame, 1), rows(focusTitle(m.reader.documentFocus, width, m.documentTitle))
 		if s.rendered != s.viewport.Width {
 			offset := s.viewport.YOffset
 			content, problem := m.shownContent(s.viewport.Width)
@@ -109,6 +113,12 @@ func (m *Model) layoutDetail() {
 			// than being cut at the pane's edge.
 			s.viewport.SetContent(wrap(content, s.viewport.Width))
 			s.viewport.SetYOffset(offset)
+		}
+		if r := &m.reader; r.detailsOpen() {
+			offset := r.detailsView.YOffset
+			r.detailsView.Width, r.detailsView.Height = s.viewport.Width, rows(m.documentPaneTitle(width))
+			r.detailsView.SetContent(wrap(strings.Join(detailsLines(s.document), "\n"), s.viewport.Width))
+			r.detailsView.SetYOffset(offset)
 		}
 	}
 }
@@ -158,8 +168,8 @@ func (m Model) header() string {
 	}
 	// Each indicator has a full form and shorter ones. A narrow terminal
 	// first gives up the breadcrumb, then uses the shorter forms, so every
-	// indicator stays in view. The footer already says when a newer document
-	// is available.
+	// indicator stays in view. The displayed document's identity belongs on
+	// its pane's title.
 	var indicators []indicator
 	scrolled := func(view viewport.Model) {
 		if view.TotalLineCount() > view.Height {
@@ -167,20 +177,12 @@ func (m Model) header() string {
 			indicators = append(indicators, indicator{mutedStyle, []string{"scrolled " + percent, percent}})
 		}
 	}
-	document := m.screen == readerScreen && m.reader.shown.document != nil
 	if m.screen == diagnosticsScreen {
 		scrolled(m.detail)
 	}
 	// The reader's document scroll position belongs only on its pane border.
 	if m.includeArchived {
 		indicators = append(indicators, indicator{mutedStyle, []string{"archived shown", "archived"}})
-	}
-	if document {
-		identity := indicator{mutedStyle, []string{"current document", "current"}}
-		if commit := m.reader.shown.document.Reference.Commit; commit != m.snapshot.Revision {
-			identity.forms = append(refForms("HISTORICAL ", commit), "HIST "+short(commit, 7))
-		}
-		indicators = append(indicators, identity)
 	}
 	revision := indicator{mutedStyle, refForms("", m.snapshot.Revision)}
 	if m.refreshFailure != nil {
@@ -211,6 +213,18 @@ func (m Model) footer() string {
 	}
 	if m.screen == readerScreen && m.reader.shown.newer {
 		lines = append(lines, wrap("Newer document available; select its entry and press enter to read it", m.width))
+	}
+	// A displayed document's diagnostics take one line, so that they never
+	// crowd out the document; the details panel shows each in full.
+	if document := m.reader.shown.document; m.screen == readerScreen && document != nil && len(document.Diagnostics) > 0 {
+		label := "! Metadata diagnostic: "
+		if count := len(document.Diagnostics); count > 1 {
+			label = fmt.Sprintf("! Metadata diagnostic 1 of %d: ", count)
+		}
+		// The diagnostic's scope is the displayed document's, so its problem
+		// alone leads with the cause.
+		text := strings.Join(strings.Fields(document.Diagnostics[0].Problem), " ")
+		lines = append(lines, truncate(warningStyle.Render(label+text), m.width))
 	}
 	if m.screen == readerScreen && m.reader.shown.renderProblem != "" {
 		lines = append(lines, wrap(warningStyle.Render("! "+m.reader.shown.renderProblem+"; showing recorded text"), m.width))
@@ -319,34 +333,57 @@ const focusMark = "▶ "
 // when the terminal is wide, and the focused one alone when it is narrow.
 func (m Model) readerBody(height int) string {
 	r := m.reader
-	navigatorTitle, documentTitle := "Documents", m.shownTitle()
-	if r.documentFocus {
-		documentTitle = focusMark + documentTitle
-	} else {
-		navigatorTitle = focusMark + navigatorTitle
+	documentWidth, _ := m.documentPane(height)
+	navigatorWidth := m.width - documentWidth
+	if m.width < wideLayout {
+		navigatorWidth = m.width
+	}
+	view := r.shown.viewport
+	if r.detailsOpen() {
+		view = r.detailsView
+	}
+	document := pane(m.documentPaneTitle(documentWidth), scrollNote(view), strings.Split(view.View(), "\n"), documentWidth, height)
+	if m.width < wideLayout && (r.documentFocus || r.detailsOpen()) {
+		return document
 	}
 	note := m.position()
 	if r.list != nil && len(r.list.Diagnostics) > 0 {
 		note = fmt.Sprintf("! %s · d · %s", plural(len(r.list.Diagnostics), "diagnostic"), note)
 	}
-	scroll := ""
-	if r.shown.viewport.TotalLineCount() > r.shown.viewport.Height {
-		scroll = fmt.Sprintf("scrolled %d%%", int(r.shown.viewport.ScrollPercent()*100))
-	}
-	documentWidth, _ := m.documentPane(height)
-	document := pane(documentTitle, scroll, strings.Split(r.shown.viewport.View(), "\n"), documentWidth, height)
-	navigatorWidth := m.width - documentWidth
-	if m.width < wideLayout {
-		if r.documentFocus {
-			return document
-		}
-		navigatorWidth = m.width
-	}
-	navigator := pane(navigatorTitle, note, m.navigator().lines(navigatorWidth-paneFrame, height-2), navigatorWidth, height)
+	navigatorTitle := focusTitle(!r.documentFocus && !r.detailsOpen(), navigatorWidth, m.navigatorTitle)
+	navigator := pane(navigatorTitle, note, m.navigator().lines(navigatorWidth-paneFrame, paneRows(navigatorTitle, height)), navigatorWidth, height)
 	if m.width < wideLayout {
 		return navigator
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, navigator, document)
+}
+
+// documentPaneTitle is the title of a document pane width cells wide: the
+// details panel's while it is open, and otherwise the displayed document's.
+func (m Model) documentPaneTitle(width int) string {
+	r := m.reader
+	if r.detailsOpen() {
+		return focusMark + "Details · " + documentLabel(r.shown.document, true)
+	}
+	return focusTitle(r.documentFocus, width, m.documentTitle)
+}
+
+// focusTitle is the title of a pane width cells wide, carrying the focus mark
+// when the keys act in the pane, and fitted to the room the mark leaves.
+func focusTitle(focused bool, width int, title func(width int) string) string {
+	mark := ""
+	if focused {
+		mark = focusMark
+	}
+	return mark + title(width-5-lipgloss.Width(mark))
+}
+
+// scrollNote is a pane's scroll position, when its content overflows it.
+func scrollNote(view viewport.Model) string {
+	if view.TotalLineCount() <= view.Height {
+		return ""
+	}
+	return fmt.Sprintf("scrolled %d%%", int(view.ScrollPercent()*100))
 }
 
 // documentPane is the size of the document pane in a reader body of height
@@ -397,13 +434,21 @@ const paneFrame = 4
 
 // pane frames lines in a rounded border exactly width cells wide and height
 // lines tall, with its title in the top edge and note, when set, in the
-// bottom edge. Lines beyond its height are clipped.
+// bottom edge. Each further line of the title continues on an edge of its
+// own below the top. Lines beyond its height are clipped.
 func pane(title, note string, lines []string, width, height int) string {
 	inner := max(width-paneFrame, 1)
-	title = truncate(title, max(width-5, 1))
 	edge := mutedStyle.Render
-	framed := []string{edge("╭─ ") + titleStyle.Render(title) + edge(" "+strings.Repeat("─", max(width-5-lipgloss.Width(title), 0))+"╮")}
-	for index := 0; index < height-2; index++ {
+	var framed []string
+	for index, line := range strings.Split(title, "\n") {
+		line = truncate(line, max(width-5, 1))
+		corners := [2]string{"├─ ", "┤"}
+		if index == 0 {
+			corners = [2]string{"╭─ ", "╮"}
+		}
+		framed = append(framed, edge(corners[0])+titleStyle.Render(line)+edge(" "+strings.Repeat("─", max(width-5-lipgloss.Width(line), 0))+corners[1]))
+	}
+	for index := range paneRows(title, height) {
 		line := ""
 		if index < len(lines) {
 			line = truncate(lines[index], inner)
@@ -416,6 +461,12 @@ func pane(title, note string, lines []string, width, height int) string {
 		bottom = "╰" + strings.Repeat("─", max(width-5-lipgloss.Width(note), 0)) + " " + note + " ─╯"
 	}
 	return strings.Join(append(framed, edge(bottom)), "\n")
+}
+
+// paneRows is how many content lines a pane height lines tall shows below
+// its title and above its bottom edge.
+func paneRows(title string, height int) int {
+	return max(height-1-lipgloss.Height(title), 0)
 }
 
 func wrapLines(lines []string, width int) []string {

@@ -101,7 +101,7 @@ func fixtureLedger(t *testing.T, extras ...func(string)) *ledger.Snapshot {
 			Claim: claimRef, Contract: contractRef,
 			Watchdog: &ledger.Reference{Commit: strings.Repeat("c", 40), Path: cancelPath + "/watchdog-report.md"},
 		},
-	}, "## Implementation evidence\n\nThe recorded implementation evidence is readable.\n")
+	}, "## Implementation evidence\n\nThe recorded implementation evidence is readable.\n\n"+strings.Repeat("Further evidence.\n\n", 30))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,8 +366,8 @@ func TestBrowserReadsReportsFollowsExactHistoricalReferencesAndPreservesScroll(t
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 140, Height: 120})
 	s.press("enter", "down", "enter", "d", "down", "down", "enter")
-	s.shows("Implementation report", "Outcome: awaiting_review", "Source repository revisions", "Ledger input references",
-		"The recorded implementation evidence is readable", "current lifecycle: Awaiting Review")
+	s.row("╭─ ", "Awaiting Review", "╭─ ▶ cancel/implement-report.md · current · awaiting_review")
+	s.shows("Implementation report", "The recorded implementation evidence is readable")
 
 	s.send(tea.WindowSizeMsg{Width: 88, Height: 16})
 	s.send(tea.KeyMsg{Type: tea.KeyPgDown})
@@ -383,11 +383,11 @@ func TestBrowserReadsReportsFollowsExactHistoricalReferencesAndPreservesScroll(t
 	s.shows("Exact ledger reference unavailable", strings.Repeat("c", 40), "watchdog-report.md", "no substitute was opened")
 	s.hides("Watchdog bytes remain readable")
 	s.press("esc", "r", "enter")
-	s.shows("cancel/state.json · HISTORICAL", "current lifecycle: Awaiting Review", "current Claim: watchdog reservation", "current Dependencies: legacy/old (Merged)")
+	s.row("cancel/state.json · HISTORICAL", "▸ watchdog claim")
 	s.press(repeat("pgdown", 10)...)
 	s.shows("ready_for_implementation")
 	s.press("esc", "esc")
-	s.shows("cancel/implement-report.md · current", "scrolled ", "current document")
+	s.shows("cancel/implement-report.md · current", "scrolled ")
 	s.hides("scrolled 0%")
 
 	// The latest malformed report remains selectable and readable, while its
@@ -395,8 +395,8 @@ func TestBrowserReadsReportsFollowsExactHistoricalReferencesAndPreservesScroll(t
 	s.press("esc")
 	s.send(tea.WindowSizeMsg{Width: 140, Height: 120})
 	s.press("down")
-	s.shows("Metadata diagnostic", "watchdog report metadata is", "unreadable", "Watchdog bytes remain readable", "watchdog reservation")
-	s.hides("Outcome:")
+	s.row("watchdog-report.md · current · ! metadata unreadable ─")
+	s.shows("Metadata diagnostic", "watchdog report metadata is", "unreadable", "Watchdog bytes remain readable", "◐ Awaiting Review · ▸ watchdog")
 	if len(s.opened) != 0 {
 		t.Fatalf("document navigation opened external URLs: %v", s.opened)
 	}
@@ -404,28 +404,31 @@ func TestBrowserReadsReportsFollowsExactHistoricalReferencesAndPreservesScroll(t
 
 func TestBrowserKeepsHistoricalDocumentIdentityAndScrollInView(t *testing.T) {
 	s := start(t, "widgets")
-	s.send(tea.WindowSizeMsg{Width: 80, Height: 16})
+	s.send(tea.WindowSizeMsg{Width: 80, Height: 10})
 	s.press("enter", "down", "enter", "a", "d", "down", "down", "enter", "r", "enter", "pgdown")
 	reference := gitOutput(t, s.root, "rev-parse", "HEAD~1")[:12]
-	if header := s.header(); !strings.Contains(header, "HISTORICAL "+reference) || strings.Contains(header, "scrolled") {
-		t.Fatalf("historical document header %q, want HISTORICAL %s without repeated scroll position", header, reference)
+	// The pane's title carries the identity; the header repeats neither it
+	// nor the scroll position.
+	s.row("╭─ ▶ ", "HISTORICAL "+reference)
+	if header := s.header(); strings.Contains(header, "HIST") || strings.Contains(header, "scrolled") {
+		t.Fatalf("historical document header %q repeats the identity or scroll position", header)
 	}
 	s.row("╰", "scrolled ")
 	s.hides("scrolled 0%")
 
-	// Narrower terminals give up the breadcrumb and shorten the indicators,
-	// keeping each of them.
+	// Narrower terminals shorten the title's identity and the header's
+	// indicators, keeping each of them.
 	reference = reference[:7]
 	revision := gitOutput(t, s.root, "rev-parse", "HEAD")[:7]
 	percent := regexp.MustCompile(`\b[1-9][0-9]*%`)
 	for _, width := range []int{40, 34} {
 		size := tea.WindowSizeMsg{Width: width, Height: 14}
 		s.send(size)
+		s.row("╭─ ▶ ", "HIST "+reference)
 		header := s.header()
-		if !strings.Contains(header, "HIST") || !strings.Contains(header, reference) || percent.MatchString(header) ||
-			!strings.Contains(header, "archived") || !strings.Contains(header, revision) {
-			t.Fatalf("%d-column historical document header %q, want historical at %s, no repeated scroll, archived and ledger %s",
-				width, header, reference, revision)
+		if strings.Contains(header, "HIST") || percent.MatchString(header) || !strings.Contains(header, "archived") || !strings.Contains(header, revision) {
+			t.Fatalf("%d-column historical document header %q, want archived and ledger %s without the identity or scroll",
+				width, header, revision)
 		}
 		s.row("╰", "scrolled ")
 		s.within(size)
@@ -438,20 +441,22 @@ func TestBrowserSelectsEarlierReportVersionAndReturnsToCurrentContext(t *testing
 	})
 	s.send(tea.WindowSizeMsg{Width: 120, Height: 80})
 	s.press("enter", "down", "enter", "d", "down", "down")
-	s.shows("cancel/implement-report.md · current", "current lifecycle: Awaiting Review")
+	s.shows("cancel/implement-report.md · current")
+	s.row("╭─ ", "◐ Awaiting Review")
 	s.row("> ", "Implementation report", "awaiting_review")
 	s.row("! ", "└", "bad metadata")
 	s.press("down")
-	s.shows("HISTORICAL", "Older recorded reasoning", "Metadata diagnostic", "current lifecycle: Awaiting Review")
+	s.row("╭─ ", "◐ Awaiting Review", "╭─ ", "HISTORICAL", "! unreadable")
+	s.shows("Older recorded reasoning", "Metadata diagnostic")
 	s.send(tea.WindowSizeMsg{Width: 84, Height: 19})
-	if header, revision := s.header(), gitOutput(t, s.root, "rev-parse", "HEAD")[:12]; !strings.Contains(header, "HISTORICAL ") ||
+	if header, revision := s.header(), gitOutput(t, s.root, "rev-parse", "HEAD")[:12]; strings.Contains(header, "HIST") ||
 		!strings.HasSuffix(header, revision) {
-		t.Fatalf("resized header %q, want the historical document and ledger %s", header, revision)
+		t.Fatalf("resized header %q, want ledger %s without the document's identity", header, revision)
 	}
 	s.row("> ", "└")
 	s.press("up")
 	s.send(tea.WindowSizeMsg{Width: 120, Height: 80})
-	s.shows("cancel/implement-report.md · current", "current lifecycle: Awaiting Review", "awaiting_review")
+	s.row("╭─ ", "◐ Awaiting Review", "╭─ cancel/implement-report.md · current · awaiting_review")
 	if len(s.opened) != 0 {
 		t.Fatalf("version navigation opened external URLs: %v", s.opened)
 	}
@@ -476,7 +481,8 @@ func TestBrowserFindsReportHistoryWhenLatestReportWasRemoved(t *testing.T) {
 	s.row("└", "awaiting_review")
 	s.row("! ", "└", "bad metadata")
 	s.press("down")
-	s.shows("HISTORICAL", "The recorded implementation evidence is readable", "current lifecycle: Awaiting Review")
+	s.row("╭─ ", "◐ Awaiting Review", "╭─ ", "HISTORICAL")
+	s.shows("The recorded implementation evidence is readable")
 	s.press("down")
 	s.shows("HISTORICAL", "Older implementation reasoning")
 }
@@ -569,8 +575,8 @@ func TestBrowserFollowsAnArchivedReportReferenceWithoutUsingTheCurrentSliceLocat
 	s.press("down", "enter", "down", "enter", "d", "down", "down", "enter", "r", "down", "down", "enter")
 	// The followed report keeps its archived incarnation: it is named and
 	// compared at its own location, not the current Slice's.
-	s.shows("Earlier archived watchdog report", "old/watchdog-report.md · HISTORICAL "+previous[:12],
-		"Newer document available", "current lifecycle: Awaiting Review")
+	s.row("╭─ ", "◐ Awaiting Review", "╭─ ▶ old/watchdog-report.md · HIST", previous[:7])
+	s.shows("Earlier archived watchdog report", "Newer document available")
 	s.hides("Later archived watchdog report")
 	followed := s.model.View()
 	s.press("v")
@@ -581,7 +587,8 @@ func TestBrowserFollowsAnArchivedReportReferenceWithoutUsingTheCurrentSliceLocat
 	s.press("enter")
 	s.shows("Later archived watchdog report", "old/watchdog-report.md")
 	s.press("esc", "down", "enter")
-	s.shows("Earlier archived watchdog report", "HISTORICAL "+recorded[:12])
+	s.row("╭─ ", "watchdog-report.md · HIST", recorded[:7])
+	s.shows("Earlier archived watchdog report")
 	s.hides("Later archived watchdog report")
 	s.press("esc", "v")
 	if after := s.model.View(); after != followed {
@@ -605,9 +612,10 @@ func TestBrowserReturnsFromNestedVersionsToTheDocumentList(t *testing.T) {
 	s := &session{t: t, model: browse.New(snapshotAfterChange(t, root), browse.Options{Project: "widgets"})}
 	s.send(tea.WindowSizeMsg{Width: 120, Height: 80})
 	s.press("enter", "down", "enter", "d", "down", "down", "down", "tab")
-	s.shows("▶ cancel/implement-report.md · HISTORICAL", "The recorded implementation evidence is readable")
+	s.row("╭─ ▶ implement-report.md · HISTORICAL")
+	s.shows("The recorded implementation evidence is readable")
 	s.press("esc")
-	s.shows("▶ Documents", "cancel/implement-report.md · HISTORICAL")
+	s.row("╭─ ▶ ", "◐ Awaiting Review", "╭─ ", "implement-report.md · HISTORICAL")
 	s.row("> ", "└", "awaiting_review")
 	s.press("esc")
 	s.shows("Slice  orders/cancel")
@@ -618,14 +626,16 @@ func TestBrowserFollowsDecisionAndClaimReferencesWithoutChangingSliceContext(t *
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 140, Height: 120})
 	s.press("enter", "down", "enter", "d", "down", "down", "down", "down", "enter")
-	s.shows("Human Decision", "Route: implement", "The human direction remains available as Markdown", "Answered request:")
+	s.row("╭─ ▶ cancel/decision.md · current · route implement")
+	s.shows("Human Decision", "The human direction remains available as Markdown")
 	s.press("r", "enter")
-	s.shows("HISTORICAL", "ready_for_implementation", "current lifecycle: Awaiting", "current Claim: watchdog reservation")
+	s.row("╭─ ", "◐ Awaiting Review", "▸ watchdog", "╭─ ", "HISTORICAL")
+	s.shows("ready_for_implementation")
 	s.press("esc", "esc", "esc", "esc")
 	s.shows("Slice  orders/cancel", "Claim state  ")
 	s.fact("Lifecycle", "Awaiting Review")
 	s.press("r", "enter")
-	s.shows("cancel/state.json · current", "lifecycle: Awaiting Review", "current Claim: watchdog reservation", "Dependencies: legacy/old (Merged)")
+	s.row("╭─ ", "◐ Awaiting Review", "╭─ ▶ cancel/state.json · current · ▸ watchdog claim")
 	s.press("esc", "esc")
 	s.shows("Slice  orders/cancel", "Depends on  legacy/old [archived] — Old work  ✓ Merged · satisfied")
 	s.fact("Lifecycle", "Awaiting Review")
@@ -635,11 +645,14 @@ func TestBrowserFollowsClaimInputsWithoutRewindingCurrentSlice(t *testing.T) {
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 120, Height: 80})
 	s.press("enter", "down", "enter", "r", "enter")
-	s.shows("cancel/state.json · current", "Claim input ledger references", "current lifecycle: Awaiting Review")
-	s.press("r")
+	s.row("╭─ ", "◐ Awaiting Review", "╭─ ▶ cancel/state.json · current")
+	s.press("m")
+	s.shows("Claim input references", "contract", "Claim basis")
+	s.press("m", "r")
 	s.shows("References (1)", "contract", "intent.md")
 	s.press("enter")
-	s.shows("HISTORICAL", "Cancellation intent", "current lifecycle: Awaiting Review", "current Claim: watchdog reservation", "legacy/old (Merged)")
+	s.row("╭─ ", "◐ Awaiting Review", "▸ watchdog", "╭─ ", "HISTORICAL")
+	s.shows("Cancellation intent")
 	s.press("esc")
 	s.shows("References (1)", "contract")
 	s.press("esc", "esc")
@@ -656,7 +669,7 @@ func TestBrowserReturnsFromNestedEmptyReferencesToTheOriginatingClaimReference(t
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 100, Height: 40})
 	s.press("enter", "down", "enter", "d", "down", "down", "enter", "r", "enter")
-	s.shows("cancel/state.json · HISTORICAL")
+	s.row("╭─ ▶ ", "state.json · HIST")
 
 	// The earlier state has an empty Claim input set. Returning from its
 	// reference screen must restore the report reference that opened it.
@@ -665,7 +678,7 @@ func TestBrowserReturnsFromNestedEmptyReferencesToTheOriginatingClaimReference(t
 	s.press("esc", "esc")
 	s.shows("References (4)", "claim", "state.json")
 	s.press("esc")
-	s.shows("▶ cancel/implement-report.md · current")
+	s.row("╭─ ▶ ", "implement-report.md · current")
 	s.press("r")
 	s.shows("References (4)", "claim", "state.json")
 }
@@ -680,7 +693,8 @@ func TestBrowserKeepsHealthyDocumentsVisibleAndDiagnosticsScrollable(t *testing.
 		s.send(size)
 		s.press("enter", "d")
 		s.within(size)
-		s.shows("▶ Documents", "diagnostics · d")
+		s.row("╭─ ▶ ", "orders")
+		s.shows("diagnostics · d")
 		s.row("> ", "Proposal description")
 		s.send(tea.WindowSizeMsg{Width: 140, Height: 30})
 
@@ -764,17 +778,18 @@ func TestBrowserNarrowFooterKeepsHelpAndHelpShowsEveryBinding(t *testing.T) {
 	s.shows("↑/k up", "↓/j down", "pgup page up", "pgdown page down", "enter open", "esc back",
 		"tab next relation", "shift+tab previous relation", "s switch project", "a toggle archived",
 		"/ search names", "f find by lifecycle or claim", "g toggle grouping", "w toggle scope",
-		"d diagnostics", "d documents", "r references", "v show/hide versions", "i open issue", "p open PR",
+		"d diagnostics", "d documents", "r references", "m details", "v show/hide versions", "i open issue", "p open PR",
 		"R refresh ledger", "? help", "q quit")
 	s.within(size)
 }
 
 func TestBrowserKeyListYieldsTheBodyToAStatusNotice(t *testing.T) {
-	size := tea.WindowSizeMsg{Width: 40, Height: 14}
+	size := tea.WindowSizeMsg{Width: 40, Height: 15}
 	s := start(t, "widgets")
 	s.send(size)
 	s.press("a", "?")
-	s.shows("Archived proposals shown", "↑/k up", "R refresh ledger • ? help • q quit")
+	s.shows("Archived proposals shown", "↑/k up", "R refresh ledger", "q quit")
+	s.hides("more keys fit a larger terminal")
 	if header := s.header(); !strings.Contains(header, "archived shown") {
 		t.Fatalf("first line %q with every binding listed, want the header saying archived shown", header)
 	}
@@ -820,8 +835,10 @@ func TestBrowserUsesOptionalDocumentAvailabilityWithoutInventingAbsence(t *testi
 
 func TestBrowserReadsArchivedDocumentsAndNamesAbsentOptionalRecords(t *testing.T) {
 	s := start(t, "widgets")
-	s.press("a", "down", "enter", "d", "enter")
-	s.shows("Archived description", "archived Proposal", "Legacy proposal")
+	s.press("a", "down", "enter", "d")
+	s.row("╭─ ▶ Proposal legacy · archived")
+	s.press("enter")
+	s.shows("Archived description", "Legacy proposal")
 
 	s = start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})
