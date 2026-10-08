@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -25,6 +26,32 @@ func TestStatusObservesHumanMergeIntoProposalBranch(t *testing.T) {
 	observed := runCompletionStatus(t, app, output, root, "--item", "branch-status/foundation")
 	if len(observed.Items) != 1 || observed.Items[0].State != ledger.Merged || observed.Items[0].Completion == nil || observed.Items[0].Completion.Target.Branch != "proposal/branch-status" {
 		t.Fatalf("branch merge observation = %+v", observed)
+	}
+}
+
+func TestAutoDispatchWorkerResumesRecordedTargetAndContinuationKeepsAuto(t *testing.T) {
+	newLedgerFixture(t)
+	source, _ := deliverySourceRepo(t)
+	app := newLedgerApp(t, newForgeServer(t))
+	if accepted := app.accept(t, source, writeProposal(t, "", dualSlice(deliveryTestProposal))); accepted.Status != "accepted" {
+		t.Fatalf("accept: %s", mustJSON(t, accepted))
+	}
+	dispatch := app.dispatched(t, "skl implement next --auto --dispatch --repo "+source)
+	worker := app.dispatchJSON(t, dispatch.Worker)
+	if worker.Status != ledger.WorkAvailable || worker.Execution == nil || worker.Packet == nil {
+		t.Fatalf("dispatched worker = %s, want an Execution Skill", mustJSON(t, worker))
+	}
+	if worker.Execution.Item != dispatch.Item || worker.Execution.Claim.Commit != dispatch.Claim {
+		t.Fatalf("worker resumed a different Claim: %s", mustJSON(t, worker))
+	}
+	if target := worker.Execution.State.Target; target == nil || target.Branch != "proposal/"+deliveryTestProposal {
+		t.Fatalf("worker target = %+v, want the recorded Proposal Branch", target)
+	}
+	if !slices.Contains(shellWords(t, dispatch.Continue), "--auto") {
+		t.Fatalf("continuation lost Auto Mode: %s", dispatch.Continue)
+	}
+	if ending, status := app.continued(t, dispatch.Continue); ending != ledger.ClaimHeld || status != "stopped" {
+		t.Fatalf("continuation with held Claim = %s, %s", ending, status)
 	}
 }
 

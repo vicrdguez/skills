@@ -56,10 +56,27 @@ func ClaimEndingOf(s *Store, repository github.RepositoryID, phase, claimCommit 
 	if err != nil {
 		return ClaimEnding{}, err
 	}
-	path := changed
+	var path string
+	paths := strings.Split(changed, "\n")
+	for _, candidate := range paths {
+		if strings.HasSuffix(candidate, "/state.json") {
+			if path != "" {
+				return unknown("commit " + claimCommit + " is not a Claim acquisition")
+			}
+			path = candidate
+		}
+	}
 	parts := strings.Split(path, "/")
-	if strings.Contains(changed, "\n") || len(parts) != 6 || parts[0] != projectsRoot || parts[2] != "proposals" || parts[5] != "state.json" {
+	if len(parts) != 6 || parts[0] != projectsRoot || parts[2] != "proposals" || parts[5] != "state.json" {
 		return unknown("commit " + claimCommit + " is not a Claim acquisition")
+	}
+	// An Auto Mode acquisition can also open this Slice's Proposal Branch
+	// in the same commit. Other Slices and Proposals remain unrelated.
+	proposalPath := strings.Join(parts[:4], "/") + "/proposal.json"
+	for _, candidate := range paths {
+		if candidate != path && candidate != proposalPath {
+			return unknown("commit " + claimCommit + " is not a Claim acquisition")
+		}
 	}
 	if parts[1] != repository.Name {
 		return unknown("Claim " + claimCommit + " belongs to Project " + parts[1])
