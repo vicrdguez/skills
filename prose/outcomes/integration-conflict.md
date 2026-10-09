@@ -4,7 +4,7 @@ Refused: merging `{{.Conflict.Branch}}` at `{{.Conflict.Head}}` into `{{.Branch}
 {{range .Conflict.Paths}}
 - `{{.}}`{{end}}
 
-The merge was aborted, and the worktree is clean at the reviewed head `{{.Conflict.Reviewed}}`. Your Claim `{{.Claim}}` is kept.
+The merge was aborted, and the worktree is clean at its prepared head `{{.Conflict.Prepared}}`. Your Claim `{{.Claim}}` is kept.
 
 This review ends in `rework`, and the implementer resolves the conflict. Write the report as `{{.Report}}` instructs, with one `BLOCK` finding against the Slice's integration with `{{.Conflict.Branch}}` that names these paths. Then submit:
 

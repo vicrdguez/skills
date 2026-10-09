@@ -400,6 +400,7 @@ func TestAgentProseGoldens(t *testing.T) {
 	advance("alerts.txt", "alerts from another slice\n")
 	integrationClaim, integrationResult = review("")
 	g.capture("outcome-watchdog-prepare-conflict", worker, "watchdog", "prepare", "--repo", source, "--remote", "origin", "--item", integrationItem, "--claim", integrationClaim, "--result-directory", integrationResult)
+	// Later steps expect source pushes to fail, as before the shim.
 	t.Setenv("GIT_SSH_COMMAND", "false")
 
 	// A Supervisor's Dispatches: claimed, stopped on a held Claim, continued

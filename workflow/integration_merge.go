@@ -9,16 +9,17 @@ import (
 
 // IntegrationConflict refuses watchdog preparation: merging the Proposal
 // Branch head into the work branch conflicts. The merge was aborted and the
-// worktree is clean at Reviewed; the conflict belongs to the implementer.
+// worktree is clean at Prepared, the pre-merge head; the conflict belongs to
+// the implementer.
 type IntegrationConflict struct {
 	Branch   string   `json:"branch"`
 	Head     string   `json:"head"`
-	Reviewed string   `json:"reviewed"`
+	Prepared string   `json:"prepared"`
 	Paths    []string `json:"paths"`
 }
 
 func (c *IntegrationConflict) Error() string {
-	return "Integration Merge of " + c.Branch + " at " + c.Head + " conflicts in " + strings.Join(c.Paths, ", ") + "; the merge was aborted and the worktree is clean at " + c.Reviewed
+	return "Integration Merge of " + c.Branch + " at " + c.Head + " conflicts in " + strings.Join(c.Paths, ", ") + "; the merge was aborted and the worktree is clean at " + c.Prepared
 }
 
 // IntegrationRef is the remote-tracking ref of a Proposal Branch Integration
@@ -90,7 +91,7 @@ func abortIntegration(worktree, pre, targetBranch, merging string, cause error) 
 		}
 		return fmt.Errorf("Integration Merge of %s at %s failed: %w", targetBranch, merging, cause)
 	}
-	return &IntegrationConflict{Branch: targetBranch, Head: merging, Reviewed: pre, Paths: strings.Split(conflicted, "\n")}
+	return &IntegrationConflict{Branch: targetBranch, Head: merging, Prepared: pre, Paths: strings.Split(conflicted, "\n")}
 }
 
 // integratedHead reports whether head is reviewed, or descends from it only

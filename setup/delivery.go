@@ -58,14 +58,23 @@ func PresentDelivery(e *ledger.Execution, repository RepositoryContext, phase, o
 	return skilldist.BuildPacket(phase, skilldist.InvocationFacts{Delivery: f})
 }
 
-// ReviewRework binds what a review that ends in rework at its reviewed head
+// ReviewRework binds what a review that ends in rework at the prepared head
 // runs: the report instructions and the submission.
-func ReviewRework(e *ledger.Execution, repository RepositoryContext, directory string) (report, submit string, err error) {
+func ReviewRework(e *ledger.Execution, repository RepositoryContext, directory, head string) (report, submit string, err error) {
 	f, review, err := deliveryFacts(e, repository, ledger.WatchdogPhase, "prepare", nil, directory, ImplementChoices{})
 	if err != nil {
 		return "", "", err
 	}
-	return f.ResultResourceCommand, review + " --outcome rework --head " + skilldist.ShellQuote(f.RequiredHead), nil
+	return f.ResultResourceCommand, review + " --outcome rework --head " + skilldist.ShellQuote(head), nil
+}
+
+// IntegrationRef is the tracking ref of the Slice's Proposal Branch target,
+// or empty for a main or unrecorded target.
+func IntegrationRef(repository RepositoryContext, state ledger.SliceState) string {
+	if state.Target == nil {
+		return ""
+	}
+	return workflow.IntegrationRef(repository.Remote, state.Target.Branch)
 }
 
 // deliveryFacts binds one rendering's facts, and the submit command before
@@ -111,7 +120,7 @@ func deliveryFacts(e *ledger.Execution, repository RepositoryContext, phase, ope
 		f.FetchStatus = source.FetchStatus
 		f.Merged = source.Merged
 	}
-	integration := workflow.IntegrationRef(repository.Remote, f.TargetBranch)
+	integration := IntegrationRef(repository, e.State)
 	if phase == ledger.WatchdogPhase && integration != "" {
 		f.Integrates = true
 		if source == nil {

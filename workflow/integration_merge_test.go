@@ -103,7 +103,7 @@ func TestReviewPreparationRefusesConflictWithCleanWorktree(t *testing.T) {
 	if !errors.As(err, &conflict) {
 		t.Fatalf("conflicting preparation error = %v; want an IntegrationConflict", err)
 	}
-	if conflict.Branch != "proposal/feature" || conflict.Head != moved || conflict.Reviewed != f.reviewed || !slices.Equal(conflict.Paths, []string{"slice.txt"}) {
+	if conflict.Branch != "proposal/feature" || conflict.Head != moved || conflict.Prepared != f.reviewed || !slices.Equal(conflict.Paths, []string{"slice.txt"}) {
 		t.Fatalf("conflict = %+v", conflict)
 	}
 	worktree := deliveryExpectedWorktree(t, f.root, f.branch)

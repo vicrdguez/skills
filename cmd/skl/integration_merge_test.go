@@ -132,15 +132,22 @@ func TestWatchdogReviewsTheIntegrationMergeOfAMovedProposalBranch(t *testing.T) 
 
 func TestWatchdogIntegrationConflictEndsReviewInRework(t *testing.T) {
 	j := newIntegrationJourney(t)
-	j.advance(t, "feature.txt", "conflicting slice\n")
+	j.advance(t, "other.txt", "another slice\n")
 	claim := j.claimReview(t)
+	// An earlier Integration Merge is kept; the conflicting later head is not.
+	merged, err := j.review(t, "prepare", claim)
+	if err != nil || merged.Source == nil {
+		t.Fatalf("first prepare = %+v, %v", merged, err)
+	}
+	prepared := merged.Source.Head
+	j.advance(t, "feature.txt", "conflicting slice\n")
 
 	refused, err := j.review(t, "prepare", claim)
 	if err != nil || refused.Status != "fix_required" || !strings.Contains(refused.Reason, "feature.txt") {
 		t.Fatalf("conflicting prepare = %+v, %v", refused, err)
 	}
-	if head := deliveryTrimmed(t, j.worktree, "rev-parse", "HEAD"); head != j.reviewed {
-		t.Fatalf("conflict left head %s; want %s", head, j.reviewed)
+	if head := deliveryTrimmed(t, j.worktree, "rev-parse", "HEAD"); head != prepared {
+		t.Fatalf("conflict left head %s; want the prepared %s", head, prepared)
 	}
 	if status := strings.TrimSpace(runGitOutput(t, j.worktree, "status", "--porcelain", "--untracked-files=all")); status != "" {
 		t.Fatalf("conflict left the worktree dirty: %s", status)
@@ -153,7 +160,8 @@ func TestWatchdogIntegrationConflictEndsReviewInRework(t *testing.T) {
 	}
 	submit := proseMatch(t, conflictSubmit, output)
 	words := shellWords(t, submit)
-	if !slices.Contains(words, "rework") || !slices.Contains(words, j.reviewed) {
+	outcome, head := slices.Index(words, "--outcome"), slices.Index(words, "--head")
+	if outcome < 0 || words[outcome+1] != "rework" || head < 0 || words[head+1] != prepared {
 		t.Fatalf("conflict outcome submit = %s", submit)
 	}
 	writeFile(t, words[slices.Index(words, "--body")+1], "# Review\n\nW1 BLOCK: integration conflict in feature.txt.\n")
