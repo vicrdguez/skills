@@ -92,3 +92,42 @@ func TestMergeReadyRefusesWithoutAnOpenProposalBranch(t *testing.T) {
 		})
 	}
 }
+
+func TestAReadyForMergeProposalBranchSliceReturnsToReviewByHumanDecision(t *testing.T) {
+	decide := func(l *deliveryLedger, store *ledger.Store, route string) *ledger.DecisionResult {
+		t.Helper()
+		result, err := ledger.ApplyDecision(store, ledger.DecisionInput{
+			Project: deliveryPublicationProject, Item: deliveryPublicationItem,
+			Request: ledger.Reference{Commit: l.head(), Path: deliveryReportPath(deliveryPublicationProject, deliveryPublicationItem, ledger.WatchdogPhase)},
+			Answer:  "Review this approved Slice again before merging.\n", Route: route,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+
+	l, _, store := mergeFixture(t)
+	if result := decide(l, store, ledger.RouteImplement); result.Status != ledger.DecisionRefused {
+		t.Fatalf("implement route from Ready for Merge = %+v", result)
+	}
+	result := decide(l, store, ledger.RouteWatchdog)
+	if result.Status != ledger.DecisionApplied || result.State != ledger.AwaitingReview {
+		t.Fatalf("watchdog route from Ready for Merge = %+v", result)
+	}
+	state := l.committedState(deliveryPublicationProject, deliveryPublicationSlice, deliveryPublicationBranch)
+	if state.State != ledger.AwaitingReview || !state.Decision || state.Submission == nil || state.Submission.Number != 9 {
+		t.Fatalf("routed state = %+v", state)
+	}
+	if pending, err := ledger.PendingMerges(store, deliveryWidgets()); err != nil || len(pending) != 0 {
+		t.Fatalf("pending merges after the return to review = %v, %v", pending, err)
+	}
+
+	l, _, store = mergeFixture(t)
+	state = l.committedState(deliveryPublicationProject, deliveryPublicationSlice, deliveryPublicationBranch)
+	state.Target.Branch = "main"
+	l.commitState(deliveryPublicationProject, deliveryPublicationSlice, deliveryPublicationBranch, state)
+	if result := decide(l, store, ledger.RouteWatchdog); result.Status != ledger.DecisionRefused {
+		t.Fatalf("watchdog route for a main-targeted Ready-for-Merge Slice = %+v", result)
+	}
+}

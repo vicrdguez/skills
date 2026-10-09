@@ -432,11 +432,17 @@ func (s *Store) currentRequest(head, directory string, state SliceState) (string
 		if err != nil {
 			return "", Reference{}, Report{}, err
 		}
-		if phase == WatchdogPhase {
-			if report.Outcome != outcomeNeedsHuman && !(report.Outcome == outcomeRework && report.Round >= 2) {
-				continue
-			}
-		} else if report.Outcome != outcomeNeedsHuman {
+		var current bool
+		switch {
+		case state.State == ReadyForMerge:
+			// A passed Slice awaiting its Proposal Branch merge answers its passing review.
+			current = phase == WatchdogPhase && report.Outcome == outcomePass
+		case phase == WatchdogPhase:
+			current = report.Outcome == outcomeNeedsHuman || report.Outcome == outcomeRework && report.Round >= 2
+		default:
+			current = report.Outcome == outcomeNeedsHuman
+		}
+		if !current {
 			continue
 		}
 		candidates = append(candidates, candidate{phase: phase, path: path, report: report, claim: report.Ledger.Claim.Commit})
@@ -702,7 +708,13 @@ func (s *Store) planDecision(input DecisionInput) (*decisionWrite, error) {
 			)
 		}
 	}
-	if state.State != NeedsHuman {
+	switch state.State {
+	case NeedsHuman:
+	case ReadyForMerge:
+		if err := s.requireReviewReturn(head, directory, state, input); err != nil {
+			return nil, err
+		}
+	default:
 		return nil, refuse(
 			"Work Item "+input.Item+" is not paused on a current request",
 			"read the Decision Inbox and resolve a current Needs Human request",
@@ -734,6 +746,29 @@ func (s *Store) planDecision(input DecisionInput) (*decisionWrite, error) {
 	plan.contents = contents
 	plan.state = state
 	return plan, nil
+}
+
+// requireReviewReturn admits the one decision a Ready-for-Merge Slice takes:
+// returning it to review while its open Proposal Branch still awaits the merge.
+// A Slice targeting main stays with its Merge Authority.
+func (s *Store) requireReviewReturn(head, directory string, state SliceState, input DecisionInput) error {
+	if input.Route != RouteWatchdog {
+		return refuse(
+			"Work Item "+input.Item+" is Ready for Merge; only the watchdog route returns it to review",
+			"route it to watchdog, or merge its pull request",
+		)
+	}
+	open, err := s.openProposalTarget(head, directory, state.Target)
+	if err != nil {
+		return err
+	}
+	if !open {
+		return refuse(
+			"Work Item "+input.Item+" is Ready for Merge outside an open Proposal Branch",
+			"merge or close its pull request as its Merge Authority",
+		)
+	}
+	return nil
 }
 
 // requireCurrentRequest verifies the supplied request is still the current

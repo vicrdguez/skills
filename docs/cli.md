@@ -105,7 +105,7 @@ skl decision apply --project <p> --item <proposal>/<slice> \
 skl decision retire --project <p> --proposal <proposal>
 ```
 
-`inbox` reads every current Needs Human request from the ledger, so it works from any directory; an unreadable ledger is reported as unavailable, never as empty. Each request comes with the worker's question, evidence, options and recommendation, and a bound `apply` command. The route is part of the answer: `implement` requeues, `watchdog` returns to review at the same revision, `supersede` abandons the unmerged work. `retire` archives a proposal parent once at least one slice is superseded and nothing active remains; merged slices and frozen records are preserved. Changed obligations go back through `explore` and `propose`, not through a decision.
+`inbox` reads every current Needs Human request from the ledger, so it works from any directory; an unreadable ledger is reported as unavailable, never as empty. Each request comes with the worker's question, evidence, options and recommendation, and a bound `apply` command. The route is part of the answer: `implement` requeues, `watchdog` returns to review at the same revision, `supersede` abandons the unmerged work. A Ready-for-Merge Slice on an open Proposal Branch also takes `apply` with the `watchdog` route, answering its passing `watchdog-report.md`, to return to review before the engine merges it. `retire` archives a proposal parent once at least one slice is superseded and nothing active remains; merged slices and frozen records are preserved. Changed obligations go back through `explore` and `propose`, not through a decision.
 
 ## Browsing
 
