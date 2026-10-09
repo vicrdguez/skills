@@ -6,10 +6,12 @@ package main
 // the landed tree and the observed completion are checked against Git.
 
 import (
+	"bytes"
 	"slices"
 	"strings"
 	"testing"
 
+	skilldist "github.com/vicrdguez/skills"
 	"github.com/vicrdguez/skills/ledger"
 )
 
@@ -253,4 +255,18 @@ func TestAutoPassRefusalsAreReportedWithoutFailingTheHandoff(t *testing.T) {
 			t.Fatalf("Auto Mode poll merged a main-targeted Slice: %s, %v", mustJSON(t, polled), err)
 		}
 	})
+}
+
+// An Auto Mode poll that claims work reports its retried merges before the
+// Execution Skill.
+func TestAutoPollReportsMergesBeforeTheExecutionSkill(t *testing.T) {
+	var output bytes.Buffer
+	out := deliveryOutput{Status: ledger.WorkAvailable, Packet: &skilldist.Packet{Instructions: "# Watchdog Review\n"},
+		Merges: []ledger.MergeAttempt{ledger.RefusedMerge("p/s", "branch protection")}}
+	if err := renderDelivery(&output, formatMarkdown, ledger.WatchdogPhase, "next", out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "Proposal Branch merge of `p/s`") || !strings.Contains(output.String(), "branch protection") || !strings.HasSuffix(output.String(), "# Watchdog Review\n") {
+		t.Fatalf("Markdown poll = %q", output.String())
+	}
 }

@@ -198,16 +198,18 @@ func TestInstallWritesDispatchLoopsForPiAndOpenCode(t *testing.T) {
 		}
 	}
 	for _, harness := range []string{"pi", "opencode"} {
-		entry := readFile(t, filepath.Join(home, fmt.Sprintf(entryPoints[harness], "implement-loop")))
-		custom := entry
-		if harness == "pi" {
-			custom = strings.Replace(custom, "${5:-false}", "true", 1)
-		} else {
-			custom = strings.Replace(custom, "$5", "true", 1)
-		}
-		want := append(slices.Clone(cases[harness]["implement-loop"]), "--auto")
-		if got := loopCommand(t, custom); !slices.Equal(got, want) {
-			t.Errorf("%s Auto Mode adapter runs %q, want %q", harness, got, want)
+		for operation, slot := range map[string]int{"implement-loop": 5, "watchdog-loop": 3} {
+			entry := readFile(t, filepath.Join(home, fmt.Sprintf(entryPoints[harness], operation)))
+			custom := entry
+			if harness == "pi" {
+				custom = strings.Replace(custom, fmt.Sprintf("${%d:-false}", slot), "true", 1)
+			} else {
+				custom = strings.Replace(custom, fmt.Sprintf("$%d", slot), "true", 1)
+			}
+			want := append(slices.Clone(cases[harness][operation]), "--auto")
+			if got := loopCommand(t, custom); !slices.Equal(got, want) {
+				t.Errorf("%s Auto Mode %s runs %q, want %q", harness, operation, got, want)
+			}
 		}
 	}
 	for _, harness := range []string{"codex", "claude"} {
