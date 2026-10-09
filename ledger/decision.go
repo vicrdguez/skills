@@ -959,7 +959,9 @@ func replicateDecision(s *Store, result *DecisionResult) {
 // completion. A recorded Proposal Submission of an open branch is observed
 // first through forge, called with the Project's owner/name repository: only
 // one observed unmerged is retired, and a merged one follows the completion
-// path instead.
+// path instead. The observation runs outside the mutation lock, which
+// revalidates only the attachment, so a merge landing in between is retired
+// without completion, the same window completion observation accepts.
 func RetireProposal(ctx context.Context, s *Store, project, proposal string, forge func(repository string) (CompletionForge, error)) (*RetirementResult, error) {
 	if !ValidRecordName(project) || !ValidRecordName(proposal) {
 		return nil, refuse(
@@ -981,12 +983,8 @@ func RetireProposal(ctx context.Context, s *Store, project, proposal string, for
 		if err != nil {
 			return err
 		}
-		var identity ProjectIdentity
-		if err := readJSONAt(s, head, filepath.Join(projectsRoot, project, "project.json"), &identity); err != nil || identity.Repository == "" {
-			return refuse(
-				"unknown Project "+project+" in the configured ledger",
-				"select a Project recorded in the configured ledger",
-			)
+		if _, err := projectRepositoryAt(s, head, project); err != nil {
+			return err
 		}
 		meta, present, err := s.readProposalMeta(project, proposal)
 		if err != nil {
@@ -1091,20 +1089,18 @@ func RetireProposal(ctx context.Context, s *Store, project, proposal string, for
 // observed unmerged. An unobservable or merged Submission refuses retirement:
 // absence of a recorded completion does not prove the pull request unmerged.
 func observeRetiredSubmission(ctx context.Context, s *Store, project, proposal string, forge func(string) (CompletionForge, error)) (*ForgeAttachment, error) {
-	meta, present, err := s.readProposalMeta(project, proposal)
-	if err != nil || !present || !proposalOpen(meta) || meta.Submission == nil {
-		return nil, err
-	}
-	var identity ProjectIdentity
 	head, err := s.head()
 	if err != nil {
 		return nil, err
 	}
-	if err := readJSONAt(s, head, filepath.Join(projectsRoot, project, "project.json"), &identity); err != nil || identity.Repository == "" {
-		return nil, refuse(
-			"unknown Project "+project+" in the configured ledger",
-			"select a Project recorded in the configured ledger",
-		)
+	var meta ProposalMeta
+	if err := readJSONAt(s, head, filepath.Join(projectsRoot, project, "proposals", proposal, "proposal.json"), &meta); err != nil || !proposalOpen(meta) || meta.Submission == nil {
+		// The locked retirement reports an unknown or unreadable Proposal.
+		return nil, nil
+	}
+	repository, err := projectRepositoryAt(s, head, project)
+	if err != nil {
+		return nil, err
 	}
 	attached := *meta.Submission
 	unobservable := func(err error) error {
@@ -1113,11 +1109,11 @@ func observeRetiredSubmission(ctx context.Context, s *Store, project, proposal s
 			"retire once the forge is reachable; an open branch is retired only when its Proposal Submission is observed unmerged",
 		)
 	}
-	f, err := forge(identity.Repository)
+	f, err := forge(repository)
 	if err != nil {
 		return nil, unobservable(err)
 	}
-	observation, err := f.ObserveSubmission(ctx, attached, IntegrationTarget{Repository: identity.Repository, Branch: proposalBase}, meta.Branch)
+	observation, err := f.ObserveSubmission(ctx, attached, IntegrationTarget{Repository: repository, Branch: proposalBase}, meta.Branch)
 	if err != nil {
 		return nil, unobservable(err)
 	}
@@ -1131,6 +1127,19 @@ func observeRetiredSubmission(ctx context.Context, s *Store, project, proposal s
 		return &attached, nil
 	}
 	return nil, unobservable(errors.New("no confirmed outcome"))
+}
+
+// projectRepositoryAt reads the owner/name repository of a Project recorded
+// at head.
+func projectRepositoryAt(s *Store, head, project string) (string, error) {
+	var identity ProjectIdentity
+	if err := readJSONAt(s, head, filepath.Join(projectsRoot, project, "project.json"), &identity); err != nil || identity.Repository == "" {
+		return "", refuse(
+			"unknown Project "+project+" in the configured ledger",
+			"select a Project recorded in the configured ledger",
+		)
+	}
+	return identity.Repository, nil
 }
 
 // proposalChildren lists the committed slice directories of one proposal.
