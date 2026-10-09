@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
+	"sync"
 
 	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/ledger"
@@ -54,19 +56,13 @@ func refreshCompletions(ctx context.Context, store *ledger.Store, repository git
 		}
 	}
 
-	var backend any
+	connect := sync.OnceValues(func() (any, error) { return newBackend(repository) })
 	var backendError error
-	connected := false
-	connect := func() (any, error) {
-		if !connected {
-			connected = true
-			backend, backendError = newBackend(repository)
-		}
-		return backend, backendError
-	}
 	var forge ledger.CompletionForge
 	if needsForge {
-		if backend, err := connect(); err == nil {
+		if backend, err := connect(); err != nil {
+			backendError = err
+		} else {
 			forge, _ = backend.(ledger.CompletionForge)
 			if forge == nil {
 				backendError = fmt.Errorf("the forge adapter cannot observe an attached Submission")
@@ -80,22 +76,16 @@ func refreshCompletions(ctx context.Context, store *ledger.Store, repository git
 		forge = reader
 	}
 	var proposals []string
-	merged := make(map[string]bool)
 	for _, item := range items {
-		proposal, _, _ := strings.Cut(item, "/")
-		if _, seen := merged[proposal]; !seen {
-			merged[proposal] = false
+		if proposal, _, _ := strings.Cut(item, "/"); !slices.Contains(proposals, proposal) {
 			proposals = append(proposals, proposal)
 		}
 		if reader != nil {
 			reader.lastErr = nil
 		}
-		observed, err := ledger.ObserveCompletion(ctx, store, repository, item, forge)
+		_, err := ledger.ObserveCompletion(ctx, store, repository, item, forge)
 		if reader != nil && reader.lastErr != nil {
 			result.ForgeReadFailures[item] = true
-		}
-		if observed != nil && observed.Commit != "" && observed.State == ledger.Merged {
-			merged[proposal] = true
 		}
 		if err == nil {
 			continue
@@ -119,7 +109,7 @@ func refreshCompletions(ctx context.Context, store *ledger.Store, repository git
 		return forge, nil
 	}
 	for _, proposal := range proposals {
-		refreshed, err := ledger.RefreshProposal(ctx, store, repository, proposal, merged[proposal], proposalForge)
+		refreshed, err := ledger.RefreshProposal(ctx, store, repository, proposal, proposalForge)
 		if refreshed != nil {
 			result.Proposals[proposal] = refreshed
 		}

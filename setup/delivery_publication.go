@@ -35,7 +35,7 @@ func (b *GitHubBackend) PresentPull(ctx context.Context, presentation ledger.Pul
 	if presentation.Base == "" {
 		presentation.Base = "main"
 	}
-	if presentation.Branch == "" || presentation.Head == "" && !presentation.Unpinned {
+	if presentation.Branch == "" || (presentation.Head == "" && !presentation.Unpinned) {
 		return 0, workflow.Refuse("delivery presentation requires an exact source branch and head; prepare and push the planned source before presenting it")
 	}
 	repository := b.repository

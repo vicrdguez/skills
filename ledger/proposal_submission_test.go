@@ -72,9 +72,9 @@ func proposalMeta(t *testing.T, l *deliveryLedger) ledger.ProposalSummary {
 	return detail.Proposal
 }
 
-func refreshProposal(t *testing.T, l *deliveryLedger, merged bool, forge *proposalForgeStub) *ledger.ProposalRefresh {
+func refreshProposal(t *testing.T, l *deliveryLedger, forge *proposalForgeStub) *ledger.ProposalRefresh {
 	t.Helper()
-	refreshed, err := ledger.RefreshProposal(context.Background(), l.store(), deliveryWidgets(), "feature", merged, forge.get)
+	refreshed, err := ledger.RefreshProposal(context.Background(), l.store(), deliveryWidgets(), "feature", forge.get)
 	if err != nil {
 		t.Fatalf("refresh Proposal: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestRenderProposalBodyListsSlicesAndClosesIssues(t *testing.T) {
 func TestFirstBranchMergePresentsDraftAndRecordsSubmission(t *testing.T) {
 	l := openProposalLedger(t, map[string]string{"api": ledger.Merged, "ui": ledger.AwaitingReview})
 	forge := &proposalForgeStub{number: 40}
-	refreshed := refreshProposal(t, l, true, forge)
+	refreshed := refreshProposal(t, l, forge)
 	if refreshed.Presentation == nil || refreshed.Presentation.Status != ledger.PullPresented || len(forge.presentations) != 1 {
 		t.Fatalf("presentation = %+v, calls %+v", refreshed, forge.presentations)
 	}
@@ -120,12 +120,12 @@ func TestFirstBranchMergePresentsDraftAndRecordsSubmission(t *testing.T) {
 func TestLaterBranchMergeRefreshesBodyAndLastMarksReady(t *testing.T) {
 	l := openProposalLedger(t, map[string]string{"api": ledger.Merged, "ui": ledger.AwaitingReview, "docs": ledger.AwaitingReview})
 	forge := &proposalForgeStub{number: 40, observed: ledger.SubmissionObservation{State: "open"}}
-	refreshProposal(t, l, true, forge)
+	refreshProposal(t, l, forge)
 	recorded := l.commitCount()
 
 	mergeIntoBranch(l, "ui")
 	l.commitAll("ui merged")
-	refreshProposal(t, l, true, forge)
+	refreshProposal(t, l, forge)
 	second := forge.presentations[1]
 	if second.Number != 40 || second.Approved || !strings.Contains(second.Body, "(`api`): Merged") || !strings.Contains(second.Body, "(`ui`): Merged into `proposal/feature`, acme/widgets#30") {
 		t.Fatalf("refresh = %+v", second)
@@ -137,7 +137,7 @@ func TestLaterBranchMergeRefreshesBodyAndLastMarksReady(t *testing.T) {
 	mergeIntoBranch(l, "docs")
 	l.commitAll("docs merged")
 	before := l.commitCount()
-	refreshProposal(t, l, true, forge)
+	refreshProposal(t, l, forge)
 	if last := forge.presentations[2]; !last.Approved || last.Number != 40 {
 		t.Fatalf("last merge presentation = %+v", last)
 	}
@@ -149,35 +149,45 @@ func TestLaterBranchMergeRefreshesBodyAndLastMarksReady(t *testing.T) {
 func TestSupersededSliceKeepsProposalDraft(t *testing.T) {
 	l := openProposalLedger(t, map[string]string{"api": ledger.Merged, "ui": ledger.Superseded})
 	forge := &proposalForgeStub{number: 40}
-	refreshProposal(t, l, true, forge)
+	refreshProposal(t, l, forge)
 	if len(forge.presentations) != 1 || forge.presentations[0].Approved {
 		t.Fatalf("Superseded member readied the Proposal: %+v", forge.presentations)
 	}
 }
 
-func TestPresentationFailureIsReportedAndRetriedUntilAttached(t *testing.T) {
+func TestPresentationFailureIsReportedAndRetriedAtNextObservation(t *testing.T) {
 	l := openProposalLedger(t, map[string]string{"api": ledger.Merged, "ui": ledger.AwaitingReview})
 	forge := &proposalForgeStub{presentErr: errors.New("forge unavailable")}
 	before := l.commitCount()
-	failed := refreshProposal(t, l, true, forge)
+	failed := refreshProposal(t, l, forge)
 	if failed.Presentation == nil || failed.Presentation.Status != ledger.IssuePending || l.commitCount() != before {
 		t.Fatalf("failed presentation = %+v", failed)
 	}
 	forge.presentErr, forge.number = nil, 41
-	retried := refreshProposal(t, l, false, forge)
+	retried := refreshProposal(t, l, forge)
 	if retried.Presentation == nil || retried.Presentation.Status != ledger.PullPresented || proposalMeta(t, l).Submission.Number != 41 {
 		t.Fatalf("retry = %+v", retried)
 	}
-	// Attached and no new Slice merge: observation only.
-	forge.observed = ledger.SubmissionObservation{State: "open"}
-	if quiet := refreshProposal(t, l, false, forge); quiet.Presentation != nil || len(forge.presentations) != 2 {
-		t.Fatalf("observation without a Slice merge presented: %+v", quiet)
+	// The last Slice lands while the forge fails; the next observation, with
+	// no further Slice merge, still readies the attached Submission.
+	mergeIntoBranch(l, "ui")
+	l.commitAll("ui merged")
+	forge.observed, forge.presentErr = ledger.SubmissionObservation{State: "open"}, errors.New("forge unavailable")
+	if failed := refreshProposal(t, l, forge); failed.Presentation == nil || failed.Presentation.Status != ledger.IssuePending {
+		t.Fatalf("failed ready presentation = %+v", failed)
+	}
+	forge.presentErr = nil
+	if ready := refreshProposal(t, l, forge); ready.Presentation == nil || ready.Presentation.Status != ledger.PullPresented {
+		t.Fatalf("ready retry = %+v", ready)
+	}
+	if last := forge.presentations[len(forge.presentations)-1]; !last.Approved || last.Number != 41 || !strings.Contains(last.Body, "(`ui`): Merged into `proposal/feature`") {
+		t.Fatalf("retried presentation = %+v", last)
 	}
 }
 
 func TestNoForgeBeforeAnyBranchMerge(t *testing.T) {
 	l := openProposalLedger(t, map[string]string{"api": ledger.AwaitingReview})
-	refreshed, err := ledger.RefreshProposal(context.Background(), l.store(), deliveryWidgets(), "feature", false, func() (ledger.ProposalForge, error) {
+	refreshed, err := ledger.RefreshProposal(context.Background(), l.store(), deliveryWidgets(), "feature", func() (ledger.ProposalForge, error) {
 		t.Fatal("forge requested before any Slice merged into the branch")
 		return nil, nil
 	})
@@ -189,9 +199,9 @@ func TestNoForgeBeforeAnyBranchMerge(t *testing.T) {
 func TestMergedProposalSubmissionRecordsCompletion(t *testing.T) {
 	l := openProposalLedger(t, map[string]string{"api": ledger.Merged})
 	forge := &proposalForgeStub{number: 40}
-	refreshProposal(t, l, true, forge)
+	refreshProposal(t, l, forge)
 	forge.observed = ledger.SubmissionObservation{State: ledger.Merged, SourceHead: "branch-head", MergeCommit: "merge-commit"}
-	completed := refreshProposal(t, l, false, forge)
+	completed := refreshProposal(t, l, forge)
 	if completed.Commit == "" || len(forge.presentations) != 1 {
 		t.Fatalf("completion = %+v", completed)
 	}
@@ -202,7 +212,7 @@ func TestMergedProposalSubmissionRecordsCompletion(t *testing.T) {
 	if summary.BranchState != ledger.BranchSpent || !summary.FullyDelivered {
 		t.Fatalf("completed Proposal = %+v", summary)
 	}
-	if again, err := ledger.RefreshProposal(context.Background(), l.store(), deliveryWidgets(), "feature", true, forge.get); err != nil || again != nil {
+	if again, err := ledger.RefreshProposal(context.Background(), l.store(), deliveryWidgets(), "feature", forge.get); err != nil || again != nil {
 		t.Fatalf("spent branch refreshed again: %+v, %v", again, err)
 	}
 	archived, err := ledger.ArchiveTerminalProposals(context.Background(), l.store(), deliveryWidgets())
@@ -214,10 +224,10 @@ func TestMergedProposalSubmissionRecordsCompletion(t *testing.T) {
 func TestClosedProposalSubmissionIsReportedOnly(t *testing.T) {
 	l := openProposalLedger(t, map[string]string{"api": ledger.Merged})
 	forge := &proposalForgeStub{number: 40}
-	refreshProposal(t, l, true, forge)
+	refreshProposal(t, l, forge)
 	before := l.commitCount()
 	forge.observed = ledger.SubmissionObservation{State: "closed", SourceHead: "branch-head"}
-	closed := refreshProposal(t, l, true, forge)
+	closed := refreshProposal(t, l, forge)
 	if !closed.ClosedUnmerged || closed.Commit != "" || l.commitCount() != before || len(forge.presentations) != 1 {
 		t.Fatalf("closure = %+v", closed)
 	}
@@ -227,7 +237,7 @@ func TestClosedProposalSubmissionIsReportedOnly(t *testing.T) {
 	}
 	// A reopened pull request is refreshed at the next observed Slice merge.
 	forge.observed = ledger.SubmissionObservation{State: "open"}
-	if reopened := refreshProposal(t, l, true, forge); reopened.Presentation == nil || forge.presentations[1].Number != 40 {
+	if reopened := refreshProposal(t, l, forge); reopened.Presentation == nil || forge.presentations[1].Number != 40 {
 		t.Fatalf("reopened refresh = %+v", reopened)
 	}
 }
@@ -243,7 +253,7 @@ func TestRetiringOpenProposalSpendsItsBranch(t *testing.T) {
 	if !summary.Retired || summary.BranchState != ledger.BranchSpent || summary.Completion != nil || !summary.FullyDelivered {
 		t.Fatalf("retired Proposal = %+v", summary)
 	}
-	if again, err := ledger.RefreshProposal(context.Background(), store, deliveryWidgets(), "feature", true, (&proposalForgeStub{}).get); err != nil || again != nil {
+	if again, err := ledger.RefreshProposal(context.Background(), store, deliveryWidgets(), "feature", (&proposalForgeStub{}).get); err != nil || again != nil {
 		t.Fatalf("retired Proposal refreshed: %+v, %v", again, err)
 	}
 	archived, err := ledger.ArchiveTerminalProposals(context.Background(), store, deliveryWidgets())
@@ -264,7 +274,7 @@ func TestRetiringOpenProposalRefusedWhileSliceActive(t *testing.T) {
 
 func TestBrowseShowsProposalBranchSubmissionAndSliceMergeTargets(t *testing.T) {
 	l := openProposalLedger(t, map[string]string{"api": ledger.Merged, "ui": ledger.Merged, "docs": ledger.AwaitingReview})
-	refreshProposal(t, l, true, &proposalForgeStub{number: 40})
+	refreshProposal(t, l, &proposalForgeStub{number: 40})
 	view, err := l.store().Snapshot()
 	if err != nil {
 		t.Fatal(err)

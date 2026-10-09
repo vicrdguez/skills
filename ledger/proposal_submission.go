@@ -140,14 +140,14 @@ func (r proposalRecord) allMerged() bool {
 }
 
 // RefreshProposal observes an open Proposal's Submission and keeps it
-// presented. sliceMerged reports a Slice of this Proposal observed Merged by
-// the same completion observation. A merged Submission records the
-// Proposal's completion into main; an unmerged closure is reported and
-// recorded nowhere. Presentation runs after a Slice merge into the branch, or
-// while no Submission is attached yet so a failed first presentation is
-// retried; its failure is reported, never returned. The forge is requested
-// only when there is something to observe or present.
-func RefreshProposal(ctx context.Context, s *Store, repository github.RepositoryID, proposal string, sliceMerged bool, forge func() (ProposalForge, error)) (*ProposalRefresh, error) {
+// presented. A merged Submission records the Proposal's completion into
+// main; an unmerged closure is reported and recorded nowhere. Once a Slice
+// has merged into the branch, every observation of an open or unattached
+// Submission presents the current view, so a failed presentation is retried
+// at the next one; the adapter writes only what differs. A presentation
+// failure is reported, never returned. The forge is requested only when there
+// is something to observe or present.
+func RefreshProposal(ctx context.Context, s *Store, repository github.RepositoryID, proposal string, forge func() (ProposalForge, error)) (*ProposalRefresh, error) {
 	head, err := s.head()
 	if err != nil {
 		return nil, err
@@ -156,7 +156,7 @@ func RefreshProposal(ctx context.Context, s *Store, repository github.Repository
 	if err != nil || !found || !proposalOpen(read.meta) {
 		return nil, err
 	}
-	present := read.mergedIntoBranch() && (sliceMerged || read.meta.Submission == nil)
+	present := read.mergedIntoBranch()
 	if read.meta.Submission == nil && !present {
 		return nil, nil
 	}
@@ -272,7 +272,7 @@ func (s *Store) recordProposal(repository github.RepositoryID, proposal string, 
 			return err
 		}
 		apply(&read.meta)
-		if err := writeJSON(filepath.Join(s.Root, read.path), read.meta); err != nil {
+		if err := s.writeProposalMeta(repository.Name, proposal, read.meta); err != nil {
 			return err
 		}
 		if err := s.commit(message+" "+repository.Name+"/"+proposal, read.path); err != nil {
