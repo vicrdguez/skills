@@ -568,6 +568,7 @@ func TestLedgerStatusMixedParentRetirementAndMissingAttachment(t *testing.T) {
 	}
 	statusRecord(t, fixture.clone, "unpublished", "foundation", func(state *ledger.SliceState) {
 		state.Submission = &ledger.ForgeAttachment{Repository: "acme/widgets", Number: 21}
+		state.Target = &ledger.IntegrationTarget{Repository: "acme/widgets", Branch: "main"}
 	})
 	lateApp, lateOutput := completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
 		body := fixturePull("closed", "true", "accepted-head", "merged-head", "acme/widgets", "acme/widgets", "main")

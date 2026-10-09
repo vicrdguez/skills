@@ -58,14 +58,15 @@ type ProjectSummary struct {
 // delivery. FullyDelivered is set only when every readable member is Merged
 // and none is unknown.
 type ProposalSummary struct {
-	Name           string           `json:"name"`
-	Archived       bool             `json:"archived"`
-	Retired        bool             `json:"retired"`
-	ParentTitle    string           `json:"parent_title,omitempty"`
-	Accepted       string           `json:"accepted,omitempty"`
-	Branch         string           `json:"branch"`
-	ParentIssue    *ForgeAttachment `json:"parent_issue,omitempty"`
-	FullyDelivered bool             `json:"fully_delivered"`
+	Name           string             `json:"name"`
+	Archived       bool               `json:"archived"`
+	Retired        bool               `json:"retired"`
+	ParentTitle    string             `json:"parent_title,omitempty"`
+	Accepted       string             `json:"accepted,omitempty"`
+	Branch         string             `json:"branch"`
+	Target         *IntegrationTarget `json:"integration_target,omitempty"`
+	ParentIssue    *ForgeAttachment   `json:"parent_issue,omitempty"`
+	FullyDelivered bool               `json:"fully_delivered"`
 	Tally
 	Incomplete  bool         `json:"incomplete"`
 	Diagnostics []Diagnostic `json:"diagnostics,omitempty"`
@@ -106,8 +107,8 @@ type RelatedSlice struct {
 }
 
 // DependencyFact is one recorded Dependency on a blocker. Satisfied is set
-// only when the blocker is Merged; Ready for Merge, Superseded, and unknown
-// blockers never satisfy it.
+// only when the blocker is Merged into main, the dependent's Proposal Branch,
+// or another Proposal Branch whose Proposal has completed into main.
 type DependencyFact struct {
 	RelatedSlice
 	Satisfied bool `json:"satisfied"`
@@ -486,7 +487,7 @@ func (v *Snapshot) sliceDetail(projectName, item string, location *bool) (*Slice
 		}
 	}
 	for _, dependency := range state.Dependencies {
-		detail.Dependencies = append(detail.Dependencies, v.dependency(project, dependency, records))
+		detail.Dependencies = append(detail.Dependencies, v.dependency(project, proposalRead.meta, dependency, records))
 	}
 	return detail, nil
 }
@@ -551,13 +552,19 @@ func related(slice *sliceTree, record sliceRecord) RelatedSlice {
 }
 
 // dependency resolves one recorded Dependency's blocker at this revision.
-func (v *Snapshot) dependency(project *projectTree, reference string, records map[*sliceTree]sliceRecord) DependencyFact {
+func (v *Snapshot) dependency(project *projectTree, dependent ProposalMeta, reference string, records map[*sliceTree]sliceRecord) DependencyFact {
 	blocker, problem := v.resolve(project, reference)
 	if blocker == nil {
 		return DependencyFact{RelatedSlice: RelatedSlice{Item: strings.TrimPrefix(reference, "proposals/"), Problem: problem}}
 	}
 	fact := DependencyFact{RelatedSlice: related(blocker, records[blocker])}
-	fact.Satisfied = fact.Problem == "" && fact.Lifecycle == Merged
+	if fact.Problem == "" {
+		var meta ProposalMeta
+		path := v.proposalPath(project.name, records[blocker].proposal) + "/proposal.json"
+		if readJSONAt(v.store, v.Revision, path, &meta) == nil {
+			fact.Satisfied = dependencyBuildable(records[blocker].read.state, meta, dependent)
+		}
+	}
 	return fact
 }
 
@@ -801,7 +808,7 @@ func (t *Tally) add(slice sliceRead) {
 func (r proposalRead) summary() ProposalSummary {
 	summary := ProposalSummary{
 		Name: r.tree.name, Archived: r.tree.archived, Retired: r.meta.Retired,
-		ParentTitle: r.meta.ParentTitle, Accepted: r.meta.Accepted, Branch: r.meta.Branch, ParentIssue: r.meta.ParentIssue,
+		ParentTitle: r.meta.ParentTitle, Accepted: r.meta.Accepted, Branch: r.meta.Branch, Target: r.meta.Target, ParentIssue: r.meta.ParentIssue,
 		Tally:       Tally{Lifecycles: map[string]int{}},
 		Diagnostics: append([]Diagnostic(nil), r.diagnostics...),
 	}
@@ -811,7 +818,7 @@ func (r proposalRead) summary() ProposalSummary {
 	}
 	summary.Slices += len(r.tree.invalid)
 	summary.Unknown += len(r.tree.invalid)
-	summary.FullyDelivered = summary.Slices > 0 && summary.Unknown == 0 && summary.Lifecycles[Merged] == summary.Slices
+	summary.FullyDelivered = summary.Slices > 0 && summary.Unknown == 0 && summary.Lifecycles[Merged] == summary.Slices && !proposalOpen(r.meta)
 	summary.Incomplete = len(summary.Diagnostics) > 0
 	return summary
 }

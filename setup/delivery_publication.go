@@ -30,6 +30,9 @@ func (b *GitHubBackend) PresentPull(ctx context.Context, presentation ledger.Pul
 	if err := b.requireRepository(); err != nil {
 		return 0, err
 	}
+	if presentation.Base == "" {
+		presentation.Base = "main"
+	}
 	if presentation.Branch == "" || presentation.Head == "" {
 		return 0, workflow.Refuse("delivery presentation requires an exact source branch and head; prepare and push the planned source before presenting it")
 	}
@@ -107,7 +110,7 @@ func (b *GitHubBackend) createPresentedPull(ctx context.Context, repository gith
 	payload := map[string]any{
 		"title": presentation.Title,
 		"head":  presentation.Branch,
-		"base":  "main",
+		"base":  presentation.Base,
 		"body":  presentation.Body,
 		// Creation cannot atomically pin GitHub's current branch SHA. Start as
 		// draft, validate the returned source, then apply any approval.
@@ -295,7 +298,7 @@ func (b *GitHubBackend) pullForPresentation(ctx context.Context, repository gith
 func (b *GitHubBackend) listPresentedPulls(ctx context.Context, repository github.RepositoryID, presentation ledger.PullPresentation) ([]githubPull, error) {
 	var all []githubPull
 	for page := 1; ; page++ {
-		path := b.repositoryPath(repository) + "/pulls?state=open&base=main&head=" + url.QueryEscape(repository.Owner+":"+presentation.Branch) + fmt.Sprintf("&per_page=100&page=%d", page)
+		path := b.repositoryPath(repository) + "/pulls?state=open&base=" + url.QueryEscape(presentation.Base) + "&head=" + url.QueryEscape(repository.Owner+":"+presentation.Branch) + fmt.Sprintf("&per_page=100&page=%d", page)
 		var batch []githubPull
 		if err := b.presentationRequest(ctx, nil, http.MethodGet, path, nil, &batch); err != nil {
 			return nil, err
@@ -316,8 +319,8 @@ func presentedPullMismatch(pull githubPull, repository github.RepositoryID, pres
 		return fmt.Sprintf("pull request #%d tracks branch %q, not the planned %q", pull.Number, pull.Head.Ref, presentation.Branch)
 	case !strings.EqualFold(pull.Head.Repo.FullName, repository.Owner+"/"+repository.Name):
 		return fmt.Sprintf("pull request #%d has source repository %q, not %q", pull.Number, pull.Head.Repo.FullName, repository.Owner+"/"+repository.Name)
-	case pull.Base.Ref != "main":
-		return fmt.Sprintf("pull request #%d targets base %q, not %q", pull.Number, pull.Base.Ref, "main")
+	case pull.Base.Ref != presentation.Base:
+		return fmt.Sprintf("pull request #%d targets base %q, not %q", pull.Number, pull.Base.Ref, presentation.Base)
 	case pull.Head.SHA != presentation.Head:
 		return fmt.Sprintf("pull request #%d presents source head %s, not the expected %s", pull.Number, pull.Head.SHA, presentation.Head)
 	case pull.State != "open":

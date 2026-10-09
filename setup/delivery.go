@@ -64,6 +64,9 @@ func PresentDelivery(e *ledger.Execution, repository RepositoryContext, phase, o
 		return skilldist.Packet{}, fmt.Errorf("result-directory must be absolute")
 	}
 	f := &skilldist.DeliveryFacts{Phase: phase, Operation: operation, Repository: e.Repository, Remote: repository.Remote, Item: e.Item, Branch: e.State.Branch, Worktree: worktree, ResultDirectory: directory, Claim: e.Claim.Commit, Documents: e.Documents, Procedure: "initial"}
+	if e.State.Target != nil {
+		f.TargetBranch = e.State.Target.Branch
+	}
 	if operation == "resume" {
 		f.Procedure = "resumed"
 	}
