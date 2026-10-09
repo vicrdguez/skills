@@ -100,9 +100,9 @@ func proposalBranchText(proposal ledger.ProposalSummary) string {
 	return proposal.Branch + " (" + proposal.BranchState + ")"
 }
 
-// proposalSubmissionText states the recorded Proposal Submission with the
-// presentation the engine gives it: merged once completion is recorded, ready
-// once every Slice is Merged, a draft before.
+// proposalSubmissionText states the recorded Proposal Submission: merged
+// once completion is recorded, otherwise the readiness the engine presents.
+// Browse reads no forge, so a human-readied pull request is not observed here.
 func proposalSubmissionText(proposal ledger.ProposalSummary) string {
 	if proposal.Submission == nil {
 		return "none"
@@ -112,9 +112,9 @@ func proposalSubmissionText(proposal ledger.ProposalSummary) string {
 	case proposal.Completion != nil:
 		return text + " (merged into " + proposal.Completion.Target.Branch + " at " + proposal.Completion.MergeCommit + ")"
 	case proposal.Slices > 0 && proposal.Lifecycles[ledger.Merged] == proposal.Slices:
-		return text + " (ready for review)"
+		return text + " (engine presents it ready for review)"
 	}
-	return text + " (draft)"
+	return text + " (engine presents it as a draft)"
 }
 
 // SliceSummaryLines are the labeled facts of one Proposal member.
