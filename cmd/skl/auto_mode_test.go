@@ -225,3 +225,26 @@ func TestStatusReportsClosedProposalSubmissionWithoutRecording(t *testing.T) {
 		t.Fatal("closed Proposal Submission changed the ledger")
 	}
 }
+
+// A human who merges the Proposal Submission and retires before any status
+// observation is refused; the next status records the completion.
+func TestDecisionRetireObservesMergedProposalSubmission(t *testing.T) {
+	_, root := openBranchStatusFixture(t)
+	forge := &proposalPullForge{}
+	app, output := completionStatusApp(t, forge.serve(t))
+	runCompletionStatus(t, app, output, root)
+	forge.mu.Lock()
+	forge.state, forge.merged = "closed", true
+	forge.mu.Unlock()
+	output.Reset()
+	if err := app.Run([]string{"skl", "decision", "retire", "--project", "widgets", "--proposal", "branch-status", "--format", "json"}); err != nil {
+		t.Fatalf("decision retire: %v (%s)", err, output)
+	}
+	if text := output.String(); !strings.Contains(text, `"status":"refused"`) || !strings.Contains(text, "has merged") {
+		t.Fatalf("retirement of a merged Proposal Submission:\n%s", text)
+	}
+	status := runCompletionStatus(t, app, output, root)
+	if len(status.Proposals) != 1 || status.Proposals[0].Completion == nil || status.Proposals[0].Completion.MergeCommit != "proposal-merge" || !status.Proposals[0].FullyDelivered {
+		t.Fatalf("status after refused retirement = %s", mustJSON(t, status))
+	}
+}

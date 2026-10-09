@@ -31,6 +31,17 @@ func (f *proposalForgeStub) PresentPull(_ context.Context, presentation ledger.P
 
 func (f *proposalForgeStub) get() (ledger.ProposalForge, error) { return f, nil }
 
+func (f *proposalForgeStub) retire(string) (ledger.CompletionForge, error) { return f, nil }
+
+// noRetirementForge fails a retirement that has no Proposal Submission to
+// observe yet contacts the forge.
+func noRetirementForge(t *testing.T) func(string) (ledger.CompletionForge, error) {
+	return func(string) (ledger.CompletionForge, error) {
+		t.Error("retirement contacted the forge without a Proposal Submission to observe")
+		return nil, errors.New("no forge")
+	}
+}
+
 const proposalJSON = `{"accepted":"` + deliveryInitial + `","branch":"proposal/feature","parent_title":"Feature work","integration_target":{"repository":"acme/widgets","branch":"proposal/feature"}}`
 
 // openProposalLedger accepts proposal feature with an open Proposal Branch and
@@ -245,7 +256,7 @@ func TestClosedProposalSubmissionIsReportedOnly(t *testing.T) {
 func TestRetiringOpenProposalSpendsItsBranch(t *testing.T) {
 	l := openProposalLedger(t, map[string]string{"api": ledger.Merged, "ui": ledger.Merged})
 	store := l.store()
-	retired, err := ledger.RetireProposal(store, "widgets", "feature")
+	retired, err := ledger.RetireProposal(context.Background(), store, "widgets", "feature", noRetirementForge(t))
 	if err != nil || retired.Status != ledger.RetirementRetired {
 		t.Fatalf("retire open Proposal = %+v, %v", retired, err)
 	}
@@ -264,8 +275,61 @@ func TestRetiringOpenProposalSpendsItsBranch(t *testing.T) {
 
 func TestRetiringOpenProposalRefusedWhileSliceActive(t *testing.T) {
 	l := openProposalLedger(t, map[string]string{"api": ledger.Merged, "ui": ledger.AwaitingReview})
-	if _, err := ledger.RetireProposal(l.store(), "widgets", "feature"); err == nil || !strings.Contains(err.Error(), "still has active or claimed work: ui") {
+	if _, err := ledger.RetireProposal(context.Background(), l.store(), "widgets", "feature", noRetirementForge(t)); err == nil || !strings.Contains(err.Error(), "still has active or claimed work: ui") {
 		t.Fatalf("retirement with an active Slice = %v", err)
+	}
+	if proposalMeta(t, l).Retired {
+		t.Fatal("refused retirement was recorded")
+	}
+}
+
+func TestRetiringProposalWithClosedSubmissionSpendsItsBranch(t *testing.T) {
+	l := openProposalLedger(t, map[string]string{"api": ledger.Merged})
+	forge := &proposalForgeStub{number: 40}
+	refreshProposal(t, l, forge)
+	forge.observed = ledger.SubmissionObservation{State: "closed", SourceHead: "branch-head"}
+	retired, err := ledger.RetireProposal(context.Background(), l.store(), "widgets", "feature", forge.retire)
+	if err != nil || retired.Status != ledger.RetirementRetired {
+		t.Fatalf("retire with a closed Submission = %+v, %v", retired, err)
+	}
+	if len(forge.observations) != 1 || forge.observations[0].Branch != "main" {
+		t.Fatalf("retirement observed %v, want the Submission into main once", forge.observations)
+	}
+	summary := proposalMeta(t, l)
+	if !summary.Retired || summary.BranchState != ledger.BranchSpent || summary.Completion != nil || summary.Submission == nil {
+		t.Fatalf("retired Proposal = %+v", summary)
+	}
+}
+
+// A human may merge the Proposal Submission and run decision retire before
+// any status observes the merge; the merge still completes the Proposal.
+func TestRetiringMergedProposalSubmissionIsRefusedAndCompletionStillObserved(t *testing.T) {
+	l := openProposalLedger(t, map[string]string{"api": ledger.Merged})
+	forge := &proposalForgeStub{number: 40}
+	refreshProposal(t, l, forge)
+	forge.observed = ledger.SubmissionObservation{State: ledger.Merged, SourceHead: "branch-head", MergeCommit: "proposal-merge"}
+	before := l.commitCount()
+	if _, err := ledger.RetireProposal(context.Background(), l.store(), "widgets", "feature", forge.retire); err == nil || !strings.Contains(err.Error(), "has merged") {
+		t.Fatalf("retire with a merged Submission = %v", err)
+	}
+	if l.commitCount() != before || proposalMeta(t, l).Retired {
+		t.Fatal("refused retirement was recorded")
+	}
+	refreshProposal(t, l, forge)
+	if summary := proposalMeta(t, l); summary.Retired || summary.Completion == nil || summary.Completion.MergeCommit != "proposal-merge" {
+		t.Fatalf("Proposal after the merge was observed = %+v", summary)
+	}
+	if _, err := ledger.RetireProposal(context.Background(), l.store(), "widgets", "feature", noRetirementForge(t)); err == nil || !strings.Contains(err.Error(), "recorded completion") {
+		t.Fatalf("retire a completed Proposal = %v", err)
+	}
+}
+
+func TestRetiringProposalWithUnobservableSubmissionIsRefused(t *testing.T) {
+	l := openProposalLedger(t, map[string]string{"api": ledger.Merged})
+	refreshProposal(t, l, &proposalForgeStub{number: 40})
+	unreachable := func(string) (ledger.CompletionForge, error) { return nil, errors.New("forge unreachable") }
+	if _, err := ledger.RetireProposal(context.Background(), l.store(), "widgets", "feature", unreachable); err == nil || !strings.Contains(err.Error(), "could not be observed") {
+		t.Fatalf("retire with an unobservable Submission = %v", err)
 	}
 	if proposalMeta(t, l).Retired {
 		t.Fatal("refused retirement was recorded")

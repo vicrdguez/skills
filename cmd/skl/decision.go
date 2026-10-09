@@ -10,6 +10,7 @@ import (
 
 	"github.com/urfave/cli/v2"
 	skilldist "github.com/vicrdguez/skills"
+	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/ledger"
 )
 
@@ -30,7 +31,7 @@ type decisionOutput struct {
 	Packet     *skilldist.Packet        `json:"packet"`
 }
 
-func decisionCommands(stdout io.Writer) *cli.Command {
+func decisionCommands(newBackend backendFactory, stdout io.Writer) *cli.Command {
 	return &cli.Command{
 		Name:  "decision",
 		Usage: "Read the ledger-wide Decision Inbox and record explicitly scoped human direction",
@@ -65,7 +66,7 @@ func decisionCommands(stdout io.Writer) *cli.Command {
 				&cli.StringFlag{Name: "proposal"},
 				implementationFormatFlag(),
 			},
-			Action: func(command *cli.Context) error { return runDecisionRetire(command, stdout) },
+			Action: func(command *cli.Context) error { return runDecisionRetire(command, newBackend, stdout) },
 		}},
 	}
 }
@@ -242,7 +243,7 @@ func applyDecisionBatch(stdout io.Writer, format implementationFormatKind, input
 	return renderDecisionResults(stdout, format, results)
 }
 
-func runDecisionRetire(command *cli.Context, stdout io.Writer) error {
+func runDecisionRetire(command *cli.Context, newBackend backendFactory, stdout io.Writer) error {
 	format, err := implementationFormat(command.String("format"))
 	if err != nil {
 		return err
@@ -262,7 +263,19 @@ func runDecisionRetire(command *cli.Context, stdout io.Writer) error {
 	if failure != nil {
 		return renderDecisionUnavailable(stdout, format, failure)
 	}
-	result, err := ledger.RetireProposal(store, project, proposal)
+	forge := func(repository string) (ledger.CompletionForge, error) {
+		owner, name, _ := strings.Cut(repository, "/")
+		backend, err := newBackend(github.RepositoryID{Owner: owner, Name: name})
+		if err != nil {
+			return nil, err
+		}
+		forge, _ := backend.(ledger.CompletionForge)
+		if forge == nil {
+			return nil, fmt.Errorf("the forge adapter cannot observe a Proposal Submission")
+		}
+		return forge, nil
+	}
+	result, err := ledger.RetireProposal(command.Context, store, project, proposal, forge)
 	if err != nil {
 		var refusal *ledger.Refusal
 		if !errors.As(err, &refusal) {
