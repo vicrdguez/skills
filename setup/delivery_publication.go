@@ -206,8 +206,10 @@ func (b *GitHubBackend) applyPresentedPull(ctx context.Context, repository githu
 // readiness. It preserves an observably changed attachment or public body and
 // confirms the result rather than treating a mutation response as proof. This
 // is bounded reconciliation, not an atomic compare-and-set with external writers.
+// An Unpinned presentation is never returned to draft: its ready state marks no
+// reviewed revision, and a ready pull request stays ready.
 func (b *GitHubBackend) correctPresentedReadiness(ctx context.Context, repository github.RepositoryID, attempt presentationAttempt, cause error) error {
-	if !attempt.ready {
+	if !attempt.ready || attempt.expected.Unpinned {
 		return cause
 	}
 	pull, err := b.pullForPresentation(ctx, repository, attempt.number)
