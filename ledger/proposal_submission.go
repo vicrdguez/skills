@@ -238,6 +238,7 @@ func RefreshProposal(ctx context.Context, s *Store, repository github.Repository
 	result.Presentation = &PublicationNote{Status: PullPresented, Detail: fmt.Sprintf("pull request #%d presents Proposal Branch %s as %s", presented, read.meta.Branch, readiness)}
 	if attached == nil {
 		submission := &ForgeAttachment{Repository: identity, Number: presented}
+		s.observeDeliveryUpstream(ctx)
 		result.Commit, err = s.recordProposal(repository, proposal, nil, func(meta *ProposalMeta) { meta.Submission = submission }, "record proposal submission")
 		if err != nil {
 			result.Presentation.Detail += fmt.Sprintf(", but recording it as the Proposal Submission is pending: %v", err)
