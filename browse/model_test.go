@@ -74,7 +74,7 @@ func fixtureLedger(t *testing.T, extras ...func(string)) *ledger.Snapshot {
 	write(t, root, "projects/widgets/proposals/orders/broken/state.json", `{broken`)
 	write(t, root, "projects/widgets/archive/legacy/proposal.json", `{"accepted": "2023-01-01T00:00:00Z"}`)
 	write(t, root, "projects/widgets/archive/legacy/proposal.md", "# Legacy proposal\n\nArchived description.\n")
-	write(t, root, "projects/widgets/archive/legacy/old/state.json", `{"state": "merged", "title": "Old work", "branch": "old"}`)
+	write(t, root, "projects/widgets/archive/legacy/old/state.json", `{"state": "merged", "title": "Old work", "branch": "old", "completion": {"target": {"repository": "acme/widgets", "branch": "main"}}}`)
 	write(t, root, "projects/widgets/archive/legacy/old/intent.md", "# Intent\n")
 	write(t, root, "projects/widgets/archive/legacy/old/behavior.md", "# Behavior\n")
 	write(t, root, "projects/gadgets/project.json", `{"repository": "acme/gadgets"}`)

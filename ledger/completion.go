@@ -265,7 +265,13 @@ func CompletionStatus(s *Store, repository github.RepositoryID, items []string, 
 			terminal = terminal && (child.State == Merged || child.State == Superseded)
 			unclaimed = unclaimed && !child.Claimed
 		}
-		summaries = append(summaries, ProposalStatus{Proposal: proposal, FullyDelivered: full, Retireable: terminal && unclaimed})
+		var meta ProposalMeta
+		path := filepath.Join(projectsRoot, repository.Name, "proposals", proposal, "proposal.json")
+		if err := readJSONAt(s, head, path, &meta); err != nil {
+			return nil, nil, err
+		}
+		open := proposalOpen(meta)
+		summaries = append(summaries, ProposalStatus{Proposal: proposal, FullyDelivered: full && !open, Retireable: terminal && unclaimed && !open})
 	}
 	// Project summaries use stable ordering independent of Go map iteration.
 	sort.Slice(summaries, func(i, j int) bool { return summaries[i].Proposal < summaries[j].Proposal })

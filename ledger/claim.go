@@ -111,7 +111,11 @@ func StartDelivery(s *Store, repository github.RepositoryID, phase string) (*Exe
 
 // StartDeliveryContext permits a waiting CLI to cancel network observation
 // before reservation; a committed acquisition is never undone by cancellation.
-func StartDeliveryContext(ctx context.Context, s *Store, repository github.RepositoryID, phase string) (*Execution, error) {
+func StartDeliveryContext(ctx context.Context, s *Store, repository github.RepositoryID, phase string, auto ...bool) (*Execution, error) {
+	if len(auto) > 1 || len(auto) == 1 && auto[0] && phase != ImplementPhase {
+		return nil, fmt.Errorf("Auto Mode applies only to implement next")
+	}
+	open := len(auto) == 1 && auto[0]
 	if phase != ImplementPhase && phase != WatchdogPhase {
 		return nil, fmt.Errorf("unknown delivery phase %q", phase)
 	}
@@ -152,9 +156,10 @@ func StartDeliveryContext(ctx context.Context, s *Store, repository github.Repos
 				continue
 			}
 			eligible := true
+			proposal, _, _ := strings.Cut(item, "/")
 			for _, dependency := range state.Dependencies {
-				status, err := s.readStateByReferenceAt(head, repository.Name, dependency)
-				if err != nil || status != Merged {
+				satisfied, err := s.dependencySatisfiedAt(head, repository.Name, proposal, dependency)
+				if err != nil || !satisfied {
 					eligible = false
 					break
 				}
@@ -162,7 +167,6 @@ func StartDeliveryContext(ctx context.Context, s *Store, repository github.Repos
 			if !eligible {
 				continue
 			}
-			proposal, _, _ := strings.Cut(item, "/")
 			var meta ProposalMeta
 			if err := readJSONAt(s, head, filepath.Join(projectsRoot, repository.Name, "proposals", proposal, "proposal.json"), &meta); err != nil {
 				return err
@@ -201,6 +205,28 @@ func StartDeliveryContext(ctx context.Context, s *Store, repository github.Repos
 			return err
 		}
 		state.Claim = &Claim{Phase: phase, Basis: head, Inputs: inputs}
+		proposal, _, _ := strings.Cut(candidates[0].item, "/")
+		metaPath := filepath.Join(projectsRoot, repository.Name, "proposals", proposal, "proposal.json")
+		var meta ProposalMeta
+		if err := readJSONAt(s, head, metaPath, &meta); err != nil {
+			return err
+		}
+		opening := phase == ImplementPhase && open && meta.Target == nil && meta.Completion == nil
+		if opening {
+			if meta.Branch == "" {
+				meta.Branch = "proposal/" + proposal
+			}
+			if err := validBranch(meta.Branch); err != nil {
+				return refuse("Proposal Branch is invalid", "repair the recorded Proposal Branch before opening it")
+			}
+			if err := s.requireBranchOwner(repository.Name, proposal, meta.Branch); err != nil {
+				return err
+			}
+			meta.Target = &IntegrationTarget{Repository: project.Repository, Branch: meta.Branch}
+			if err := s.requireCleanPaths(metaPath); err != nil {
+				return err
+			}
+		}
 		// Validate all required report schemas before acquiring a reservation.
 		proposed := &Execution{Project: repository.Name, Repository: project.Repository, Item: candidates[0].item, State: state}
 		if err := s.hydrateExecution(proposed); err != nil {
@@ -218,10 +244,25 @@ func StartDeliveryContext(ctx context.Context, s *Store, repository github.Repos
 		if requiresDecision(proposed) && inputs.Decision == nil {
 			return refuse("continued work requires recorded human direction", "have the human-decision operation record direction and requeue within the frozen Contract")
 		}
+		if phase == ImplementPhase && inputs.Implement == nil && state.Submission == nil {
+			branch := "main"
+			if meta.Target != nil && meta.Completion == nil {
+				branch = meta.Target.Branch
+			}
+			state.Target = &IntegrationTarget{Repository: project.Repository, Branch: branch}
+			proposed.State = state
+		}
 		if err := writeJSON(filepath.Join(s.Root, directory, "state.json"), state); err != nil {
 			return err
 		}
-		if err := s.commit("claim "+phase+" "+repository.Name+"/"+proposed.Item, directory+"/state.json"); err != nil {
+		commitPaths := []string{directory + "/state.json"}
+		if opening {
+			if err := writeJSON(filepath.Join(s.Root, metaPath), meta); err != nil {
+				return err
+			}
+			commitPaths = append(commitPaths, metaPath)
+		}
+		if err := s.commit("claim "+phase+" "+repository.Name+"/"+proposed.Item, commitPaths...); err != nil {
 			return err
 		}
 		acquired, err := s.head()
@@ -270,7 +311,7 @@ func (s *Store) requireBranchOwner(project, item, branch string) error {
 			if err := readJSONAt(s, head, path, &meta); err != nil {
 				return err
 			}
-			if meta.Branch != "" && meta.Branch == branch {
+			if meta.Branch != "" && meta.Branch == branch && other != item {
 				return refuse("branch "+branch+" is already owned by Proposal "+other, "give "+item+" a distinct branch")
 			}
 		}

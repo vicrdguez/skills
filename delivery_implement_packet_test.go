@@ -87,6 +87,18 @@ func TestDeliveryImplementBindsEachProcedure(t *testing.T) {
 	}
 }
 
+func TestImplementProcedureIntegratesRecordedProposalBranch(t *testing.T) {
+	facts := deliveryImplementFacts("next", "initial")
+	facts.TargetBranch = "proposal/add-refunds"
+	packet, err := BuildPacket("implement", InvocationFacts{Delivery: facts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(packet.Instructions, "fetch 'origin' 'proposal/add-refunds'") || strings.Contains(packet.Instructions, "fetch 'origin' main") {
+		t.Fatal("the implement procedure did not integrate the recorded Proposal Branch")
+	}
+}
+
 // TestDeliveryImplementNarrowInspectAndPrepare proves prepare and inspect
 // continuations stay narrow: source facts and the next commands, with no
 // repeated Contract evidence and no bundled skills.

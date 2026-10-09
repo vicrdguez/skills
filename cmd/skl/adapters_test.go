@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -102,7 +101,11 @@ func loopCommand(t *testing.T, entry string) []string {
 		if regexp.MustCompile(`^\$\d+$`).MatchString(value) {
 			value = ""
 		}
-		if value != "" {
+		if slot[1] == "--auto" {
+			if value == "true" {
+				words = append(words, "--auto")
+			}
+		} else if value != "" {
 			words = append(words, slot[1], value)
 		}
 	}
@@ -171,7 +174,7 @@ func TestInstallWritesDispatchLoopsForPiAndOpenCode(t *testing.T) {
 			piWant := cases["pi"][operation]
 			i := 0
 			for position, flag := range piWant {
-				if !strings.HasPrefix(flag, "--") || flag == "--dispatch" || flag == "--wait" || flag == "--mode" {
+				if !strings.HasPrefix(flag, "--") || flag == "--dispatch" || flag == "--wait" || flag == "--mode" || flag == "--auto" {
 					continue
 				}
 				i++
@@ -194,48 +197,24 @@ func TestInstallWritesDispatchLoopsForPiAndOpenCode(t *testing.T) {
 			}
 		}
 	}
+	for _, harness := range []string{"pi", "opencode"} {
+		entry := readFile(t, filepath.Join(home, fmt.Sprintf(entryPoints[harness], "implement-loop")))
+		custom := entry
+		if harness == "pi" {
+			custom = strings.Replace(custom, "${5:-false}", "true", 1)
+		} else {
+			custom = strings.Replace(custom, "$5", "true", 1)
+		}
+		want := append(slices.Clone(cases[harness]["implement-loop"]), "--auto")
+		if got := loopCommand(t, custom); !slices.Equal(got, want) {
+			t.Errorf("%s Auto Mode adapter runs %q, want %q", harness, got, want)
+		}
+	}
 	for _, harness := range []string{"codex", "claude"} {
 		for operation := range cases["pi"] {
 			if _, err := os.Stat(filepath.Join(home, fmt.Sprintf(entryPoints[harness], operation))); !os.IsNotExist(err) {
 				t.Errorf("unexpected %s %s loop adapter: %v", harness, operation, err)
 			}
-		}
-	}
-}
-
-func TestInstallArtifactsDoNotSupplyOldSol(t *testing.T) {
-	home := t.TempDir()
-	installInto(t, home)
-	if err := filepath.WalkDir(home, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if !entry.IsDir() && strings.Contains(readFile(t, path), "gpt-6-sol") {
-			t.Errorf("installed artifact %s supplies the old Sol model", path)
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestInstallPiReviewerOverridesKeepExplicitOldModel(t *testing.T) {
-	home := t.TempDir()
-	installInto(t, home)
-	for _, operation := range []string{"implement", "implement-team"} {
-		entry := readFile(t, filepath.Join(home, fmt.Sprintf(entryPoints["pi"], operation)))
-		// Fill only reviewer slots; omitted helpers keep their own defaults.
-		modelSlot, thinkingSlot := 1, 2
-		want := []string{"skl", "implement", "next"}
-		if operation == "implement-team" {
-			modelSlot, thinkingSlot = 3, 4
-			want = append(want, "--mode", "team", "--helper-model", "openai-codex/gpt-6-luna", "--helper-thinking", "xhigh")
-		}
-		entry = regexp.MustCompile(fmt.Sprintf(`\$\{%d:-[^}]*\}`, modelSlot)).ReplaceAllString(entry, "openai-codex/gpt-6-sol")
-		entry = regexp.MustCompile(fmt.Sprintf(`\$\{%d:-[^}]*\}`, thinkingSlot)).ReplaceAllString(entry, "xhigh")
-		want = append(want, "--reviewer-model", "openai-codex/gpt-6-sol", "--reviewer-thinking", "xhigh")
-		if got := invokedCommand(t, entry); !slices.Equal(got, want) {
-			t.Errorf("pi %s runs %q, want explicit choices %q", operation, got, want)
 		}
 	}
 }

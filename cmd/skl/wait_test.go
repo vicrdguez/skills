@@ -205,6 +205,7 @@ func TestDeliveryCLIWaitClaimsLateWorkWithCanonicalEligibility(t *testing.T) {
 		time.Sleep(45 * time.Second)
 		state := deliveryPersistedState(t, fixture.clone)
 		state.Claim, state.State = nil, ledger.Merged
+		state.Completion = &ledger.TerminalEvidence{Target: *state.Target}
 		deliveryCommitState(t, fixture.clone, state)
 		<-done
 		if out.Status != ledger.WorkAvailable || out.Execution == nil || out.Execution.Item != deliveryTestProposal+"/feature" || elapsed != time.Minute {

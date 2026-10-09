@@ -23,7 +23,7 @@ func dispatchFlags() []cli.Flag {
 
 // supervisorFlags configure the Dispatch itself, so the worker command omits
 // them. repo and remote are bound to their resolved values instead.
-var supervisorFlags = map[string]bool{"repo": true, "remote": true, "format": true, "wait": true, "poll": true, "dispatch": true, "after": true, "worker-model": true, "worker-thinking": true}
+var supervisorFlags = map[string]bool{"repo": true, "remote": true, "format": true, "wait": true, "poll": true, "dispatch": true, "after": true, "auto": true, "worker-model": true, "worker-thinking": true}
 
 // dispatched is one dispatched Claim: how to start its Worker Session, and
 // how to continue once that session returns.

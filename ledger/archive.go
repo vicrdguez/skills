@@ -123,6 +123,9 @@ func (s *Store) archivable(head, project, proposal string) (bool, string, error)
 	if err := readJSONAt(s, head, directory+"/proposal.json", &meta); err != nil {
 		return false, "proposal.json is unreadable, so its membership is unknown", nil
 	}
+	if proposalOpen(meta) {
+		return false, "open Proposal Branch " + meta.Target.Branch + " awaits Proposal completion", nil
+	}
 	slices, err := git(s.Root, "ls-tree", "-d", "--name-only", head+":"+directory)
 	if err != nil {
 		return false, "", gitError(s.Root, []string{"ls-tree", "-d", "--name-only", head + ":" + directory}, err)
