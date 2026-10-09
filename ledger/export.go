@@ -30,30 +30,19 @@ func ExportProposal(store *Store, repository github.RepositoryID, proposalName, 
 	if err != nil {
 		return nil, err
 	}
-	if err := store.refuseExportDestination(destination); err != nil {
+	if err := store.requireExportDestination(destination); err != nil {
 		return nil, err
 	}
 	snapshot, err := store.Snapshot()
 	if err != nil {
 		return nil, err
 	}
-	declaration, files, err := snapshot.exportDeclaration(repository, proposalName)
+	declaration, err := snapshot.exportDeclaration(repository, proposalName)
 	if err != nil {
 		return nil, err
 	}
-	contents, err := json.MarshalIndent(declaration, "", "  ")
-	if err != nil {
+	if err := writeIntake(destination, declaration); err != nil {
 		return nil, err
-	}
-	files["proposal.json"] = append(contents, '\n')
-	for name, contents := range files {
-		path := filepath.Join(destination, filepath.FromSlash(name))
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return nil, err
-		}
-		if err := os.WriteFile(path, contents, 0o644); err != nil {
-			return nil, err
-		}
 	}
 	return &Export{
 		Project: repository.Name, Repository: repository.Owner + "/" + repository.Name, Proposal: proposalName,
@@ -61,9 +50,35 @@ func ExportProposal(store *Store, repository github.RepositoryID, proposalName, 
 	}, nil
 }
 
-// refuseExportDestination accepts an absent or empty directory outside the
+// writeIntake writes a declaration in the intake layout LoadDeclaration
+// reads: proposal.json, proposal.md and one directory of Contract files per
+// Slice.
+func writeIntake(destination string, declaration *ProposalDeclaration) error {
+	contents, err := json.MarshalIndent(declaration, "", "  ")
+	if err != nil {
+		return err
+	}
+	files := map[string][]byte{"proposal.json": append(contents, '\n'), "proposal.md": declaration.Description}
+	for _, slice := range declaration.Slices {
+		for name, contents := range slice.contract {
+			files[filepath.Join(slice.Name, name)] = contents
+		}
+	}
+	for name, contents := range files {
+		path := filepath.Join(destination, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(path, contents, 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// requireExportDestination accepts an absent or empty directory outside the
 // ledger clone.
-func (s *Store) refuseExportDestination(destination string) error {
+func (s *Store) requireExportDestination(destination string) error {
 	root, err := filepath.EvalSymlinks(s.Root)
 	if err != nil {
 		return err
@@ -103,13 +118,13 @@ func (s *Store) refuseExportDestination(destination string) error {
 }
 
 // exportDeclaration synthesizes the intake declaration of one active
-// Proposal from its records at this revision, and returns the description
-// and frozen Contract bytes keyed by their intake path.
-func (v *Snapshot) exportDeclaration(repository github.RepositoryID, name string) (*ProposalDeclaration, map[string][]byte, error) {
+// Proposal from its records at this revision, with its description and
+// frozen Contract bytes.
+func (v *Snapshot) exportDeclaration(repository github.RepositoryID, name string) (*ProposalDeclaration, error) {
 	identity := repository.Owner + "/" + repository.Name
 	project := v.projects[repository.Name]
 	if project == nil {
-		return nil, nil, refuse(
+		return nil, refuse(
 			"no Project for "+identity+" at ledger revision "+v.Revision,
 			"accept a Proposal for this repository first, or check --repo and --remote",
 		)
@@ -123,68 +138,71 @@ func (v *Snapshot) exportDeclaration(repository github.RepositoryID, name string
 		}
 	}
 	if active == nil && archived != nil {
-		return nil, nil, refuse(
+		return nil, refuse(
 			"Proposal "+name+" of project "+project.name+" is archived at ledger revision "+v.Revision,
 			"read its records with `skl browse proposal --project "+project.name+" --proposal "+name+" --archived`; archived Proposals are not exported",
 		)
 	}
 	if active == nil {
-		return nil, nil, refuse(
+		return nil, refuse(
 			"no active Proposal "+name+" in project "+project.name+" at ledger revision "+v.Revision,
 			"select a Proposal listed by `skl browse project --project "+project.name+"`",
 		)
 	}
 	read, err := v.readOne(project, active)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if read.repository != identity {
-		return nil, nil, refuse(
+		return nil, refuse(
 			"project "+project.name+" is recorded for "+read.repository+", not "+identity,
 			"choose the correct source repository or repair the ledger Project with human direction",
 		)
 	}
 	proposal := read.proposals[0]
 	if len(proposal.diagnostics) > 0 {
-		return nil, nil, damagedExport(name, v.Revision, proposal.diagnostics[0].Problem)
+		return nil, damagedExport(name, v.Revision, proposal.diagnostics[0].Problem)
 	}
-	directory := v.proposalPath(project.name, active)
-	paths := []string{directory + "/proposal.md"}
+	directory := v.proposalPath(project.name, active) + "/"
+	paths := []string{directory + "proposal.md"}
 	for _, slice := range active.slices {
 		for file := range slice.files {
 			if contractFiles[file] {
-				paths = append(paths, directory+"/"+slice.name+"/"+file)
+				paths = append(paths, directory+slice.name+"/"+file)
 			}
 		}
 	}
 	blobs, err := v.blobs(paths)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	files := map[string][]byte{}
 	for _, path := range paths {
-		contents, present := blobs[path]
-		if !present {
-			return nil, nil, damagedExport(name, v.Revision, strings.TrimPrefix(path, directory+"/")+" is not a committed file")
+		if _, present := blobs[path]; !present {
+			return nil, damagedExport(name, v.Revision, strings.TrimPrefix(path, directory)+" is not a committed file")
 		}
-		files[strings.TrimPrefix(path, directory+"/")] = contents
 	}
-	declaration := &ProposalDeclaration{Proposal: name, Branch: proposal.meta.Branch, ParentTitle: proposal.meta.ParentTitle}
+	declaration := &ProposalDeclaration{Proposal: name, Branch: proposal.meta.Branch, ParentTitle: proposal.meta.ParentTitle, Description: blobs[directory+"proposal.md"]}
 	for _, slice := range proposal.slices {
 		if !slice.readable {
-			return nil, nil, damagedExport(name, v.Revision, "the state of Slice "+slice.tree.name+" is unreadable")
+			return nil, damagedExport(name, v.Revision, "the state of Slice "+slice.tree.name+" is unreadable")
+		}
+		contract := map[string][]byte{}
+		for file := range slice.tree.files {
+			if contractFiles[file] {
+				contract[file] = blobs[directory+slice.tree.name+"/"+file]
+			}
 		}
 		for _, required := range []string{"intent.md", "behavior.md"} {
-			if !slice.tree.files[required] {
-				return nil, nil, damagedExport(name, v.Revision, "Slice "+slice.tree.name+" misses "+required)
+			if contract[required] == nil {
+				return nil, damagedExport(name, v.Revision, "Slice "+slice.tree.name+" misses "+required)
 			}
 		}
 		declaration.Slices = append(declaration.Slices, SliceDeclaration{
 			Name: slice.tree.name, Title: slice.state.Title, Branch: slice.state.Branch,
-			Depends: slice.state.Dependencies, Superseded: slice.state.State == Superseded,
+			Depends: slice.state.Dependencies, Superseded: slice.state.State == Superseded, contract: contract,
 		})
 	}
-	return declaration, files, nil
+	return declaration, nil
 }
 
 func damagedExport(proposal, revision, problem string) error {

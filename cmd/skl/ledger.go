@@ -280,7 +280,9 @@ func ledgerCommands(newBackend backendFactory, stdout io.Writer) *cli.Command {
 				if err != nil {
 					return refuse(err)
 				}
-				return renderLedgerOutcome(stdout, format, ledgerOutcome{Status: "exported", Export: export, kind: "ledger-export", facts: exportFacts{Status: "exported", Export: export}})
+				outcome := ledgerOutcome{Status: "exported", Export: export, kind: "ledger-export"}
+				outcome.facts = outcome
+				return renderLedgerOutcome(stdout, format, outcome)
 			},
 		}, presentCommand(newBackend, stdout)},
 	}
@@ -437,12 +439,6 @@ func ledgerMarkdown(outcome ledgerOutcome) string {
 		report.WriteString(document.Contents)
 	}
 	return report.String()
-}
-
-// exportFacts are one written intake directory.
-type exportFacts struct {
-	Status string
-	Export *ledger.Export
 }
 
 // proposalFacts are one acceptance or publication outcome: ledger replication,
