@@ -92,19 +92,21 @@ type SliceState struct {
 }
 
 // ProposalMeta is the persisted proposal.json: its accepted identity, open
-// Integration Target and eventual completion. Directory membership defines
-// the slices; no child inventory is stored.
+// Integration Target, Proposal Submission and eventual completion into main.
+// Directory membership defines the slices; no child inventory is stored.
 type ProposalMeta struct {
 	Accepted    string             `json:"accepted"`
 	Branch      string             `json:"branch,omitempty"`
 	ParentTitle string             `json:"parent_title,omitempty"`
 	ParentIssue *ForgeAttachment   `json:"parent_issue,omitempty"`
 	Target      *IntegrationTarget `json:"integration_target,omitempty"`
+	Submission  *ForgeAttachment   `json:"submission,omitempty"`
 	Completion  *TerminalEvidence  `json:"completion,omitempty"`
 	// Retired marks explicit human-directed retirement of a fully terminal,
-	// unclaimed proposal. It is an indication only: merged history, frozen
-	// Contracts, dependencies, and source work remain untouched, and it never
-	// asserts that every slice was delivered.
+	// unclaimed proposal. It spends an open Proposal Branch without completion.
+	// Merged history, frozen Contracts, dependencies, source work and the
+	// remote branch remain untouched, and it never asserts that every slice
+	// was delivered.
 	Retired bool `json:"retired,omitempty"`
 }
 

@@ -23,11 +23,13 @@ var ErrPresentationUncertain = errors.New("pull request presentation outcome is 
 // PullPresentation contains only deliberately public material. Approved is a
 // semantic delivery fact; the forge adapter owns draft/readiness mechanics.
 // Current, when set, reports whether the selected local result still stands;
-// the adapter consults it before each additional forge write.
+// the adapter consults it before each additional forge write. Unpinned
+// presents whatever the branch holds rather than one reviewed Head: no head is
+// checked, and a ready pull request is never returned to draft.
 type PullPresentation struct {
 	Number                          int
 	Title, Body, Branch, Head, Base string
-	Approved                        bool
+	Approved, Unpinned              bool
 	Current                         func() error `json:"-"`
 }
 

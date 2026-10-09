@@ -121,7 +121,8 @@ type InboxEntry struct {
 
 // RetirementResult reports one explicit proposal retirement. Merged and
 // Superseded name the preserved child outcomes; PartialDelivery is true when
-// at least one slice was abandoned rather than delivered.
+// at least one slice was abandoned rather than delivered, or the open Proposal
+// Branch holding the merged slices never completed into main.
 type RetirementResult struct {
 	Project         string           `json:"project"`
 	Proposal        string           `json:"proposal"`
@@ -949,9 +950,12 @@ func replicateDecision(s *Store, result *DecisionResult) {
 }
 
 // RetireProposal records explicit human-directed retirement of one proposal
-// once every child is Merged or Superseded and unclaimed. It preserves merged
-// history, frozen contracts, dependencies, and source work, and reports
-// partial delivery rather than all-delivered completion.
+// once every child is Merged or Superseded and unclaimed. A proposal without
+// an open Proposal Branch also needs a Superseded child; an open branch whose
+// Proposal Submission has no recorded completion is spent by retirement. It
+// preserves merged history, frozen contracts, dependencies, source work and
+// the remote branch, and reports partial delivery rather than all-delivered
+// completion.
 func RetireProposal(s *Store, project, proposal string) (*RetirementResult, error) {
 	if !ValidRecordName(project) || !ValidRecordName(proposal) {
 		return nil, refuse(
@@ -1030,7 +1034,10 @@ func RetireProposal(s *Store, project, proposal string) (*RetirementResult, erro
 				"retire only a proposal whose every slice is Merged or Superseded and unclaimed",
 			)
 		}
-		if len(result.Superseded) == 0 {
+		// An opened Proposal Branch without recorded completion may be
+		// abandoned even when every Slice merged into it; retirement spends it.
+		branchUncompleted := meta.Target != nil && meta.Completion == nil
+		if len(result.Superseded) == 0 && !branchUncompleted {
 			return refuse("proposal "+proposal+" has no Superseded slices",
 				"this operation retires abandoned work, not all-delivered proposals; leave completion observation to its own operation")
 		}

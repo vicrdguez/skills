@@ -5,7 +5,29 @@ import (
 	"strings"
 )
 
-func proposalOpen(meta ProposalMeta) bool { return meta.Target != nil && meta.Completion == nil }
+// proposalOpen reports a Proposal Branch that still collects Slice merges.
+// Completion or retirement spends it for good.
+func proposalOpen(meta ProposalMeta) bool {
+	return meta.Target != nil && meta.Completion == nil && !meta.Retired
+}
+
+// Proposal Branch states shown by status and browse.
+const (
+	BranchOpen  = "open"
+	BranchSpent = "spent"
+)
+
+// proposalBranchState is BranchOpen, BranchSpent, or empty for a Proposal
+// whose branch was never opened.
+func proposalBranchState(meta ProposalMeta) string {
+	switch {
+	case meta.Target == nil:
+		return ""
+	case proposalOpen(meta):
+		return BranchOpen
+	}
+	return BranchSpent
+}
 
 // dependencyBuildable requires a confirmed merge into a branch the dependent
 // can build on. Another Proposal's branch counts only after that Proposal has

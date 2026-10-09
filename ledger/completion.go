@@ -174,10 +174,19 @@ type StatusItem struct {
 	Observation  string             `json:"observation,omitempty"`
 }
 
+// ProposalStatus is one Proposal's committed accounting and Proposal
+// Submission facts. Refresh and Observation carry this status run's Proposal
+// Submission observation; they are reported, never recorded.
 type ProposalStatus struct {
-	Proposal       string `json:"proposal"`
-	FullyDelivered bool   `json:"fully_delivered"`
-	Retireable     bool   `json:"retireable"`
+	Proposal       string            `json:"proposal"`
+	FullyDelivered bool              `json:"fully_delivered"`
+	Retireable     bool              `json:"retireable"`
+	Branch         string            `json:"branch,omitempty"`
+	BranchState    string            `json:"branch_state,omitempty"`
+	Submission     *ForgeAttachment  `json:"submission,omitempty"`
+	Completion     *TerminalEvidence `json:"completion,omitempty"`
+	Refresh        *ProposalRefresh  `json:"refresh,omitempty"`
+	Observation    string            `json:"observation,omitempty"`
 }
 
 // StatusItems enumerates only the selected project's current records, or one
@@ -271,7 +280,11 @@ func CompletionStatus(s *Store, repository github.RepositoryID, items []string, 
 			return nil, nil, err
 		}
 		open := proposalOpen(meta)
-		summaries = append(summaries, ProposalStatus{Proposal: proposal, FullyDelivered: full && !open, Retireable: terminal && unclaimed && !open})
+		summary := ProposalStatus{Proposal: proposal, FullyDelivered: full && !open, Retireable: terminal && unclaimed && !open, BranchState: proposalBranchState(meta), Submission: meta.Submission, Completion: meta.Completion}
+		if meta.Target != nil {
+			summary.Branch = meta.Branch
+		}
+		summaries = append(summaries, summary)
 	}
 	// Project summaries use stable ordering independent of Go map iteration.
 	sort.Slice(summaries, func(i, j int) bool { return summaries[i].Proposal < summaries[j].Proposal })
