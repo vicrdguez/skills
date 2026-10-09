@@ -115,10 +115,10 @@ func loopCommand(t *testing.T, entry string) []string {
 func TestInstallPassesEachModeAndItsSlotsWithPiDefaults(t *testing.T) {
 	home := t.TempDir()
 	installInto(t, home)
-	const sol, luna = "openai-codex/gpt-6-sol", "openai-codex/gpt-6-luna"
+	const sol, luna = "openai-codex/gpt-6.1-sol", "openai-codex/gpt-6-luna"
 	piDefaults := map[string][]string{
-		"implement":      {"--reviewer-model", sol, "--reviewer-thinking", "xhigh"},
-		"implement-team": {"--mode", "team", "--helper-model", luna, "--helper-thinking", "xhigh", "--reviewer-model", sol, "--reviewer-thinking", "xhigh"},
+		"implement":      {"--reviewer-model", sol, "--reviewer-thinking", "high"},
+		"implement-team": {"--mode", "team", "--helper-model", luna, "--helper-thinking", "xhigh", "--reviewer-model", sol, "--reviewer-thinking", "high"},
 	}
 	empty := map[string][]string{
 		"implement":      {"--reviewer-model", "", "--reviewer-thinking", ""},
@@ -144,11 +144,11 @@ func TestInstallPassesEachModeAndItsSlotsWithPiDefaults(t *testing.T) {
 func TestInstallWritesDispatchLoopsForPiAndOpenCode(t *testing.T) {
 	home := t.TempDir()
 	installInto(t, home)
-	const sol = "openai-codex/gpt-6-sol"
+	const sol = "openai-codex/gpt-6.1-sol"
 	cases := map[string]map[string][]string{
 		"pi": {
-			"implement-loop":      {"skl", "implement", "next", "--dispatch", "--wait", "--worker-model", sol, "--worker-thinking", "xhigh", "--reviewer-model", "openai-codex/gpt-6-astra", "--reviewer-thinking", "low"},
-			"implement-team-loop": {"skl", "implement", "next", "--mode", "team", "--dispatch", "--wait", "--worker-model", sol, "--worker-thinking", "xhigh", "--helper-model", "openai-codex/gpt-6-luna", "--helper-thinking", "xhigh", "--reviewer-model", sol, "--reviewer-thinking", "xhigh"},
+			"implement-loop":      {"skl", "implement", "next", "--dispatch", "--wait", "--worker-model", sol, "--worker-thinking", "high", "--reviewer-model", "openai-codex/gpt-6-astra", "--reviewer-thinking", "low"},
+			"implement-team-loop": {"skl", "implement", "next", "--mode", "team", "--dispatch", "--wait", "--worker-model", sol, "--worker-thinking", "high", "--helper-model", "openai-codex/gpt-6-luna", "--helper-thinking", "xhigh", "--reviewer-model", sol, "--reviewer-thinking", "high"},
 			"watchdog-loop":       {"skl", "watchdog", "next", "--dispatch", "--wait", "--worker-model", "openai-codex/gpt-6-astra", "--worker-thinking", "high"},
 		},
 		"opencode": {

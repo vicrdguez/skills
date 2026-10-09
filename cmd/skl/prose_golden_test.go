@@ -227,7 +227,7 @@ func TestAgentProseGoldens(t *testing.T) {
 	g.capture("outcome-watchdog-next-no-work", worker, "watchdog", "next", "--repo", source)
 	released := proseMatch(t, proseClaimLine, g.capture("implement-start", worker, "implement", "next", "--repo", source))
 	g.capture("outcome-implement-release", worker, "implement", "release", "--repo", source, "--item", proseItem, "--claim", released)
-	reviewer := []string{"--reviewer-model", "openai-codex/gpt-6-sol", "--reviewer-thinking", "xhigh"}
+	reviewer := []string{"--reviewer-model", "openai-codex/gpt-6.1-sol", "--reviewer-thinking", "high"}
 	team := append([]string{"--mode", "team", "--helper-model", "openai-codex/gpt-6-luna", "--helper-thinking", "xhigh"}, reviewer...)
 	released = proseMatch(t, proseClaimLine, g.capture("implement-start-reviewer", worker, append([]string{"implement", "next", "--repo", source}, reviewer...)...))
 	g.run(worker, "implement", "release", "--repo", source, "--item", proseItem, "--claim", released)
