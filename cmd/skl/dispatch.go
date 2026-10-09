@@ -40,6 +40,7 @@ type dispatchedFacts struct {
 	Status   string
 	Phase    string
 	Previous *ledger.ClaimEnding
+	Merges   []ledger.MergeAttempt
 	dispatched
 }
 
@@ -56,7 +57,7 @@ type stoppedFacts struct {
 // dispatchOutput answers a Dispatch that claimed execution's Work Item. The
 // worker command resumes that exact Claim as the Execution Skill next would
 // have returned; the continue command repeats this Dispatch after it.
-func dispatchOutput(c *cli.Context, phase string, repository setup.RepositoryContext, execution *ledger.Execution, previous *ledger.ClaimEnding) deliveryOutput {
+func dispatchOutput(c *cli.Context, phase string, repository setup.RepositoryContext, execution *ledger.Execution, previous *ledger.ClaimEnding, merges []ledger.MergeAttempt) deliveryOutput {
 	item, claim := execution.Item, execution.Claim.Commit
 	worker := []string{claimCommand(phase, "resume", repository, item, claim), "--dispatched"}
 	continuation := []string{nextInvocation(phase, repository)}
@@ -74,8 +75,8 @@ func dispatchOutput(c *cli.Context, phase string, repository setup.RepositoryCon
 	}
 	d := dispatched{Item: item, Claim: claim, Worker: strings.Join(worker, " "), Continue: strings.Join(continuation, " "),
 		WorkerModel: c.String("worker-model"), WorkerThinking: c.String("worker-thinking")}
-	return deliveryOutput{Status: "dispatched", Previous: previous, Dispatch: &d, kind: "dispatched",
-		facts: dispatchedFacts{Status: "dispatched", Phase: phase, Previous: previous, dispatched: d}}
+	return deliveryOutput{Status: "dispatched", Previous: previous, Dispatch: &d, Merges: merges, kind: "dispatched",
+		facts: dispatchedFacts{Status: "dispatched", Phase: phase, Previous: previous, Merges: merges, dispatched: d}}
 }
 
 // stoppedOutput answers a continuation whose Claim ended without a handoff.

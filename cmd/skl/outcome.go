@@ -35,6 +35,7 @@ type refusalFacts struct {
 	// Stop replaces the rerun: the refusal ends a Supervisor's lane.
 	Stop     bool
 	Previous *ledger.ClaimEnding
+	Merges   []ledger.MergeAttempt
 }
 
 // phaseFacts serve the outcomes that concern one delivery phase and nothing
@@ -44,6 +45,7 @@ type phaseFacts struct {
 	Phase         string
 	StatusCommand string
 	Previous      *ledger.ClaimEnding
+	Merges        []ledger.MergeAttempt
 }
 
 type releasedFacts struct {
@@ -74,6 +76,7 @@ type handoffFacts struct {
 	AlreadyCompleted bool
 	Notes            []noteFact
 	Present          string
+	Merge            *ledger.MergeAttempt
 }
 
 type noteFact struct {
