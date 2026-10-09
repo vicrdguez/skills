@@ -124,6 +124,14 @@ func Accept(ctx context.Context, store *Store, repository github.RepositoryID, d
 		} else if !os.IsNotExist(err) {
 			return err
 		} else {
+			for _, slice := range declaration.Slices {
+				if slice.Superseded {
+					return refuse(
+						"slice "+slice.Name+" of new proposal "+declaration.Proposal+" is declared superseded, and acceptance never supersedes",
+						"remove \"superseded\" from slice "+slice.Name+", or leave the slice out of the declaration",
+					)
+				}
+			}
 			branches := map[string]string{declaration.Branch: "Proposal " + declaration.Proposal}
 			if err := store.requireBranchOwner(project.Name, "Proposal "+declaration.Proposal, declaration.Branch); err != nil {
 				return err

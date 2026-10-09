@@ -316,10 +316,11 @@ func writeProposal(t *testing.T, parent string, proposal proposalSpec) string {
 }
 
 type proposalSliceSpec struct {
-	name   string
-	title  string
-	branch string
-	files  map[string]string
+	name       string
+	title      string
+	branch     string
+	superseded bool
+	files      map[string]string
 }
 
 type proposalSpec struct {
@@ -355,6 +356,9 @@ func (p proposalSpec) declaration() string {
 		}
 		if edges := p.depends[slice.name]; len(edges) > 0 {
 			builder.WriteString(`, "depends": ["` + strings.Join(edges, `", "`) + `"]`)
+		}
+		if slice.superseded {
+			builder.WriteString(`, "superseded": true`)
 		}
 		builder.WriteString(`}`)
 	}

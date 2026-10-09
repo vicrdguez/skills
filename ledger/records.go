@@ -257,6 +257,12 @@ func (s *Store) compareAccepted(project string, declaration *ProposalDeclaration
 				"a changed declared relationship requires a renewed Proposal rather than in-place replacement",
 			)
 		}
+		if (state.State == Superseded) != slice.Superseded {
+			return refuse(
+				"slice "+slice.Name+" of proposal "+declaration.Proposal+" is already accepted with a different superseded declaration",
+				"a changed declared relationship requires a renewed Proposal rather than in-place replacement",
+			)
+		}
 		if !sameDependencies(state.Dependencies, declaration.CanonicalDependencies(slice)) {
 			return refuse(
 				"slice "+slice.Name+" of proposal "+declaration.Proposal+" is already accepted with different dependencies",

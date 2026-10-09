@@ -29,6 +29,7 @@ type ledgerOutcome struct {
 	Authoring       *proseAuthoring          `json:"authoring,omitempty"`
 	Readback        *ledger.Readback         `json:"readback,omitempty"`
 	Document        *ledger.ContractDocument `json:"document,omitempty"`
+	Export          *ledger.Export           `json:"export,omitempty"`
 	ReadbackCommand string                   `json:"readback_command,omitempty"`
 	// Presentation and Guidance carry one current-view pull request attempt.
 	Presentation *ledger.Presentation  `json:"presentation,omitempty"`
@@ -250,6 +251,37 @@ func ledgerCommands(newBackend backendFactory, stdout io.Writer) *cli.Command {
 				}
 				return renderLedgerOutcome(stdout, format, ledgerOutcome{Status: "shown", Document: &document})
 			},
+		}, {
+			Name:  "export",
+			Usage: "Write one active accepted proposal back out as an intake directory",
+			Flags: []cli.Flag{
+				&cli.PathFlag{Name: "repo", Value: "."},
+				&cli.StringFlag{Name: "remote"},
+				&cli.StringFlag{Name: "proposal", Required: true},
+				&cli.PathFlag{Name: "to", Required: true, Usage: "Absent or empty destination directory"},
+				implementationFormatFlag(),
+			},
+			Action: func(command *cli.Context) error {
+				format, err := implementationFormat(command.String("format"))
+				if err != nil {
+					return err
+				}
+				rerun := boundCommand(command, "skl ledger export")
+				refuse := func(err error) error { return refuseLedger(stdout, format, rerun, err) }
+				repository, err := setup.ResolveRepository(command.Path("repo"), command.String("remote"))
+				if err != nil {
+					return refuse(err)
+				}
+				store, failure := openConfiguredLedger()
+				if failure != nil {
+					return refuse(failure)
+				}
+				export, err := ledger.ExportProposal(store, repository.Repository, command.String("proposal"), command.Path("to"))
+				if err != nil {
+					return refuse(err)
+				}
+				return renderLedgerOutcome(stdout, format, ledgerOutcome{Status: "exported", Export: export, kind: "ledger-export", facts: exportFacts{Status: "exported", Export: export}})
+			},
 		}, presentCommand(newBackend, stdout)},
 	}
 }
@@ -405,6 +437,12 @@ func ledgerMarkdown(outcome ledgerOutcome) string {
 		report.WriteString(document.Contents)
 	}
 	return report.String()
+}
+
+// exportFacts are one written intake directory.
+type exportFacts struct {
+	Status string
+	Export *ledger.Export
 }
 
 // proposalFacts are one acceptance or publication outcome: ledger replication,

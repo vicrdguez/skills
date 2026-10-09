@@ -18,22 +18,25 @@ var contractFiles = map[string]bool{"intent.md": true, "behavior.md": true, "pla
 
 // SliceDeclaration is one declared slice of a proposal intake.
 type SliceDeclaration struct {
-	Name     string   `json:"name"`
-	Title    string   `json:"title"`
-	Branch   string   `json:"branch"`
-	Depends  []string `json:"depends"`
-	contract map[string][]byte
+	Name    string   `json:"name"`
+	Title   string   `json:"title"`
+	Branch  string   `json:"branch"`
+	Depends []string `json:"depends,omitempty"`
+	// Superseded declares a recorded Superseded Slice. Acceptance never
+	// supersedes, so a new Proposal declaring it is refused.
+	Superseded bool `json:"superseded,omitempty"`
+	contract   map[string][]byte
 }
 
 // ProposalDeclaration is the parsed intake declaration of one proposal.
 type ProposalDeclaration struct {
 	Proposal    string             `json:"proposal"`
-	Branch      string             `json:"branch"`
-	ParentTitle string             `json:"parent_title"`
+	Branch      string             `json:"branch,omitempty"`
+	ParentTitle string             `json:"parent_title,omitempty"`
 	Slices      []SliceDeclaration `json:"slices"`
-	Description []byte
-	IssueBodies map[string][]byte
-	ParentBody  []byte
+	Description []byte             `json:"-"`
+	IssueBodies map[string][]byte  `json:"-"`
+	ParentBody  []byte             `json:"-"`
 }
 
 // LoadDeclaration reads and validates the complete intake declaration from
