@@ -51,7 +51,7 @@ skl ledger show --repo <path> --item <proposal>/<slice>
 |---|---|
 | `next` (alias `start`) | Selects one eligible Slice in this repository's Project, records a Claim, and returns the Execution Skill. Rework precedes new work; older acceptance precedes newer. Claimed Slices and Slices with unmerged blockers are skipped. |
 | `resume --item --claim` | Continues exactly that reservation. It cannot take over or clear a later one. |
-| `prepare` | Creates or safely reuses the planned branch and `.worktrees/<branch>`; never resets, rebases or stashes. |
+| `prepare` | Creates or safely reuses the planned branch and `.worktrees/<branch>`; never resets, rebases or stashes. Watchdog preparation of a Slice targeting a Proposal Branch also performs the Integration Merge: it fetches the branch and, when its head is not already an ancestor, commits one ordinary merge of it into the work branch. A conflict aborts the merge, leaves the worktree clean and refuses; the review then ends in `rework`. |
 | `inspect` | Read-only look at the prepared workspace; returns a narrow continuation. |
 | `submit --head --target --body [--public-body]` | Records the phase report, moves Workflow State and releases the Claim in one ledger commit, then attempts push and public presentation. |
 | `needs-human --body [--head --target]` | Implement only. Records a blocker question for a human and releases the Claim. |

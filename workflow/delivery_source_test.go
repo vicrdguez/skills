@@ -19,7 +19,7 @@ func TestDeliverySourceRefusesUnsupportedSchemaObjectFormat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ValidateDeliverySource(root, "feature-sha256", source.Head, source.Target, "", false); err == nil {
+	if err := ValidateDeliverySource(root, "feature-sha256", source.Head, source.Target, "", false, ""); err == nil {
 		t.Fatal("source validation accepted an identity the schema-1 report cannot record")
 	}
 	if got := gitOutput(t, source.Worktree, "rev-parse", "HEAD"); got != head {
@@ -53,7 +53,7 @@ func TestDeliverySourcePrepareCreatesInitialBranch(t *testing.T) {
 		t.Fatalf("created branch head = %s; want %s", got, target)
 	}
 
-	inspection, err := InspectDeliverySource(root, "feature-one", "", source.Target, "")
+	inspection, err := InspectDeliverySource(root, "feature-one", "", source.Target, "", "")
 	if err != nil {
 		t.Fatalf("InspectDeliverySource() error = %v", err)
 	}
@@ -192,16 +192,16 @@ func TestDeliverySourceInspectRefusesUncleanOrWrongHead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PrepareDeliverySource() error = %v", err)
 	}
-	if _, err := InspectDeliverySource(root, "feature-inspect", "", source.Target, ""); err != nil {
+	if _, err := InspectDeliverySource(root, "feature-inspect", "", source.Target, "", ""); err != nil {
 		t.Fatalf("clean InspectDeliverySource() error = %v", err)
 	}
-	if _, err := InspectDeliverySource(root, "feature-inspect", strings.Repeat("b", 40), source.Target, ""); err == nil {
+	if _, err := InspectDeliverySource(root, "feature-inspect", strings.Repeat("b", 40), source.Target, "", ""); err == nil {
 		t.Fatal("InspectDeliverySource() ignored a required head mismatch")
 	}
 	if err := os.WriteFile(filepath.Join(source.Worktree, "scratch.txt"), []byte("scratch\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := InspectDeliverySource(root, "feature-inspect", "", source.Target, ""); err == nil {
+	if _, err := InspectDeliverySource(root, "feature-inspect", "", source.Target, "", ""); err == nil {
 		t.Fatal("InspectDeliverySource() accepted a dirty worktree as unambiguous evidence")
 	}
 }
@@ -214,23 +214,23 @@ func TestDeliverySourceValidateChecksHeadAndTarget(t *testing.T) {
 		t.Fatalf("PrepareDeliverySource() error = %v", err)
 	}
 	head, target := source.Head, source.Target
-	if err := ValidateDeliverySource(root, "feature-validate", head, target, head, false); err != nil {
+	if err := ValidateDeliverySource(root, "feature-validate", head, target, head, false, ""); err != nil {
 		t.Fatalf("valid ValidateDeliverySource() error = %v", err)
 	}
 	other := deliveryDanglingCommit(t, root)
-	if err := ValidateDeliverySource(root, "feature-validate", other, target, other, false); err == nil {
+	if err := ValidateDeliverySource(root, "feature-validate", other, target, other, false, ""); err == nil {
 		t.Fatal("ValidateDeliverySource() accepted a branch head other than the actual one")
 	}
-	if err := ValidateDeliverySource(root, "feature-validate", head, other, head, false); err == nil {
+	if err := ValidateDeliverySource(root, "feature-validate", head, other, head, false, ""); err == nil {
 		t.Fatal("ValidateDeliverySource() accepted a target that is not an ancestor of the head")
 	}
-	if err := ValidateDeliverySource(root, "feature-validate", head[:12], target, head[:12], false); err == nil {
+	if err := ValidateDeliverySource(root, "feature-validate", head[:12], target, head[:12], false, ""); err == nil {
 		t.Fatal("ValidateDeliverySource() accepted an abbreviated head object ID")
 	}
 	if err := os.WriteFile(filepath.Join(source.Worktree, "dirty.txt"), []byte("dirty\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := ValidateDeliverySource(root, "feature-validate", head, target, head, false); err == nil {
+	if err := ValidateDeliverySource(root, "feature-validate", head, target, head, false, ""); err == nil {
 		t.Fatal("ValidateDeliverySource() accepted a dirty worktree")
 	}
 }
@@ -248,20 +248,20 @@ func TestDeliverySourceValidateReviewedDistinction(t *testing.T) {
 	if final == reviewed {
 		t.Fatal("test setup did not add a post-review marker commit")
 	}
-	if err := ValidateDeliverySource(root, "feature-review", final, source.Target, reviewed, true); err != nil {
+	if err := ValidateDeliverySource(root, "feature-review", final, source.Target, reviewed, true, ""); err != nil {
 		t.Fatalf("marker-permitted ValidateDeliverySource() error = %v", err)
 	}
-	if err := ValidateDeliverySource(root, "feature-review", final, source.Target, reviewed, false); err == nil {
+	if err := ValidateDeliverySource(root, "feature-review", final, source.Target, reviewed, false, ""); err == nil {
 		t.Fatal("ValidateDeliverySource() accepted a distinct final head without marker permission")
 	}
-	if err := ValidateDeliverySource(root, "feature-review", final, source.Target, final, false); err != nil {
+	if err := ValidateDeliverySource(root, "feature-review", final, source.Target, final, false, ""); err != nil {
 		t.Fatalf("equal reviewed/final ValidateDeliverySource() error = %v", err)
 	}
-	if err := ValidateDeliverySource(root, "feature-review", final, source.Target, strings.Repeat("c", 40), true); err == nil {
+	if err := ValidateDeliverySource(root, "feature-review", final, source.Target, strings.Repeat("c", 40), true, ""); err == nil {
 		t.Fatal("ValidateDeliverySource() accepted an unavailable reviewed revision")
 	}
 	other := deliveryDanglingCommit(t, root)
-	if err := ValidateDeliverySource(root, "feature-review", final, source.Target, other, true); err == nil {
+	if err := ValidateDeliverySource(root, "feature-review", final, source.Target, other, true, ""); err == nil {
 		t.Fatal("ValidateDeliverySource() accepted a non-ancestral reviewed revision")
 	}
 }
@@ -277,7 +277,7 @@ func TestDeliverySourceInspectReviewScope(t *testing.T) {
 	commitFile(t, source.Worktree, "one.txt", "1\n")
 	head := gitOutput(t, source.Worktree, "rev-parse", "HEAD")
 
-	inspected, err := InspectDeliverySource(root, "feature-scope", head, source.Target, base)
+	inspected, err := InspectDeliverySource(root, "feature-scope", head, source.Target, base, "")
 	if err != nil {
 		t.Fatalf("ancestral InspectDeliverySource() error = %v", err)
 	}
@@ -286,7 +286,7 @@ func TestDeliverySourceInspectReviewScope(t *testing.T) {
 	}
 
 	other := deliveryDanglingCommit(t, root)
-	inspected, err = InspectDeliverySource(root, "feature-scope", "", source.Target, other)
+	inspected, err = InspectDeliverySource(root, "feature-scope", "", source.Target, other, "")
 	if err != nil {
 		t.Fatalf("non-ancestral InspectDeliverySource() error = %v", err)
 	}
@@ -295,7 +295,7 @@ func TestDeliverySourceInspectReviewScope(t *testing.T) {
 	}
 
 	missing := strings.Repeat("d", 40)
-	inspected, err = InspectDeliverySource(root, "feature-scope", "", source.Target, missing)
+	inspected, err = InspectDeliverySource(root, "feature-scope", "", source.Target, missing, "")
 	if err != nil {
 		t.Fatalf("unavailable InspectDeliverySource() error = %v", err)
 	}
@@ -303,7 +303,7 @@ func TestDeliverySourceInspectReviewScope(t *testing.T) {
 		t.Fatalf("unavailable previous inspection = %#v; want full with no previous", inspected)
 	}
 
-	if _, err := InspectDeliverySource(root, "feature-scope", other, source.Target, ""); err == nil {
+	if _, err := InspectDeliverySource(root, "feature-scope", other, source.Target, "", ""); err == nil {
 		t.Fatal("InspectDeliverySource() ignored a required head mismatch")
 	}
 }

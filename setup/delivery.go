@@ -51,17 +51,37 @@ func supplied(choice skilldist.SubagentChoice) *skilldist.SubagentChoice {
 // storage navigation or asking workers to choose an engine-resolvable procedure.
 // Implement renders and resumes with choices; Watchdog takes none.
 func PresentDelivery(e *ledger.Execution, repository RepositoryContext, phase, operation string, source *workflow.DeliverySource, directory string, choices ImplementChoices) (skilldist.Packet, error) {
-	worktree, err := workflow.DeliveryWorktree(repository.Root, e.State.Branch)
+	f, _, err := deliveryFacts(e, repository, phase, operation, source, directory, choices)
 	if err != nil {
 		return skilldist.Packet{}, err
+	}
+	return skilldist.BuildPacket(phase, skilldist.InvocationFacts{Delivery: f})
+}
+
+// ReviewRework binds what a review that ends in rework at its reviewed head
+// runs: the report instructions and the submission.
+func ReviewRework(e *ledger.Execution, repository RepositoryContext, directory string) (report, submit string, err error) {
+	f, review, err := deliveryFacts(e, repository, ledger.WatchdogPhase, "prepare", nil, directory, ImplementChoices{})
+	if err != nil {
+		return "", "", err
+	}
+	return f.ResultResourceCommand, review + " --outcome rework --head " + skilldist.ShellQuote(f.RequiredHead), nil
+}
+
+// deliveryFacts binds one rendering's facts, and the submit command before
+// its outcome and head arguments.
+func deliveryFacts(e *ledger.Execution, repository RepositoryContext, phase, operation string, source *workflow.DeliverySource, directory string, choices ImplementChoices) (*skilldist.DeliveryFacts, string, error) {
+	worktree, err := workflow.DeliveryWorktree(repository.Root, e.State.Branch)
+	if err != nil {
+		return nil, "", err
 	}
 	if directory == "" {
 		directory, err = os.MkdirTemp("", "skl-"+phase+"-")
 		if err != nil {
-			return skilldist.Packet{}, err
+			return nil, "", err
 		}
 	} else if !filepath.IsAbs(directory) {
-		return skilldist.Packet{}, fmt.Errorf("result-directory must be absolute")
+		return nil, "", fmt.Errorf("result-directory must be absolute")
 	}
 	f := &skilldist.DeliveryFacts{Phase: phase, Operation: operation, Repository: e.Repository, Remote: repository.Remote, Item: e.Item, Branch: e.State.Branch, Worktree: worktree, ResultDirectory: directory, Claim: e.Claim.Commit, Documents: e.Documents, Procedure: "initial"}
 	if e.State.Target != nil {
@@ -89,6 +109,14 @@ func PresentDelivery(e *ledger.Execution, repository RepositoryContext, phase, o
 		f.SourceTarget = source.Target
 		f.ReviewScope = source.Scope
 		f.FetchStatus = source.FetchStatus
+		f.Merged = source.Merged
+	}
+	integration := workflow.IntegrationRef(repository.Remote, f.TargetBranch)
+	if phase == ledger.WatchdogPhase && integration != "" {
+		f.Integrates = true
+		if source == nil {
+			f.Merged = workflow.IntegrationMerged(repository.Root, e.State.Branch, f.RequiredHead, integration)
+		}
 	}
 	q := skilldist.ShellQuote
 	identity := fmt.Sprintf(" --repo %s --remote %s --item %s --claim %s", q(repository.Root), q(repository.Remote), q(e.Item), q(e.Claim.Commit))
@@ -120,7 +148,8 @@ func PresentDelivery(e *ledger.Execution, repository RepositoryContext, phase, o
 	private := q(filepath.Join(directory, phase+"-report.md"))
 	public := q(filepath.Join(directory, "public.md"))
 	documents := " --body " + private + " --public-body " + public + " --run-metadata " + q(filepath.Join(directory, "run.json"))
-	f.SubmitCommand = command("submit") + documents
+	submit := command("submit") + documents
+	f.SubmitCommand = submit
 	f.PauseCommand = command("needs-human") + documents
 	if phase == ledger.ImplementPhase {
 		f.SubmitCommand += " --head <final-source-sha> --target <observed-target-sha>"
@@ -128,12 +157,21 @@ func PresentDelivery(e *ledger.Execution, repository RepositoryContext, phase, o
 		f.ResultResourceCommand = fmt.Sprintf("skl skill --resource ledger-submission.md --input result_directory=%s --input procedure=%s --input review_count=%d --input mode=%s implement", q(directory), f.Procedure, f.ReviewCount, f.Mode)
 	} else {
 		f.SubmitCommand += " --outcome <pass|rework|needs-human>"
-		f.PauseCommand = command("submit") + documents + " --outcome needs-human"
+		f.PauseCommand = submit + " --outcome needs-human"
+		if f.Integrates {
+			// The prepared head may carry the Integration Merge.
+			head := " --head <prepared-source-sha>"
+			if source != nil {
+				head = " --head " + q(source.Head)
+			}
+			f.SubmitCommand += head
+			f.PauseCommand += head
+		}
 		rework, err := ledger.ReviewDestination(ledger.Rework, f.ReviewNumber)
 		if err != nil {
-			return skilldist.Packet{}, err
+			return nil, "", err
 		}
 		f.ResultResourceCommand = fmt.Sprintf("skl skill --resource ledger-review.md --input result_directory=%s --input round=%d --input reviewed_head=%s --input rework_pauses=%t watchdog", q(directory), f.ReviewNumber, q(f.RequiredHead), rework == ledger.NeedsHuman)
 	}
-	return skilldist.BuildPacket(phase, skilldist.InvocationFacts{Delivery: f})
+	return f, submit, nil
 }

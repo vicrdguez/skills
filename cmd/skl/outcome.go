@@ -11,6 +11,7 @@ import (
 	skilldist "github.com/vicrdguez/skills"
 	"github.com/vicrdguez/skills/ledger"
 	"github.com/vicrdguez/skills/setup"
+	"github.com/vicrdguez/skills/workflow"
 )
 
 // Claim states an Outcome Instruction reports. The empty state means the
@@ -35,6 +36,17 @@ type refusalFacts struct {
 	// Stop replaces the rerun: the refusal ends a Supervisor's lane.
 	Stop     bool
 	Previous *ledger.ClaimEnding
+}
+
+// integrationConflictFacts are a review preparation refused by a conflicting
+// Integration Merge, and the rework that ends the review.
+type integrationConflictFacts struct {
+	Status   string
+	Claim    string
+	Branch   string
+	Conflict *workflow.IntegrationConflict
+	Report   string
+	Submit   string
 }
 
 // phaseFacts serve the outcomes that concern one delivery phase and nothing

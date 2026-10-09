@@ -215,7 +215,16 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 	var source *workflow.DeliverySource
 	required, target, previous := deliverySourceInputs(execution, phase)
 	if operation == "prepare" {
-		observed, err := workflow.PrepareDeliverySource(repository.Root, repository.Remote, execution.State.Branch, required, target, execution.State.Target.Branch)
+		var observed workflow.DeliverySource
+		if phase == ledger.WatchdogPhase {
+			observed, err = workflow.PrepareReviewSource(repository.Root, repository.Remote, execution.State.Branch, required, target, execution.State.Target.Branch)
+		} else {
+			observed, err = workflow.PrepareDeliverySource(repository.Root, repository.Remote, execution.State.Branch, required, target, execution.State.Target.Branch)
+		}
+		var conflict *workflow.IntegrationConflict
+		if errors.As(err, &conflict) {
+			return emit(integrationConflictOutput(execution, repository, c.Path("result-directory"), conflict))
+		}
 		if err != nil {
 			return refusal(err)
 		}
@@ -224,7 +233,7 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 		if phase == ledger.ImplementPhase && c.String("target") != "" {
 			target = c.String("target")
 		}
-		observed, err := workflow.InspectDeliverySource(repository.Root, execution.State.Branch, requiredForInspection(phase, required), target, previous)
+		observed, err := workflow.InspectDeliverySource(repository.Root, execution.State.Branch, requiredForInspection(phase, required), target, previous, integrationRef(repository, execution.State))
 		if err != nil {
 			return refusal(err)
 		}
@@ -303,6 +312,26 @@ func requiredForInspection(phase, head string) string {
 	return ""
 }
 
+// integrationConflictOutput refuses review preparation whose Integration
+// Merge conflicts; the review ends in rework at the reviewed head.
+func integrationConflictOutput(e *ledger.Execution, repository setup.RepositoryContext, directory string, conflict *workflow.IntegrationConflict) deliveryOutput {
+	report, submit, err := setup.ReviewRework(e, repository, directory)
+	if err != nil {
+		return renderingFailedOutput(ledger.WatchdogPhase, repository, e.Item, e.Claim.Commit, err)
+	}
+	return deliveryOutput{Status: "fix_required", Reason: conflict.Error(), Repair: "record the conflict as a Rework finding and submit rework at the reviewed head",
+		kind: "integration-conflict", facts: integrationConflictFacts{Status: "fix_required", Claim: e.Claim.Commit, Branch: e.State.Branch, Conflict: conflict, Report: report, Submit: submit}}
+}
+
+// integrationRef is the tracking ref of the Slice's Proposal Branch target, or
+// empty for a main or unrecorded target.
+func integrationRef(repository setup.RepositoryContext, state ledger.SliceState) string {
+	if state.Target == nil {
+		return ""
+	}
+	return workflow.IntegrationRef(repository.Remote, state.Target.Branch)
+}
+
 func deliverySourceInputs(e *ledger.Execution, phase string) (head, target, previous string) {
 	if e.Implement != nil {
 		head, target = e.Implement.Source.Head, e.Implement.Source.Target
@@ -363,7 +392,7 @@ func submitDelivery(c *cli.Context, phase, operation string, repository setup.Re
 			} else if err := workflow.ValidatePausedDeliverySource(repository.Root, e.State.Branch, source.Head, source.Target); err != nil {
 				return refusal(err)
 			}
-		} else if err := workflow.ValidateDeliverySource(repository.Root, e.State.Branch, source.Head, source.Target, source.Reviewed, outcome == "pass"); err != nil {
+		} else if err := workflow.ValidateDeliverySource(repository.Root, e.State.Branch, source.Head, source.Target, source.Reviewed, outcome == "pass", integrationRef(repository, e.State)); err != nil {
 			return refusal(err)
 		}
 	} else {
