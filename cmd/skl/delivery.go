@@ -160,29 +160,38 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 			if err := c.Context.Err(); err != nil {
 				return ledger.Selection{}, err
 			}
+			observe := func() error {
+				items, err := ledger.StatusItems(store, repository.Repository, "")
+				if err != nil {
+					return err
+				}
+				refreshed, err := refreshCompletions(c.Context, store, repository.Repository, items, newBackend)
+				if err != nil {
+					return err
+				}
+				if err := c.Context.Err(); err != nil {
+					return err
+				}
+				for _, item := range items {
+					if observationError := refreshed.ObservationErrors[item]; observationError != nil && completionRefreshIntegrityError(item, observationError, refreshed.ForgeReadFailures[item]) {
+						return observationError
+					}
+				}
+				return c.Context.Err()
+			}
+			if err := observe(); err != nil {
+				return ledger.Selection{}, err
+			}
+			// Retry only what observation left Ready for Merge, then observe
+			// this poll's merges before selecting.
 			if phase == ledger.WatchdogPhase && c.Bool("auto") {
-				if err := retryMerges(c.Context, store, repository, newBackend, merges); err != nil {
+				merged, err := retryMerges(c.Context, store, repository, newBackend, merges)
+				if err == nil && merged {
+					err = observe()
+				}
+				if err != nil {
 					return ledger.Selection{}, err
 				}
-			}
-			items, err := ledger.StatusItems(store, repository.Repository, "")
-			if err != nil {
-				return ledger.Selection{}, err
-			}
-			refreshed, err := refreshCompletions(c.Context, store, repository.Repository, items, newBackend)
-			if err != nil {
-				return ledger.Selection{}, err
-			}
-			if err := c.Context.Err(); err != nil {
-				return ledger.Selection{}, err
-			}
-			for _, item := range items {
-				if observationError := refreshed.ObservationErrors[item]; observationError != nil && completionRefreshIntegrityError(item, observationError, refreshed.ForgeReadFailures[item]) {
-					return ledger.Selection{}, observationError
-				}
-			}
-			if err := c.Context.Err(); err != nil {
-				return ledger.Selection{}, err
 			}
 			selectionAttempted = true
 			execution, err := ledger.StartDeliveryContext(c.Context, store, repository.Repository, phase, c.Bool("auto"))
@@ -259,21 +268,24 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 
 // retryMerges attempts every pending Proposal Branch merge of the Project and
 // keeps each Slice's latest attempt. A refused merge leaves the Slice Ready for
-// Merge; only a failure to list pending merges stops the poll.
-func retryMerges(ctx context.Context, store *ledger.Store, repository setup.RepositoryContext, newBackend backendFactory, merges map[string]ledger.MergeAttempt) error {
+// Merge; only a failure to list pending merges stops the poll. It reports
+// whether any merge landed.
+func retryMerges(ctx context.Context, store *ledger.Store, repository setup.RepositoryContext, newBackend backendFactory, merges map[string]ledger.MergeAttempt) (bool, error) {
 	pending, err := ledger.PendingMerges(store, repository.Repository)
 	if err != nil || len(pending) == 0 {
-		return err
+		return false, err
 	}
 	forge, unavailable := mergeForge(repository, newBackend)
+	merged := false
 	for _, item := range pending {
 		if unavailable != "" {
 			merges[item] = ledger.RefusedMerge(item, unavailable)
 			continue
 		}
 		merges[item] = ledger.MergeReady(ctx, store, repository.Repository, repository.Root, repository.Remote, item, forge)
+		merged = merged || merges[item].Status == ledger.MergeMerged
 	}
-	return nil
+	return merged, nil
 }
 
 // mergeForge constructs the forge's merge capability, or the reason it is
@@ -457,15 +469,12 @@ func submitDelivery(c *cli.Context, phase, operation string, repository setup.Re
 	}
 	ledger.PublishDelivery(c.Context, store, repository.Repository, repository.Root, repository.Remote, result, public, forge)
 	ledger.ReplicateDelivery(store, repository.Repository, result)
-	out := handoffOutput(phase, repository, result)
+	var merge *ledger.MergeAttempt
 	if auto && result.Status == ledger.ReadyForMerge && !result.AlreadyCompleted && result.State.Target != nil && result.State.Target.Branch != "main" {
-		merge := mergeHandoff(c.Context, store, repository, newBackend, result)
-		out.Merge = &merge
-		facts := out.facts.(handoffFacts)
-		facts.Merge = &merge
-		out.facts = facts
+		attempt := mergeHandoff(c.Context, store, repository, newBackend, result)
+		merge = &attempt
 	}
-	return emit(out)
+	return emit(handoffOutput(phase, repository, result, merge))
 }
 
 // mergeHandoff attempts an Auto Mode pass's Proposal Branch merge once the
@@ -554,8 +563,8 @@ func readRunMetadata(name string) (any, error) {
 
 // handoffOutput is the outcome of one committed handoff: submitted, or paused
 // for a human decision.
-func handoffOutput(phase string, repository setup.RepositoryContext, result *ledger.DeliveryResult) deliveryOutput {
-	out := deliveryOutput{Status: result.Status, Result: result, kind: "submitted"}
+func handoffOutput(phase string, repository setup.RepositoryContext, result *ledger.DeliveryResult, merge *ledger.MergeAttempt) deliveryOutput {
+	out := deliveryOutput{Status: result.Status, Result: result, Merge: merge, kind: "submitted"}
 	if result.Status == ledger.NeedsHuman {
 		out.kind = "paused"
 	}
@@ -563,7 +572,7 @@ func handoffOutput(phase string, repository setup.RepositoryContext, result *led
 		out.Present = presentInvocation(repository, result.Item)
 	}
 	out.facts = handoffFacts{Status: result.Status, Phase: phase, Item: result.Item, Report: result.Report, AlreadyCompleted: result.AlreadyCompleted,
-		Notes: notesOf(result.Replication, result.Publication), Present: out.Present}
+		Notes: notesOf(result.Replication, result.Publication), Present: out.Present, Merge: merge}
 	return out
 }
 

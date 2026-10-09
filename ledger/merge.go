@@ -63,7 +63,11 @@ func MergeReady(ctx context.Context, s *Store, repository github.RepositoryID, r
 	if selected.Lifecycle != ReadyForMerge {
 		return refused("Work Item " + item + " is " + selected.Lifecycle + ", not " + ReadyForMerge)
 	}
-	open, err := s.openProposalTarget(repository, item, selected.Target)
+	_, directory, ledgerHead, err := s.deliveryState(repository, item)
+	if err != nil {
+		return refused(err.Error())
+	}
+	open, err := s.openProposalTarget(ledgerHead, directory, selected.Target)
 	if err != nil {
 		return refused(err.Error())
 	}
@@ -100,14 +104,14 @@ func PendingMerges(s *Store, repository github.RepositoryID) ([]string, error) {
 	}
 	var pending []string
 	for _, item := range items {
-		state, _, _, err := s.deliveryState(repository, item)
+		state, directory, head, err := s.deliveryState(repository, item)
 		if err != nil {
 			return nil, err
 		}
 		if state.State != ReadyForMerge || state.Submission == nil {
 			continue
 		}
-		if open, err := s.openProposalTarget(repository, item, state.Target); err != nil {
+		if open, err := s.openProposalTarget(head, directory, state.Target); err != nil {
 			return nil, err
 		} else if open {
 			pending = append(pending, item)
@@ -117,15 +121,12 @@ func PendingMerges(s *Store, repository github.RepositoryID) ([]string, error) {
 	return pending, nil
 }
 
-// openProposalTarget reports whether target is the item's Proposal Branch
-// while that Proposal is open. main is never such a target.
-func (s *Store) openProposalTarget(repository github.RepositoryID, item string, target *IntegrationTarget) (bool, error) {
+// openProposalTarget reports whether target is the Proposal Branch of the
+// Slice recorded at directory while that Proposal is open at the ledger head.
+// main is never such a target.
+func (s *Store) openProposalTarget(head, directory string, target *IntegrationTarget) (bool, error) {
 	if target == nil || target.Branch == "" || target.Branch == "main" {
 		return false, nil
-	}
-	_, directory, head, err := s.deliveryState(repository, item)
-	if err != nil {
-		return false, err
 	}
 	var meta ProposalMeta
 	if err := readJSONAt(s, head, path.Join(path.Dir(directory), "proposal.json"), &meta); err != nil {

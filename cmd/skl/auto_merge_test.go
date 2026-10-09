@@ -140,10 +140,14 @@ func TestAutoWatchdogPassSquashMergesTheReviewedTreeIntoTheProposalBranch(t *tes
 	if state := deliveryPersistedState(t, f.clone); state.State != ledger.ReadyForMerge || state.Completion != nil {
 		t.Fatalf("state after merge = %+v", state)
 	}
-	observed := f.observe(t)
-	completion := observed.Items[0].Completion
-	if observed.Items[0].State != ledger.Merged || completion == nil || completion.Target.Branch != autoMergeBranch || completion.MergeCommit != merge.Commit {
-		t.Fatalf("observed completion = %+v", observed.Items[0])
+	// The lane's next poll observes the merge instead of retrying it.
+	polled, err := f.cli.deliveryJSON(t, "skl", "watchdog", "next", "--auto", "--repo", f.source, "--format", "json")
+	if err != nil || len(polled.Merges) != 0 || f.mergeRequests() != 1 {
+		t.Fatalf("poll after the merge = %s, %v", mustJSON(t, polled), err)
+	}
+	state := deliveryPersistedState(t, f.clone)
+	if state.State != ledger.Merged || state.Completion == nil || state.Completion.Target.Branch != autoMergeBranch || state.Completion.MergeCommit != merge.Commit {
+		t.Fatalf("observed completion = %+v", state)
 	}
 }
 
