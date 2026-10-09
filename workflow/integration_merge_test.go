@@ -118,6 +118,33 @@ func TestReviewPreparationRefusesConflictWithCleanWorktree(t *testing.T) {
 	}
 }
 
+func TestReviewPreparationRefusesConflictDespiteRecordedResolution(t *testing.T) {
+	f := newIntegrationFixture(t)
+	moved := f.advance(t, "slice.txt", "a different slice\n")
+	worktree := deliveryExpectedWorktree(t, f.root, f.branch)
+	// The consumer's Git replays recorded resolutions and stages them.
+	runGit(t, f.root, "config", "rerere.enabled", "true")
+	runGit(t, f.root, "config", "rerere.autoupdate", "true")
+	runGit(t, worktree, "fetch", "-q", "upstream")
+	if _, err := git(worktree, "merge", "--no-edit", moved); err == nil {
+		t.Fatal("recording merge did not conflict")
+	}
+	commitFile(t, worktree, "slice.txt", "resolved\n")
+	runGit(t, worktree, "reset", "-q", "--hard", f.reviewed)
+
+	_, err := f.prepare(t)
+	var conflict *IntegrationConflict
+	if !errors.As(err, &conflict) || !slices.Equal(conflict.Paths, []string{"slice.txt"}) {
+		t.Fatalf("preparation with a recorded resolution = %v; want an IntegrationConflict in slice.txt", err)
+	}
+	if head := gitOutput(t, worktree, "rev-parse", "HEAD"); head != f.reviewed {
+		t.Fatalf("conflict left head %s; want %s", head, f.reviewed)
+	}
+	if status, _ := git(worktree, "status", "--porcelain", "--untracked-files=all"); status != "" {
+		t.Fatalf("conflict left the worktree dirty: %s", status)
+	}
+}
+
 func TestMainTargetedReviewPreparationMergesNothing(t *testing.T) {
 	root := newGitRepository(t)
 	newBareRemote(t, root)

@@ -58,7 +58,8 @@ func PrepareReviewSource(root, remote, branch, reviewed, recordedTarget, targetB
 	if err := deliveryClean(source.Worktree); err != nil {
 		return source, err
 	}
-	if _, err := git(source.Worktree, "merge", "--no-ff", "--no-edit", "-m", "Merge "+targetBranch+" into "+branch, source.Target); err != nil {
+	// Recorded resolutions stay off: a conflict is the implementer's to resolve.
+	if _, err := git(source.Worktree, "-c", "rerere.enabled=false", "merge", "--no-ff", "--no-edit", "-m", "Merge "+targetBranch+" into "+branch, source.Target); err != nil {
 		return source, abortIntegration(source.Worktree, source.Head, targetBranch, source.Target, err)
 	}
 	head, err := git(source.Worktree, "rev-parse", "HEAD")
