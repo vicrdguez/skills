@@ -351,6 +351,58 @@ func TestAgentProseGoldens(t *testing.T) {
 	err := worker.app.RunContext(interrupted, []string{"skl", "watchdog", "next", "--repo", source, "--wait", "1m"})
 	g.check("outcome-watchdog-next-interrupted", worker.out.String()+err.Error()+"\n")
 
+	// Auto Mode review of a Slice whose Proposal Branch moved: the Integration
+	// Merge, then a conflicting branch head that ends the next review.
+	integrationProposal := "widget-alerts"
+	integrationItem := integrationProposal + "/foundation"
+	if outcome := proposer.accept(t, source, intake(integrationProposal, contract), issue); outcome.Status != "accepted" {
+		t.Fatalf("accept %s: %s", integrationProposal, mustJSON(t, outcome))
+	}
+	bare := routeSourcePushes(t)
+	runGit(t, source, "push", "-q", "origin", "main")
+	pusher := filepath.Join(t.TempDir(), "pusher")
+	integrationWorktree := filepath.Join(source, ".worktrees", integrationProposal)
+	advance := func(file, contents string) {
+		t.Helper()
+		if _, err := os.Stat(pusher); err != nil {
+			runGit(t, source, "clone", "-q", "-b", "proposal/"+integrationProposal, bare, pusher)
+			runGit(t, pusher, "config", "user.name", "Other")
+			runGit(t, pusher, "config", "user.email", "other@example.com")
+		}
+		runGit(t, pusher, "pull", "-q")
+		proseCommit(t, pusher, file, contents)
+		runGit(t, pusher, "push", "-q", "origin", "proposal/"+integrationProposal)
+	}
+	implementAlerts := func(contents string) {
+		t.Helper()
+		output := g.run(worker, "implement", "next", "--auto", "--repo", source)
+		claim := proseMatch(t, proseClaimLine, output)
+		g.run(worker, "implement", "prepare", "--repo", source, "--remote", "origin", "--item", integrationItem, "--claim", claim)
+		submitted := g.run(worker, "implement", "submit", "--repo", source, "--item", integrationItem, "--claim", claim,
+			"--head", proseCommit(t, integrationWorktree, "alerts.txt", contents), "--target", deliveryTrimmed(t, source, "rev-parse", "refs/remotes/origin/proposal/"+integrationProposal), "--body", report)
+		if !strings.Contains(submitted, "Status: "+ledger.AwaitingReview) {
+			t.Fatalf("implement submit %s:\n%s", integrationItem, submitted)
+		}
+	}
+	implementAlerts("alert on every widget\n")
+	advance("other.txt", "another slice\n")
+	integrationClaim, integrationResult := review("watchdog-integration-start")
+	integrationIdentity := []string{"--repo", source, "--remote", "origin", "--item", integrationItem, "--claim", integrationClaim, "--result-directory", integrationResult}
+	g.capture("watchdog-integration-prepare", worker, append([]string{"watchdog", "prepare"}, integrationIdentity...)...)
+	g.capture("watchdog-integration-inspect", worker, append([]string{"watchdog", "inspect"}, integrationIdentity...)...)
+	g.capture("watchdog-integration-resume", worker, append([]string{"watchdog", "resume"}, integrationIdentity...)...)
+	reworked := g.run(worker, "watchdog", "submit", "--repo", source, "--item", integrationItem, "--claim", integrationClaim, "--outcome", "rework",
+		"--head", deliveryTrimmed(t, integrationWorktree, "rev-parse", "HEAD"), "--body", proseFixturePath("watchdog-report.md"))
+	if !strings.Contains(reworked, "Status: "+ledger.Rework) {
+		t.Fatalf("rework at the Integration Merge:\n%s", reworked)
+	}
+	implementAlerts("alert on unhealthy widgets\n")
+	advance("alerts.txt", "alerts from another slice\n")
+	integrationClaim, integrationResult = review("")
+	g.capture("outcome-watchdog-prepare-conflict", worker, "watchdog", "prepare", "--repo", source, "--remote", "origin", "--item", integrationItem, "--claim", integrationClaim, "--result-directory", integrationResult)
+	// Later steps expect source pushes to fail, as before the shim.
+	t.Setenv("GIT_SSH_COMMAND", "false")
+
 	// A Supervisor's Dispatches: claimed, stopped on a held Claim, continued
 	// after a handoff into an idle window, an interrupted wait and a new
 	// Dispatch, stopped on a released Claim, and refused.

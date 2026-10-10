@@ -167,10 +167,10 @@ A watchdog report (`outcome` `pass`, `rework`, or `needs_human`):
 - records `round` of at least `1` for the completed review;
 - requires `source.head`, `source.target`, `source.reviewed`, and
   `ledger.implement`;
-- records `source.head` equal to `source.reviewed` for a non-passing review,
-  so `rework` and `needs_human` inspect exactly the reported head;
-- may record a distinct `source.head` only for `pass`, which distinguishes the
-  reviewed code from permitted post-marker final code.
+- records `source.reviewed`, the implementation head, and `source.head`, the
+  final head. On any outcome the final head may add the Integration Merge of
+  the Proposal Branch; only `pass` may add permitted post-marker code. Submit
+  validates this against the source repository.
 
 ## Ownership boundary
 
