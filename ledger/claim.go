@@ -29,6 +29,9 @@ type Claim struct {
 	Phase  string      `json:"phase"`
 	Basis  string      `json:"basis"`
 	Inputs ClaimInputs `json:"inputs"`
+	// Auto marks a Watchdog Claim taken in Auto Mode: its pass merges into an
+	// open Proposal Branch.
+	Auto bool `json:"auto,omitempty"`
 }
 
 type ClaimInputs struct {
@@ -111,9 +114,11 @@ func StartDelivery(s *Store, repository github.RepositoryID, phase string) (*Exe
 
 // StartDeliveryContext permits a waiting CLI to cancel network observation
 // before reservation; a committed acquisition is never undone by cancellation.
+// In Auto Mode an implement Claim opens the Proposal Branch, and a Watchdog
+// Claim records the mode for its handoff.
 func StartDeliveryContext(ctx context.Context, s *Store, repository github.RepositoryID, phase string, auto ...bool) (*Execution, error) {
-	if len(auto) > 1 || len(auto) == 1 && auto[0] && phase != ImplementPhase {
-		return nil, fmt.Errorf("Auto Mode applies only to implement next")
+	if len(auto) > 1 {
+		return nil, fmt.Errorf("Auto Mode is one flag")
 	}
 	open := len(auto) == 1 && auto[0]
 	if phase != ImplementPhase && phase != WatchdogPhase {
@@ -204,7 +209,7 @@ func StartDeliveryContext(ctx context.Context, s *Store, repository github.Repos
 		if err != nil {
 			return err
 		}
-		state.Claim = &Claim{Phase: phase, Basis: head, Inputs: inputs}
+		state.Claim = &Claim{Phase: phase, Basis: head, Inputs: inputs, Auto: phase == WatchdogPhase && open}
 		proposal, _, _ := strings.Cut(candidates[0].item, "/")
 		metaPath := filepath.Join(projectsRoot, repository.Name, "proposals", proposal, "proposal.json")
 		var meta ProposalMeta

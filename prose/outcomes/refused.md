@@ -1,6 +1,6 @@
 Status: {{.Status}}
 
-{{template "outcome-previous" .Previous}}Refused: {{.Reason}}
+{{template "outcome-previous" .Previous}}{{template "outcome-merges" .Merges}}Refused: {{.Reason}}
 {{if .Repair}}
 Repair: {{.Repair}}
 {{end}}

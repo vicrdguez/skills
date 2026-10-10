@@ -56,8 +56,8 @@ var loopAdapters = []adapter{
 		defaults: map[string]string{"worker-model": "openai-codex/gpt-6.1-sol", "worker-thinking": "high", "reviewer-model": "openai-codex/gpt-6-astra", "reviewer-thinking": "low", "auto": "false"}},
 	{name: "implement-team-loop", command: "skl implement next --mode team --dispatch --wait", slots: []string{"worker-model", "worker-thinking", "helper-model", "helper-thinking", "reviewer-model", "reviewer-thinking", "auto"}, loop: true,
 		defaults: map[string]string{"worker-model": "openai-codex/gpt-6.1-sol", "worker-thinking": "high", "helper-model": "openai-codex/gpt-6-luna", "helper-thinking": "xhigh", "reviewer-model": "openai-codex/gpt-6.1-sol", "reviewer-thinking": "high", "auto": "false"}},
-	{name: "watchdog-loop", command: "skl watchdog next --dispatch --wait", slots: []string{"worker-model", "worker-thinking"}, loop: true,
-		defaults: map[string]string{"worker-model": "openai-codex/gpt-6-astra", "worker-thinking": "high"}},
+	{name: "watchdog-loop", command: "skl watchdog next --dispatch --wait", slots: []string{"worker-model", "worker-thinking", "auto"}, loop: true,
+		defaults: map[string]string{"worker-model": "openai-codex/gpt-6-astra", "worker-thinking": "high", "auto": "false"}},
 }
 
 // piDefaults are the values the pi adapters pass for an omitted argument.

@@ -19,34 +19,38 @@ const InstructionProtocol = "skl.instructions/v1"
 // DeliveryFacts specializes both private-ledger worker phases. Exact evidence
 // is data, while the command fields are engine-bound procedures.
 type DeliveryFacts struct {
-	Phase                 string                    `json:"phase"`
-	Procedure             string                    `json:"procedure"`
-	Operation             string                    `json:"operation"`
-	Repository            string                    `json:"repository"`
-	Remote                string                    `json:"remote"`
-	Item                  string                    `json:"item"`
-	Branch                string                    `json:"branch"`
-	TargetBranch          string                    `json:"target_branch"`
-	Worktree              string                    `json:"worktree"`
-	ResultDirectory       string                    `json:"result_directory"`
-	Claim                 string                    `json:"claim"`
-	PrepareCommand        string                    `json:"prepare_command"`
-	InspectCommand        string                    `json:"inspect_command"`
-	ResumeCommand         string                    `json:"resume_command"`
-	ReleaseCommand        string                    `json:"release_command"`
-	SubmitCommand         string                    `json:"submit_command"`
-	PauseCommand          string                    `json:"pause_command,omitempty"`
-	ResultResourceCommand string                    `json:"result_resource_command"`
-	RequiredHead          string                    `json:"required_head,omitempty"`
-	RecordedTarget        string                    `json:"recorded_target,omitempty"`
-	PreviousReviewed      string                    `json:"previous_reviewed,omitempty"`
-	SourceHead            string                    `json:"source_head,omitempty"`
-	SourceTarget          string                    `json:"source_target,omitempty"`
-	ReviewScope           string                    `json:"review_scope,omitempty"`
-	FetchStatus           string                    `json:"fetch_status,omitempty"`
-	ReviewCount           uint64                    `json:"review_count"`
-	ReviewNumber          uint64                    `json:"review_number"`
-	Documents             []ledger.ContractDocument `json:"documents"`
+	Phase                 string `json:"phase"`
+	Procedure             string `json:"procedure"`
+	Operation             string `json:"operation"`
+	Repository            string `json:"repository"`
+	Remote                string `json:"remote"`
+	Item                  string `json:"item"`
+	Branch                string `json:"branch"`
+	TargetBranch          string `json:"target_branch"`
+	Worktree              string `json:"worktree"`
+	ResultDirectory       string `json:"result_directory"`
+	Claim                 string `json:"claim"`
+	PrepareCommand        string `json:"prepare_command"`
+	InspectCommand        string `json:"inspect_command"`
+	ResumeCommand         string `json:"resume_command"`
+	ReleaseCommand        string `json:"release_command"`
+	SubmitCommand         string `json:"submit_command"`
+	PauseCommand          string `json:"pause_command,omitempty"`
+	ResultResourceCommand string `json:"result_resource_command"`
+	RequiredHead          string `json:"required_head,omitempty"`
+	RecordedTarget        string `json:"recorded_target,omitempty"`
+	PreviousReviewed      string `json:"previous_reviewed,omitempty"`
+	SourceHead            string `json:"source_head,omitempty"`
+	SourceTarget          string `json:"source_target,omitempty"`
+	ReviewScope           string `json:"review_scope,omitempty"`
+	FetchStatus           string `json:"fetch_status,omitempty"`
+	// Integrates is a review whose preparation merges the Proposal Branch
+	// head; Merged is the branch head the prepared head integrates.
+	Integrates   bool                      `json:"integrates,omitempty"`
+	Merged       string                    `json:"merged,omitempty"`
+	ReviewCount  uint64                    `json:"review_count"`
+	ReviewNumber uint64                    `json:"review_number"`
+	Documents    []ledger.ContractDocument `json:"documents"`
 	// Mode, Helper and Reviewer are the Implement invocation's choices. The
 	// subagent choices are nil when no value was supplied.
 	Mode     string          `json:"mode,omitempty"`

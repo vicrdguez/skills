@@ -491,12 +491,6 @@ func validateWatchdogReport(report Report) error {
 			return err
 		}
 	}
-	if report.Outcome != outcomePass && report.Source.Head != report.Source.Reviewed {
-		return refuse(
-			report.Outcome+" watchdog report records head "+report.Source.Head+" that differs from reviewed "+report.Source.Reviewed,
-			"a non-passing review inspects exactly the reported head; only a passing review may record permitted post-marker code",
-		)
-	}
 	return nil
 }
 
