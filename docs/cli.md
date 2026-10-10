@@ -39,9 +39,10 @@ skl ledger accept --repo <path> --proposal-dir <dir> \
   --issue <slice>=<public-body.md> [--parent-body <parent.md>]
 skl ledger publish --repo <path> --proposal <proposal> --issue <slice>=<fresh-body.md>
 skl ledger show --repo <path> --item <proposal>/<slice>
+skl ledger export --repo <path> --proposal <proposal> --to <dir>
 ```
 
-`accept` freezes the Contracts under `projects/<repository>/` and commits locally, then attempts replication and issue publication. Unchanged acceptance is idempotent; changed obligations need a renewed proposal. A Project names exactly one source repository, and a different repository with the same name is refused. `publish` updates or creates the issues for an accepted proposal at any later time from freshly written prose. `show` returns the frozen Contract and the current report references; add `--phase implement` or `--phase watchdog` for a report body, or `--commit <sha> --path <ledger-path>` for any exact historical document.
+`accept` freezes the Contracts under `projects/<repository>/` and commits locally, then attempts replication and issue publication. Unchanged acceptance is idempotent; changed obligations need a renewed proposal. A Project names exactly one source repository, and a different repository with the same name is refused. `publish` updates or creates the issues for an accepted proposal at any later time from freshly written prose. `show` returns the frozen Contract and the current report references; add `--phase implement` or `--phase watchdog` for a report body, or `--commit <sha> --path <ledger-path>` for any exact historical document. `export` writes one active accepted Proposal back out as an intake directory: `proposal.json` with the recorded Proposal Branch, parent title and every Slice's title, planned branch and Dependencies, `proposal.md`, and each Slice's frozen Contract files byte for byte. A Superseded Slice is declared with `"superseded": true`; acceptance refuses that flag on a new Proposal and compares it on re-acceptance, so accepting an unchanged export reports `existing`. Export reads the committed ledger head, names that commit in its outcome, changes no ledger record and contacts no forge. It refuses an unknown or archived Proposal (read archived records with `skl browse`) and a destination that exists and is not empty.
 
 ## Delivery lanes
 

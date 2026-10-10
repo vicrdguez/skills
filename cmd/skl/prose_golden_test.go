@@ -221,6 +221,7 @@ func TestAgentProseGoldens(t *testing.T) {
 	g.capture("outcome-ledger-accept-existing", proposer, "ledger", "accept", "--repo", source, "--proposal-dir", accepted, issue)
 	g.capture("outcome-ledger-show", proposer, "ledger", "show", "--repo", source, "--item", proseItem)
 	g.capture("outcome-ledger-publish", proposer, "ledger", "publish", "--repo", source, "--proposal", proseProposal, issue)
+	g.capture("outcome-ledger-export", proposer, "ledger", "export", "--repo", source, "--proposal", proseProposal, "--to", filepath.Join(temp, "export"))
 	g.capture("outcome-propose-cleanup", proposer, "propose", "cleanup", "--repo", source)
 
 	// Implement: start, release, resume, prepare and inspect, then hand off.
