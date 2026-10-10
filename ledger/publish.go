@@ -60,8 +60,10 @@ type IssueProse struct {
 // one accepted proposal, then replicates the ledger through the clone's own
 // remote configuration. The local records are already committed and stay
 // authoritative: forge failures are reported for this invocation only, and
-// only successfully established attachments are recorded.
-func Publish(ctx context.Context, store *Store, outcome *Acceptance, prose IssueProse, forge Forge, acceptedRevision string) {
+// only successfully established attachments are recorded. It returns the
+// reported replication of the accepted records, which each listed Slice
+// also carries.
+func Publish(ctx context.Context, store *Store, outcome *Acceptance, prose IssueProse, forge Forge, acceptedRevision string) PublicationNote {
 	if forge == nil {
 		for index := range outcome.Slices {
 			outcome.Slices[index].IssueStatus = &PublicationNote{
@@ -86,11 +88,11 @@ func Publish(ctx context.Context, store *Store, outcome *Acceptance, prose Issue
 			Status: IssueFailed,
 			Detail: "publication bookkeeping was not written: " + err.Error() + "; any forge object this invocation created stays unrecorded, and a later publication may create a duplicate",
 		}
-		return
+		return note
 	}
 	outcome.Commit = bookkeepingRevision
 	if !pushed || bookkeepingRevision == acceptedRevision {
-		return
+		return note
 	}
 	if retry, ok := store.push(bookkeepingRevision); !ok {
 		for index := range outcome.Slices {
@@ -112,7 +114,9 @@ func Publish(ctx context.Context, store *Store, outcome *Acceptance, prose Issue
 		for index := range outcome.Slices {
 			outcome.Slices[index].PushStatus = detail
 		}
+		return *detail
 	}
+	return note
 }
 
 // PublishCurrent publishes the current issue and parent presentation of one
@@ -207,7 +211,9 @@ func publishIssues(ctx context.Context, store *Store, outcome *Acceptance, prose
 			return store.recordedIssue(outcome.Project, outcome.Proposal, slice.Name)
 		})
 	}
-	if len(outcome.Slices) < 2 {
+	// A parent title marks a multi-slice Proposal, even when this outcome
+	// lists only some of its Slices.
+	if outcome.ParentTitle == "" {
 		return
 	}
 	if prose.Parent == nil {
