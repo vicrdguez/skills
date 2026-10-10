@@ -8,6 +8,7 @@ type githubPull struct {
 	NodeID    string `json:"node_id"`
 	Draft     bool   `json:"draft"`
 	MergedAt  string `json:"merged_at"`
+	MergeSHA  string `json:"merge_commit_sha"`
 	User      struct {
 		Login string `json:"login"`
 	} `json:"user"`

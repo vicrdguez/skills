@@ -18,7 +18,7 @@ func TestHandoffOutcomeRendersIdenticallyEveryTime(t *testing.T) {
 		Replication: &ledger.PublicationNote{Status: ledger.PushPending, Detail: "remote unavailable"},
 		Publication: &ledger.PublicationNote{Status: ledger.IssuePending, Detail: "forge unavailable"},
 	}
-	out := handoffOutput(ledger.ImplementPhase, setup.RepositoryContext{Root: "/work/widgets", Remote: "origin"}, result)
+	out := handoffOutput(ledger.ImplementPhase, setup.RepositoryContext{Root: "/work/widgets", Remote: "origin"}, result, nil)
 	var first string
 	for range 50 {
 		var rendered bytes.Buffer

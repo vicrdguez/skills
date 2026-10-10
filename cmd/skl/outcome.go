@@ -36,6 +36,7 @@ type refusalFacts struct {
 	// Stop replaces the rerun: the refusal ends a Supervisor's lane.
 	Stop     bool
 	Previous *ledger.ClaimEnding
+	Merges   []ledger.MergeAttempt
 }
 
 // integrationConflictFacts are a review preparation refused by a conflicting
@@ -56,6 +57,7 @@ type phaseFacts struct {
 	Phase         string
 	StatusCommand string
 	Previous      *ledger.ClaimEnding
+	Merges        []ledger.MergeAttempt
 }
 
 type releasedFacts struct {
@@ -86,6 +88,7 @@ type handoffFacts struct {
 	AlreadyCompleted bool
 	Notes            []noteFact
 	Present          string
+	Merge            *ledger.MergeAttempt
 }
 
 type noteFact struct {

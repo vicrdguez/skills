@@ -37,6 +37,8 @@ type pullServer struct {
 	requests  []string
 	bodies    []string
 	readiness []string
+	// mergeRefusal, when set, is the reason the forge refuses every merge.
+	mergeRefusal string
 }
 
 func newPullServer(t *testing.T, bare string) *pullServer {
@@ -51,12 +53,31 @@ func (p *pullServer) record(number int) map[string]any {
 	pull := p.pulls[number]
 	branch := pull["branch"].(string)
 	sha := strings.TrimSpace(runGitOutput(p.t, p.bare, "rev-parse", "refs/heads/"+branch))
+	merged, _ := pull["merge_sha"].(string)
+	state, mergedAt := "open", any(nil)
+	if merged != "" {
+		state, mergedAt = "closed", "2026-01-01T00:00:00Z"
+	}
 	return map[string]any{
-		"number": number, "node_id": fmt.Sprintf("PR_%d", number), "state": "open",
+		"number": number, "node_id": fmt.Sprintf("PR_%d", number), "state": state,
+		"merged": merged != "", "merged_at": mergedAt, "merge_commit_sha": merged,
 		"body": pull["body"], "draft": pull["draft"], "title": pull["title"],
 		"head": map[string]any{"ref": branch, "sha": sha, "repo": map[string]string{"full_name": "acme/widgets"}},
-		"base": map[string]string{"ref": "main"},
+		"base": map[string]any{"ref": pull["base"], "repo": map[string]string{"full_name": "acme/widgets"}},
 	}
+}
+
+// squash lands the pull request's head tree as one commit on its base, as
+// GitHub's squash merge does, and returns that commit.
+func (p *pullServer) squash(number int) string {
+	pull := p.pulls[number]
+	base := "refs/heads/" + pull["base"].(string)
+	parent := strings.TrimSpace(runGitOutput(p.t, p.bare, "rev-parse", base))
+	tree := strings.TrimSpace(runGitOutput(p.t, p.bare, "rev-parse", "refs/heads/"+pull["branch"].(string)+"^{tree}"))
+	commit := strings.TrimSpace(runGitOutput(p.t, p.bare, "-c", "user.name=GitHub", "-c", "user.email=noreply@github.com", "commit-tree", tree, "-p", parent, "-m", fmt.Sprintf("%v (#%d)", pull["title"], number)))
+	runGit(p.t, p.bare, "update-ref", base, commit, parent)
+	pull["merge_sha"] = commit
+	return commit
 }
 
 func (p *pullServer) serve(w http.ResponseWriter, r *http.Request) {
@@ -81,13 +102,26 @@ func (p *pullServer) serve(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(records)
 	case r.Method == http.MethodPost && r.URL.Path == "/repos/acme/widgets/pulls":
 		number := 21 + len(p.pulls)
-		p.pulls[number] = map[string]any{"branch": payload["head"], "body": payload["body"], "draft": payload["draft"], "title": payload["title"]}
+		p.pulls[number] = map[string]any{"branch": payload["head"], "base": payload["base"], "body": payload["body"], "draft": payload["draft"], "title": payload["title"]}
 		_ = json.NewEncoder(w).Encode(p.record(number))
 	case strings.HasPrefix(r.URL.Path, "/repos/acme/widgets/pulls/"):
 		var number int
 		fmt.Sscanf(strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets/pulls/"), "%d", &number)
 		if p.pulls[number] == nil {
 			http.NotFound(w, r)
+			return
+		}
+		if r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/merge") {
+			switch record := p.record(number); {
+			case p.mergeRefusal != "":
+				w.WriteHeader(http.StatusMethodNotAllowed)
+				_ = json.NewEncoder(w).Encode(map[string]string{"message": p.mergeRefusal})
+			case payload["merge_method"] != "squash" || payload["sha"] != record["head"].(map[string]any)["sha"] || record["draft"] == true || record["state"] != "open":
+				w.WriteHeader(http.StatusConflict)
+				_ = json.NewEncoder(w).Encode(map[string]string{"message": "Head branch was modified"})
+			default:
+				_ = json.NewEncoder(w).Encode(map[string]any{"sha": p.squash(number), "merged": true})
+			}
 			return
 		}
 		if r.Method == http.MethodPatch {
