@@ -552,12 +552,6 @@ func TestReportRefusesIncompatibleMetadata(t *testing.T) {
 			data:  document(strings.Replace(watchdogFrontmatter(), "  reviewed: "+commitReviewed+"\n", "", 1)),
 			want:  "requires source head, target, and reviewed",
 		},
-		{
-			name:  "rework head differs from reviewed",
-			phase: watchdog,
-			data:  document(strings.Replace(watchdogFrontmatter(), "outcome: pass", "outcome: rework", 1)),
-			want:  "differs from reviewed",
-		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			_, _, err := ledger.ParseReport(testCase.phase, testCase.data)

@@ -29,6 +29,9 @@ type DeliverySource struct {
 	Previous    string `json:"previous,omitempty"`
 	Scope       string `json:"scope,omitempty"`
 	FetchStatus string `json:"fetch_status,omitempty"`
+	// Merged is the Proposal Branch head the head integrates through
+	// Integration Merges over the reviewed revision.
+	Merged string `json:"merged,omitempty"`
 }
 
 // PrepareDeliverySource creates or reuses the planned source branch and worktree
@@ -163,8 +166,10 @@ func PrepareDeliverySource(root, remote, branch, requiredHead, recordedTarget st
 // network. It requires the expected worktree on the planned branch with clean
 // tracked, index, and untracked state, returns the full head and an available
 // target, and derives review scope from the supplied previous reviewed
-// revision. A nonempty requiredHead must match the actual head.
-func InspectDeliverySource(root, branch, requiredHead, target, previous string) (DeliverySource, error) {
+// revision. A nonempty requiredHead must match the actual head, or be its
+// first-parent ancestor through Integration Merges of the Proposal Branch at
+// integrationRef.
+func InspectDeliverySource(root, branch, requiredHead, target, previous, integrationRef string) (DeliverySource, error) {
 	worktree, err := deliveryWorktree(root, branch)
 	if err != nil {
 		return DeliverySource{}, err
@@ -180,13 +185,19 @@ func InspectDeliverySource(root, branch, requiredHead, target, previous string) 
 	if err != nil {
 		return DeliverySource{}, fmt.Errorf("resolve prepared branch head in %s: %w", worktree, err)
 	}
+	merged := ""
 	if requiredHead != "" {
 		required := deliveryResolveCommit(root, requiredHead)
 		if required == "" {
 			return DeliverySource{}, Refuse("required source revision " + requiredHead + " is unavailable in the selected source repository")
 		}
-		if required != head {
-			return DeliverySource{}, Refuse("prepared branch " + branch + " is at " + head + ", not the required revision " + required + "; preserve that progress and reconcile it explicitly")
+		var ok bool
+		if merged, ok = integratedHead(root, required, head, integrationRef); !ok {
+			expected := required
+			if integrationRef != "" {
+				expected += " or its Integration Merge"
+			}
+			return DeliverySource{}, Refuse("prepared branch " + branch + " is at " + head + ", not the required revision " + expected + "; preserve that progress and reconcile it explicitly")
 		}
 	}
 	if target == "" {
@@ -196,7 +207,7 @@ func InspectDeliverySource(root, branch, requiredHead, target, previous string) 
 	if resolvedTarget == "" {
 		return DeliverySource{}, Refuse("Integration Target " + target + " is unavailable in the selected source repository")
 	}
-	result := DeliverySource{Worktree: worktree, Head: head, Target: resolvedTarget, Scope: "full"}
+	result := DeliverySource{Worktree: worktree, Head: head, Target: resolvedTarget, Scope: "full", Merged: merged}
 	if previous != "" {
 		previousCommit := deliveryResolveCommit(root, previous)
 		if previousCommit != "" {
@@ -238,10 +249,12 @@ func ValidatePausedDeliverySource(root, branch, head, target string) error {
 // handoff. It requires full exact committed head and target object IDs, the
 // planned clean branch at that head, and the target as an ancestor of the head.
 // A reviewed revision, when supplied, must be available and ancestral; a final
-// head distinct from it requires allowMarkers, and the worker - not this
-// function - judges whether the marker comments are permitted. No remote-head
-// equality is required. Dirty files produce an error and are never deleted.
-func ValidateDeliverySource(root, branch, head, target, reviewed string, allowMarkers bool) error {
+// head distinct from it is either the reviewed revision's Integration Merge of
+// the Proposal Branch at integrationRef, on any outcome, or requires
+// allowMarkers, and the worker - not this function - judges whether the marker
+// comments are permitted. No remote-head equality is required. Dirty files
+// produce an error and are never deleted.
+func ValidateDeliverySource(root, branch, head, target, reviewed string, allowMarkers bool, integrationRef string) error {
 	if err := validateSourceIdentity(root, branch, head, target, true); err != nil {
 		return err
 	}
@@ -260,8 +273,8 @@ func ValidateDeliverySource(root, branch, head, target, reviewed string, allowMa
 	if gitOK(root, "merge-base", "--is-ancestor", reviewed, head) != nil {
 		return Refuse("reviewed revision " + reviewed + " is not an ancestor of final head " + head)
 	}
-	if reviewed != head && !allowMarkers {
-		return Refuse("reviewed and final source revisions differ; only permitted non-functional marker comments may add a distinct final head")
+	if _, merged := integratedHead(root, reviewed, head, integrationRef); !merged && !allowMarkers {
+		return Refuse("reviewed and final source revisions differ; only the Integration Merge or, on pass, permitted non-functional marker comments may add a distinct final head")
 	}
 	return nil
 }

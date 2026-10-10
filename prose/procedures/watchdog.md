@@ -7,7 +7,7 @@ You review this change fresh. If this session built it, stop and ask the user to
 
 Prepare the worktree with `{{.PrepareCommand}}`, then inspect it with `{{.InspectCommand}}`. Work only in `{{.Worktree}}`, and edit no functional code. Continue this Claim with `{{.ResumeCommand}}`; release it with `{{.ReleaseCommand}}` only to abandon the review.
 
-Check: inspection shows the source head `{{.RequiredHead}}`.
+Check: inspection shows the {{if .Integrates}}reviewed head `{{.RequiredHead}}` and the prepared source head that carries it{{else}}source head `{{.RequiredHead}}`{{end}}.
 
 ## Supplied documents
 
@@ -27,7 +27,7 @@ You judge the Contract: `intent.md`, `behavior.md`, and any `plan.md` or `tasks.
    - `incremental`: {{template "watchdog-incremental" .}}.
    - `full`: {{template "watchdog-full" .}}.
   {{end}} Apply the method and criteria below.
-5. Judge integration effects against the recorded Integration Target: the merge and its conflict resolutions count, unrelated inherited target code does not. Fetch no newer target.
+5. {{if .Integrates}}Preparation merged the current head of `{{.TargetBranch}}`{{with .Merged}}, `{{.}}`,{{end}} into this branch when it was missing; inspection names it as the merged head. Judge that merge and its effects as part of this change, together with the implementation's merges and conflict resolutions; code inherited unchanged from `{{.TargetBranch}}` is outside the review.{{else}}Judge integration effects against the recorded Integration Target: the merge and its conflict resolutions count, unrelated inherited target code does not. Fetch no newer target.{{end}}
 
 Check: you hold the gate result and a judgement on every Contract item and every `F<n>`.
 

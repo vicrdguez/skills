@@ -11,6 +11,7 @@ Claim: `{{.Claim}}`
 {{if .ReviewScope}}Review scope: `{{.ReviewScope}}`
 {{end}}{{if .SourceHead}}Prepared source head: `{{.SourceHead}}`
 {{end}}{{if .SourceTarget}}Prepared integrated target: `{{.SourceTarget}}`
+{{end}}{{if .Merged}}Merged `{{.TargetBranch}}` head: `{{.Merged}}`
 {{end}}{{if .FetchStatus}}Source fetch: {{.FetchStatus}}
 {{end}}{{end}}
 
