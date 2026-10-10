@@ -5,6 +5,7 @@ package ledger_test
 // active Claims, failed commits, review continuation and guarded retirement.
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -259,7 +260,7 @@ func TestRetireProposalGuardsTerminalChildren(t *testing.T) {
 
 	// Active work refuses retirement without abandoning the other child.
 	headBefore := l.head()
-	if _, err := ledger.RetireProposal(store, "widgets", "active-work"); err == nil || !strings.Contains(err.Error(), "active or claimed") {
+	if _, err := ledger.RetireProposal(context.Background(), store, "widgets", "active-work", noRetirementForge(t)); err == nil || !strings.Contains(err.Error(), "active or claimed") {
 		t.Fatalf("active retirement refusal = %v", err)
 	}
 	if l.head() != headBefore {
@@ -274,11 +275,11 @@ func TestRetireProposalGuardsTerminalChildren(t *testing.T) {
 	claimed.State = ledger.Merged
 	claimed.Claim = &ledger.Claim{Phase: ledger.ImplementPhase, Basis: l.head()}
 	l.commitState("widgets", "active-work", "blocked", claimed)
-	if _, err := ledger.RetireProposal(store, "widgets", "active-work"); err == nil || !strings.Contains(err.Error(), "active or claimed") {
+	if _, err := ledger.RetireProposal(context.Background(), store, "widgets", "active-work", noRetirementForge(t)); err == nil || !strings.Contains(err.Error(), "active or claimed") {
 		t.Fatalf("claimed retirement refusal = %v", err)
 	}
 
-	retired, err := ledger.RetireProposal(store, "widgets", "legacy")
+	retired, err := ledger.RetireProposal(context.Background(), store, "widgets", "legacy", noRetirementForge(t))
 	if err != nil {
 		t.Fatalf("retire legacy: %v", err)
 	}
@@ -293,7 +294,7 @@ func TestRetireProposalGuardsTerminalChildren(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &meta); err != nil || !meta.Retired {
 		t.Fatalf("proposal retirement marker = %#v, %v", meta, err)
 	}
-	again, err := ledger.RetireProposal(store, "widgets", "legacy")
+	again, err := ledger.RetireProposal(context.Background(), store, "widgets", "legacy", noRetirementForge(t))
 	if err != nil || again.Status != ledger.RetirementAlreadyRetired {
 		t.Fatalf("repeated retirement = %#v, %v", again, err)
 	}

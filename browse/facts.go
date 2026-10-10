@@ -12,15 +12,7 @@ import (
 )
 
 // lifecycleLabels name the canonical lifecycles.
-var lifecycleLabels = map[string]string{
-	ledger.ReadyForImplementation: "Ready for Implementation",
-	ledger.AwaitingReview:         "Awaiting Review",
-	ledger.Rework:                 "Rework",
-	ledger.NeedsHuman:             "Needs Human",
-	ledger.ReadyForMerge:          "Ready for Merge",
-	ledger.Merged:                 "Merged",
-	ledger.Superseded:             "Superseded",
-}
+var lifecycleLabels = ledger.LifecycleLabels
 
 // claimLabels name the selectable Claim values.
 var claimLabels = map[string]string{
@@ -90,14 +82,39 @@ func ProposalLines(proposal ledger.ProposalSummary) []string {
 	}
 	lines = append(lines,
 		"Accepted: "+orUnknown(proposal.Accepted),
-		"Proposal Branch: "+orNone(proposal.Branch),
+		"Proposal Branch: "+proposalBranchText(proposal),
 		"Integration target: "+proposalTargetText(proposal.Target),
+		"Proposal Submission: "+proposalSubmissionText(proposal),
 		"Location: "+locationText(proposal.Archived, proposal.Retired),
 		"Delivery: "+deliveryText(proposal),
 		"Slices: "+tallyText(proposal.Tally),
 		"Parent issue: "+attachmentText(proposal.ParentIssue),
 	)
 	return append(lines, diagnosticLines(proposal.Diagnostics)...)
+}
+
+func proposalBranchText(proposal ledger.ProposalSummary) string {
+	if proposal.Branch == "" || proposal.BranchState == "" {
+		return orNone(proposal.Branch)
+	}
+	return proposal.Branch + " (" + proposal.BranchState + ")"
+}
+
+// proposalSubmissionText states the recorded Proposal Submission: merged
+// once completion is recorded, otherwise the readiness the engine presents.
+// Browse reads no forge, so a human-readied pull request is not observed here.
+func proposalSubmissionText(proposal ledger.ProposalSummary) string {
+	if proposal.Submission == nil {
+		return "none"
+	}
+	text := fmt.Sprintf("%s#%d", proposal.Submission.Repository, proposal.Submission.Number)
+	switch {
+	case proposal.Completion != nil:
+		return text + " (merged into " + proposal.Completion.Target.Branch + " at " + proposal.Completion.MergeCommit + ")"
+	case proposal.Slices > 0 && proposal.Lifecycles[ledger.Merged] == proposal.Slices:
+		return text + " (engine presents it ready for review)"
+	}
+	return text + " (engine presents it as a draft)"
 }
 
 // SliceSummaryLines are the labeled facts of one Proposal member.
@@ -112,6 +129,9 @@ func SliceSummaryLines(slice ledger.SliceSummary) []string {
 	lines := []string{"Slice: " + slice.Item}
 	if slice.Readable {
 		lines = append(lines, "Title: "+slice.Title, "Lifecycle: "+lifecycleLabel(slice.Lifecycle), "Claim: "+claimText(slice.ClaimPhase, ""))
+		if slice.MergedInto != "" {
+			lines = append(lines, "Merged into: "+slice.MergedInto)
+		}
 	} else {
 		lines = append(lines, "Lifecycle: unknown", "Claim: unknown")
 	}

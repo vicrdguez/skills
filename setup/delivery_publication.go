@@ -25,7 +25,9 @@ const presentationAttempts = 3
 // The adapter alone translates Approved into GitHub's native draft/non-draft
 // presentation; it carries no workflow authority, keeps the private report
 // out of public material, and never merges, closes, labels, comments, or
-// approves a revision other than the exact pushed source head.
+// approves a revision other than the exact pushed source head. An Unpinned
+// presentation matches the branch whatever its head and keeps a ready pull
+// request ready.
 func (b *GitHubBackend) PresentPull(ctx context.Context, presentation ledger.PullPresentation) (int, error) {
 	if err := b.requireRepository(); err != nil {
 		return 0, err
@@ -33,7 +35,7 @@ func (b *GitHubBackend) PresentPull(ctx context.Context, presentation ledger.Pul
 	if presentation.Base == "" {
 		presentation.Base = "main"
 	}
-	if presentation.Branch == "" || presentation.Head == "" {
+	if presentation.Branch == "" || (presentation.Head == "" && !presentation.Unpinned) {
 		return 0, workflow.Refuse("delivery presentation requires an exact source branch and head; prepare and push the planned source before presenting it")
 	}
 	repository := b.repository
@@ -187,7 +189,7 @@ func (b *GitHubBackend) applyPresentedPull(ctx context.Context, repository githu
 		}
 	}
 	draft := !presentation.Approved
-	if pull.Draft != draft {
+	if pull.Draft != draft && !(draft && presentation.Unpinned) {
 		if pull.NodeID == "" {
 			return attempt, workflow.Refuse(fmt.Sprintf("pull request #%d has no stable node identity for the required %s presentation", pull.Number, presentationReadiness(draft)))
 		}
@@ -204,8 +206,10 @@ func (b *GitHubBackend) applyPresentedPull(ctx context.Context, repository githu
 // readiness. It preserves an observably changed attachment or public body and
 // confirms the result rather than treating a mutation response as proof. This
 // is bounded reconciliation, not an atomic compare-and-set with external writers.
+// An Unpinned presentation is never returned to draft: its ready state marks no
+// reviewed revision, and a ready pull request stays ready.
 func (b *GitHubBackend) correctPresentedReadiness(ctx context.Context, repository github.RepositoryID, attempt presentationAttempt, cause error) error {
-	if !attempt.ready {
+	if !attempt.ready || attempt.expected.Unpinned {
 		return cause
 	}
 	pull, err := b.pullForPresentation(ctx, repository, attempt.number)
@@ -273,7 +277,7 @@ func (b *GitHubBackend) refreshPresentedPull(ctx context.Context, repository git
 	if pull.Body != presentation.Body {
 		return 0, workflow.Refuse(fmt.Sprintf("pull request #%d does not present the supplied public body; inspect the current content before presenting the current result again", attempt.number))
 	}
-	if pull.Draft != !presentation.Approved {
+	if pull.Draft != !presentation.Approved && !(!pull.Draft && presentation.Unpinned) {
 		return 0, b.correctPresentedReadiness(ctx, repository, attempt, workflow.Refuse(fmt.Sprintf("pull request #%d readiness was not observed as %s; inspect it before presenting the current result again", attempt.number, presentationReadiness(!presentation.Approved))))
 	}
 	return pull.Number, nil
@@ -321,7 +325,7 @@ func presentedPullMismatch(pull githubPull, repository github.RepositoryID, pres
 		return fmt.Sprintf("pull request #%d has source repository %q, not %q", pull.Number, pull.Head.Repo.FullName, repository.Owner+"/"+repository.Name)
 	case pull.Base.Ref != presentation.Base:
 		return fmt.Sprintf("pull request #%d targets base %q, not %q", pull.Number, pull.Base.Ref, presentation.Base)
-	case pull.Head.SHA != presentation.Head:
+	case !presentation.Unpinned && pull.Head.SHA != presentation.Head:
 		return fmt.Sprintf("pull request #%d presents source head %s, not the expected %s", pull.Number, pull.Head.SHA, presentation.Head)
 	case pull.State != "open":
 		return fmt.Sprintf("pull request #%d is %s, not open", pull.Number, pull.State)

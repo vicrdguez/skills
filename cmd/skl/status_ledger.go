@@ -40,6 +40,10 @@ func ledgerStatus(command *cli.Context, store *ledger.Store, repository github.R
 	if err != nil {
 		return renderLedgerRefusal(output, format, err)
 	}
+	for index := range proposals {
+		proposals[index].Refresh = refreshed.Proposals[proposals[index].Proposal]
+		proposals[index].Observation = refreshed.ProposalProblems[proposals[index].Proposal]
+	}
 	outcome := ledgerStatusOutcome{Status: "shown", Items: states, Proposals: proposals}
 	if format == formatJSON {
 		return json.NewEncoder(output).Encode(outcome)
@@ -74,6 +78,29 @@ func ledgerStatus(command *cli.Context, store *ledger.Store, repository github.R
 	}
 	for _, proposal := range proposals {
 		fmt.Fprintf(&text, "Proposal: %s (fully delivered: %t, safe to retire: %t)\n", proposal.Proposal, proposal.FullyDelivered, proposal.Retireable)
+		if proposal.Branch != "" {
+			fmt.Fprintf(&text, "  Proposal Branch: %s (%s)\n", proposal.Branch, proposal.BranchState)
+		}
+		if proposal.Submission != nil {
+			fmt.Fprintf(&text, "  Proposal Submission: %s#%d\n", proposal.Submission.Repository, proposal.Submission.Number)
+		}
+		if proposal.Completion != nil {
+			fmt.Fprintf(&text, "  Proposal completion: into %s %s at %s\n", proposal.Completion.Target.Repository, proposal.Completion.Target.Branch, proposal.Completion.MergeCommit)
+		}
+		if refresh := proposal.Refresh; refresh != nil {
+			if refresh.ClosedUnmerged {
+				fmt.Fprintln(&text, "  Observation: Proposal Submission closed without merge; nothing was recorded")
+			}
+			if refresh.Presentation != nil {
+				fmt.Fprintf(&text, "  Proposal presentation: %s: %s\n", refresh.Presentation.Status, refresh.Presentation.Detail)
+			}
+			if refresh.Replication != nil && refresh.Replication.Status != ledger.PushPushed {
+				fmt.Fprintf(&text, "  Pending ledger replication: %s: %s\n", refresh.Replication.Status, refresh.Replication.Detail)
+			}
+		}
+		if proposal.Observation != "" {
+			fmt.Fprintf(&text, "  Observation unavailable: %s\n", proposal.Observation)
+		}
 	}
 	_, err = io.WriteString(output, text.String())
 	return err

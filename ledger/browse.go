@@ -64,7 +64,10 @@ type ProposalSummary struct {
 	ParentTitle    string             `json:"parent_title,omitempty"`
 	Accepted       string             `json:"accepted,omitempty"`
 	Branch         string             `json:"branch"`
+	BranchState    string             `json:"branch_state,omitempty"`
 	Target         *IntegrationTarget `json:"integration_target,omitempty"`
+	Submission     *ForgeAttachment   `json:"submission,omitempty"`
+	Completion     *TerminalEvidence  `json:"completion,omitempty"`
 	ParentIssue    *ForgeAttachment   `json:"parent_issue,omitempty"`
 	FullyDelivered bool               `json:"fully_delivered"`
 	Tally
@@ -82,6 +85,7 @@ type SliceSummary struct {
 	Title       string       `json:"title,omitempty"`
 	Lifecycle   string       `json:"lifecycle,omitempty"`
 	ClaimPhase  string       `json:"claim_phase,omitempty"`
+	MergedInto  string       `json:"merged_into,omitempty"`
 	Diagnostics []Diagnostic `json:"diagnostics,omitempty"`
 }
 
@@ -808,7 +812,8 @@ func (t *Tally) add(slice sliceRead) {
 func (r proposalRead) summary() ProposalSummary {
 	summary := ProposalSummary{
 		Name: r.tree.name, Archived: r.tree.archived, Retired: r.meta.Retired,
-		ParentTitle: r.meta.ParentTitle, Accepted: r.meta.Accepted, Branch: r.meta.Branch, Target: r.meta.Target, ParentIssue: r.meta.ParentIssue,
+		ParentTitle: r.meta.ParentTitle, Accepted: r.meta.Accepted, Branch: r.meta.Branch, BranchState: proposalBranchState(r.meta), Target: r.meta.Target, ParentIssue: r.meta.ParentIssue,
+		Submission: r.meta.Submission, Completion: r.meta.Completion,
 		Tally:       Tally{Lifecycles: map[string]int{}},
 		Diagnostics: append([]Diagnostic(nil), r.diagnostics...),
 	}
@@ -849,6 +854,9 @@ func (r sliceRead) summary(proposal string) SliceSummary {
 		summary.Title, summary.Lifecycle = r.state.Title, r.state.State
 		if r.state.Claim != nil {
 			summary.ClaimPhase = r.state.Claim.Phase
+		}
+		if r.state.State == Merged && r.state.Completion != nil {
+			summary.MergedInto = r.state.Completion.Target.Branch
 		}
 	}
 	return summary

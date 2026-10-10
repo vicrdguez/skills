@@ -18,6 +18,17 @@ const (
 // Lifecycles lists the canonical lifecycles in workflow order.
 var Lifecycles = []string{ReadyForImplementation, AwaitingReview, Rework, NeedsHuman, ReadyForMerge, Merged, Superseded}
 
+// LifecycleLabels name the canonical lifecycles for people.
+var LifecycleLabels = map[string]string{
+	ReadyForImplementation: "Ready for Implementation",
+	AwaitingReview:         "Awaiting Review",
+	Rework:                 "Rework",
+	NeedsHuman:             "Needs Human",
+	ReadyForMerge:          "Ready for Merge",
+	Merged:                 "Merged",
+	Superseded:             "Superseded",
+}
+
 // Claims lists the selectable Claim values in workflow order.
 var Claims = []string{ImplementPhase, WatchdogPhase, ClaimNone}
 

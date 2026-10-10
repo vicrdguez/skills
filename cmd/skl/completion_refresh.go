@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
+	"sync"
 
 	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/ledger"
@@ -14,6 +16,10 @@ type completionRefreshResult struct {
 	Problems          map[string]string
 	ObservationErrors map[string]error
 	ForgeReadFailures map[string]bool
+	// Proposals and ProposalProblems report each Proposal Submission
+	// refresh. They never block selection.
+	Proposals        map[string]*ledger.ProposalRefresh
+	ProposalProblems map[string]string
 }
 
 type completionForgeReader struct {
@@ -27,14 +33,17 @@ func (reader *completionForgeReader) ObserveSubmission(ctx context.Context, atta
 	return observation, err
 }
 
-// refreshCompletions observes only the selected items' attached Submissions.
-// Forge setup and reads are best-effort; ObserveCompletion owns the unlocked
-// network read and locked revalidation/recording boundary.
+// refreshCompletions observes the selected items' attached Submissions, then
+// refreshes their Proposals' Submissions. Forge setup and reads are
+// best-effort; ObserveCompletion and RefreshProposal own the unlocked network
+// reads and locked revalidation/recording boundaries.
 func refreshCompletions(ctx context.Context, store *ledger.Store, repository github.RepositoryID, items []string, newBackend backendFactory) (completionRefreshResult, error) {
 	result := completionRefreshResult{
 		Problems:          make(map[string]string),
 		ObservationErrors: make(map[string]error),
 		ForgeReadFailures: make(map[string]bool),
+		Proposals:         make(map[string]*ledger.ProposalRefresh),
+		ProposalProblems:  make(map[string]string),
 	}
 	needsForge := false
 	for _, item := range items {
@@ -47,11 +56,11 @@ func refreshCompletions(ctx context.Context, store *ledger.Store, repository git
 		}
 	}
 
-	var forge ledger.CompletionForge
+	connect := sync.OnceValues(func() (any, error) { return newBackend(repository) })
 	var backendError error
+	var forge ledger.CompletionForge
 	if needsForge {
-		backend, err := newBackend(repository)
-		if err != nil {
+		if backend, err := connect(); err != nil {
 			backendError = err
 		} else {
 			forge, _ = backend.(ledger.CompletionForge)
@@ -66,7 +75,11 @@ func refreshCompletions(ctx context.Context, store *ledger.Store, repository git
 		reader = &completionForgeReader{forge: forge}
 		forge = reader
 	}
+	var proposals []string
 	for _, item := range items {
+		if proposal, _, _ := strings.Cut(item, "/"); !slices.Contains(proposals, proposal) {
+			proposals = append(proposals, proposal)
+		}
 		if reader != nil {
 			reader.lastErr = nil
 		}
@@ -82,6 +95,26 @@ func refreshCompletions(ctx context.Context, store *ledger.Store, repository git
 			result.Problems[item] = backendError.Error()
 		} else {
 			result.Problems[item] = err.Error()
+		}
+	}
+	proposalForge := func() (ledger.ProposalForge, error) {
+		backend, err := connect()
+		if err != nil {
+			return nil, err
+		}
+		forge, _ := backend.(ledger.ProposalForge)
+		if forge == nil {
+			return nil, fmt.Errorf("the forge adapter cannot present or observe a Proposal Submission")
+		}
+		return forge, nil
+	}
+	for _, proposal := range proposals {
+		refreshed, err := ledger.RefreshProposal(ctx, store, repository, proposal, proposalForge)
+		if refreshed != nil {
+			result.Proposals[proposal] = refreshed
+		}
+		if err != nil {
+			result.ProposalProblems[proposal] = err.Error()
 		}
 	}
 	return result, nil

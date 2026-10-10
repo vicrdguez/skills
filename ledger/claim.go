@@ -251,7 +251,7 @@ func StartDeliveryContext(ctx context.Context, s *Store, repository github.Repos
 		}
 		if phase == ImplementPhase && inputs.Implement == nil && state.Submission == nil {
 			branch := "main"
-			if meta.Target != nil && meta.Completion == nil {
+			if proposalOpen(meta) {
 				branch = meta.Target.Branch
 			}
 			state.Target = &IntegrationTarget{Repository: project.Repository, Branch: branch}

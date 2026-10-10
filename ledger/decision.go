@@ -2,6 +2,7 @@ package ledger
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -121,7 +122,8 @@ type InboxEntry struct {
 
 // RetirementResult reports one explicit proposal retirement. Merged and
 // Superseded name the preserved child outcomes; PartialDelivery is true when
-// at least one slice was abandoned rather than delivered.
+// at least one slice was abandoned rather than delivered, or the open Proposal
+// Branch holding the merged slices never completed into main.
 type RetirementResult struct {
 	Project         string           `json:"project"`
 	Proposal        string           `json:"proposal"`
@@ -984,19 +986,31 @@ func replicateDecision(s *Store, result *DecisionResult) {
 }
 
 // RetireProposal records explicit human-directed retirement of one proposal
-// once every child is Merged or Superseded and unclaimed. It preserves merged
-// history, frozen contracts, dependencies, and source work, and reports
-// partial delivery rather than all-delivered completion.
-func RetireProposal(s *Store, project, proposal string) (*RetirementResult, error) {
+// once every child is Merged or Superseded and unclaimed. A proposal without
+// an open Proposal Branch also needs a Superseded child; an open branch whose
+// Proposal Submission has no recorded completion is spent by retirement. It
+// preserves merged history, frozen contracts, dependencies, source work and
+// the remote branch, and reports partial delivery rather than all-delivered
+// completion. A recorded Proposal Submission of an open branch is observed
+// first through forge, called with the Project's owner/name repository: only
+// one observed unmerged is retired, and a merged one follows the completion
+// path instead. The observation runs outside the mutation lock, which
+// revalidates only the attachment, so a merge landing in between is retired
+// without completion, the same window completion observation accepts.
+func RetireProposal(ctx context.Context, s *Store, project, proposal string, forge func(repository string) (CompletionForge, error)) (*RetirementResult, error) {
 	if !ValidRecordName(project) || !ValidRecordName(proposal) {
 		return nil, refuse(
 			"invalid proposal retirement scope "+strconv.Quote(project+"/"+proposal),
 			"select a recorded Project and proposal identity",
 		)
 	}
+	observed, err := observeRetiredSubmission(ctx, s, project, proposal, forge)
+	if err != nil {
+		return nil, err
+	}
 	var result *RetirementResult
 	var replicate string
-	err := s.withMutation(func() error {
+	err = s.withMutation(func() error {
 		if err := s.requireReconciled(); err != nil {
 			return err
 		}
@@ -1004,12 +1018,8 @@ func RetireProposal(s *Store, project, proposal string) (*RetirementResult, erro
 		if err != nil {
 			return err
 		}
-		var identity ProjectIdentity
-		if err := readJSONAt(s, head, filepath.Join(projectsRoot, project, "project.json"), &identity); err != nil || identity.Repository == "" {
-			return refuse(
-				"unknown Project "+project+" in the configured ledger",
-				"select a Project recorded in the configured ledger",
-			)
+		if _, err := projectRepositoryAt(s, head, project); err != nil {
+			return err
 		}
 		meta, present, err := s.readProposalMeta(project, proposal)
 		if err != nil {
@@ -1065,7 +1075,18 @@ func RetireProposal(s *Store, project, proposal string) (*RetirementResult, erro
 				"retire only a proposal whose every slice is Merged or Superseded and unclaimed",
 			)
 		}
-		if len(result.Superseded) == 0 {
+		if meta.Target != nil && meta.Completion != nil {
+			return refuse("proposal "+proposal+" has recorded completion of its Proposal Submission",
+				"a merged Proposal Submission completes the Proposal; leave it to cleanup instead of retiring it")
+		}
+		// An opened Proposal Branch without recorded completion may be
+		// abandoned even when every Slice merged into it; retirement spends it.
+		branchUncompleted := meta.Target != nil
+		if branchUncompleted && !meta.Retired && !sameAttachment(meta.Submission, observed) {
+			return refuse("the Proposal Submission of "+proposal+" changed since it was observed",
+				"run decision retire again to observe the current Proposal Submission")
+		}
+		if len(result.Superseded) == 0 && !branchUncompleted {
 			return refuse("proposal "+proposal+" has no Superseded slices",
 				"this operation retires abandoned work, not all-delivered proposals; leave completion observation to its own operation")
 		}
@@ -1096,6 +1117,64 @@ func RetireProposal(s *Store, project, proposal string) (*RetirementResult, erro
 		result.Replication = &note
 	}
 	return result, nil
+}
+
+// observeRetiredSubmission observes, outside the mutation lock, the recorded
+// Proposal Submission of an open Proposal Branch and returns the attachment
+// observed unmerged. An unobservable or merged Submission refuses retirement:
+// absence of a recorded completion does not prove the pull request unmerged.
+func observeRetiredSubmission(ctx context.Context, s *Store, project, proposal string, forge func(string) (CompletionForge, error)) (*ForgeAttachment, error) {
+	head, err := s.head()
+	if err != nil {
+		return nil, err
+	}
+	var meta ProposalMeta
+	if err := readJSONAt(s, head, filepath.Join(projectsRoot, project, "proposals", proposal, "proposal.json"), &meta); err != nil || !proposalOpen(meta) || meta.Submission == nil {
+		// The locked retirement reports an unknown or unreadable Proposal.
+		return nil, nil
+	}
+	repository, err := projectRepositoryAt(s, head, project)
+	if err != nil {
+		return nil, err
+	}
+	attached := *meta.Submission
+	unobservable := func(err error) error {
+		return refuse(
+			fmt.Sprintf("Proposal Submission %s#%d of %s could not be observed: %v", attached.Repository, attached.Number, proposal, err),
+			"retire once the forge is reachable; an open branch is retired only when its Proposal Submission is observed unmerged",
+		)
+	}
+	f, err := forge(repository)
+	if err != nil {
+		return nil, unobservable(err)
+	}
+	observation, err := f.ObserveSubmission(ctx, attached, IntegrationTarget{Repository: repository, Branch: proposalBase}, meta.Branch)
+	if err != nil {
+		return nil, unobservable(err)
+	}
+	switch observation.State {
+	case Merged:
+		return nil, refuse(
+			fmt.Sprintf("Proposal Submission %s#%d of %s has merged", attached.Repository, attached.Number, proposal),
+			"run skl status to record the Proposal's completion; a merged Proposal is completed, not retired",
+		)
+	case "open", "closed":
+		return &attached, nil
+	}
+	return nil, unobservable(errors.New("no confirmed outcome"))
+}
+
+// projectRepositoryAt reads the owner/name repository of a Project recorded
+// at head.
+func projectRepositoryAt(s *Store, head, project string) (string, error) {
+	var identity ProjectIdentity
+	if err := readJSONAt(s, head, filepath.Join(projectsRoot, project, "project.json"), &identity); err != nil || identity.Repository == "" {
+		return "", refuse(
+			"unknown Project "+project+" in the configured ledger",
+			"select a Project recorded in the configured ledger",
+		)
+	}
+	return identity.Repository, nil
 }
 
 // proposalChildren lists the committed slice directories of one proposal.
