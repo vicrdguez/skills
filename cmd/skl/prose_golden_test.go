@@ -317,7 +317,11 @@ func TestAgentProseGoldens(t *testing.T) {
 
 	// Decision Inbox: the request, the recorded answer, then empty and
 	// unavailable reads.
-	g.capture("decision-inbox", worker, "decision", "inbox")
+	inbox := g.capture("decision-inbox", worker, "decision", "inbox")
+	// The abandoned-work rules carry the amendment's supersession flag.
+	if !strings.Contains(inbox, "`\"superseded\": true`") {
+		t.Fatalf("the abandoned-work rules do not name the amendment flag:\n%s", inbox)
+	}
 	request := decisionRequest(t, worker, "widgets", proseItem)
 	g.capture("decision-result", worker, "decision", "apply", "--project", "widgets", "--item", proseItem,
 		"--request-commit", request.RequestCommit, "--request-path", request.RequestPath, "--route", ledger.RouteImplement, "--answer", proseFixturePath("answer.md"))
