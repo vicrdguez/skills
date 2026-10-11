@@ -25,7 +25,7 @@ Load the `design` skill, then sketch the seams at which each slice is verified:
 - Where the seam choice was delegated, prefer an existing seam, and use the highest one that exposes the promised consequence.
 - Before drafting, return to the user any consequential seam that is neither settled nor delegated.
 
-In an amendment, draft only the delta: added Slices, replaced Contracts, changed Dependencies and superseded Slices. Give every dependent of a replaced Slice a disposition: keep it, repoint its Dependencies, replace its Contract, or supersede it. A dependent of a superseded Slice is repointed or superseded.
+In an amendment, draft only the delta: added Slices, replaced Contracts, changed Dependencies and superseded Slices. Give every dependent of a replaced Slice a disposition: keep it, repoint its Dependencies, replace its Contract, or supersede it. A dependent of a superseded Slice is repointed or superseded; one in another Proposal stays as it is, so name it to the user as needing an amendment of its own Proposal.
 
 Check: every slice has its behavior, its Dependencies and its verification seams, and in an amendment every such dependent has its disposition.
 
@@ -111,7 +111,7 @@ Check: every slice has a body file, plus a parent body for a multi-slice Proposa
    - `proposal.json`: `{"proposal": "<kebab-name>", "branch": "<optional Proposal Branch>", "parent_title": "<multi-slice only>", "slices": [{"name": "<slug>", "title": "<issue title>", "branch": "<planned source branch>", "depends": ["<sibling slug or proposals/<proposal>/<slice>"]}]}`;
    - one directory per slice, holding only its Contract documents.
    The Proposal Branch defaults to `proposal/<kebab-name>` when omitted. In an amendment, the edited export is the intake.
-4. Run `skl ledger accept --repo <root> --proposal-dir <dir> --issue <slice>=<body-file>`, repeating `--issue` per slice and adding `--parent-body <file>` for multi-slice work, and follow its outcome. Acceptance records the Proposal Branch and each planned Slice branch; it creates no branch or worktree. In an amendment, run `skl ledger amend --repo <root> --proposal-dir <dir> --issue <slice>=<body-file>` instead, repeating `--issue` per added or changed Slice that stays active and adding `--parent-body <file>` for multi-slice work, and follow its outcome.
+4. Run `skl ledger accept --repo <root> --proposal-dir <dir> --issue <slice>=<body-file>`, repeating `--issue` per slice and adding `--parent-body <file>` for multi-slice work, and follow its outcome. Acceptance records the Proposal Branch and each planned Slice branch; it creates no branch or worktree. In an amendment, run `skl ledger amend --repo <root> --proposal-dir <dir> --issue <slice>=<body-file>` instead, repeating `--issue` per slice body from step 6 and adding `--parent-body <file>` for multi-slice work, and follow its outcome.
 5. Read each accepted or changed slice back with `skl ledger show --repo <root> --item <proposal>/<slice>`. Cite its ledger commit and path when you identify a document exactly.
 
 Check: the readback shows every accepted or changed slice's recorded documents.
