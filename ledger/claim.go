@@ -288,9 +288,9 @@ func (s *Store) requireBranchOwner(project, item, branch string) error {
 	return s.requireBranchFree(project, item, branch, func(other string) bool { return other == item })
 }
 
-// requireBranchFree is requireBranchOwner with the active Slice records that
-// own reports true for left out, because the caller checks their branches
-// itself.
+// requireBranchFree refuses a branch held by any Proposal, or by any Slice
+// record other than the active ones own accepts; a caller that excuses
+// several Slices checks their branches itself.
 func (s *Store) requireBranchFree(project, item, branch string, own func(slice string) bool) error {
 	head, err := s.head()
 	if err != nil {

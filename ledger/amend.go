@@ -315,7 +315,7 @@ func (s *Store) claimEvidence(project, proposal, slice string, state SliceState)
 // requireAmendedBranches keeps every planned branch unique within the
 // Project for added Slices and changed planned branches. The declaration
 // holds every recorded Slice of the Proposal with its resulting branch, so
-// their committed branches are left out of the Project check: a branch this
+// their active committed branches are left out of the Project check: a branch this
 // amendment moves away from is free for another of its Slices.
 func (s *Store) requireAmendedBranches(project string, declaration *ProposalDeclaration, meta ProposalMeta, changes map[string]*SliceAmendment) error {
 	ownSlice := func(other string) bool { return strings.HasPrefix(other, declaration.Proposal+"/") }

@@ -259,6 +259,10 @@ func TestAmendReassignsBranchesWithinOneAmendment(t *testing.T) {
 		editIntake(t, clash, func(declaration map[string]any) { exportedSlice(t, declaration, "second")["branch"] = taken })
 		requireRefused(t, cli.amend(t, root, clash), fixture.clone, head, taken, "transfer/second")
 	}
+	// So does a branch an unchanged sibling keeps.
+	sibling := exportedIntake(t, cli, root, "transfer")
+	editIntake(t, sibling, func(declaration map[string]any) { exportedSlice(t, declaration, "second")["branch"] = "transfer-first" })
+	requireRefused(t, cli.amend(t, root, sibling), fixture.clone, head, "transfer-first", "transfer/second")
 
 	// A branch the amendment moves away from is free for another of its Slices.
 	intake := exportedIntake(t, cli, root, "transfer")
