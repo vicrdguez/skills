@@ -436,6 +436,31 @@ func TestAgentProseGoldens(t *testing.T) {
 	g.capture("outcome-implement-next-dispatch-released", worker, "implement", "next", "--dispatch", "--repo", source, "--after", shareClaim)
 	g.capture("outcome-implement-next-dispatch-refused", worker, "implement", "next", "--dispatch", "--repo", source, "--after", "not-a-claim")
 
+	// Amend: an unchanged export, a refused change to submitted work, then a
+	// Slice added behind the released widget-share/foundation, whose Contract
+	// is replaced next.
+	exports := 0
+	amendIntake := func(proposal string) string {
+		t.Helper()
+		exports++
+		directory := filepath.Join(temp, fmt.Sprintf("amend-%d", exports), proposal)
+		g.run(proposer, "ledger", "export", "--repo", source, "--proposal", proposal, "--to", directory)
+		return directory
+	}
+	g.capture("outcome-ledger-amend-existing", proposer, "ledger", "amend", "--repo", source, "--proposal-dir", amendIntake("widget-share"))
+	submittedIntake := amendIntake("widget-search")
+	writeFile(t, filepath.Join(submittedIntake, "foundation", "intent.md"), "# Search intent, revised\n")
+	g.capture("outcome-ledger-amend-fix-required", proposer, "ledger", "amend", "--repo", source, "--proposal-dir", submittedIntake)
+	grown := amendIntake("widget-share")
+	addIntakeSlice(t, grown, "followup", "foundation")
+	if output := g.run(proposer, "ledger", "amend", "--repo", source, "--proposal-dir", grown,
+		"--issue=followup="+proseFixturePath("issue.md"), "--parent-body", proseFixturePath("issue.md")); !strings.Contains(output, "Status: amended") {
+		t.Fatalf("ledger amend widget-share:\n%s", output)
+	}
+	replaced := amendIntake("widget-share")
+	writeFile(t, filepath.Join(replaced, "foundation", "behavior.md"), "# Share behavior, revised\n")
+	g.capture("outcome-ledger-amend-amended", proposer, "ledger", "amend", "--repo", source, "--proposal-dir", replaced)
+
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	g.capture("outcome-implement-next-unconfigured", worker, "implement", "next", "--repo", source)
 

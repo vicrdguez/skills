@@ -30,6 +30,7 @@ type ledgerOutcome struct {
 	Readback        *ledger.Readback         `json:"readback,omitempty"`
 	Document        *ledger.ContractDocument `json:"document,omitempty"`
 	Export          *ledger.Export           `json:"export,omitempty"`
+	Amendment       *ledger.Amendment        `json:"amendment,omitempty"`
 	ReadbackCommand string                   `json:"readback_command,omitempty"`
 	// Presentation and Guidance carry one current-view pull request attempt.
 	Presentation *ledger.Presentation  `json:"presentation,omitempty"`
@@ -63,16 +64,38 @@ func authoringFor(repository setup.RepositoryContext, outcome *ledger.Acceptance
 	if !missing {
 		return nil
 	}
+	var names []string
+	for _, slice := range outcome.Slices {
+		names = append(names, slice.Name)
+	}
+	return bindAuthoring(repository, outcome, names, len(outcome.Slices) > 1)
+}
+
+// amendAuthoring returns the prose authoring pointers for the listed Slices
+// an amendment left unpresented, or for its parent when no parent prose was
+// supplied, and nil otherwise.
+func amendAuthoring(repository setup.RepositoryContext, amendment *ledger.Amendment) *proseAuthoring {
+	parent := amendment.ParentNote != nil && amendment.ParentNote.Status == ledger.IssueMissingInput
+	if len(amendment.Unpresented) == 0 && !parent {
+		return nil
+	}
+	return bindAuthoring(repository, &amendment.Acceptance, amendment.Unpresented, parent)
+}
+
+// bindAuthoring binds the readback of each named Slice and a publish
+// continuation that takes fresh prose for those Slices and, when parent is
+// set, for the parent issue.
+func bindAuthoring(repository setup.RepositoryContext, outcome *ledger.Acceptance, names []string, parent bool) *proseAuthoring {
 	selection := "--repo " + skilldist.ShellQuote(repository.Root) + " --remote " + skilldist.ShellQuote(repository.Remote)
 	authoring := &proseAuthoring{
 		Guidance:     "skl skill --resource issue-publication.md --input " + skilldist.ShellQuote("proposal="+outcome.Proposal) + " --input " + skilldist.ShellQuote("project="+outcome.Project) + " --input " + skilldist.ShellQuote("repo="+repository.Root) + " --input " + skilldist.ShellQuote("remote="+repository.Remote) + " propose",
 		Continuation: "skl ledger publish " + selection + " --proposal " + skilldist.ShellQuote(outcome.Proposal),
 	}
-	for _, slice := range outcome.Slices {
-		authoring.Readback = append(authoring.Readback, "skl ledger show "+selection+" --item "+skilldist.ShellQuote(outcome.Proposal+"/"+slice.Name))
-		authoring.Continuation += " --issue " + skilldist.ShellQuote(slice.Name+"=") + "<body-file>"
+	for _, name := range names {
+		authoring.Readback = append(authoring.Readback, "skl ledger show "+selection+" --item "+skilldist.ShellQuote(outcome.Proposal+"/"+name))
+		authoring.Continuation += " --issue " + skilldist.ShellQuote(name+"=") + "<body-file>"
 	}
-	if len(outcome.Slices) > 1 {
+	if parent {
 		authoring.Continuation += " --parent-body <parent-body-file>"
 	}
 	return authoring
@@ -133,6 +156,58 @@ func ledgerCommands(newBackend backendFactory, stdout io.Writer) *cli.Command {
 				authoring := authoringFor(repository, acceptance)
 				return renderLedgerOutcome(stdout, format, ledgerOutcome{Status: acceptance.Status, Acceptance: acceptance, Authoring: authoring,
 					kind: "ledger-accept", facts: proposalFactsOf(repository, acceptance, authoring)})
+			},
+		}, {
+			Name:  "amend",
+			Usage: "Record an edited intake of one accepted proposal as one ledger revision and publish the changed issues",
+			Flags: []cli.Flag{
+				&cli.PathFlag{Name: "repo", Value: "."},
+				&cli.StringFlag{Name: "remote"},
+				&cli.PathFlag{Name: "proposal-dir", Required: true},
+				newIssueBodyFlag(),
+				&cli.PathFlag{Name: "parent-body"},
+				implementationFormatFlag(),
+			},
+			Action: func(command *cli.Context) error {
+				format, err := implementationFormat(command.String("format"))
+				if err != nil {
+					return err
+				}
+				rerun := boundCommand(command, "skl ledger amend")
+				refuse := func(err error) error { return refuseLedger(stdout, format, rerun, err) }
+				bodies, parentBody, err := issueBodyInputs(command)
+				if err != nil {
+					return err
+				}
+				repository, err := setup.ResolveRepository(command.Path("repo"), command.String("remote"))
+				if err != nil {
+					return renderLedgerOutcome(stdout, format, ledgerOutcome{Status: "fix_required", Reason: "repository or remote resolution failed: " + err.Error(), Repair: "run the amendment inside the source repository, or pass --repo and --remote explicitly", rerun: rerun})
+				}
+				declaration, err := ledger.LoadDeclaration(command.Path("proposal-dir"), bodies, parentBody)
+				if err != nil {
+					return refuse(err)
+				}
+				store, failure := openConfiguredLedger()
+				if failure != nil {
+					return refuse(failure)
+				}
+				if err := store.RefuseSourceOverlap(repository.Root); err != nil {
+					return refuse(err)
+				}
+				backend, err := newBackend(repository.Repository)
+				if err != nil {
+					return refuse(err)
+				}
+				forge, ok := backend.(ledger.Forge)
+				if !ok {
+					return fmt.Errorf("workflow backend does not support ledger issue publication")
+				}
+				amendment, err := ledger.Amend(command.Context, store, repository.Repository, declaration, forge)
+				if err != nil {
+					return refuse(err)
+				}
+				return renderLedgerOutcome(stdout, format, ledgerOutcome{Status: amendment.Status, Amendment: amendment,
+					kind: "ledger-amend", facts: amendFactsOf(repository, amendment)})
 			},
 		}, {
 			Name:  "publish",
@@ -507,6 +582,32 @@ func proposalFactsOf(repository setup.RepositoryContext, acceptance *ledger.Acce
 			view.Grouping = noteWord(slice.GroupingStatus)
 		}
 		facts.Slices = append(facts.Slices, view)
+	}
+	return facts
+}
+
+// amendFacts are one amendment outcome: what it changed, the listed Slices'
+// publication, the untouched dependents to confirm, and the Slices left
+// unpresented.
+type amendFacts struct {
+	proposalFacts
+	ParentTitle         string
+	DescriptionReplaced bool
+	ParentTitleChanged  bool
+	Amended             []ledger.SliceAmendment
+	Confirm             bool
+	Unpresented         []string
+}
+
+func amendFactsOf(repository setup.RepositoryContext, amendment *ledger.Amendment) amendFacts {
+	facts := amendFacts{
+		proposalFacts: proposalFactsOf(repository, &amendment.Acceptance, amendAuthoring(repository, amendment)),
+		ParentTitle:   amendment.ParentTitle, DescriptionReplaced: amendment.DescriptionReplaced, ParentTitleChanged: amendment.ParentTitleChanged,
+		Amended: amendment.Amended, Unpresented: amendment.Unpresented,
+	}
+	facts.Push = noteWord(&amendment.Push)
+	for _, change := range amendment.Amended {
+		facts.Confirm = facts.Confirm || len(change.Dependents) > 0
 	}
 	return facts
 }

@@ -3,6 +3,7 @@ package ledger
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -210,116 +211,138 @@ func writeJSON(path string, value any) error {
 	return os.WriteFile(path, append(contents, '\n'), 0o644)
 }
 
-// compareAccepted reports whether an existing accepted record set matches
-// the incoming declaration exactly: the same contract bytes and declared
-// relationships. Any difference names the first mismatching fact.
-func (s *Store) compareAccepted(project string, declaration *ProposalDeclaration, meta ProposalMeta) error {
+// Kinds of difference between an intake declaration and the accepted record
+// of the Proposal it names.
+const (
+	diffDescription    = "description"
+	diffProposalBranch = "proposal_branch"
+	diffParentTitle    = "parent_title"
+	// diffAdded is a declared Slice the record lacks; diffMissing a recorded
+	// Slice the declaration omits; diffUnexpected any other record entry.
+	diffAdded        = "added"
+	diffMissing      = "missing"
+	diffUnexpected   = "unexpected"
+	diffTitle        = "title"
+	diffBranch       = "branch"
+	diffSuperseded   = "superseded"
+	diffDependencies = "dependencies"
+	// diffContract names one Contract file whose bytes differ, or that only
+	// one side holds.
+	diffContract = "contract"
+)
+
+// difference is one fact on which an intake declaration and the accepted
+// record disagree.
+type difference struct {
+	kind  string
+	slice string
+	// entry is the Contract file of diffContract, or the record entry of
+	// diffUnexpected.
+	entry string
+}
+
+// fact names what the record holds that the declaration contradicts.
+func (d difference) fact() string {
+	switch d.kind {
+	case diffDescription:
+		return "a different proposal.md"
+	case diffProposalBranch:
+		return "a different Proposal Branch"
+	case diffParentTitle:
+		return "a different parent title"
+	case diffAdded:
+		return "no slice " + d.slice
+	case diffMissing:
+		return "slice " + d.slice + ", which the declaration omits"
+	case diffUnexpected:
+		return "the unexpected record entry " + d.entry
+	case diffTitle:
+		return "a different title for slice " + d.slice
+	case diffBranch:
+		return "a different planned branch for slice " + d.slice
+	case diffSuperseded:
+		return "a different superseded declaration for slice " + d.slice
+	case diffDependencies:
+		return "different dependencies for slice " + d.slice
+	}
+	return "different content for " + d.entry + " of slice " + d.slice
+}
+
+// declarationDifferences walks the incoming declaration against the accepted
+// record of its Proposal and reports every difference, in walk order. An
+// unreadable record is an error, not a difference.
+func (s *Store) declarationDifferences(project string, declaration *ProposalDeclaration, meta ProposalMeta) ([]difference, error) {
+	var differences []difference
+	differ := func(kind, slice, entry string) {
+		differences = append(differences, difference{kind: kind, slice: slice, entry: entry})
+	}
 	directory := filepath.Join(s.Root, projectsRoot, project, "proposals", declaration.Proposal)
 	description, err := os.ReadFile(filepath.Join(directory, "proposal.md"))
 	if err != nil {
-		return refuse(
+		return nil, refuse(
 			"existing record proposals/"+declaration.Proposal+" is incomplete: its proposal.md is unavailable",
 			"restore the accepted record with human direction, or use a new proposal name",
 		)
 	}
 	if !bytes.Equal(description, declaration.Description) {
-		return refuse(
-			"proposal "+declaration.Proposal+" is already accepted with a different proposal.md",
-			"a changed Contract requires a renewed Proposal rather than in-place replacement",
-		)
+		differ(diffDescription, "", "")
 	}
 	// Historical Proposals have no recorded Proposal Branch to compare or backfill.
 	if meta.Branch != "" && meta.Branch != declaration.Branch {
-		return refuse(
-			"proposal "+declaration.Proposal+" is already accepted with a different Proposal Branch "+meta.Branch,
-			"a changed declared relationship requires a renewed Proposal rather than in-place replacement",
-		)
+		differ(diffProposalBranch, "", "")
 	}
 	if strings.TrimSpace(meta.ParentTitle) != strings.TrimSpace(declaration.ParentTitle) {
-		return refuse(
-			"proposal "+declaration.Proposal+" is already accepted with a different parent grouping",
-			"a changed declared relationship requires a renewed Proposal rather than in-place replacement",
-		)
+		differ(diffParentTitle, "", "")
 	}
 	for index := range declaration.Slices {
 		slice := declaration.Slices[index]
 		state, found, err := s.readSliceState(project, declaration.Proposal, slice.Name)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if !found {
-			return refuse(
-				"proposal "+declaration.Proposal+" is already accepted without slice "+slice.Name,
-				"a changed slice membership requires a renewed Proposal rather than in-place replacement",
-			)
+			differ(diffAdded, slice.Name, "")
+			continue
 		}
-		if state.Title != slice.Title || state.Branch != slice.Branch {
-			return refuse(
-				"slice "+slice.Name+" of proposal "+declaration.Proposal+" is already accepted with a different title or planned branch",
-				"a changed declared relationship requires a renewed Proposal rather than in-place replacement",
-			)
+		if state.Title != slice.Title {
+			differ(diffTitle, slice.Name, "")
+		}
+		if state.Branch != slice.Branch {
+			differ(diffBranch, slice.Name, "")
 		}
 		if (state.State == Superseded) != slice.Superseded {
-			return refuse(
-				"slice "+slice.Name+" of proposal "+declaration.Proposal+" is already accepted with a different superseded declaration",
-				"a changed declared relationship requires a renewed Proposal rather than in-place replacement",
-			)
+			differ(diffSuperseded, slice.Name, "")
 		}
 		if !sameDependencies(state.Dependencies, declaration.CanonicalDependencies(slice)) {
-			return refuse(
-				"slice "+slice.Name+" of proposal "+declaration.Proposal+" is already accepted with different dependencies",
-				"a changed declared relationship requires a renewed Proposal rather than in-place replacement",
-			)
+			differ(diffDependencies, slice.Name, "")
 		}
-		for name, contents := range slice.contract {
+		for _, name := range []string{"behavior.md", "intent.md", "plan.md", "tasks.md"} {
+			declared, wanted := slice.contract[name]
 			accepted, err := os.ReadFile(filepath.Join(directory, slice.Name, name))
-			if err != nil {
-				return refuse(
-					"existing record of slice "+slice.Name+" is incomplete: "+name+" is unavailable",
-					"restore the accepted record with human direction, or use a new proposal name",
-				)
-			}
-			if !bytes.Equal(accepted, contents) {
-				return refuse(
-					"contract file "+name+" of slice "+slice.Name+" is already accepted with different content",
-					"a changed Contract requires a renewed Proposal rather than in-place replacement",
-				)
-			}
-		}
-		for _, name := range []string{"intent.md", "behavior.md", "plan.md", "tasks.md"} {
-			if _, wanted := slice.contract[name]; wanted {
-				continue
-			}
-			if _, err := os.Stat(filepath.Join(directory, slice.Name, name)); err == nil {
-				return refuse(
-					"slice "+slice.Name+" is already accepted with a "+name+" the renewed declaration omits",
-					"a changed Contract requires a renewed Proposal rather than in-place replacement",
-				)
+			switch {
+			case err != nil && !os.IsNotExist(err):
+				return nil, fmt.Errorf("read the accepted %s of slice %s: %w", name, slice.Name, err)
+			case err != nil && wanted, err == nil && (!wanted || !bytes.Equal(accepted, declared)):
+				differ(diffContract, slice.Name, name)
 			}
 		}
 	}
 	entries, err := os.ReadDir(directory)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	expected := make(map[string]bool, len(declaration.Slices)+2)
-	expected["proposal.json"] = true
-	expected["proposal.md"] = true
+	expected := map[string]bool{"proposal.json": true, "proposal.md": true}
 	for index := range declaration.Slices {
 		expected[declaration.Slices[index].Name] = true
 	}
-	var unexpected []string
 	for _, entry := range entries {
-		if !expected[entry.Name()] {
-			unexpected = append(unexpected, entry.Name())
+		switch {
+		case expected[entry.Name()]:
+		case entry.IsDir() && ValidRecordName(entry.Name()):
+			differ(diffMissing, entry.Name(), "")
+		default:
+			differ(diffUnexpected, "", entry.Name())
 		}
 	}
-	if len(unexpected) > 0 {
-		sort.Strings(unexpected)
-		return refuse(
-			"existing record proposals/"+declaration.Proposal+" holds unexpected entries: "+strings.Join(unexpected, ", "),
-			"a changed slice membership requires a renewed Proposal rather than in-place replacement",
-		)
-	}
-	return nil
+	return differences, nil
 }
