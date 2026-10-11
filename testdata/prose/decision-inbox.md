@@ -129,7 +129,7 @@ round: 2
 
 - An obligation that is wrong goes back through `explore` and `propose`.
 - `supersede` abandons unmerged work only. A Superseded blocker leaves its dependents blocked.
-- Unclaimed work can also be abandoned by amending its Proposal: mark the Slice `"superseded": true` in an export of the Proposal and run `skl ledger amend`.
+- The human can also abandon unclaimed work by amending its Proposal with the Slice marked `"superseded": true`.
 - When the human directs retiring the old parent of abandoned work, run `skl decision retire --project <project> --proposal <proposal>` once no slice is active or claimed. Retirement reports partial delivery.
 
 

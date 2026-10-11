@@ -649,9 +649,7 @@ func TestAmendSupersedesUnclaimedSlicesInEveryLifecycle(t *testing.T) {
 	intake := exportedIntake(t, cli, root, "discard")
 	supersede(t, intake, "ready", "rework", "review", "merge")
 	forbidForge(t, forge)
-	if text, err := cli.deliveryRun(t, "skl", "ledger", "amend", "--repo", root, "--proposal-dir", intake); err != nil || !strings.Contains(text, "Status: amended") {
-		t.Fatalf("amend output:\n%s", text)
-	}
+	requireAmended(t, cli.amend(t, root, intake))
 	for slice, recorded := range before {
 		state := amendState(t, fixture.clone, "discard", slice)
 		want := recorded
@@ -829,4 +827,29 @@ func TestAmendSupersedingEverySliceMakesRetirementReachable(t *testing.T) {
 	if meta := decodeRecord(t, readLedgerFile(t, fixture.clone, "projects/widgets/proposals/unstarted/proposal.json")); meta["retired"] != true {
 		t.Fatalf("proposal.json records %v", meta)
 	}
+}
+
+func TestAmendRefusesActiveSliceBehindArchivedSupersededSlice(t *testing.T) {
+	fixture := newLedgerFixture(t)
+	root := sourceRepository(t, "acme", "widgets")
+	cli := newLedgerApp(t, newForgeServer(t))
+	acceptSpec(t, cli, root, cleanupSpec("gone", "old"))
+	live := cleanupSpec("live", "x")
+	live.depends["x"] = []string{"proposals/gone/old"}
+	acceptSpec(t, cli, root, live)
+	abandoned := exportedIntake(t, cli, root, "gone")
+	supersede(t, abandoned, "old")
+	requireAmended(t, cli.amend(t, root, abandoned))
+	if retired := decisionReadOnlyApp(t).decisionJSON(t, "skl", "decision", "retire", "--project", "widgets", "--proposal", "gone", "--format", "json"); retired.Status != ledger.DecisionApplied {
+		t.Fatalf("setup retirement = %s", mustJSON(t, retired))
+	}
+	outcome := runCleanup(t, offlineForge(t), root)
+	if _, archived := archivedNames(outcome)["gone"]; !archived {
+		t.Fatalf("setup did not archive gone: %s", mustJSON(t, outcome))
+	}
+	head := ledgerHead(t, fixture.clone)
+
+	intake := exportedIntake(t, cli, root, "live")
+	writeFile(t, filepath.Join(intake, "proposal.md"), "# live\n\nRevised.\n")
+	requireRefused(t, cli.amend(t, root, intake), fixture.clone, head, "live/x behind gone/old")
 }

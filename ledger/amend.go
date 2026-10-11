@@ -24,10 +24,12 @@ type SliceAmendment struct {
 	// Superseded marks a Slice this amendment superseded.
 	Superseded bool `json:"superseded,omitempty"`
 	// Dependents are the active Slices this amendment left untouched that
-	// depend on this changed Slice, as Work Item identities.
+	// depend on this changed Slice, as Work Item identities. A superseded
+	// Slice lists them as Blocked instead, since there is nothing to confirm.
 	Dependents []string `json:"dependents,omitempty"`
-	// Blocked are the active Slices of other Proposals left depending on this
-	// superseded Slice, as Work Item identities.
+	// Blocked are the active Slices left depending on this superseded Slice,
+	// as Work Item identities. The graph rule refuses any in its own Proposal,
+	// so they belong to other Proposals.
 	Blocked []string `json:"blocked,omitempty"`
 }
 
@@ -246,12 +248,12 @@ func (s *Store) classifyAmendment(project string, declaration *ProposalDeclarati
 				)
 			case state.Claim != nil:
 				return nil, refuse(
-					"slice "+item+" holds an active "+state.Claim.Phase+" Claim on ledger basis "+state.Claim.Basis+", so it stays live",
+					"slice "+item+" holds an active "+state.Claim.Phase+" Claim on ledger basis "+state.Claim.Basis+", so it is not superseded",
 					"let that Claim end with its handoff or release, then amend again",
 				)
 			case state.State == Merged:
 				return nil, refuse(
-					"slice "+item+" is merged, so it stays live",
+					"slice "+item+" is merged, so it is not superseded",
 					"remove \"superseded\" from slice "+difference.slice,
 				)
 			}
