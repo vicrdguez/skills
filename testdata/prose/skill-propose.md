@@ -102,7 +102,6 @@ Judge each fact by its use to the reader, whichever document holds it, and summa
 
 Check: every slice has a body file, plus a parent body for a multi-slice Proposal, and each body explains its work to a reader who sees only that issue.
 
-
 ## 7. Record in the Workflow Ledger
 
 1. Run `skl propose cleanup --repo <root>` and follow its outcome. It archives finished Proposals and removes safe merged source work itself.

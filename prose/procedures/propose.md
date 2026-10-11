@@ -92,7 +92,6 @@ Check: every review finding is corrected or resolved by the user.
 In an amendment, the slices this step covers are the added and changed Slices that stay active.
 
 {{template "issue-description" .}}
-
 ## 7. Record in the Workflow Ledger
 
 1. Run `skl propose cleanup --repo <root>` and follow its outcome. It archives finished Proposals and removes safe merged source work itself.
