@@ -101,10 +101,7 @@ func Accept(ctx context.Context, store *Store, repository github.RepositoryID, d
 			ParentTitle: strings.TrimSpace(declaration.ParentTitle),
 		}
 		if exists(filepath.Join(store.Root, projectsRoot, project.Name, archiveRoot, declaration.Proposal)) {
-			return refuse(
-				"proposal "+declaration.Proposal+" is already accepted and archived",
-				"archived records are never re-accepted or copied back; choose a new proposal name for renewed work",
-			)
+			return archivedRefusal(declaration.Proposal)
 		}
 		if _, err := os.Stat(proposalDirectory); err == nil {
 			if !recorded {
@@ -113,8 +110,15 @@ func Accept(ctx context.Context, store *Store, repository github.RepositoryID, d
 					"repair or remove the damaged record with human direction, then retry",
 				)
 			}
-			if err := store.compareAccepted(project.Name, declaration, meta); err != nil {
+			differences, err := store.declarationDifferences(project.Name, declaration, meta)
+			if err != nil {
 				return err
+			}
+			if len(differences) > 0 {
+				return refuse(
+					"proposal "+declaration.Proposal+" is already accepted with "+differences[0].fact(),
+					"re-acceptance records nothing new; change an accepted Proposal through renewed Proposal review and `skl ledger amend`",
+				)
 			}
 			outcome.Status = "existing"
 			outcome.ParentIssue = meta.ParentIssue
