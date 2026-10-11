@@ -43,7 +43,7 @@ Each stage is a skill, entered cold and left behind at handoff. `propose` is the
 
 - **Fresh contexts.** Handoff uses recorded evidence, not conversation history. Watchdog never runs in the context that built the change.
 - **Private authority.** The ledger owns Slices, Claims, reports and Workflow State. Issues and PRs are human-facing attachments, never delivery authority.
-- **Frozen Contracts.** Accepted obligations do not change. Changed obligations need a renewed proposal, not an edit.
+- **Frozen Contracts.** A Slice's Contract freezes at its first Claim. Before then, a renewed proposal may amend it, and the Amendment is recorded in the ledger; afterwards, changed obligations need a replacement Slice, not an edit.
 - **Tracer bullets.** Each Slice cuts a demoable path through its layers. A dependent Slice becomes eligible only once every blocker is merged.
 
 `brainstorm` and `shape` are optional thinking tools outside the pipeline. They preserve an open conversation or turn it into an implementation-independent design under `.thinking/`, which stays out of Git.
