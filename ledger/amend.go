@@ -44,8 +44,8 @@ func (c SliceAmendment) presented() bool {
 type Amendment struct {
 	// Acceptance carries the status, "amended" or "existing", the ledger
 	// commit, and the listed Slices: every amended Slice, every Slice a
-	// supplied body names, and every Slice when the amendment may create the
-	// parent issue.
+	// supplied body names, and every Slice not declared superseded when the
+	// amendment may create the parent issue.
 	Acceptance
 	DescriptionReplaced bool             `json:"description_replaced,omitempty"`
 	ParentTitleChanged  bool             `json:"parent_title_changed,omitempty"`
@@ -107,10 +107,17 @@ func Amend(ctx context.Context, store *Store, repository github.RepositoryID, de
 			return err
 		}
 		for name := range declaration.IssueBodies {
-			if declaration.sliceByName(name) == nil {
+			slice := declaration.sliceByName(name)
+			if slice == nil {
 				return refuse(
 					"issue prose names "+name+", which is not a slice of proposal "+declaration.Proposal,
 					"supply --issue only for the declared slices: "+strings.Join(declaration.SliceNames(), ", "),
+				)
+			}
+			if slice.Superseded {
+				return refuse(
+					"issue prose names "+name+", which is declared superseded, and an amendment leaves a Superseded Slice's issue as it is",
+					"leave out --issue for slice "+name,
 				)
 			}
 		}
@@ -130,10 +137,14 @@ func Amend(ctx context.Context, store *Store, repository github.RepositoryID, de
 		for name := range declaration.IssueBodies {
 			listed[name] = true
 		}
-		// A created parent groups every established child issue.
+		// A created parent groups every established child issue except a
+		// Superseded Slice's, whose issue the amendment leaves as it is.
 		mayCreateParent := outcome.ParentTitle != "" && meta.ParentIssue == nil && declaration.ParentBody != nil
 		var names []string
 		for _, name := range declaration.SliceNames() {
+			if declaration.sliceByName(name).Superseded {
+				continue
+			}
 			if listed[name] || mayCreateParent {
 				names = append(names, name)
 				if _, supplied := declaration.IssueBodies[name]; !supplied {
@@ -298,9 +309,17 @@ func (s *Store) classifyAmendment(project string, declaration *ProposalDeclarati
 		}
 	}
 	for _, slice := range declaration.Slices {
-		if changes[slice.Name] != nil {
-			plan.slices = append(plan.slices, *changes[slice.Name])
+		change := changes[slice.Name]
+		if change == nil {
+			continue
 		}
+		if change.Superseded && change.presented() {
+			return nil, refuse(
+				"slice "+declaration.Proposal+"/"+slice.Name+" is superseded by this amendment, so its Contract, title, planned branch and Dependencies stay as recorded",
+				"restore its recorded entries in the intake, or remove \"superseded\" from slice "+slice.Name,
+			)
+		}
+		plan.slices = append(plan.slices, *change)
 	}
 	if err := s.requireAmendedBranches(project, declaration, meta, changes); err != nil {
 		return nil, err

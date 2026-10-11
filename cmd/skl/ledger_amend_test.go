@@ -853,3 +853,57 @@ func TestAmendRefusesActiveSliceBehindArchivedSupersededSlice(t *testing.T) {
 	writeFile(t, filepath.Join(intake, "proposal.md"), "# live\n\nRevised.\n")
 	requireRefused(t, cli.amend(t, root, intake), fixture.clone, head, "live/x behind gone/old")
 }
+
+// A Slice superseded by an amendment keeps its Contract, title, planned
+// branch and Dependencies, so a supersession combined with another change
+// to the same Slice is refused.
+func TestAmendSupersessionKeepsTheSliceRecords(t *testing.T) {
+	fixture := newLedgerFixture(t)
+	root := sourceRepository(t, "acme", "widgets")
+	cli := newLedgerApp(t, newForgeServer(t))
+	acceptSpec(t, cli, root, cleanupSpec("discard", "old", "kept"))
+	head := ledgerHead(t, fixture.clone)
+
+	rewritten := exportedIntake(t, cli, root, "discard")
+	supersede(t, rewritten, "old")
+	writeFile(t, filepath.Join(rewritten, "old", "behavior.md"), "# Replaced while abandoned\n")
+	requireRefused(t, cli.amend(t, root, rewritten), fixture.clone, head, "discard/old", "stay as recorded")
+
+	retitled := exportedIntake(t, cli, root, "discard")
+	supersede(t, retitled, "old")
+	editIntake(t, retitled, func(declaration map[string]any) { exportedSlice(t, declaration, "old")["title"] = "Abandoned" })
+	requireRefused(t, cli.amend(t, root, retitled), fixture.clone, head, "discard/old", "stay as recorded")
+}
+
+// An amendment that supersedes a Slice leaves its issue alone: a supplied
+// body for it is refused, and a parent the amendment creates groups only
+// the live Slices' issues.
+func TestAmendLeavesSupersededIssuesAlone(t *testing.T) {
+	fixture := newLedgerFixture(t)
+	root := sourceRepository(t, "acme", "widgets")
+	forge := newForgeServer(t)
+	cli := newLedgerApp(t, forge)
+	acceptSpec(t, cli, root, cleanupSpec("discard", "old", "kept"), issueFile(t, "old", "Old body\n"), issueFile(t, "kept", "Kept body\n"))
+	old, kept := amendState(t, fixture.clone, "discard", "old").Issue, amendState(t, fixture.clone, "discard", "kept").Issue
+	if old == nil || kept == nil {
+		t.Fatal("setup did not attach both issues")
+	}
+	head := ledgerHead(t, fixture.clone)
+
+	presented := exportedIntake(t, cli, root, "discard")
+	supersede(t, presented, "old")
+	forbidForge(t, forge)
+	requireRefused(t, cli.amend(t, root, presented, issueFile(t, "old", "Old body, revised\n")), fixture.clone, head, "old", "superseded")
+	forge.fail = nil
+
+	amendment := requireAmended(t, cli.amend(t, root, presented, "--parent-body", writeTemp(t, t, "Parent body\n")))
+	if amendment.ParentIssue == nil {
+		t.Fatalf("the parent issue was not created: %s", mustJSON(t, amendment))
+	}
+	if children := forge.children[amendment.ParentIssue.Number]; !slices.Equal(children, []int{kept.Number}) {
+		t.Fatalf("parent %d groups %v, want only kept's issue %d", amendment.ParentIssue.Number, children, kept.Number)
+	}
+	if updated := forge.updatedIssues(); containsNumber(updated, old.Number) {
+		t.Fatalf("the superseded issue %d was updated: %v", old.Number, updated)
+	}
+}
