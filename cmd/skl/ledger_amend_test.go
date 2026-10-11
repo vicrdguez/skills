@@ -623,7 +623,7 @@ func supersede(t *testing.T, directory string, names ...string) {
 func forbidForge(t *testing.T, forge *forgeServer) {
 	t.Helper()
 	forge.fail = func(method, path string) int {
-		t.Errorf("superseding contacted the forge: %s %s", method, path)
+		t.Errorf("the amendment contacted the forge: %s %s", method, path)
 		return http.StatusServiceUnavailable
 	}
 }

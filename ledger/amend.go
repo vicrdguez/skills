@@ -34,7 +34,8 @@ type SliceAmendment struct {
 }
 
 // presented reports whether the change alters what the Slice's issue
-// presents. A supersession alone contacts no forge.
+// presents. A supersession is never combined with such a change, so a
+// superseded Slice contacts no forge.
 func (c SliceAmendment) presented() bool {
 	return c.Added || c.Title || c.Branch || c.Dependencies || len(c.Contract) > 0
 }
@@ -141,8 +142,9 @@ func Amend(ctx context.Context, store *Store, repository github.RepositoryID, de
 		// Superseded Slice's, whose issue the amendment leaves as it is.
 		mayCreateParent := outcome.ParentTitle != "" && meta.ParentIssue == nil && declaration.ParentBody != nil
 		var names []string
-		for _, name := range declaration.SliceNames() {
-			if declaration.sliceByName(name).Superseded {
+		for _, slice := range declaration.Slices {
+			name := slice.Name
+			if slice.Superseded {
 				continue
 			}
 			if listed[name] || mayCreateParent {
