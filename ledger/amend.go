@@ -21,9 +21,20 @@ type SliceAmendment struct {
 	Title        bool     `json:"title,omitempty"`
 	Branch       bool     `json:"branch,omitempty"`
 	Dependencies bool     `json:"dependencies,omitempty"`
+	// Superseded marks a Slice this amendment superseded.
+	Superseded bool `json:"superseded,omitempty"`
 	// Dependents are the active Slices this amendment left untouched that
-	// depend on this one, as Work Item identities.
+	// depend on this changed Slice, as Work Item identities.
 	Dependents []string `json:"dependents,omitempty"`
+	// Blocked are the active Slices of other Proposals left depending on this
+	// superseded Slice, as Work Item identities.
+	Blocked []string `json:"blocked,omitempty"`
+}
+
+// presented reports whether the change alters what the Slice's issue
+// presents. A supersession alone contacts no forge.
+func (c SliceAmendment) presented() bool {
+	return c.Added || c.Title || c.Branch || c.Dependencies || len(c.Contract) > 0
 }
 
 // Amendment is the outcome of one amendment: what it changed, and the
@@ -112,7 +123,7 @@ func Amend(ctx context.Context, store *Store, repository github.RepositoryID, de
 		outcome.ParentIssue = meta.ParentIssue
 		listed := map[string]bool{}
 		for _, change := range plan.slices {
-			listed[change.Name] = true
+			listed[change.Name] = change.presented()
 		}
 		for name := range declaration.IssueBodies {
 			listed[name] = true
@@ -227,20 +238,28 @@ func (s *Store) classifyAmendment(project string, declaration *ProposalDeclarati
 				"restore its entry in proposal.json and its directory of Contract files; an amendment keeps every recorded Slice",
 			)
 		case diffSuperseded:
-			if state.State == Superseded {
+			switch {
+			case state.State == Superseded:
 				return nil, refuse(
 					"slice "+item+" is recorded Superseded, and the declaration drops its \"superseded\" flag",
-					"restore \"superseded\": true on slice "+difference.slice,
+					"restore \"superseded\": true on slice "+difference.slice+"; a Superseded Slice keeps its name, so declare its replacement as a new Slice under a new name",
+				)
+			case state.Claim != nil:
+				return nil, refuse(
+					"slice "+item+" holds an active "+state.Claim.Phase+" Claim on ledger basis "+state.Claim.Basis+", so it stays live",
+					"let that Claim end with its handoff or release, then amend again",
+				)
+			case state.State == Merged:
+				return nil, refuse(
+					"slice "+item+" is merged, so it stays live",
+					"remove \"superseded\" from slice "+difference.slice,
 				)
 			}
-			return nil, refuse(
-				"slice "+item+" is declared superseded, and amendment records no supersession",
-				"remove \"superseded\" from slice "+difference.slice+"; to supersede it, answer its Needs Human request with the Decision route `supersede`",
-			)
+			change(difference.slice).Superseded = true
 		case diffAdded:
 			if declaration.sliceByName(difference.slice).Superseded {
 				return nil, refuse(
-					"added slice "+item+" is declared superseded, and amendment records no supersession",
+					"added slice "+item+" is declared superseded, and only a recorded Slice is superseded",
 					"remove \"superseded\" from slice "+difference.slice+", or leave the slice out of the declaration",
 				)
 			}
@@ -346,8 +365,9 @@ type graphNode struct {
 }
 
 // checkAmendedGraph refuses an added or changed Dependency that names no
-// recorded Slice or a Superseded one, and any cycle in the resulting graph,
-// including recorded edges of the Project's other Proposals.
+// recorded Slice, any active Slice of the amended Proposal that depends on a
+// Superseded Slice, changed edge or not, and any cycle in the resulting
+// graph, including recorded edges of the Project's other Proposals.
 func (s *Store) checkAmendedGraph(project string, declaration *ProposalDeclaration, states map[string]SliceState, plan *amendmentPlan) error {
 	graph, err := s.amendedGraph(project, declaration, states)
 	if err != nil {
@@ -363,26 +383,53 @@ func (s *Store) checkAmendedGraph(project string, declaration *ProposalDeclarati
 				continue
 			}
 			edge := "dependency " + reference + " of slice " + declaration.Proposal + "/" + change.Name
-			node, recorded := graph[strings.TrimPrefix(reference, "proposals/")]
-			if !recorded {
+			if _, recorded := graph[strings.TrimPrefix(reference, "proposals/")]; !recorded {
 				return refuse(edge+" names no recorded Slice of project "+project, "name a recorded Slice as proposals/<proposal>/<slice>, or declare it in this Proposal")
 			}
-			if node.state == Superseded {
-				return refuse(edge+" names a Superseded Slice", "depend on the Slice that carries its work instead")
-			}
 		}
+	}
+	if stuck := stuckDependents(graph, declaration); len(stuck) > 0 {
+		return refuse(
+			"active slices of proposal "+declaration.Proposal+" depend on Superseded Slices: "+strings.Join(stuck, ", "),
+			"in the same intake, make each depend on the Slice that carries the work instead, or mark it \"superseded\": true",
+		)
 	}
 	if cycle := graphCycle(graph, declaration); cycle != nil {
 		return refuse("the amended dependencies form the cycle "+strings.Join(cycle, " -> "), "remove one edge of the cycle from the intake")
 	}
 	for index := range plan.slices {
-		plan.slices[index].Dependents = dependents(graph, declaration.Proposal, plan.slices[index].Name, plan.slices)
+		found := dependents(graph, declaration.Proposal, plan.slices[index].Name, plan.slices)
+		if plan.slices[index].Superseded {
+			plan.slices[index].Blocked = found
+		} else {
+			plan.slices[index].Dependents = found
+		}
 	}
 	return nil
 }
 
+// stuckDependents names every active Slice of the amended Proposal behind a
+// Superseded Slice of the Project, as "<dependent> behind <blocker>".
+func stuckDependents(graph map[string]graphNode, declaration *ProposalDeclaration) []string {
+	var stuck []string
+	for _, slice := range declaration.Slices {
+		item := declaration.Proposal + "/" + slice.Name
+		node := graph[item]
+		if node.state == Merged || node.state == Superseded {
+			continue
+		}
+		for _, dependency := range node.dependencies {
+			if graph[dependency].state == Superseded {
+				stuck = append(stuck, item+" behind "+dependency)
+			}
+		}
+	}
+	return stuck
+}
+
 // amendedGraph reads every recorded Slice of the Project, active and
-// archived, and overlays the amended Proposal's declared Slices.
+// archived, and overlays the amended Proposal's declared Slices with their
+// resulting state.
 func (s *Store) amendedGraph(project string, declaration *ProposalDeclaration, states map[string]SliceState) (map[string]graphNode, error) {
 	graph := map[string]graphNode{}
 	for _, root := range []string{"proposals", archiveRoot} {
@@ -422,6 +469,9 @@ func (s *Store) amendedGraph(project string, declaration *ProposalDeclaration, s
 		state := ReadyForImplementation
 		if recorded, found := states[slice.Name]; found {
 			state = recorded.State
+		}
+		if slice.Superseded {
+			state = Superseded
 		}
 		graph[declaration.Proposal+"/"+slice.Name] = graphNode{state: state, dependencies: trimReferences(declaration.CanonicalDependencies(slice))}
 	}
@@ -538,6 +588,9 @@ func (s *Store) writeAmendment(project string, declaration *ProposalDeclaration,
 			state = SliceState{State: ReadyForImplementation}
 		}
 		state.Title, state.Branch, state.Dependencies = slice.Title, slice.Branch, declaration.CanonicalDependencies(slice)
+		if change.Superseded {
+			state.State = Superseded
+		}
 		if err := s.writeSliceState(project, declaration.Proposal, slice.Name, state); err != nil {
 			return err
 		}
@@ -564,6 +617,9 @@ func (c SliceAmendment) summary(slice SliceDeclaration) []string {
 	}
 	if c.Dependencies {
 		lines = append(lines, "Change Dependencies of "+c.Name)
+	}
+	if c.Superseded {
+		lines = append(lines, "Supersede "+c.Name)
 	}
 	return lines
 }

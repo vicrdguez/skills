@@ -9,10 +9,14 @@ Status: {{.Status}}
 {{end}}{{if .Title}}- Changed the title of Slice `{{.Name}}`
 {{end}}{{if .Branch}}- Changed the planned branch of Slice `{{.Name}}`
 {{end}}{{if .Dependencies}}- Changed the Dependencies of Slice `{{.Name}}`
+{{end}}{{if .Superseded}}- Superseded Slice `{{.Name}}`
 {{end}}{{end}}{{end}}
 {{template "outcome-proposal" .}}
 {{if .Confirm}}These active Slices depend on a changed Slice. Ask the user to confirm that their Contracts still hold:
 {{range .Amended}}{{$name := .Name}}{{range .Dependents}}- `{{.}}` depends on `{{$.Proposal}}/{{$name}}`
+{{end}}{{end}}
+{{end}}{{if .Blocked}}These active Slices of other Proposals are left blocked behind a Slice superseded here. Tell the user that amending their own Proposal removes the edge:
+{{range .Amended}}{{$name := .Name}}{{range .Blocked}}- `{{.}}` depends on `{{$.Proposal}}/{{$name}}`
 {{end}}{{end}}
 {{end}}{{if .Unpresented}}Issues not presented, for lack of a supplied body: {{range $i, $s := .Unpresented}}{{if $i}}, {{end}}`{{$s}}`{{end}}.
 

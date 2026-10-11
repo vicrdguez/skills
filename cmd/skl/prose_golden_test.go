@@ -317,7 +317,11 @@ func TestAgentProseGoldens(t *testing.T) {
 
 	// Decision Inbox: the request, the recorded answer, then empty and
 	// unavailable reads.
-	g.capture("decision-inbox", worker, "decision", "inbox")
+	inbox := g.capture("decision-inbox", worker, "decision", "inbox")
+	// The abandoned-work rules name the amendment path beside the route.
+	if _, rules, _ := strings.Cut(inbox, "abandoned work"); !strings.Contains(strings.SplitN(rules, "\n## ", 2)[0], "`skl ledger amend`") {
+		t.Fatalf("the abandoned-work rules do not name `skl ledger amend`:\n%s", inbox)
+	}
 	request := decisionRequest(t, worker, "widgets", proseItem)
 	g.capture("decision-result", worker, "decision", "apply", "--project", "widgets", "--item", proseItem,
 		"--request-commit", request.RequestCommit, "--request-path", request.RequestPath, "--route", ledger.RouteImplement, "--answer", proseFixturePath("answer.md"))

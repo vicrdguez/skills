@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -495,13 +496,9 @@ func TestAmendMembershipChangesAreExplicit(t *testing.T) {
 	})
 	requireRefused(t, cli.amend(t, root, missing), fixture.clone, head, "members/drop", "restore its entry")
 
-	flagged := exportedIntake(t, cli, root, "members")
-	editIntake(t, flagged, func(declaration map[string]any) { exportedSlice(t, declaration, "keep")["superseded"] = true })
-	requireRefused(t, cli.amend(t, root, flagged), fixture.clone, head, "members/keep", "Decision route `supersede`")
-
 	unflagged := exportedIntake(t, cli, root, "members")
 	editIntake(t, unflagged, func(declaration map[string]any) { delete(exportedSlice(t, declaration, "old"), "superseded") })
-	requireRefused(t, cli.amend(t, root, unflagged), fixture.clone, head, "members/old", "restore \"superseded\": true")
+	requireRefused(t, cli.amend(t, root, unflagged), fixture.clone, head, "members/old", "restore \"superseded\": true", "new name")
 }
 
 func TestAmendKeepsTheGraphConsistent(t *testing.T) {
@@ -520,7 +517,7 @@ func TestAmendKeepsTheGraphConsistent(t *testing.T) {
 
 	superseded := exportedIntake(t, cli, root, "graph")
 	setDepends(t, superseded, "live", "old")
-	requireRefused(t, cli.amend(t, root, superseded), fixture.clone, head, "dependency proposals/graph/old of slice graph/live", "Superseded")
+	requireRefused(t, cli.amend(t, root, superseded), fixture.clone, head, "graph/live behind graph/old", "Superseded")
 
 	unrecorded := exportedIntake(t, cli, root, "graph")
 	setDepends(t, unrecorded, "live", "proposals/other/ghost")
@@ -530,9 +527,12 @@ func TestAmendKeepsTheGraphConsistent(t *testing.T) {
 	setDepends(t, cycle, "a", "proposals/other/b")
 	requireRefused(t, cli.amend(t, root, cycle), fixture.clone, head, "cycle", "base-work/a", "other/b")
 
-	// An untouched edge to a Superseded Slice is not re-examined.
+	// An untouched edge to a Superseded Slice is re-examined by any
+	// amendment of its Proposal, and repointing it in the same intake lands.
 	retitled := exportedIntake(t, cli, root, "graph")
-	editIntake(t, retitled, func(declaration map[string]any) { exportedSlice(t, declaration, "stale")["title"] = "Stale, retitled" })
+	editIntake(t, retitled, func(declaration map[string]any) { exportedSlice(t, declaration, "live")["title"] = "Live, retitled" })
+	requireRefused(t, cli.amend(t, root, retitled), fixture.clone, head, "graph/stale behind graph/old")
+	setDepends(t, retitled, "stale", "live")
 	requireAmended(t, cli.amend(t, root, retitled))
 }
 
@@ -606,5 +606,227 @@ func TestAmendKeepsTheProposalBranch(t *testing.T) {
 	requireAmended(t, cli.amend(t, root, writeProposal(t, "", spec)))
 	if _, recorded := decodeRecord(t, readLedgerFile(t, fixture.clone, metaPath))["branch"]; recorded {
 		t.Fatal("the amendment recorded a Proposal Branch for a historical Proposal")
+	}
+}
+
+// supersede marks the named intake Slices superseded.
+func supersede(t *testing.T, directory string, names ...string) {
+	t.Helper()
+	editIntake(t, directory, func(declaration map[string]any) {
+		for _, name := range names {
+			exportedSlice(t, declaration, name)["superseded"] = true
+		}
+	})
+}
+
+// forbidForge fails the test on any forge request from here on.
+func forbidForge(t *testing.T, forge *forgeServer) {
+	t.Helper()
+	forge.fail = func(method, path string) int {
+		t.Errorf("superseding contacted the forge: %s %s", method, path)
+		return http.StatusServiceUnavailable
+	}
+}
+
+func TestAmendSupersedesUnclaimedSlicesInEveryLifecycle(t *testing.T) {
+	fixture := newLedgerFixture(t)
+	root := sourceRepository(t, "acme", "widgets")
+	forge := newForgeServer(t)
+	cli := newLedgerApp(t, forge)
+	acceptSpec(t, cli, root, cleanupSpec("discard", "ready", "rework", "review", "merge", "kept"), issueFile(t, "merge", "Merge body\n"))
+	submission := &ledger.ForgeAttachment{Repository: "acme/widgets", Number: 21}
+	for slice, value := range map[string]string{"rework": ledger.Rework, "review": ledger.AwaitingReview, "merge": ledger.ReadyForMerge} {
+		statusRecord(t, fixture.clone, "discard", slice, func(state *ledger.SliceState) { state.State, state.Submission = value, submission })
+	}
+	reportPath := "projects/widgets/proposals/discard/merge/watchdog-report.md"
+	commitLedgerRecord(t, fixture.clone, reportPath, "Recorded watchdog report\n")
+	before := map[string]ledger.SliceState{}
+	for _, slice := range []string{"ready", "rework", "review", "merge"} {
+		before[slice] = amendState(t, fixture.clone, "discard", slice)
+	}
+	head := ledgerHead(t, fixture.clone)
+
+	intake := exportedIntake(t, cli, root, "discard")
+	supersede(t, intake, "ready", "rework", "review", "merge")
+	forbidForge(t, forge)
+	if text, err := cli.deliveryRun(t, "skl", "ledger", "amend", "--repo", root, "--proposal-dir", intake); err != nil || !strings.Contains(text, "Status: amended") {
+		t.Fatalf("amend output:\n%s", text)
+	}
+	for slice, recorded := range before {
+		state := amendState(t, fixture.clone, "discard", slice)
+		want := recorded
+		want.State = ledger.Superseded
+		if mustJSON(t, state) != mustJSON(t, want) {
+			t.Fatalf("%s records %s, want only its state Superseded", slice, mustJSON(t, state))
+		}
+	}
+	if kept := amendState(t, fixture.clone, "discard", "kept"); kept.State != ledger.ReadyForImplementation {
+		t.Fatalf("kept records %+v", kept)
+	}
+	if got := readLedgerFile(t, fixture.clone, reportPath); got != "Recorded watchdog report\n" {
+		t.Fatalf("the report changed: %q", got)
+	}
+	if commits := amendCommits(t, fixture.clone, head); len(commits) != 1 {
+		t.Fatalf("amendment commits = %v, want one", commits)
+	}
+	changed := strings.Fields(runGitOutput(t, fixture.clone, "diff", "--name-only", head, "HEAD"))
+	for _, path := range changed {
+		if filepath.Base(path) != "state.json" {
+			t.Fatalf("the amendment wrote %s; it writes only state.json", path)
+		}
+	}
+	if len(changed) != 4 {
+		t.Fatalf("the amendment wrote %v, want the four superseded states", changed)
+	}
+
+	// The superseded set is now part of the record: an unchanged intake
+	// is existing.
+	if again := cli.amend(t, root, intake); again.Status != "existing" {
+		t.Fatalf("a re-sent intake was not existing: %s", mustJSON(t, again))
+	}
+}
+
+// The outcome's superseded branches render the superseded Slice and the
+// dependent left blocked in another Proposal.
+func TestAmendSupersessionOutcome(t *testing.T) {
+	newLedgerFixture(t)
+	root := sourceRepository(t, "acme", "widgets")
+	cli := newLedgerApp(t, newForgeServer(t))
+	acceptSpec(t, cli, root, cleanupSpec("shared", "a", "b"))
+	other := cleanupSpec("other", "x")
+	other.depends["x"] = []string{"proposals/shared/a"}
+	acceptSpec(t, cli, root, other)
+
+	intake := exportedIntake(t, cli, root, "shared")
+	supersede(t, intake, "a")
+	text, err := cli.deliveryRun(t, "skl", "ledger", "amend", "--repo", root, "--proposal-dir", intake)
+	if err != nil || !strings.Contains(text, "Slice `a`") || !strings.Contains(text, "- `other/x` depends on `shared/a`") {
+		t.Fatalf("the outcome does not list the supersession and the blocked dependent:\n%s", text)
+	}
+}
+
+func TestAmendRefusesSupersedingClaimedOrMergedSlices(t *testing.T) {
+	fixture := newLedgerFixture(t)
+	source, _ := deliverySourceRepo(t)
+	cli := newLedgerApp(t, newForgeServer(t))
+	worker := deliveryNoForgeApp(t)
+	acceptSpec(t, cli, source, cleanupSpec("held", "claimed", "done"))
+	statusRecord(t, fixture.clone, "held", "done", merged(""))
+	claimed := decisionSelect(t, worker, source)
+	if claimed.Execution.Item != "held/claimed" {
+		t.Fatalf("setup claimed %s, want held/claimed", claimed.Execution.Item)
+	}
+	head := ledgerHead(t, fixture.clone)
+	claim := amendState(t, fixture.clone, "held", "claimed").Claim
+
+	intake := exportedIntake(t, cli, source, "held")
+	supersede(t, intake, "claimed")
+	requireRefused(t, cli.amend(t, source, intake), fixture.clone, head, "held/claimed", "active implement Claim on ledger basis "+claim.Basis)
+
+	intake = exportedIntake(t, cli, source, "held")
+	supersede(t, intake, "done")
+	requireRefused(t, cli.amend(t, source, intake), fixture.clone, head, "held/done", "merged")
+
+	intake = exportedIntake(t, cli, source, "held")
+	addIntakeSlice(t, intake, "fresh")
+	supersede(t, intake, "fresh")
+	requireRefused(t, cli.amend(t, source, intake), fixture.clone, head, "held/fresh", "recorded Slice")
+}
+
+func TestAmendSupersedingNeedsHumanSliceRemovesItsRequest(t *testing.T) {
+	fixture := newLedgerFixture(t)
+	source, _ := deliverySourceRepo(t)
+	cli := newLedgerApp(t, newForgeServer(t))
+	worker := deliveryNoForgeApp(t)
+	acceptSpec(t, cli, source, cleanupSpec("asked", "paused", "waiting"))
+	if item, _ := decisionPauseNext(t, worker, source); item != "asked/paused" {
+		t.Fatalf("setup paused %s, want asked/paused", item)
+	}
+	request := decisionRequest(t, worker, "widgets", "asked/paused")
+
+	intake := exportedIntake(t, cli, source, "asked")
+	supersede(t, intake, "paused")
+	requireAmended(t, cli.amend(t, source, intake))
+
+	inbox := worker.decisionJSON(t, "skl", "decision", "inbox", "--project", "widgets", "--format", "json")
+	if len(inbox.Facts.Requests) != 0 {
+		t.Fatalf("the inbox still lists a request: %s", mustJSON(t, inbox.Facts))
+	}
+	head := ledgerHead(t, fixture.clone)
+	applied := decisionApplyAnswer(t, worker, request, ledger.RouteImplement, "# Answer\n\nContinue.\n")
+	if applied.Status != ledger.DecisionRefused || len(applied.Results) != 1 || !strings.Contains(applied.Results[0].Refusal, "not paused on a current request") {
+		t.Fatalf("an answer to the superseded request was not refused: %s", mustJSON(t, applied))
+	}
+	requireLedgerUnchanged(t, fixture.clone, head)
+	if _, err := os.Stat(filepath.Join(fixture.clone, "projects", "widgets", "proposals", "asked", "paused", "decision.md")); !os.IsNotExist(err) {
+		t.Fatalf("superseding wrote a decision record: %v", err)
+	}
+}
+
+func TestAmendSupersessionLeavesNoActiveSliceBehindIt(t *testing.T) {
+	fixture := newLedgerFixture(t)
+	root := sourceRepository(t, "acme", "widgets")
+	cli := newLedgerApp(t, newForgeServer(t))
+	spec := cleanupSpec("chain", "a", "b")
+	spec.depends["b"] = []string{"a"}
+	acceptSpec(t, cli, root, spec)
+	other := cleanupSpec("other", "x")
+	other.depends["x"] = []string{"proposals/chain/a"}
+	acceptSpec(t, cli, root, other)
+	head := ledgerHead(t, fixture.clone)
+
+	behind := exportedIntake(t, cli, root, "chain")
+	supersede(t, behind, "a")
+	requireRefused(t, cli.amend(t, root, behind), fixture.clone, head, "chain/b behind chain/a")
+
+	repointed := exportedIntake(t, cli, root, "chain")
+	supersede(t, repointed, "a")
+	addIntakeSlice(t, repointed, "a2")
+	setDepends(t, repointed, "b", "a2")
+	amendment := requireAmended(t, cli.amend(t, root, repointed))
+	if blocked := amendedSlice(t, amendment, "a").Blocked; !equalStrings(blocked, []string{"other/x"}) {
+		t.Fatalf("blocked behind a = %v, want other/x", blocked)
+	}
+	if a := amendState(t, fixture.clone, "chain", "a"); a.State != ledger.Superseded {
+		t.Fatalf("a records %+v", a)
+	}
+	if a2 := amendState(t, fixture.clone, "chain", "a2"); a2.State != ledger.ReadyForImplementation {
+		t.Fatalf("a2 records %+v", a2)
+	}
+	if b := amendState(t, fixture.clone, "chain", "b"); !equalStrings(b.Dependencies, []string{"proposals/chain/a2"}) {
+		t.Fatalf("b depends on %v, want chain/a2 only", b.Dependencies)
+	}
+
+	// The left-blocked dependent stops its own Proposal's amendments until
+	// one removes the edge.
+	freed := exportedIntake(t, cli, root, "other")
+	writeFile(t, filepath.Join(freed, "proposal.md"), "# other\n\nRevised.\n")
+	requireRefused(t, cli.amend(t, root, freed), fixture.clone, ledgerHead(t, fixture.clone), "other/x behind chain/a")
+	setDepends(t, freed, "x")
+	requireAmended(t, cli.amend(t, root, freed))
+	if x := amendState(t, fixture.clone, "other", "x"); len(x.Dependencies) != 0 {
+		t.Fatalf("x still depends on %v", x.Dependencies)
+	}
+}
+
+func TestAmendSupersedingEverySliceMakesRetirementReachable(t *testing.T) {
+	fixture := newLedgerFixture(t)
+	root := sourceRepository(t, "acme", "widgets")
+	cli := newLedgerApp(t, newForgeServer(t))
+	spec := cleanupSpec("unstarted", "first", "second")
+	spec.depends["second"] = []string{"first"}
+	acceptSpec(t, cli, root, spec)
+
+	intake := exportedIntake(t, cli, root, "unstarted")
+	supersede(t, intake, "first", "second")
+	requireAmended(t, cli.amend(t, root, intake))
+
+	retired := decisionReadOnlyApp(t).decisionJSON(t, "skl", "decision", "retire", "--project", "widgets", "--proposal", "unstarted", "--format", "json")
+	if retired.Status != ledger.DecisionApplied || retired.Retirement == nil || !retired.Retirement.PartialDelivery ||
+		!equalStrings(retired.Retirement.Superseded, []string{"first", "second"}) {
+		t.Fatalf("retirement = %s", mustJSON(t, retired))
+	}
+	if meta := decodeRecord(t, readLedgerFile(t, fixture.clone, "projects/widgets/proposals/unstarted/proposal.json")); meta["retired"] != true {
+		t.Fatalf("proposal.json records %v", meta)
 	}
 }

@@ -587,8 +587,8 @@ func proposalFactsOf(repository setup.RepositoryContext, acceptance *ledger.Acce
 }
 
 // amendFacts are one amendment outcome: what it changed, the listed Slices'
-// publication, the untouched dependents to confirm, and the Slices left
-// unpresented.
+// publication, the untouched dependents to confirm, the dependents in other
+// Proposals left blocked, and the Slices left unpresented.
 type amendFacts struct {
 	proposalFacts
 	ParentTitle         string
@@ -596,6 +596,7 @@ type amendFacts struct {
 	ParentTitleChanged  bool
 	Amended             []ledger.SliceAmendment
 	Confirm             bool
+	Blocked             bool
 	Unpresented         []string
 }
 
@@ -608,6 +609,7 @@ func amendFactsOf(repository setup.RepositoryContext, amendment *ledger.Amendmen
 	facts.Push = noteWord(&amendment.Push)
 	for _, change := range amendment.Amended {
 		facts.Confirm = facts.Confirm || len(change.Dependents) > 0
+		facts.Blocked = facts.Blocked || len(change.Blocked) > 0
 	}
 	return facts
 }
