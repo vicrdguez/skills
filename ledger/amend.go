@@ -313,8 +313,12 @@ func (s *Store) claimEvidence(project, proposal, slice string, state SliceState)
 }
 
 // requireAmendedBranches keeps every planned branch unique within the
-// Project for added Slices and changed planned branches.
+// Project for added Slices and changed planned branches. The declaration
+// holds every recorded Slice of the Proposal with its resulting branch, so
+// their committed branches are left out of the Project check: a branch this
+// amendment moves away from is free for another of its Slices.
 func (s *Store) requireAmendedBranches(project string, declaration *ProposalDeclaration, meta ProposalMeta, changes map[string]*SliceAmendment) error {
+	ownSlice := func(other string) bool { return strings.HasPrefix(other, declaration.Proposal+"/") }
 	owners := map[string]string{}
 	if meta.Branch != "" {
 		owners[meta.Branch] = "Proposal " + declaration.Proposal
@@ -325,7 +329,7 @@ func (s *Store) requireAmendedBranches(project string, declaration *ProposalDecl
 		}
 		owners[slice.Branch] = "Slice " + declaration.Proposal + "/" + slice.Name
 		if change := changes[slice.Name]; change != nil && (change.Added || change.Branch) {
-			if err := s.requireBranchOwner(project, declaration.Proposal+"/"+slice.Name, slice.Branch); err != nil {
+			if err := s.requireBranchFree(project, declaration.Proposal+"/"+slice.Name, slice.Branch, ownSlice); err != nil {
 				return err
 			}
 		}

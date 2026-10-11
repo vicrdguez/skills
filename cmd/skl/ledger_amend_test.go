@@ -240,6 +240,41 @@ func TestAmendReplacesNeverClaimedContract(t *testing.T) {
 	}
 }
 
+func TestAmendReassignsBranchesWithinOneAmendment(t *testing.T) {
+	fixture := newLedgerFixture(t)
+	root := sourceRepository(t, "acme", "widgets")
+	cli := newLedgerApp(t, newForgeServer(t))
+	acceptSpec(t, cli, root, cleanupSpec("archived", "base"))
+	statusRecord(t, fixture.clone, "archived", "base", merged(""))
+	if outcome := runCleanup(t, offlineForge(t), root); len(archivedNames(outcome)) != 1 {
+		t.Fatalf("archive setup: %s", mustJSON(t, outcome))
+	}
+	acceptSpec(t, cli, root, cleanupSpec("other", "work"))
+	acceptSpec(t, cli, root, cleanupSpec("transfer", "first", "second"))
+	head := ledgerHead(t, fixture.clone)
+
+	// Branches owned outside this Proposal stay owned.
+	for _, taken := range []string{"other-work", "archived-base"} {
+		clash := exportedIntake(t, cli, root, "transfer")
+		editIntake(t, clash, func(declaration map[string]any) { exportedSlice(t, declaration, "second")["branch"] = taken })
+		requireRefused(t, cli.amend(t, root, clash), fixture.clone, head, taken, "transfer/second")
+	}
+
+	// A branch the amendment moves away from is free for another of its Slices.
+	intake := exportedIntake(t, cli, root, "transfer")
+	editIntake(t, intake, func(declaration map[string]any) {
+		exportedSlice(t, declaration, "first")["branch"] = "transfer-first-new"
+		exportedSlice(t, declaration, "second")["branch"] = "transfer-first"
+	})
+	requireAmended(t, cli.amend(t, root, intake))
+	if first, second := amendState(t, fixture.clone, "transfer", "first").Branch, amendState(t, fixture.clone, "transfer", "second").Branch; first != "transfer-first-new" || second != "transfer-first" {
+		t.Fatalf("recorded branches = %s, %s", first, second)
+	}
+	if commits := amendCommits(t, fixture.clone, head); len(commits) != 1 {
+		t.Fatalf("amendment commits = %v, want one", commits)
+	}
+}
+
 func TestAmendRefusesContractChangeOnceClaimed(t *testing.T) {
 	fixture := newLedgerFixture(t)
 	source, _ := deliverySourceRepo(t)

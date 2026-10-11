@@ -285,6 +285,13 @@ func StartDeliveryContext(ctx context.Context, s *Store, repository github.Repos
 // Project, including archived records. Check under the ledger mutation lock
 // at acceptance and Slice acquisition.
 func (s *Store) requireBranchOwner(project, item, branch string) error {
+	return s.requireBranchFree(project, item, branch, func(other string) bool { return other == item })
+}
+
+// requireBranchFree is requireBranchOwner with the active Slice records that
+// own reports true for left out, because the caller checks their branches
+// itself.
+func (s *Store) requireBranchFree(project, item, branch string, own func(slice string) bool) error {
 	head, err := s.head()
 	if err != nil {
 		return err
@@ -300,7 +307,7 @@ func (s *Store) requireBranchOwner(project, item, branch string) error {
 		switch {
 		case strings.HasSuffix(path, "/state.json"):
 			other = strings.TrimSuffix(other, "/state.json")
-			if strings.HasPrefix(path, active+"/") && other == item {
+			if strings.HasPrefix(path, active+"/") && own(other) {
 				continue
 			}
 			var state SliceState
