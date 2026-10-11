@@ -89,6 +89,8 @@ Check: every review finding is corrected or resolved by the user.
 
 ## 6. Write the issue descriptions
 
+In an amendment, the slices this step covers are the added and changed Slices that stay active.
+
 Write one body per slice, plus a parent body when the Proposal has several slices, in private temporary Markdown files outside the source tree. Write each body for a collaborator whose only source is that one issue, and write it complete, as though it were the first version they read.
 
 - **Slice body:** the problem, the intended outcome, the accepted scope and what it leaves out, and the broad approach. In a multi-slice Proposal, add a sentence or two on how this slice contributes to the overall change.
@@ -100,7 +102,6 @@ Judge each fact by its use to the reader, whichever document holds it, and summa
 
 Check: every slice has a body file, plus a parent body for a multi-slice Proposal, and each body explains its work to a reader who sees only that issue.
 
-In an amendment, write bodies only for the added and changed Slices that stay active.
 
 ## 7. Record in the Workflow Ledger
 

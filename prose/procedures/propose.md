@@ -89,8 +89,9 @@ Check: every review finding is corrected or resolved by the user.
 
 ## 6. Write the issue descriptions
 
+In an amendment, the slices this step covers are the added and changed Slices that stay active.
+
 {{template "issue-description" .}}
-In an amendment, write bodies only for the added and changed Slices that stay active.
 
 ## 7. Record in the Workflow Ledger
 
