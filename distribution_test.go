@@ -1,0 +1,93 @@
+package skills_test
+
+import (
+	"os"
+	"path/filepath"
+	"reflect"
+	"testing"
+
+	skills "github.com/vicrdguez/skills"
+)
+
+func TestInstallationPlansAndResultsRetainOwnershipAndLegacyCleanup(t *testing.T) {
+	home := t.TempDir()
+	if _, err := skills.Install(home); err != nil {
+		t.Fatal(err)
+	}
+	create := filepath.Join(home, ".codex/skills/audit/SKILL.md")
+	update := filepath.Join(home, ".claude/skills/testing/SKILL.md")
+	legacy := filepath.Join(home, ".config/opencode/skills/tdd/SKILL.md")
+	collision := filepath.Join(home, ".pi/agent/skills/design/SKILL.md")
+	retiredCollision := filepath.Join(home, ".codex/skills/tdd/SKILL.md")
+	if err := os.Remove(create); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		update:           "<!-- skl-owned: skl.stub/v1 -->\nstale",
+		legacy:           "<!-- skl-owned: skl.stub/v1 -->\nlegacy",
+		collision:        "user design",
+		retiredCollision: "user tdd",
+	}
+	for path, contents := range files {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wantActions := map[string]string{create: "create", update: "update", legacy: "remove", filepath.Dir(legacy): "remove"}
+	plan, err := skills.PlanInstall(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertActions(t, plan.Actions, wantActions)
+	wantPreserved := []string{collision, retiredCollision}
+	if !reflect.DeepEqual(plan.Preserved, wantPreserved) {
+		t.Fatalf("planned collisions = %v, want %v", plan.Preserved, wantPreserved)
+	}
+	for path, contents := range files {
+		got, err := os.ReadFile(path)
+		if err != nil || string(got) != contents {
+			t.Fatalf("preview changed %s: %q: %v", path, got, err)
+		}
+	}
+	if _, err := os.Stat(create); !os.IsNotExist(err) {
+		t.Fatalf("preview created file: %v", err)
+	}
+	outcome, err := skills.Install(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertActions(t, outcome.Completed, wantActions)
+	if outcome.Failed != nil || outcome.Changed != 3 || !reflect.DeepEqual(outcome.Preserved, wantPreserved) {
+		t.Fatalf("installation outcome = %+v", outcome)
+	}
+	for _, path := range wantPreserved {
+		got, err := os.ReadFile(path)
+		if err != nil || string(got) != files[path] {
+			t.Fatalf("preserved collision changed: %s: %q: %v", path, got, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Dir(legacy)); !os.IsNotExist(err) {
+		t.Fatalf("empty legacy directory remains: %v", err)
+	}
+	plan, err = skills.PlanInstall(home)
+	if err != nil || len(plan.Actions) != 0 || !reflect.DeepEqual(plan.Preserved, wantPreserved) {
+		t.Fatalf("repeat plan = %+v: %v", plan, err)
+	}
+}
+
+func assertActions(t *testing.T, actions []skills.InstallAction, want map[string]string) {
+	t.Helper()
+	got := map[string]string{}
+	for _, action := range actions {
+		if _, duplicate := got[action.Path]; duplicate {
+			t.Errorf("duplicate action for %s", action.Path)
+		}
+		got[action.Path] = action.Action
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("actions = %v, want %v", got, want)
+	}
+}
