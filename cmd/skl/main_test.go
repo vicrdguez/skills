@@ -278,7 +278,7 @@ func shellArgs(t *testing.T, command string) []string {
 func TestInstallSupportedSkillStubs(t *testing.T) {
 	root := t.TempDir()
 	var output bytes.Buffer
-	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, root)
+	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, strings.NewReader("yes\n"), &output, &output, root)
 
 	if err := app.Run([]string{"skl", "install"}); err != nil {
 		t.Fatal(err)
@@ -341,7 +341,8 @@ func TestInstallRefreshesOnlyOwnedStubs(t *testing.T) {
 		t.Run(harness, func(t *testing.T) {
 			root := t.TempDir()
 			var output bytes.Buffer
-			app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, root)
+			input := strings.NewReader("yes\n")
+			app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, input, &output, &output, root)
 			if err := app.Run([]string{"skl", "install"}); err != nil {
 				t.Fatal(err)
 			}
@@ -355,6 +356,7 @@ func TestInstallRefreshesOnlyOwnedStubs(t *testing.T) {
 			if err := os.WriteFile(audit, []byte("---\nname: audit\n---\n\n<!-- skl-owned: skl.stub/v2 -->\nmy unrelated skill"), 0o644); err != nil {
 				t.Fatal(err)
 			}
+			input.Reset("yes\n")
 			if err := app.Run([]string{"skl", "install"}); err != nil {
 				t.Fatal(err)
 			}
@@ -406,7 +408,7 @@ func TestInstallUpgradesOwnedTDDStubsWithoutTouchingUserContent(t *testing.T) {
 			}
 
 			var output bytes.Buffer
-			app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, root)
+			app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, strings.NewReader("yes\n"), &output, &output, root)
 			for range 2 {
 				if err := app.Run([]string{"skl", "install"}); err != nil {
 					t.Fatal(err)
@@ -439,7 +441,7 @@ func TestInstallUpgradesOwnedTDDStubsWithoutTouchingUserContent(t *testing.T) {
 			t.Fatal(err)
 		}
 		var output bytes.Buffer
-		app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, root)
+		app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, strings.NewReader("yes\n"), &output, &output, root)
 		for range 2 {
 			if err := app.Run([]string{"skl", "install"}); err != nil {
 				t.Fatal(err)
@@ -468,7 +470,7 @@ func TestInstallPreservesOpenCodeSkillsAndConfiguration(t *testing.T) {
 		}
 	}
 	var output bytes.Buffer
-	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, root)
+	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, strings.NewReader("yes\n"), &output, &output, root)
 	for range 2 {
 		if err := app.Run([]string{"skl", "install"}); err != nil {
 			t.Fatal(err)

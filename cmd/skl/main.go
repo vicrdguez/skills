@@ -62,8 +62,7 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 					return err
 				}
 			}
-			_, err := skilldist.Install(home)
-			return err
+			return installSkills(home, stdin, stdout)
 		},
 	}, {
 		Name:      "skill",

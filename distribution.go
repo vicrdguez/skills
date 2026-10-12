@@ -151,21 +151,55 @@ type installData struct {
 	LegacyOwner []byte
 }
 
+// InstallAction identifies a file change or removal of an empty legacy directory.
+type InstallAction struct {
+	Path   string
+	Action string
+}
+
+// InstallPlan describes the current filesystem without changing it. It is a
+// preview, not a reservation: Install inspects ownership again when it runs.
+type InstallPlan struct {
+	Actions   []InstallAction
+	Unchanged int
+	Preserved []string
+}
+
 type InstallOutcome struct {
 	Changed   int
 	Unchanged int
+	Completed []InstallAction
+	Preserved []string
+	Failed    *InstallAction
+}
+
+// PlanInstall applies the same destination and ownership rules as Install,
+// without writing or removing anything.
+func PlanInstall(home string) (InstallPlan, error) {
+	outcome, err := install(home, true)
+	return InstallPlan{Actions: outcome.Completed, Unchanged: outcome.Unchanged, Preserved: outcome.Preserved}, err
 }
 
 func Install(home string) (InstallOutcome, error) {
+	outcome, err := install(home, false)
+	return outcome.InstallOutcome, err
+}
+
+type installer struct {
+	InstallOutcome
+	preview bool
+}
+
+func install(home string, preview bool) (installer, error) {
 	stub, err := template.ParseFS(embedded, "prose/adapters/stub.md")
 	if err != nil {
-		return InstallOutcome{}, err
+		return installer{}, err
 	}
 	entry, err := template.ParseFS(embedded, "prose/adapters/entry.md")
 	if err != nil {
-		return InstallOutcome{}, err
+		return installer{}, err
 	}
-	var outcome InstallOutcome
+	outcome := installer{preview: preview}
 	for _, target := range harnesses {
 		if err := outcome.retireStub(filepath.Join(home, target.skills, "tdd", "SKILL.md")); err != nil {
 			return outcome, err
@@ -219,7 +253,7 @@ func Install(home string) (InstallOutcome, error) {
 }
 
 // writeStub installs the Skill Stub of name, which runs command.
-func (outcome *InstallOutcome) writeStub(file string, stub *template.Template, name, command string) error {
+func (outcome *installer) writeStub(file string, stub *template.Template, name, command string) error {
 	frontmatter, err := stubFrontmatter(name)
 	if err != nil {
 		return err
@@ -229,57 +263,69 @@ func (outcome *InstallOutcome) writeStub(file string, stub *template.Template, n
 
 // write renders an installed file, replacing an existing one only when skl
 // owns it.
-func (outcome *InstallOutcome) write(file string, tmpl *template.Template, data installData) error {
+func (outcome *installer) write(file string, tmpl *template.Template, data installData) error {
 	current, err := os.ReadFile(file)
 	if err != nil && !os.IsNotExist(err) {
-		return err
+		return outcome.fail(file, "inspect", err)
+	}
+	action := "update"
+	if os.IsNotExist(err) {
+		action = "create"
 	}
 	if err == nil && !bytes.Contains(current, stubMarker) && !bytes.Contains(current, adapterMarker) &&
 		(len(data.LegacyOwner) == 0 || !bytes.Contains(current, data.LegacyOwner)) {
+		outcome.Preserved = append(outcome.Preserved, file)
 		outcome.Unchanged++
 		return nil
 	}
 	var contents bytes.Buffer
 	if err := tmpl.Execute(&contents, data); err != nil {
-		return err
+		return outcome.fail(file, action, err)
 	}
 	if bytes.Equal(current, contents.Bytes()) {
 		outcome.Unchanged++
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
-		return err
+	if !outcome.preview {
+		if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+			return outcome.fail(file, action, err)
+		}
+		if err := os.WriteFile(file, contents.Bytes(), 0o644); err != nil {
+			return outcome.fail(file, action, err)
+		}
 	}
-	if err := os.WriteFile(file, contents.Bytes(), 0o644); err != nil {
-		return err
-	}
+	outcome.Completed = append(outcome.Completed, InstallAction{Path: file, Action: action})
 	outcome.Changed++
 	return nil
 }
 
 // retire removes a file an earlier installation wrote, when it still carries
 // that installation's marker, and reports whether it did.
-func (outcome *InstallOutcome) retire(file string, marker []byte) (bool, error) {
+func (outcome *installer) retire(file string, marker []byte) (bool, error) {
 	current, err := os.ReadFile(file)
 	switch {
 	case os.IsNotExist(err):
 		return false, nil
 	case err != nil:
-		return false, fmt.Errorf("inspect retired %s: %w", file, err)
+		return false, outcome.fail(file, "inspect", err)
 	case !bytes.Contains(current, marker):
+		outcome.Preserved = append(outcome.Preserved, file)
 		outcome.Unchanged++
 		return false, nil
 	}
-	if err := os.Remove(file); err != nil {
-		return false, fmt.Errorf("retire %s: %w", file, err)
+	if !outcome.preview {
+		if err := os.Remove(file); err != nil {
+			return false, outcome.fail(file, "remove", err)
+		}
 	}
+	outcome.Completed = append(outcome.Completed, InstallAction{Path: file, Action: "remove"})
 	outcome.Changed++
 	return true, nil
 }
 
 // retireStub retires an owned Skill Stub and then its skill directory, unless
 // something else is in it.
-func (outcome *InstallOutcome) retireStub(file string) error {
+func (outcome *installer) retireStub(file string) error {
 	retired, err := outcome.retire(file, stubMarker)
 	if err != nil || !retired {
 		return err
@@ -287,15 +333,28 @@ func (outcome *InstallOutcome) retireStub(file string) error {
 	directory := filepath.Dir(file)
 	entries, err := os.ReadDir(directory)
 	if err != nil {
-		return fmt.Errorf("inspect retired %s: %w", directory, err)
+		return outcome.fail(directory, "inspect", err)
 	}
-	if len(entries) > 0 {
-		return nil
+	// During preview the stub has not yet been removed.
+	if outcome.preview {
+		if len(entries) != 1 || entries[0].Name() != filepath.Base(file) {
+			return nil
+		}
+	} else {
+		if len(entries) > 0 {
+			return nil
+		}
+		if err := os.Remove(directory); err != nil {
+			return outcome.fail(directory, "remove", err)
+		}
 	}
-	if err := os.Remove(directory); err != nil {
-		return fmt.Errorf("retire %s: %w", directory, err)
-	}
+	outcome.Completed = append(outcome.Completed, InstallAction{Path: directory, Action: "remove"})
 	return nil
+}
+
+func (outcome *installer) fail(file, action string, err error) error {
+	outcome.Failed = &InstallAction{Path: file, Action: action}
+	return fmt.Errorf("%s %s: %w", action, file, err)
 }
 
 // stubFrontmatter is the discovery metadata a harness reads from a skill's or

@@ -26,7 +26,7 @@ var entryPoints = map[string]string{
 func installInto(t *testing.T, home string) {
 	t.Helper()
 	var output bytes.Buffer
-	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, bytes.NewReader(nil), &output, &output, home)
+	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, strings.NewReader("yes\n"), &output, &output, home)
 	if err := app.Run([]string{"skl", "install"}); err != nil {
 		t.Fatal(err)
 	}
