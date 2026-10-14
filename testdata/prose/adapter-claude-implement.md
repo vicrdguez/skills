@@ -8,4 +8,4 @@ argument-hint: "[reviewer-model] [reviewer-thinking]"
 
 <!-- skl-owned: skl.adapter/v1 -->
 
-Run `skl implement next --reviewer-model '$reviewer_model' --reviewer-thinking '$reviewer_thinking'` and follow the Execution Skill it returns.
+Run `skl implement next --harness claude --reviewer-model '$reviewer_model' --reviewer-thinking '$reviewer_thinking'` and follow the Execution Skill it returns.

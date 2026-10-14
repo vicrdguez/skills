@@ -6,4 +6,4 @@ disable-model-invocation: true
 
 <!-- skl-owned: skl.adapter/v1 -->
 
-Run `skl watchdog next` and follow the Execution Skill it returns.
+Run `skl watchdog next --harness claude` and follow the Execution Skill it returns.

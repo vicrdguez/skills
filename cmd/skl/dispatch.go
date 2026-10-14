@@ -57,7 +57,7 @@ type stoppedFacts struct {
 // dispatchOutput answers a Dispatch that claimed execution's Work Item. The
 // worker command resumes that exact Claim as the Execution Skill next would
 // have returned; the continue command repeats this Dispatch after it.
-func dispatchOutput(c *cli.Context, phase string, repository setup.RepositoryContext, execution *ledger.Execution, previous *ledger.ClaimEnding, merges []ledger.MergeAttempt) deliveryOutput {
+func dispatchOutput(c *cli.Context, phase string, repository setup.RepositoryContext, execution *ledger.Execution, previous *ledger.ClaimEnding, merges []ledger.MergeAttempt, settings ledger.LaunchRoles, choices setup.ImplementChoices) deliveryOutput {
 	item, claim := execution.Item, execution.Claim.Commit
 	worker := []string{claimCommand(phase, "resume", repository, item, claim), "--dispatched"}
 	continuation := []string{nextInvocation(phase, repository)}
@@ -69,24 +69,51 @@ func dispatchOutput(c *cli.Context, phase string, repository setup.RepositoryCon
 		case name != "repo" && name != "remote":
 			continuation = append(continuation, flagWords(c, name)...)
 		}
-		if !supervisorFlags[name] {
+		if !supervisorFlags[name] && name != "helper-model" && name != "helper-thinking" && name != "reviewer-model" && name != "reviewer-thinking" {
 			worker = append(worker, flagWords(c, name)...)
 		}
 	}
+	// Session choices are frozen in the worker command, whereas continuation
+	// above repeats only invocation flags so the next dispatch rereads defaults.
+	if choices.Resolved {
+		worker = append(worker, "--launch-resolved")
+	}
+	for _, choice := range []struct{ flag, value string }{
+		{"helper-model", choices.Helper.Model}, {"helper-thinking", choices.Helper.Thinking},
+		{"reviewer-model", choices.Reviewer.Model}, {"reviewer-thinking", choices.Reviewer.Thinking},
+	} {
+		if choice.value != "" {
+			worker = append(worker, "--"+choice.flag, skilldist.ShellQuote(choice.value))
+		}
+	}
+	defaults := settings.Implement
+	if phase == ledger.WatchdogPhase {
+		defaults = settings.Watchdog
+	}
+	launch := resolveLaunchChoice(skilldist.SubagentChoice{Model: c.String("worker-model"), Thinking: c.String("worker-thinking")}, defaults)
 	d := dispatched{Item: item, Claim: claim, Worker: strings.Join(worker, " "), Continue: strings.Join(continuation, " "),
-		WorkerModel: c.String("worker-model"), WorkerThinking: c.String("worker-thinking")}
+		WorkerModel: launch.Model, WorkerThinking: launch.Thinking}
 	return deliveryOutput{Status: "dispatched", Previous: previous, Dispatch: &d, Merges: merges, kind: "dispatched",
 		facts: dispatchedFacts{Status: "dispatched", Phase: phase, Previous: previous, Merges: merges, dispatched: d}}
 }
 
 // stoppedOutput answers a continuation whose Claim ended without a handoff.
 // It claims nothing: the Claim stays exactly as it is for a human to decide.
-func stoppedOutput(phase string, repository setup.RepositoryContext, ending ledger.ClaimEnding) deliveryOutput {
+func stoppedOutput(c *cli.Context, phase string, repository setup.RepositoryContext, ending ledger.ClaimEnding) deliveryOutput {
 	facts := stoppedFacts{Status: "stopped", Phase: phase, Ending: ending}
 	reason := fmt.Sprintf("Claim %s on %s was released without a phase handoff", ending.Claim, ending.Item)
 	if ending.Ending == ledger.ClaimHeld {
 		reason = fmt.Sprintf("Claim %s on %s is still held", ending.Claim, ending.Item)
 		facts.Resume = claimCommand(phase, "resume", repository, ending.Item, ending.Claim)
+		for _, flag := range c.Command.Flags {
+			name := flag.Names()[0]
+			if !supervisorFlags[name] {
+				words := flagWords(c, name)
+				if len(words) > 0 {
+					facts.Resume += " " + strings.Join(words, " ")
+				}
+			}
+		}
 		facts.Release = claimCommand(phase, "release", repository, ending.Item, ending.Claim)
 	}
 	return deliveryOutput{Status: "stopped", Reason: reason, Previous: &ending, kind: "stopped", facts: facts}

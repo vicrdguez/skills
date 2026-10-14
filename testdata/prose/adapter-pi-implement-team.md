@@ -5,4 +5,4 @@ argument-hint: "[helper-model] [helper-thinking] [reviewer-model] [reviewer-thin
 
 <!-- skl-owned: skl.adapter/v1 -->
 
-Run `skl implement next --mode team --helper-model '${1:-openai-codex/gpt-6-luna}' --helper-thinking '${2:-xhigh}' --reviewer-model '${3:-openai-codex/gpt-6.1-sol}' --reviewer-thinking '${4:-high}'` and follow the Execution Skill it returns.
+Run `skl implement next --mode team --harness pi --helper-model '${1:-}' --helper-thinking '${2:-}' --reviewer-model '${3:-}' --reviewer-thinking '${4:-}'` and follow the Execution Skill it returns.

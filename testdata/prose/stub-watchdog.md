@@ -6,4 +6,4 @@ disable-model-invocation: true
 
 <!-- skl-owned: skl.stub/v1 -->
 
-Run `skl watchdog next`.
+Run `skl watchdog next --harness codex`.
