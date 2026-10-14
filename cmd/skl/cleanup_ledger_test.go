@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -64,7 +66,7 @@ func offlineForge(t *testing.T) ledgerCLI {
 func runCleanup(t *testing.T, cli ledgerCLI, root string) cleanupOutcome {
 	t.Helper()
 	cli.out.Reset()
-	if err := cli.app.Run([]string{"skl", "propose", "cleanup", "--repo", root, "--format", "json"}); err != nil {
+	if err := cli.app.Run([]string{"skl", "cleanup", "--repo", root, "--format", "json"}); err != nil {
 		t.Fatalf("cleanup: %v\n%s", err, cli.out.String())
 	}
 	var outcome cleanupOutcome
@@ -72,6 +74,97 @@ func runCleanup(t *testing.T, cli ledgerCLI, root string) cleanupOutcome {
 		t.Fatalf("cleanup response %q: %v", cli.out.String(), err)
 	}
 	return outcome
+}
+
+func TestCleanupRepositoryDefaultsAndBoundRerun(t *testing.T) {
+	newLedgerFixture(t) // configured, but neither Project is accepted
+	root := sourceRepository(t, "acme", "widgets")
+	runGit(t, root, "remote", "add", "upstream", "git@github.com:acme/other.git")
+	nested := filepath.Join(root, "nested")
+	if err := os.Mkdir(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	previous, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(nested); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(previous) })
+	before := ledgerSnapshot(t, root)
+	for _, scenario := range []struct {
+		name, repository string
+		options          []string
+	}{
+		{"current repository and origin", "acme/widgets", nil},
+		{"explicit repository and omitted remote", "acme/widgets", []string{"--repo", root}},
+		{"explicit remote and transport", "acme/other", []string{"--repo", root, "--remote", "upstream", "--format", "markdown"}},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			cli := offlineForge(t)
+			args := append([]string{"skl", "cleanup"}, scenario.options...)
+			if err := cli.app.Run(args); err != nil {
+				t.Fatal(err)
+			}
+			first := cli.out.String()
+			if !strings.Contains(first, "Status: fix_required\n") || !strings.Contains(first, "accepted Project for "+scenario.repository) {
+				t.Fatalf("repository default or structured refusal changed:\n%s", first)
+			}
+			rerun := regexp.MustCompile("`(skl cleanup[^`]*)`").FindStringSubmatch(first)
+			if rerun == nil || !slices.Equal(shellWords(t, rerun[1]), args) {
+				t.Fatalf("rerun does not bind the canonical invocation %v:\n%s", args, first)
+			}
+			cli.out.Reset()
+			if err := cli.app.Run(shellWords(t, rerun[1])); err != nil || cli.out.String() != first {
+				t.Fatalf("rerun changed the operation: %v\n%s", err, cli.out.String())
+			}
+			if ledgerSnapshot(t, root) != before {
+				t.Fatal("unadopted cleanup changed source Git state")
+			}
+		})
+	}
+}
+
+func TestCleanupRejectsInapplicableSyntaxBeforeEffects(t *testing.T) {
+	root := sourceRepository(t, "acme", "widgets")
+	before := ledgerSnapshot(t, root)
+	for _, options := range [][]string{
+		{"--proposal", "done"},
+		{"--item", "done/core"},
+		{"--format", "raw"},
+		{"unexpected"},
+	} {
+		t.Run(strings.Join(options, " "), func(t *testing.T) {
+			cli := offlineForge(t)
+			args := append([]string{"skl", "cleanup", "--repo", root}, options...)
+			if err := cli.app.Run(args); err == nil {
+				t.Fatalf("invalid cleanup syntax succeeded: %v\n%s", args, cli.out.String())
+			}
+			if strings.Contains(cli.out.String(), "Status:") || ledgerSnapshot(t, root) != before {
+				t.Fatal("invalid syntax reached the operation or changed source Git state")
+			}
+		})
+	}
+}
+
+func TestCleanupHelpExposesDefaultsAndEffects(t *testing.T) {
+	cli := offlineForge(t)
+	if err := cli.app.Run([]string{"skl", "cleanup", "--help"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"skl cleanup", "--repo", "current directory", "--remote", "origin", "--format", "markdown", "json", "terminal, unclaimed", "before evaluating local source work", "remote branches are never removed"} {
+		if !strings.Contains(cli.out.String(), want) {
+			t.Errorf("cleanup help lacks %q:\n%s", want, cli.out.String())
+		}
+	}
+	cli.out.Reset()
+	if err := cli.app.Run([]string{"skl", "--help"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(cli.out.String(), "cleanup") || regexp.MustCompile(`(?m)^\s+propose\s`).MatchString(cli.out.String()) {
+		t.Fatalf("top-level help has the wrong command interface:\n%s", cli.out.String())
+	}
 }
 
 func TestCleanupRequiresAcceptedLedgerBeforeTouchingSourceWork(t *testing.T) {
@@ -102,7 +195,7 @@ func TestCleanupRequiresAcceptedLedgerBeforeTouchingSourceWork(t *testing.T) {
 			scenario.configure(t)
 			cli := offlineForge(t)
 			cli.out.Reset()
-			if err := cli.app.Run([]string{"skl", "propose", "cleanup", "--repo", root, "--format", "json"}); err != nil {
+			if err := cli.app.Run([]string{"skl", "cleanup", "--repo", root, "--format", "json"}); err != nil {
 				t.Fatal(err)
 			}
 			var outcome ledgerOutcome
@@ -146,7 +239,7 @@ func TestUnadoptedCleanupIgnoresGitHubMergedSubmission(t *testing.T) {
 		backend.BindRepository(repository)
 		return backend, nil
 	}, bytes.NewReader(nil), &output, &output)
-	if err := app.Run([]string{"skl", "propose", "cleanup", "--repo", root, "--format", "json"}); err != nil {
+	if err := app.Run([]string{"skl", "cleanup", "--repo", root, "--format", "json"}); err != nil {
 		t.Fatal(err)
 	}
 	var refusal ledgerOutcome
@@ -600,7 +693,7 @@ func TestLedgerCleanupRemovesOnlySafeMergedSourceWork(t *testing.T) {
 	// The default Markdown transport, which Propose reads, keeps every
 	// outcome visible and distinct.
 	cli.out.Reset()
-	if err := cli.app.Run([]string{"skl", "propose", "cleanup", "--repo", root}); err != nil {
+	if err := cli.app.Run([]string{"skl", "cleanup", "--repo", root}); err != nil {
 		t.Fatal(err)
 	}
 	second := cli.out.String()
@@ -707,7 +800,7 @@ func TestCleanupDoesNotArchiveFromAStaleSnapshot(t *testing.T) {
 	}
 	cli := offlineForge(t)
 	done := make(chan error, 1)
-	go func() { done <- cli.app.Run([]string{"skl", "propose", "cleanup", "--repo", root, "--format", "json"}) }()
+	go func() { done <- cli.app.Run([]string{"skl", "cleanup", "--repo", root, "--format", "json"}) }()
 	time.Sleep(500 * time.Millisecond)
 	select {
 	case err := <-done:
