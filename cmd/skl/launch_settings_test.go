@@ -53,7 +53,7 @@ func TestHarnessLaunchChoicesReachTheirRoles(t *testing.T) {
 	}
 }
 
-func TestDispatchRefreshesDefaultsButFreezesSessionChoices(t *testing.T) {
+func TestStartupAndRecoveryRefreshDefaultsWithoutChangingRunningGuidance(t *testing.T) {
 	for _, explicit := range []bool{false, true} {
 		t.Run(fmt.Sprint(explicit), func(t *testing.T) {
 			f := newLedgerFixture(t)
@@ -69,20 +69,43 @@ func TestDispatchRefreshesDefaultsButFreezesSessionChoices(t *testing.T) {
 				flags += " --worker-model explicit-worker --reviewer-model explicit-review --helper-thinking explicit-helper"
 			}
 			first := cli.dispatched(t, "skl implement next --dispatch --repo "+source+flags)
-			configure("next")
+			wantWorker := "worker-first"
+			if explicit {
+				wantWorker = "explicit-worker"
+			}
+			if first.WorkerModel != wantWorker || first.WorkerThinking != "thinking-first" {
+				t.Fatalf("dispatch choices = %#v", first)
+			}
+			configure("startup")
 			session := cli.dispatchJSON(t, first.Worker)
-			wantReview, wantHelper := "review-first", "helper-first"
+			wantReview, wantHelper := "review-startup", "helper-startup"
 			if explicit {
 				wantReview, wantHelper = "explicit-review", "explicit-helper"
 			}
 			if session.Packet.Facts.Delivery.Reviewer.Model != wantReview || session.Packet.Facts.Delivery.Helper.Thinking != wantHelper {
-				t.Fatal("configuration edit changed session choices")
+				t.Fatal("startup did not resolve current defaults and explicit overrides")
 			}
+			configure("recovery")
 			prepared := cli.dispatchJSON(t, session.Packet.Facts.Delivery.PrepareCommand)
-			resumed := cli.dispatchJSON(t, prepared.Packet.Facts.Delivery.ResumeCommand)
-			if resumed.Packet.Facts.Delivery.Reviewer.Model != wantReview {
-				t.Fatal("prepare/resume lost session choices")
+			inspected := cli.dispatchJSON(t, strings.ReplaceAll(prepared.Packet.Facts.Delivery.InspectCommand, "<observed-target-sha>", target))
+			for _, followup := range []deliveryOutput{prepared, inspected} {
+				// Source observations leave the startup guidance in the worker context;
+				// they neither supply new role guidance nor serialize defaults.
+				if strings.Contains(followup.Packet.Instructions, "review-recovery") || strings.Contains(followup.Packet.Instructions, "helper-recovery") || strings.Contains(followup.Packet.Instructions, "review-startup") || strings.Contains(followup.Packet.Instructions, "helper-startup") {
+					t.Fatalf("follow-up changed or persisted session defaults: %s", followup.Packet.Instructions)
+				}
+				if followup.Packet.Facts.Delivery.ResumeCommand != session.Packet.Facts.Delivery.ResumeCommand {
+					t.Fatal("follow-up changed recovery invocation")
+				}
 			}
+			resumed := cli.dispatchJSON(t, inspected.Packet.Facts.Delivery.ResumeCommand)
+			if !explicit {
+				wantReview, wantHelper = "review-recovery", "helper-recovery"
+			}
+			if resumed.Packet.Facts.Delivery.Reviewer.Model != wantReview || resumed.Packet.Facts.Delivery.Helper.Thinking != wantHelper {
+				t.Fatal("fresh recovery retained old defaults or lost overrides")
+			}
+			configure("next")
 			dispatchImplementHandoff(t, cli, source, target, first.Item, first.Claim)
 			watch := cli.dispatched(t, "skl watchdog next --dispatch --repo "+source+" --harness pi")
 			if watch.WorkerModel != "watch-next" || watch.WorkerThinking != "watch-thinking" {
@@ -101,7 +124,7 @@ func TestDispatchRefreshesDefaultsButFreezesSessionChoices(t *testing.T) {
 			if second.WorkerModel != wantModel || second.WorkerThinking != "thinking-next" {
 				t.Fatalf("continuation choices = %#v", second)
 			}
-			if strings.Contains(first.Continue, "review-first") || strings.Contains(first.Continue, "thinking-first") || strings.Contains(first.Continue, "--launch-resolved") {
+			if strings.Contains(first.Continue, "review-first") || strings.Contains(first.Continue, "thinking-first") {
 				t.Fatalf("defaults became loop overrides: %s", first.Continue)
 			}
 			secondSession := cli.dispatchJSON(t, second.Worker).Packet.Facts.Delivery
@@ -122,10 +145,22 @@ func TestEmptySessionChoicesStayInheritedAfterConfigurationEdit(t *testing.T) {
 	deliveryAcceptFixture(t, newForgeServer(t), source)
 	cli := deliveryNoForgeApp(t)
 	d := cli.dispatched(t, "skl implement next --dispatch --repo "+source+" --harness pi --mode team")
-	f.misconfigure(t, fmt.Sprintf(`{"ledger":%q,"harnesses":{"pi":{"reviewer":{"model":"later-review"},"helper":{"model":"later-helper"}}}}`, f.clone))
-	facts := cli.dispatchJSON(t, d.Worker).Packet.Facts.Delivery
+	session := cli.dispatchJSON(t, d.Worker)
+	facts := session.Packet.Facts.Delivery
 	if facts.Reviewer != nil || facts.Helper != nil {
-		t.Fatal("omitted session choices picked up later defaults")
+		t.Fatal("empty settings did not inherit")
+	}
+	f.misconfigure(t, fmt.Sprintf(`{"ledger":%q,"harnesses":{"pi":{"reviewer":{"model":"later-review"},"helper":{"model":"later-helper"}}}}`, f.clone))
+	prepared := cli.dispatchJSON(t, facts.PrepareCommand)
+	inspected := cli.dispatchJSON(t, strings.ReplaceAll(prepared.Packet.Facts.Delivery.InspectCommand, "<observed-target-sha>", "HEAD"))
+	for _, out := range []deliveryOutput{prepared, inspected} {
+		if out.Packet.Facts.Delivery.Reviewer != nil || out.Packet.Facts.Delivery.Helper != nil || strings.Contains(out.Packet.Instructions, "later-") {
+			t.Fatal("source observation supplied new choices to the running session")
+		}
+	}
+	fresh := cli.dispatchJSON(t, inspected.Packet.Facts.Delivery.ResumeCommand).Packet.Facts.Delivery
+	if fresh.Reviewer == nil || fresh.Helper == nil || fresh.Reviewer.Model != "later-review" || fresh.Helper.Model != "later-helper" {
+		t.Fatal("fresh recovery did not resolve new defaults")
 	}
 }
 

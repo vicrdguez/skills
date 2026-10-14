@@ -27,7 +27,7 @@ The supported harness keys are `pi`, `opencode`, `claude` and `codex`. Each supp
 
 Delivery `next`, `resume`, `prepare` and `inspect` take `--harness`. Installed adapters supply it, including Codex's direct stubs. Resolve each field independently: a nonempty explicit launch flag, then the selected harness's role setting, then harness inheritance. Without `--harness`, only explicit launch flags are used; environment variables never select a harness, and another harness's defaults never apply. `implement` and `watchdog` choose dispatched workers; `helper` applies only to team implementation; `reviewer` supplies the same implementation-review defaults in standard and team modes.
 
-Every new dispatch reads the current file. Its continuation carries the selector and explicit overrides, not resolved defaults. The worker command freezes that session's helper/reviewer values (including inherited empty choices), and its prepare/inspect/resume commands keep them. Editing the file therefore affects later dispatches, not existing sessions. Bound commands include an internal `--launch-resolved` marker for these session choices.
+Every new dispatch reads the current file to resolve the worker model and thinking. Helper and reviewer defaults resolve when the Worker Session starts, using then-current configuration. The running worker retains those supplied choices, including inherited empty fields, in its context; prepare and inspect are source observations, not launches. Startup, follow-up, recovery and dispatch continuation commands carry the selector and explicit overrides only. A fresh recovery session therefore resolves current defaults again without promoting earlier resolved defaults into overrides.
 
 ## Setup and install
 
