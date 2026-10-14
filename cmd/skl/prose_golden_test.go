@@ -323,7 +323,7 @@ func TestAgentProseGoldens(t *testing.T) {
 		t.Fatalf("the abandoned-work rules do not name the amendment flag:\n%s", inbox)
 	}
 	request := decisionRequest(t, worker, "widgets", proseItem)
-	g.capture("decision-result", worker, "decision", "apply", "--project", "widgets", "--item", proseItem,
+	g.capture("decision-result", worker, "decision", "apply", "--project", "widgets", "--slice", proseItem,
 		"--request-commit", request.RequestCommit, "--request-path", request.RequestPath, "--route", ledger.RouteImplement, "--answer", proseFixturePath("answer.md"))
 	g.capture("decision-inbox-empty", worker, "decision", "inbox")
 	g.capture("decision-inbox-unavailable", worker, "decision", "inbox", "--project", "no-such-project")

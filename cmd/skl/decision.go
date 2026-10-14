@@ -45,10 +45,10 @@ func decisionCommands(newBackend backendFactory, stdout io.Writer) *cli.Command 
 			Action: func(command *cli.Context) error { return runDecisionInbox(command, stdout) },
 		}, {
 			Name:  "apply",
-			Usage: "Record one explicitly scoped human answer with its continuation route",
+			Usage: "Record an explicitly scoped human answer or JSON decision batch with continuation routes",
 			Flags: []cli.Flag{
-				&cli.StringFlag{Name: "project"},
-				&cli.StringFlag{Name: "item", Usage: "The exact proposal/slice identity the human answered"},
+				&cli.StringFlag{Name: "project", Usage: "Explicit Project identity for one decision; never taken from the working directory"},
+				&cli.StringFlag{Name: "slice", Usage: "The exact proposal/slice identity the human answered"},
 				&cli.StringFlag{Name: "request-commit", Usage: "The full commit the answered blocking request is valid at"},
 				&cli.StringFlag{Name: "request-path", Usage: "The ledger-relative path of the answered blocking request"},
 				&cli.StringFlag{Name: "route", Usage: "Continuation route: implement, watchdog, or supersede"},
@@ -166,7 +166,7 @@ func runDecisionApply(command *cli.Context, stdout io.Writer) error {
 			"submit the bound single-request command, or one explicitly scoped --input file")
 	}
 	inputPath := command.Path("input")
-	explicit := command.IsSet("project") || command.IsSet("item") || command.IsSet("request-commit") ||
+	explicit := command.IsSet("project") || command.IsSet("slice") || command.IsSet("request-commit") ||
 		command.IsSet("request-path") || command.IsSet("route") || command.IsSet("answer")
 	coupled := command.Bool("coupled")
 	if inputPath != "" {
@@ -182,11 +182,11 @@ func runDecisionApply(command *cli.Context, stdout io.Writer) error {
 			"--coupled applies only with --input",
 			"omit --coupled for one request, or supply an explicitly scoped batch with --input and --coupled")
 	}
-	project, item := command.String("project"), command.String("item")
+	project, item := command.String("project"), command.String("slice")
 	commit, path, route := command.String("request-commit"), command.String("request-path"), command.String("route")
 	if project == "" || item == "" || commit == "" || path == "" || route == "" || command.Path("answer") == "" {
 		return renderDecisionRefusal(stdout, format,
-			"an apply requires --project, --item, --request-commit, --request-path, --route, and --answer",
+			"an apply requires --project, --slice, --request-commit, --request-path, --route, and --answer",
 			"use the exact bound command the inbox reported for the answered request")
 	}
 	answer, err := os.ReadFile(command.Path("answer"))
