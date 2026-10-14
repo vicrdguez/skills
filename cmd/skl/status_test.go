@@ -12,7 +12,7 @@ import (
 	"github.com/vicrdguez/skills/setup"
 )
 
-func TestStatusRequiresConfiguredAcceptedProjectWithoutForgeAccess(t *testing.T) {
+func TestReconcileRequiresConfiguredAcceptedProjectWithoutForgeAccess(t *testing.T) {
 	// A source repository without an accepted ledger Project cannot derive
 	// status from any external records.
 	root := sourceRepository(t, "acme", "widgets")
@@ -52,9 +52,9 @@ func TestStatusRequiresConfiguredAcceptedProjectWithoutForgeAccess(t *testing.T)
 					t.Fatal("status accessed GitHub without an accepted Project")
 					return nil, nil
 				}, bytes.NewReader(nil), &output, &output)
-				args := []string{"skl", "status", "--repo", root, "--format", format}
+				args := []string{"skl", "reconcile", "--repo", root, "--format", format}
 				if tc.item != "" {
-					args = append(args, "--item", tc.item)
+					args = append(args, "--slice", tc.item)
 				}
 				if err := app.Run(args); err != nil {
 					t.Fatalf("status: %v", err)
@@ -75,7 +75,7 @@ func TestStatusRequiresConfiguredAcceptedProjectWithoutForgeAccess(t *testing.T)
 	}
 }
 
-func TestStatusGuidesRepositoryWithCollidingProjectName(t *testing.T) {
+func TestReconcileGuidesRepositoryWithCollidingProjectName(t *testing.T) {
 	fixture := newLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	path := filepath.Join(fixture.clone, "projects", "widgets", "project.json")
@@ -87,7 +87,7 @@ func TestStatusGuidesRepositoryWithCollidingProjectName(t *testing.T) {
 		t.Fatal("colliding Project fell back to forge")
 		return nil, nil
 	}, bytes.NewReader(nil), &output, &output)
-	if err := app.Run([]string{"skl", "status", "--repo", root, "--format", "json"}); err != nil {
+	if err := app.Run([]string{"skl", "reconcile", "--repo", root, "--format", "json"}); err != nil {
 		t.Fatal(err)
 	}
 	var outcome ledgerOutcome
@@ -96,7 +96,7 @@ func TestStatusGuidesRepositoryWithCollidingProjectName(t *testing.T) {
 	}
 }
 
-func TestStatusShowsAcceptedProjectInBothFormats(t *testing.T) {
+func TestReconcileShowsAcceptedProjectInBothFormats(t *testing.T) {
 	newLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", singleSlice("shown")))
@@ -112,14 +112,14 @@ func TestStatusShowsAcceptedProjectInBothFormats(t *testing.T) {
 				t.Fatal("unattached ledger status should not contact the forge")
 				return nil, nil
 			}, bytes.NewReader(nil), &output, &output)
-			if err := app.Run([]string{"skl", "status", "--repo", root, "--item", "shown/foundation", "--format", tc.format}); err != nil || !strings.Contains(output.String(), tc.expected) {
+			if err := app.Run([]string{"skl", "reconcile", "--repo", root, "--slice", "shown/foundation", "--format", tc.format}); err != nil || !strings.Contains(output.String(), tc.expected) {
 				t.Fatalf("accepted status: %v %s", err, &output)
 			}
 		})
 	}
 }
 
-func TestStatusRefusesMalformedAcceptedProjectWithoutForgeFallback(t *testing.T) {
+func TestReconcileRefusesMalformedAcceptedProjectWithoutForgeFallback(t *testing.T) {
 	fixture := newLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	path := filepath.Join(fixture.clone, "projects", "widgets", "project.json")
@@ -135,7 +135,7 @@ func TestStatusRefusesMalformedAcceptedProjectWithoutForgeFallback(t *testing.T)
 		t.Fatal("malformed Project fell back to forge")
 		return nil, nil
 	}, bytes.NewReader(nil), &output, &output)
-	if err := app.Run([]string{"skl", "status", "--repo", root, "--format", "json"}); err != nil {
+	if err := app.Run([]string{"skl", "reconcile", "--repo", root, "--format", "json"}); err != nil {
 		t.Fatal(err)
 	}
 	var outcome ledgerOutcome

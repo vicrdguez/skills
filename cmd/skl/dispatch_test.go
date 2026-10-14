@@ -436,7 +436,7 @@ func TestDispatchWaitingKeepsTheWaitContract(t *testing.T) {
 	cancel()
 	cli.out.Reset()
 	err := cli.app.RunContext(ctx, []string{"skl", "watchdog", "next", "--dispatch", "--repo", source, "--wait", "1m"})
-	if err == nil || !strings.Contains(cli.out.String(), "Status: interrupted") || !strings.Contains(cli.out.String(), "`skl status --repo '") {
+	if err == nil || !strings.Contains(cli.out.String(), "Status: interrupted") || !strings.Contains(cli.out.String(), "`skl reconcile --repo '") {
 		t.Fatalf("interrupted dispatch = %v:\n%s", err, cli.out)
 	}
 }

@@ -120,7 +120,7 @@ func (f *autoMergeFixture) draft(number int) any {
 // observe runs status for the Slice, which observes completions.
 func (f *autoMergeFixture) observe(t *testing.T) ledgerStatusOutcome {
 	t.Helper()
-	observed := runCompletionStatus(t, f.cli.app, f.cli.out, f.source, "--item", deliveryTestItem)
+	observed := runCompletionStatus(t, f.cli.app, f.cli.out, f.source, "--slice", deliveryTestItem)
 	if len(observed.Items) != 1 {
 		t.Fatalf("status = %+v", observed)
 	}

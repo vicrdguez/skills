@@ -63,7 +63,7 @@ func ObserveCompletion(ctx context.Context, s *Store, repository github.Reposito
 		}
 	}
 	if forge == nil {
-		return result, refuse("forge observation is unavailable", "retry status when the owned Submission can be read; no terminal fact was recorded")
+		return result, refuse("forge observation is unavailable", "retry reconcile when the owned Submission can be read; no terminal fact was recorded")
 	}
 	observation, err := forge.ObserveSubmission(ctx, *state.Submission, *state.Target, state.Branch)
 	if err != nil {
