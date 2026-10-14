@@ -50,6 +50,12 @@ func deliveryCommands(phase string, newBackend backendFactory, stdout io.Writer)
 		if name == "resume" {
 			command.Flags = append(command.Flags, &cli.BoolFlag{Name: "dispatched", Usage: "render the Execution Skill a Dispatch of this Claim stands for"})
 		}
+		if name == "next" || name == "resume" || name == "prepare" || name == "inspect" {
+			command.Flags = append(command.Flags, &cli.StringFlag{Name: "harness", Usage: "launch configuration selector: pi, opencode, claude or codex"})
+			if name != "next" {
+				command.Flags = append(command.Flags, &cli.BoolFlag{Name: "launch-resolved", Hidden: true, Usage: "keep the launch choices supplied to this Worker Session"})
+			}
+		}
 		// Prepare and inspect print the resume command, so they carry the
 		// choices too.
 		if phase == ledger.ImplementPhase && (name == "next" || name == "resume" || name == "prepare" || name == "inspect") {
@@ -130,10 +136,16 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 	if err != nil {
 		return refusal(err)
 	}
-	store, err := openConfiguredLedger()
+	store, config, err := openConfiguredLaunchSettings()
 	if err != nil {
 		return refusal(err)
 	}
+	settings, err := selectedLaunchRoles(config, c.String("harness"))
+	if err != nil {
+		return refusal(err)
+	}
+	choices.Harness = c.String("harness")
+	choices.Resolved = choices.Harness != ""
 	if err := store.RefuseSourceOverlap(repository.Root); err != nil {
 		return refusal(err)
 	}
@@ -150,7 +162,7 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 				return refusal(err)
 			}
 			if !ending.Handoff() {
-				return emit(stoppedOutput(phase, repository, ending))
+				return emit(stoppedOutput(c, phase, repository, ending))
 			}
 			continued = &ending
 		}
@@ -193,6 +205,22 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 					return ledger.Selection{}, err
 				}
 			}
+			// Resolve launch defaults at this acquisition attempt, not before
+			// the idle wait. Keep the ledger that validated any continuation.
+			refreshedStore, config, err := openConfiguredLaunchSettings()
+			if err != nil {
+				return ledger.Selection{}, err
+			}
+			if refreshedStore.Root != store.Root {
+				return ledger.Selection{}, &ledger.Refusal{
+					Invariant: "configured ledger changed while waiting for work",
+					Repair:    "start a fresh next invocation against the intended ledger",
+				}
+			}
+			settings, err = selectedLaunchRoles(config, choices.Harness)
+			if err != nil {
+				return ledger.Selection{}, err
+			}
 			selectionAttempted = true
 			execution, err := ledger.StartDeliveryContext(c.Context, store, repository.Repository, phase, c.Bool("auto"))
 			if execution == nil {
@@ -221,9 +249,6 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 		if execution == nil {
 			return emit(deliveryOutput{Status: selection.Status, Reason: selectionReasons[selection.Status], Previous: continued, Merges: retried, kind: selectionKinds[selection.Status], facts: phaseFacts{Status: selection.Status, Phase: phase, Previous: continued, Merges: retried}})
 		}
-		if dispatch {
-			return emit(dispatchOutput(c, phase, repository, execution, continued, retried))
-		}
 	} else if operation == "release" {
 		if err := ledger.ReleaseDelivery(store, repository.Repository, item, phase, claim); err != nil {
 			return refusal(err)
@@ -235,6 +260,15 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 			return refusal(err)
 		}
 		verified()
+	}
+	if phase == ledger.ImplementPhase && !c.Bool("launch-resolved") {
+		choices.Reviewer = resolveLaunchChoice(choices.Reviewer, settings.Reviewer)
+		if choices.Mode == skilldist.TeamMode {
+			choices.Helper = resolveLaunchChoice(choices.Helper, settings.Helper)
+		}
+	}
+	if dispatch {
+		return emit(dispatchOutput(c, phase, repository, execution, continued, sortedMerges(merges), settings, choices))
 	}
 	var source *workflow.DeliverySource
 	required, target, previous := deliverySourceInputs(execution, phase)

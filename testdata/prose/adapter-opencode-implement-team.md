@@ -4,4 +4,4 @@ description: Implement a single claimed change with a team of implementer subage
 
 <!-- skl-owned: skl.adapter/v1 -->
 
-Run `skl implement next --mode team --helper-model '$1' --helper-thinking '$2' --reviewer-model '$3' --reviewer-thinking '$4'` and follow the Execution Skill it returns.
+Run `skl implement next --mode team --harness opencode --helper-model '$1' --helper-thinking '$2' --reviewer-model '$3' --reviewer-thinking '$4'` and follow the Execution Skill it returns.

@@ -4,19 +4,36 @@ This is the operator's view of the CLI: what each command does, when it runs, an
 
 ## Configuration
 
-`skl` reads one file, `$XDG_CONFIG_HOME/skl/config.json` (falling back to `~/.config/skl/config.json`), with one key:
+`skl` reads one file, `$XDG_CONFIG_HOME/skl/config.json` (falling back to `~/.config/skl/config.json`), with a required ledger path and optional harness-scoped launch choices:
 
 ```json
-{"ledger": "/absolute/path/to/ledger-clone"}
+{
+  "ledger": "/absolute/path/to/ledger-clone",
+  "harnesses": {
+    "pi": {
+      "implement": {"model": "openai/gpt-6.1-sol", "thinking": "high"},
+      "watchdog": {"model": "openai/gpt-6-astra", "thinking": "high"},
+      "helper": {"model": "openai/gpt-6-luna", "thinking": "xhigh"},
+      "reviewer": {"model": "openai/gpt-6-astra", "thinking": "low"}
+    },
+    "claude": {}
+  }
+}
 ```
 
 The path must be an existing local Git clone with at least one commit, separate from any source repository. The clone's own remote and upstream decide where the ledger replicates; `skl` provisions no hosting. A missing or broken configuration is a repairable refusal, never a fallback to forge-authoritative delivery.
+
+The supported harness keys are `pi`, `opencode`, `claude` and `codex`. Each supports optional `implement`, `watchdog`, `helper` and `reviewer` roles, each with optional string `model` and `thinking` fields. Empty sections and values are equivalent to omission; ledger-only files remain valid. Unknown fields and non-string launch values are refused. Values are opaque choices interpreted by the harness, not a provider catalog maintained by `skl`.
+
+Delivery `next`, `resume`, `prepare` and `inspect` take `--harness`. Installed adapters supply it, including Codex's direct stubs. Resolve each field independently: a nonempty explicit launch flag, then the selected harness's role setting, then harness inheritance. Without `--harness`, only explicit launch flags are used; environment variables never select a harness, and another harness's defaults never apply. `implement` and `watchdog` choose dispatched workers; `helper` applies only to team implementation; `reviewer` supplies the same implementation-review defaults in standard and team modes.
+
+Every new dispatch reads the current file. Its continuation carries the selector and explicit overrides, not resolved defaults. The worker command freezes that session's helper/reviewer values (including inherited empty choices), and its prepare/inspect/resume commands keep them. Editing the file therefore affects later dispatches, not existing sessions. Bound commands include an internal `--launch-resolved` marker for these session choices.
 
 ## Setup and install
 
 `skl setup [--repo <path>]` prepares local guidance in a Git repository: it writes the managed Workflow and Simplicity block into `AGENTS.md`, offers to link `CLAUDE.md` to it, and adds `.worktrees/` to `.gitignore`. It needs no GitHub remote, authentication or ledger configuration. Setup does not configure a ledger or adopt a Project; those are separate operations.
 
-`skl install` refreshes the owned skill stubs in `~/.pi/agent/skills`, `~/.codex/skills`, `~/.claude/skills` and `~/.config/opencode/skills`, and installs `implement`, `implement-team` and `watchdog` as Harness Adapters in each harness's native entry point: prompt templates in `~/.pi/agent/prompts/`, user-invoked skills in `~/.claude/skills/`, and commands in `~/.config/opencode/commands/`. Codex has no entry point that takes arguments, so it keeps plain stubs for those three. Every adapter runs its `next` command; `implement-team` adds `--mode team`. The Implement adapters take model and thinking arguments in order: `implement` takes the reviewer model and thinking level, and `implement-team` takes the helper's and then the reviewer's. An omitted argument passes an empty value, which `skl` treats as omitted. The pi templates default reviewers to `openai-codex/gpt-6.1-sol` at `high` and helpers to `openai-codex/gpt-6-luna` at `xhigh`; the other harnesses ship no defaults, and Codex's `implement-team` stub passes only the mode. The installer touches only files it owns and retires the ones it used to own: the `tdd` stub and the earlier Pi runners, loop prompts and queue helper. Stubs and adapters read the running binary, so rebuild after prose or default changes with `go install ./cmd/skl` and run `skl install` again. This refreshes owned files without changing loaded sessions or running workers.
+`skl install` refreshes the owned skill stubs in `~/.pi/agent/skills`, `~/.codex/skills`, `~/.claude/skills` and `~/.config/opencode/skills`, and installs `implement`, `implement-team` and `watchdog` as Harness Adapters in each harness's native entry point: prompt templates in `~/.pi/agent/prompts/`, user-invoked skills in `~/.claude/skills/`, and commands in `~/.config/opencode/commands/`. Codex has no entry point that takes arguments, so it keeps plain stubs for those three. Every adapter runs its `next` command; `implement-team` adds `--mode team`. The Implement adapters take model and thinking arguments in order: `implement` takes the reviewer model and thinking level, and `implement-team` takes the helper's and then the reviewer's. An omitted argument passes an empty value, which `skl` treats as omitted. Adapters supply their harness selector and invocation overrides, with no compiled model or thinking defaults; Codex's `implement-team` stub passes the mode and selector. The installer touches only files it owns and retires the ones it used to own: the `tdd` stub and the earlier Pi runners, loop prompts and queue helper. Stubs and adapters read the running binary, so deliver binary or prose changes with `go install ./cmd/skl` and run `skl install` again. This refreshes owned files without changing loaded sessions or running workers. After this one-time update, editing launch choices in the configuration requires no rebuild, adapter reinstall or Supervisor restart.
 
 Before changing files, `skl install` previews each create, update and removal and asks `Install these changes? [y/N]`. Enter `y` or `yes` to proceed; Enter, no answer or any other response cancels without changes. There is no confirmation-bypass flag. An unchanged installation says “Already up to date” without prompting, and user-owned collisions are identified separately. After acceptance, the command reports completed changes and confirms success. On failure it reports the completed changes and failed action, leaves completed changes in place, and exits with an error rather than rolling back.
 
@@ -86,15 +103,7 @@ skl implement next --dispatch --wait --repo <path> [--worker-model <m>] [--worke
 
 A Dispatch claims a Slice like `next` but answers with two bound commands instead of the Execution Skill: a worker command (`skl <phase> resume … --dispatched`) that a fresh subagent runs, and a continue command that repeats the Dispatch with `--after <claim>`. Continuation first reads how that Claim ended and proceeds only after its phase handoff. A Claim still held or released without a handoff stops the Supervisor with the Claim untouched. Model and thinking values are passed through opaquely to the harness.
 
-Pi and OpenCode install `implement-loop`, `implement-team-loop` and `watchdog-loop` adapters. Omitted Pi arguments select these defaults:
-
-| Entry point | Worker model / thinking | Helper model / thinking | Reviewer model / thinking |
-| --- | --- | --- | --- |
-| `implement-loop` | `openai-codex/gpt-6.1-sol` / `high` | — | `openai-codex/gpt-6-astra` / `low` |
-| `implement-team-loop` | `openai-codex/gpt-6.1-sol` / `high` | `openai-codex/gpt-6-luna` / `xhigh` | `openai-codex/gpt-6.1-sol` / `high` |
-| `watchdog-loop` | `openai-codex/gpt-6-astra` / `high` | — | — |
-
-Explicit model and thinking arguments keep their existing precedence, including older model identifiers. OpenCode supplies no defaults; Claude Code and Codex have no loop adapters.
+Pi and OpenCode install `implement-loop`, `implement-team-loop` and `watchdog-loop` adapters. All use the runtime configuration and field-by-field precedence described above. Claude Code and Codex have no loop adapters. Pi workers retain ordinary extension-enabled subagent tool loading and scope: codemode is available when enabled under the normal Pi session configuration. Availability does not require the model to call it.
 
 ## Presenting a result
 

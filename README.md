@@ -139,15 +139,11 @@ The point of composing at invocation time is that the worker reads only what app
 
 A Supervisor drains a queue by asking for work with `--dispatch --wait`: the engine claims a Slice for a fresh worker session and answers with the command that session runs and the command that continues afterwards (`skl <phase> next --dispatch --wait --after <claim>`). Continuation only proceeds once the ledger records that worker's handoff ([ADR 0010](docs/adr/0010-drive-supervisors-through-dispatch-outcomes.md)).
 
-Pi and OpenCode install `implement-loop` (standard Implement), `implement-team-loop` (team Implement) and `watchdog-loop` entry points. Each starts Dispatch and follows its Outcome Instructions until one says to stop. All accept worker model and thinking arguments; the Implement loops also accept reviewer arguments, and team mode accepts helper arguments. Supplied values override the defaults; OpenCode leaves every slot to the harness default.
+Pi and OpenCode install `implement-loop` (standard Implement), `implement-team-loop` (team Implement) and `watchdog-loop` entry points. Each starts Dispatch and follows its Outcome Instructions until one says to stop. All accept worker model and thinking arguments; the Implement loops also accept reviewer arguments, and team mode accepts helper arguments.
 
-| Pi loop | Worker model / thinking | Helper model / thinking | Audit reviewer model / thinking |
-|---|---|---|---|
-| `implement-loop` | `openai-codex/gpt-6.1-sol` / `high` | — | `openai-codex/gpt-6-astra` / `low` |
-| `implement-team-loop` | `openai-codex/gpt-6.1-sol` / `high` | `openai-codex/gpt-6-luna` / `xhigh` | `openai-codex/gpt-6.1-sol` / `high` |
-| `watchdog-loop` | `openai-codex/gpt-6-astra` / `high` | — | — |
+Adapters identify their harness with `--harness` and supply no compiled model or thinking defaults. Set optional `harnesses.<pi|opencode|claude|codex>.<implement|watchdog|helper|reviewer>.<model|thinking>` choices in the existing `skl/config.json`. Each field resolves from an explicit invocation choice, then the selected harness's configuration, then harness inheritance. Standard and team Implement share the same reviewer defaults. Direct CLI calls without a selector use only explicit launch flags. See [configuration and precedence](docs/cli.md#configuration) for an example.
 
-The single-item Pi `implement` and `implement-team` adapters also default their Audit reviewers to `openai-codex/gpt-6.1-sol` / `high`; `implement-team` keeps its Luna helper at `xhigh`. Explicit model and thinking arguments override these defaults, including older model identifiers. Claude Code and OpenCode supply no model or thinking defaults, and Codex keeps plain stubs.
+Each dispatch rereads configuration; continuation preserves explicit overrides rather than old defaults. Existing workers retain their supplied session choices. Pi-dispatched workers use ordinary extension-enabled subagent tool loading, so codemode is available when enabled under normal scope rules.
 
 Run one Supervisor per phase per Project. Configure the harness to allow subagent depth **2**: the Supervisor dispatches a worker, and that worker's Audit dispatches reviewers. `skl install` does not configure harness subagent depth.
 
@@ -223,9 +219,9 @@ Then prepare local guidance in each repository you want to work in (ledger Proje
 skl setup    # local AGENTS.md workflow block, .worktrees/ ignore entry, optional CLAUDE.md link
 ```
 
-After changing prose or adapter defaults, rebuild with `go install ./cmd/skl` and run `skl install` again. Stubs and adapters use the running binary, not the checkout; reinstalling refreshes owned files, not loaded sessions or running workers.
+For the one-time runtime-settings delivery update, or after changing binary/prose sources, rebuild with `go install ./cmd/skl` and run `skl install` again. Stubs and adapters use the running binary, not the checkout; reinstalling refreshes owned files, not loaded sessions or running workers.
 
-To change the model defaults an entry point passes, copy its installed template to a new name and edit the copy; `skl install` only refreshes the files it wrote.
+After that update, edit launch defaults in the existing configuration file; no rebuild, adapter reinstall or Supervisor restart is needed.
 
 ## Daily use
 

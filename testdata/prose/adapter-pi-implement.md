@@ -5,4 +5,4 @@ argument-hint: "[reviewer-model] [reviewer-thinking]"
 
 <!-- skl-owned: skl.adapter/v1 -->
 
-Run `skl implement next --reviewer-model '${1:-openai-codex/gpt-6.1-sol}' --reviewer-thinking '${2:-high}'` and follow the Execution Skill it returns.
+Run `skl implement next --harness pi --reviewer-model '${1:-}' --reviewer-thinking '${2:-}'` and follow the Execution Skill it returns.
