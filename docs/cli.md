@@ -168,4 +168,10 @@ Every view reads one committed ledger revision, never fetches or contacts a forg
 
 Status and every `implement next` poll also keep the Proposal Submission current. Once a Slice is observed Merged into an open Proposal Branch, they open a draft pull request from that branch into `main`, or attach the one already open, and record it on the Proposal. Each later Slice merge re-renders its body from the ledger, and it is marked ready once every Slice is Merged; a ready pull request is never returned to draft. When it merges, the Proposal records its completion and the branch is spent; a pull request closed without merge is reported and nothing is recorded. Status shows the Proposal Branch as open or spent, the Proposal Submission and its completion.
 
-`skl propose cleanup` also requires ledger configuration and an accepted Project. It archives terminal proposals and removes only safely merged local source work. Without that authority, cleanup reports how to configure the ledger and accept a Project, without consulting GitHub. Accept and publish Proposals through `skl ledger accept` and `skl ledger publish`.
+```sh
+skl cleanup [--repo <path>] [--remote <name>] [--format markdown|json]
+```
+
+`skl cleanup` replaces the removed `skl propose cleanup` command and its now-empty command group; the standalone `skl skill propose` remains available. Coordinate this syntax upgrade between runs: finish or stop active workers and Supervisors, then update the binary and refresh installed adapters together with `skl install`. Existing Claims and ledger history remain intact.
+
+`skl cleanup` defaults to the current repository and the `origin` remote, with Markdown output. It also requires ledger configuration and an accepted Project. It archives terminal proposals and removes only safely merged local source work. Without that authority, cleanup reports how to configure the ledger and accept a Project, without consulting GitHub. Accept and publish Proposals through `skl ledger accept` and `skl ledger publish`.

@@ -130,10 +130,7 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 			}
 			return fmt.Errorf("unsupported format %q", command.String("format"))
 		},
-	}, {
-		Name:        "propose",
-		Subcommands: []*cli.Command{cleanupCommand(stdout)},
-	}, {
+	}, cleanupCommand(stdout), {
 		Name:        "implement",
 		Subcommands: deliveryCommands("implement", newBackend, stdout),
 	}, {
