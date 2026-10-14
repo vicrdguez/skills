@@ -66,7 +66,7 @@ func TestImplementAutoFlagAppliesToNextAndDispatchOnly(t *testing.T) {
 		t.Fatalf("accept: %s", mustJSON(t, accepted))
 	}
 	before := runGitOutput(t, fixture.clone, "rev-parse", "HEAD")
-	if _, err := app.deliveryJSON(t, "skl", "implement", "resume", "--auto", "--repo", source, "--slice", deliveryTestItem, "--claim-phase", before, "--format", "json"); err == nil || !strings.Contains(err.Error(), "auto") {
+	if _, err := app.deliveryJSON(t, "skl", "implement", "resume", "--auto", "--repo", source, "--item", deliveryTestItem, "--claim", before, "--format", "json"); err == nil || !strings.Contains(err.Error(), "auto") {
 		t.Fatalf("resume --auto error = %v; want flag refusal", err)
 	}
 	if after := runGitOutput(t, fixture.clone, "rev-parse", "HEAD"); after != before {
