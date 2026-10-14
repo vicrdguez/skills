@@ -98,14 +98,10 @@ func loopCommand(t *testing.T, entry string) []string {
 	words := shellWords(t, command[1])
 	for _, slot := range regexp.MustCompile(`(?m)^- (--[a-z-]+): (.*)$`).FindAllStringSubmatch(entry, -1) {
 		value := regexp.MustCompile(`\$\{\d+:-([^}]*)\}`).ReplaceAllString(slot[2], "$1")
-		if regexp.MustCompile(`^\$\d+$`).MatchString(value) {
+		if regexp.MustCompile(`^\$\w+$`).MatchString(value) {
 			value = ""
 		}
-		if slot[1] == "--auto" {
-			if value == "true" {
-				words = append(words, "--auto")
-			}
-		} else if value != "" {
+		if value != "" {
 			words = append(words, slot[1], value)
 		}
 	}
@@ -139,75 +135,93 @@ func TestInstallPassesHarnessModeAndOpaqueSlotsWithoutDefaults(t *testing.T) {
 	}
 }
 
-func TestInstallWritesDispatchLoopsForPiAndOpenCode(t *testing.T) {
+func TestInstallWritesLoopAndAutoFamiliesForNativeHarnesses(t *testing.T) {
 	home := t.TempDir()
 	installInto(t, home)
-	cases := map[string]map[string][]string{
-		"pi": {
-			"implement-loop":      {"skl", "implement", "next", "--dispatch", "--wait", "--harness", "pi"},
-			"implement-team-loop": {"skl", "implement", "next", "--mode", "team", "--dispatch", "--wait", "--harness", "pi"},
-			"watchdog-loop":       {"skl", "watchdog", "next", "--dispatch", "--wait", "--harness", "pi"},
-		},
-		"opencode": {
-			"implement-loop":      {"skl", "implement", "next", "--dispatch", "--wait", "--harness", "opencode"},
-			"implement-team-loop": {"skl", "implement", "next", "--mode", "team", "--dispatch", "--wait", "--harness", "opencode"},
-			"watchdog-loop":       {"skl", "watchdog", "next", "--dispatch", "--wait", "--harness", "opencode"},
-		},
+	slots := map[string][]string{
+		"implement":      {"worker-model", "worker-thinking", "reviewer-model", "reviewer-thinking"},
+		"implement-team": {"worker-model", "worker-thinking", "helper-model", "helper-thinking", "reviewer-model", "reviewer-thinking"},
+		"watchdog":       {"worker-model", "worker-thinking"},
 	}
-	for harness, operations := range cases {
-		for operation, want := range operations {
-			entry := readFile(t, filepath.Join(home, fmt.Sprintf(entryPoints[harness], operation)))
-			if !strings.Contains(entry, "<!-- skl-owned: skl.adapter/v1 -->") || !strings.Contains(entry, "Follow each Outcome Instruction until one tells you to stop") {
-				t.Errorf("%s %s is not an outcome-driven adapter:\n%s", harness, operation, entry)
-			}
-			if got := loopCommand(t, entry); !slices.Equal(got, want) {
-				t.Errorf("%s %s runs %q, want %q", harness, operation, got, want)
-			}
-			if strings.Contains(entry, "Execution Skill") || strings.Contains(entry, "--after") || !strings.Contains(entry, "Quote values for the shell without changing them; omit empty slots") {
-				t.Errorf("%s %s contains worker logic or lacks opaque argument guidance:\n%s", harness, operation, entry)
-			}
-			// Every supplied slot is passed unchanged, including punctuation
-			// that would break an interpolated shell command.
-			slots := map[string][]string{
-				"implement-loop":      {"worker-model", "worker-thinking", "reviewer-model", "reviewer-thinking"},
-				"implement-team-loop": {"worker-model", "worker-thinking", "helper-model", "helper-thinking", "reviewer-model", "reviewer-thinking"},
-				"watchdog-loop":       {"worker-model", "worker-thinking"},
-			}
-			for i, flag := range slots[operation] {
-				value := "user/o'brien-" + fmt.Sprint(i+1)
-				custom := entry
-				if harness == "pi" {
-					custom = regexp.MustCompile(fmt.Sprintf(`\$\{%d:-[^}]*\}`, i+1)).ReplaceAllString(custom, value)
-				} else {
-					custom = strings.ReplaceAll(custom, fmt.Sprintf("$%d", i+1), value)
+	first := map[string]string{}
+	for _, harness := range []string{"pi", "opencode", "claude"} {
+		for mode, flags := range slots {
+			for _, family := range []string{"loop", "auto"} {
+				operation := mode + "-" + family
+				path := filepath.Join(home, fmt.Sprintf(entryPoints[harness], operation))
+				entry := readFile(t, path)
+				first[path] = entry
+				want := []string{"skl", strings.TrimSuffix(mode, "-team"), "next"}
+				if mode == "implement-team" {
+					want = append(want, "--mode", "team")
 				}
-				overridden := append(slices.Clone(want), "--"+flag, value)
-				if got := loopCommand(t, custom); !slices.Equal(got, overridden) {
-					t.Errorf("%s %s slot %d runs %q, want %q", harness, operation, i+1, got, overridden)
+				want = append(want, "--dispatch", "--wait")
+				if family == "auto" {
+					want = append(want, "--auto")
+				}
+				want = append(want, "--harness", harness)
+				if got := loopCommand(t, entry); !slices.Equal(got, want) {
+					t.Errorf("%s %s runs %q, want %q", harness, operation, got, want)
+				}
+				if got := regexp.MustCompile(`(?m)^- (--[a-z-]+):`).FindAllStringSubmatch(entry, -1); len(got) != len(flags) || strings.Contains(entry, "- --auto:") {
+					t.Errorf("%s %s has unexpected argument slots:\n%s", harness, operation, entry)
+				}
+				if harness == "claude" && (!strings.Contains(entry, "name: "+operation+"\n") || !strings.Contains(entry, "disable-model-invocation: true") || !strings.Contains(entry, "arguments: [worker_model, worker_thinking")) {
+					t.Errorf("%s is not a native user-invoked Claude skill:\n%s", operation, entry)
+				}
+				// Supplied slots remain opaque, even with shell punctuation.
+				for i, flag := range flags {
+					value := "user/o'brien-" + fmt.Sprint(i+1)
+					custom := entry
+					switch harness {
+					case "pi":
+						custom = regexp.MustCompile(fmt.Sprintf(`\$\{%d:-[^}]*\}`, i+1)).ReplaceAllString(custom, value)
+					case "claude":
+						custom = strings.ReplaceAll(custom, "$"+strings.ReplaceAll(flag, "-", "_"), value)
+					default:
+						custom = strings.ReplaceAll(custom, fmt.Sprintf("$%d", i+1), value)
+					}
+					overridden := append(slices.Clone(want), "--"+flag, value)
+					if got := loopCommand(t, custom); !slices.Equal(got, overridden) {
+						t.Errorf("%s %s slot %d runs %q, want %q", harness, operation, i+1, got, overridden)
+					}
 				}
 			}
 		}
 	}
-	for _, harness := range []string{"pi", "opencode"} {
-		for operation, slot := range map[string]int{"implement-loop": 5, "watchdog-loop": 3} {
-			entry := readFile(t, filepath.Join(home, fmt.Sprintf(entryPoints[harness], operation)))
-			custom := entry
-			if harness == "pi" {
-				custom = strings.Replace(custom, fmt.Sprintf("${%d:-false}", slot), "true", 1)
-			} else {
-				custom = strings.Replace(custom, fmt.Sprintf("$%d", slot), "true", 1)
-			}
-			want := append(slices.Clone(cases[harness][operation]), "--auto")
-			if got := loopCommand(t, custom); !slices.Equal(got, want) {
-				t.Errorf("%s Auto Mode %s runs %q, want %q", harness, operation, got, want)
+	for mode := range slots {
+		for _, family := range []string{"loop", "auto"} {
+			if _, err := os.Stat(filepath.Join(home, fmt.Sprintf(entryPoints["codex"], mode+"-"+family))); !os.IsNotExist(err) {
+				t.Errorf("unexpected Codex %s-%s adapter: %v", mode, family, err)
 			}
 		}
 	}
-	for _, harness := range []string{"codex", "claude"} {
-		for operation := range cases["pi"] {
-			if _, err := os.Stat(filepath.Join(home, fmt.Sprintf(entryPoints[harness], operation))); !os.IsNotExist(err) {
-				t.Errorf("unexpected %s %s loop adapter: %v", harness, operation, err)
-			}
+	installInto(t, home)
+	for path, want := range first {
+		if got := readFile(t, path); got != want {
+			t.Errorf("reinstall changed %s:\n%s", path, got)
+		}
+	}
+}
+
+func TestInstallPreservesUserAutoEntriesAndUpdatesOwnedAutoEntries(t *testing.T) {
+	home := t.TempDir()
+	files := map[string]string{}
+	for _, harness := range []string{"pi", "opencode", "claude"} {
+		user := writeHomeFile(t, home, fmt.Sprintf(entryPoints[harness], "implement-auto"), "my auto entry\n")
+		files[user] = "my auto entry\n"
+		writeHomeFile(t, home, fmt.Sprintf(entryPoints[harness], "implement-team-auto"), "<!-- skl-owned: skl.adapter/v1 -->\nstale\n")
+	}
+	installInto(t, home)
+	for path, want := range files {
+		if got := readFile(t, path); got != want {
+			t.Errorf("user-owned auto entry %s changed: %q", path, got)
+		}
+	}
+	for _, harness := range []string{"pi", "opencode", "claude"} {
+		entry := readFile(t, filepath.Join(home, fmt.Sprintf(entryPoints[harness], "implement-team-auto")))
+		if strings.Contains(entry, "stale") || !slices.Contains(loopCommand(t, entry), "--auto") {
+			t.Errorf("owned %s auto entry was not updated:\n%s", harness, entry)
 		}
 	}
 }
