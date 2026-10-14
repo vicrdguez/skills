@@ -146,12 +146,6 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 	}
 	choices.Harness = c.String("harness")
 	choices.Resolved = choices.Harness != ""
-	if phase == ledger.ImplementPhase && !c.Bool("launch-resolved") {
-		choices.Reviewer = resolveLaunchChoice(choices.Reviewer, settings.Reviewer)
-		if choices.Mode == skilldist.TeamMode {
-			choices.Helper = resolveLaunchChoice(choices.Helper, settings.Helper)
-		}
-	}
 	if err := store.RefuseSourceOverlap(repository.Root); err != nil {
 		return refusal(err)
 	}
@@ -211,6 +205,22 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 					return ledger.Selection{}, err
 				}
 			}
+			// Resolve launch defaults at this acquisition attempt, not before
+			// the idle wait. Keep the ledger that validated any continuation.
+			refreshedStore, config, err := openConfiguredLaunchSettings()
+			if err != nil {
+				return ledger.Selection{}, err
+			}
+			if refreshedStore.Root != store.Root {
+				return ledger.Selection{}, &ledger.Refusal{
+					Invariant: "configured ledger changed while waiting for work",
+					Repair:    "start a fresh next invocation against the intended ledger",
+				}
+			}
+			settings, err = selectedLaunchRoles(config, choices.Harness)
+			if err != nil {
+				return ledger.Selection{}, err
+			}
 			selectionAttempted = true
 			execution, err := ledger.StartDeliveryContext(c.Context, store, repository.Repository, phase, c.Bool("auto"))
 			if execution == nil {
@@ -239,9 +249,6 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 		if execution == nil {
 			return emit(deliveryOutput{Status: selection.Status, Reason: selectionReasons[selection.Status], Previous: continued, Merges: retried, kind: selectionKinds[selection.Status], facts: phaseFacts{Status: selection.Status, Phase: phase, Previous: continued, Merges: retried}})
 		}
-		if dispatch {
-			return emit(dispatchOutput(c, phase, repository, execution, continued, retried, settings, choices))
-		}
 	} else if operation == "release" {
 		if err := ledger.ReleaseDelivery(store, repository.Repository, item, phase, claim); err != nil {
 			return refusal(err)
@@ -253,6 +260,15 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 			return refusal(err)
 		}
 		verified()
+	}
+	if phase == ledger.ImplementPhase && !c.Bool("launch-resolved") {
+		choices.Reviewer = resolveLaunchChoice(choices.Reviewer, settings.Reviewer)
+		if choices.Mode == skilldist.TeamMode {
+			choices.Helper = resolveLaunchChoice(choices.Helper, settings.Helper)
+		}
+	}
+	if dispatch {
+		return emit(dispatchOutput(c, phase, repository, execution, continued, sortedMerges(merges), settings, choices))
 	}
 	var source *workflow.DeliverySource
 	required, target, previous := deliverySourceInputs(execution, phase)
