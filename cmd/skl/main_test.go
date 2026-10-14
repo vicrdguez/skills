@@ -130,21 +130,30 @@ func TestSetupRejectsNonGitLocationAndRemovedRemoteFlag(t *testing.T) {
 	}
 }
 
-func TestProposePublishIsNotACommand(t *testing.T) {
+func TestProposeIsNotACommand(t *testing.T) {
 	root := proposalRepository(t)
-	command := exec.Command(os.Args[0], "-test.run=^TestProposePublishProcess$", "--", "propose", "publish", "--repo", root, "--target", "main", "--slice", "widget=issue.md")
-	command.Env = append(os.Environ(), "SKL_PROPOSE_PUBLISH_PROCESS=1")
-	output, err := command.CombinedOutput()
-	if err == nil || !strings.Contains(string(output), "No help topic for 'publish'") {
-		t.Fatalf("retired invocation = %v, %q", err, output)
-	}
-	if got := runGitOutput(t, root, "status", "--porcelain", "--untracked-files=all"); got != "" {
-		t.Fatalf("retired invocation changed repository files: %s", got)
+	before := ledgerSnapshot(t, root)
+	for _, args := range [][]string{
+		{"propose"},
+		{"propose", "cleanup", "--repo", root},
+		{"propose", "publish", "--repo", root, "--target", "main", "--slice", "widget=issue.md"},
+	} {
+		t.Run(strings.Join(args[:min(len(args), 2)], " "), func(t *testing.T) {
+			command := exec.Command(os.Args[0], append([]string{"-test.run=^TestRemovedProposeProcess$", "--"}, args...)...)
+			command.Env = append(os.Environ(), "SKL_REMOVED_PROPOSE_PROCESS=1")
+			output, err := command.CombinedOutput()
+			if err == nil || !strings.Contains(string(output), "No help topic for 'propose'") {
+				t.Fatalf("retired invocation = %v, %q", err, output)
+			}
+			if ledgerSnapshot(t, root) != before {
+				t.Fatal("retired invocation changed source Git state")
+			}
+		})
 	}
 }
 
-func TestProposePublishProcess(t *testing.T) {
-	if os.Getenv("SKL_PROPOSE_PUBLISH_PROCESS") != "1" {
+func TestRemovedProposeProcess(t *testing.T) {
+	if os.Getenv("SKL_REMOVED_PROPOSE_PROCESS") != "1" {
 		return
 	}
 	os.Args = append([]string{"skl"}, os.Args[3:]...)
