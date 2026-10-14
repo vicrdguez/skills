@@ -112,28 +112,26 @@ func loopCommand(t *testing.T, entry string) []string {
 	return words
 }
 
-func TestInstallPassesEachModeAndItsSlotsWithPiDefaults(t *testing.T) {
+func TestInstallPassesHarnessModeAndOpaqueSlotsWithoutDefaults(t *testing.T) {
 	home := t.TempDir()
 	installInto(t, home)
-	const sol, luna = "openai-codex/gpt-6.1-sol", "openai-codex/gpt-6-luna"
-	piDefaults := map[string][]string{
-		"implement":      {"--reviewer-model", sol, "--reviewer-thinking", "high"},
-		"implement-team": {"--mode", "team", "--helper-model", luna, "--helper-thinking", "xhigh", "--reviewer-model", sol, "--reviewer-thinking", "high"},
-	}
-	empty := map[string][]string{
-		"implement":      {"--reviewer-model", "", "--reviewer-thinking", ""},
-		"implement-team": {"--mode", "team", "--helper-model", "", "--helper-thinking", "", "--reviewer-model", "", "--reviewer-thinking", ""},
-	}
-	// Codex keeps stubs, which pass the mode without slots.
-	stubs := map[string][]string{"implement-team": {"--mode", "team"}}
 	for harness, location := range entryPoints {
-		for _, operation := range []string{"implement", "implement-team"} {
+		for _, operation := range []string{"implement", "implement-team", "watchdog"} {
 			entry := readFile(t, filepath.Join(home, fmt.Sprintf(location, operation)))
-			slots := map[string]map[string][]string{"pi": piDefaults, "codex": stubs}[harness]
-			if slots == nil {
-				slots = empty
+			phase := strings.TrimSuffix(operation, "-team")
+			want := []string{"skl", phase, "next"}
+			if operation == "implement-team" {
+				want = append(want, "--mode", "team")
 			}
-			want := append([]string{"skl", "implement", "next"}, slots[operation]...)
+			want = append(want, "--harness", harness)
+			if harness != "codex" {
+				if operation == "implement-team" {
+					want = append(want, "--helper-model", "", "--helper-thinking", "")
+				}
+				if phase == "implement" {
+					want = append(want, "--reviewer-model", "", "--reviewer-thinking", "")
+				}
+			}
 			if got := invokedCommand(t, entry); !slices.Equal(got, want) {
 				t.Errorf("%s %s runs %q, want %q", harness, operation, got, want)
 			}
@@ -144,17 +142,16 @@ func TestInstallPassesEachModeAndItsSlotsWithPiDefaults(t *testing.T) {
 func TestInstallWritesDispatchLoopsForPiAndOpenCode(t *testing.T) {
 	home := t.TempDir()
 	installInto(t, home)
-	const sol = "openai-codex/gpt-6.1-sol"
 	cases := map[string]map[string][]string{
 		"pi": {
-			"implement-loop":      {"skl", "implement", "next", "--dispatch", "--wait", "--worker-model", sol, "--worker-thinking", "high", "--reviewer-model", "openai-codex/gpt-6-astra", "--reviewer-thinking", "low"},
-			"implement-team-loop": {"skl", "implement", "next", "--mode", "team", "--dispatch", "--wait", "--worker-model", sol, "--worker-thinking", "high", "--helper-model", "openai-codex/gpt-6-luna", "--helper-thinking", "xhigh", "--reviewer-model", sol, "--reviewer-thinking", "high"},
-			"watchdog-loop":       {"skl", "watchdog", "next", "--dispatch", "--wait", "--worker-model", "openai-codex/gpt-6-astra", "--worker-thinking", "high"},
+			"implement-loop":      {"skl", "implement", "next", "--dispatch", "--wait", "--harness", "pi"},
+			"implement-team-loop": {"skl", "implement", "next", "--mode", "team", "--dispatch", "--wait", "--harness", "pi"},
+			"watchdog-loop":       {"skl", "watchdog", "next", "--dispatch", "--wait", "--harness", "pi"},
 		},
 		"opencode": {
-			"implement-loop":      {"skl", "implement", "next", "--dispatch", "--wait"},
-			"implement-team-loop": {"skl", "implement", "next", "--mode", "team", "--dispatch", "--wait"},
-			"watchdog-loop":       {"skl", "watchdog", "next", "--dispatch", "--wait"},
+			"implement-loop":      {"skl", "implement", "next", "--dispatch", "--wait", "--harness", "opencode"},
+			"implement-team-loop": {"skl", "implement", "next", "--mode", "team", "--dispatch", "--wait", "--harness", "opencode"},
+			"watchdog-loop":       {"skl", "watchdog", "next", "--dispatch", "--wait", "--harness", "opencode"},
 		},
 	}
 	for harness, operations := range cases {
@@ -171,28 +168,22 @@ func TestInstallWritesDispatchLoopsForPiAndOpenCode(t *testing.T) {
 			}
 			// Every supplied slot is passed unchanged, including punctuation
 			// that would break an interpolated shell command.
-			piWant := cases["pi"][operation]
-			i := 0
-			for position, flag := range piWant {
-				if !strings.HasPrefix(flag, "--") || flag == "--dispatch" || flag == "--wait" || flag == "--mode" || flag == "--auto" {
-					continue
-				}
-				i++
-				value := "user/o'brien-" + fmt.Sprint(i)
+			slots := map[string][]string{
+				"implement-loop":      {"worker-model", "worker-thinking", "reviewer-model", "reviewer-thinking"},
+				"implement-team-loop": {"worker-model", "worker-thinking", "helper-model", "helper-thinking", "reviewer-model", "reviewer-thinking"},
+				"watchdog-loop":       {"worker-model", "worker-thinking"},
+			}
+			for i, flag := range slots[operation] {
+				value := "user/o'brien-" + fmt.Sprint(i+1)
 				custom := entry
 				if harness == "pi" {
-					custom = regexp.MustCompile(fmt.Sprintf(`\$\{%d:-[^}]*\}`, i)).ReplaceAllString(custom, value)
+					custom = regexp.MustCompile(fmt.Sprintf(`\$\{%d:-[^}]*\}`, i+1)).ReplaceAllString(custom, value)
 				} else {
-					custom = strings.ReplaceAll(custom, fmt.Sprintf("$%d", i), value)
+					custom = strings.ReplaceAll(custom, fmt.Sprintf("$%d", i+1), value)
 				}
-				overridden := slices.Clone(want)
-				if harness == "pi" {
-					overridden[position+1] = value
-				} else {
-					overridden = append(overridden, flag, value)
-				}
+				overridden := append(slices.Clone(want), "--"+flag, value)
 				if got := loopCommand(t, custom); !slices.Equal(got, overridden) {
-					t.Errorf("%s %s slot %d runs %q, want %q", harness, operation, i, got, overridden)
+					t.Errorf("%s %s slot %d runs %q, want %q", harness, operation, i+1, got, overridden)
 				}
 			}
 		}

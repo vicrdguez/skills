@@ -367,17 +367,22 @@ func ledgerCommands(newBackend backendFactory, stdout io.Writer) *cli.Command {
 // configured ledger clone, translating every unusable shape into an
 // actionable refusal.
 func openConfiguredLedger() (*ledger.Store, error) {
-	store, path, exists, err := ledger.LoadSettings(os.Getenv)
+	store, _, err := openConfiguredLaunchSettings()
+	return store, err
+}
+
+func openConfiguredLaunchSettings() (*ledger.Store, ledger.Config, error) {
+	store, config, path, exists, err := ledger.LoadSettings(os.Getenv)
 	if err != nil {
-		return nil, err
+		return nil, config, err
 	}
 	if !exists {
-		return nil, &ledger.Refusal{
+		return nil, config, &ledger.Refusal{
 			Invariant: "no skl configuration exists at " + path,
 			Repair:    "create " + path + " as {\"ledger\": \"/absolute/path/to/ledger-clone\"} pointing at an existing local Git clone of the ledger",
 		}
 	}
-	return store, nil
+	return store, config, nil
 }
 
 // issueBodyFlag collects repeated --issue <slice>=<body-file> occurrences.

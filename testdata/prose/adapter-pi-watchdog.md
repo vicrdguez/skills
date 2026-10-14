@@ -4,4 +4,4 @@ description: Adversarial validation in a fresh context, passing review to the hu
 
 <!-- skl-owned: skl.adapter/v1 -->
 
-Run `skl watchdog next` and follow the Execution Skill it returns.
+Run `skl watchdog next --harness pi` and follow the Execution Skill it returns.

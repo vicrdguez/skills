@@ -8,4 +8,4 @@ argument-hint: "[helper-model] [helper-thinking] [reviewer-model] [reviewer-thin
 
 <!-- skl-owned: skl.adapter/v1 -->
 
-Run `skl implement next --mode team --helper-model '$helper_model' --helper-thinking '$helper_thinking' --reviewer-model '$reviewer_model' --reviewer-thinking '$reviewer_thinking'` and follow the Execution Skill it returns.
+Run `skl implement next --mode team --harness claude --helper-model '$helper_model' --helper-thinking '$helper_thinking' --reviewer-model '$reviewer_model' --reviewer-thinking '$reviewer_thinking'` and follow the Execution Skill it returns.

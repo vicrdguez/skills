@@ -16,10 +16,30 @@ import (
 	"strings"
 )
 
-// Config is the single machine-local setting file. Its only setting is the
-// absolute path of an existing local ledger clone.
+// Config is the existing machine-local configuration, including optional
+// opaque Agent Harness launch choices.
 type Config struct {
-	Ledger string `json:"ledger"`
+	Ledger    string          `json:"ledger"`
+	Harnesses HarnessSettings `json:"harnesses,omitempty"`
+}
+
+type LaunchChoice struct {
+	Model    string `json:"model,omitempty"`
+	Thinking string `json:"thinking,omitempty"`
+}
+
+type LaunchRoles struct {
+	Implement LaunchChoice `json:"implement,omitempty"`
+	Watchdog  LaunchChoice `json:"watchdog,omitempty"`
+	Helper    LaunchChoice `json:"helper,omitempty"`
+	Reviewer  LaunchChoice `json:"reviewer,omitempty"`
+}
+
+type HarnessSettings struct {
+	Pi       LaunchRoles `json:"pi,omitempty"`
+	OpenCode LaunchRoles `json:"opencode,omitempty"`
+	Claude   LaunchRoles `json:"claude,omitempty"`
+	Codex    LaunchRoles `json:"codex,omitempty"`
 }
 
 // SettingsLocation resolves the applicable config file: XDG_CONFIG_HOME when
@@ -178,20 +198,20 @@ func requireJSONEnd(decoder *json.Decoder) error {
 // LoadSettings resolves, reads, and opens the applicable machine
 // configuration. exists reports whether any config file was present, so
 // callers can distinguish an unconfigured machine from an unusable one.
-func LoadSettings(getenv func(string) string) (store *Store, path string, exists bool, err error) {
+func LoadSettings(getenv func(string) string) (store *Store, config Config, path string, exists bool, err error) {
 	path, exists, err = SettingsLocation(getenv)
 	if err != nil || !exists {
-		return nil, path, exists, err
+		return nil, config, path, exists, err
 	}
-	config, err := LoadConfig(path)
+	config, err = LoadConfig(path)
 	if err != nil {
-		return nil, path, exists, err
+		return nil, config, path, exists, err
 	}
 	store, err = Open(config.Ledger)
 	if err != nil {
-		return nil, path, exists, err
+		return nil, config, path, exists, err
 	}
-	return store, path, true, nil
+	return store, config, path, true, nil
 }
 
 // Refusal is an actionable refusal: an invariant that stopped the operation

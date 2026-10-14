@@ -12,22 +12,28 @@ import (
 	"github.com/vicrdguez/skills/workflow"
 )
 
-// ImplementChoices are an Implement invocation's mode and its opaque subagent
-// values. An empty value is omitted.
+// ImplementChoices carry the delivery harness and session snapshot marker,
+// plus Implement's mode and opaque subagent values. Empty values inherit.
 type ImplementChoices struct {
 	Mode     string
+	Harness  string
+	Resolved bool
 	Helper   skilldist.SubagentChoice
 	Reviewer skilldist.SubagentChoice
 }
 
-// flags repeats the supplied choices for the commands that render or print a
-// later Implement continuation.
-func (choices ImplementChoices) flags() string {
+// CommandFlags serializes the choices supplied to one Worker Session for its
+// worker and later prepare, inspect and resume commands.
+func (choices ImplementChoices) CommandFlags() string {
 	var words []string
 	add := func(flag, value string) {
 		if value != "" {
 			words = append(words, " --"+flag+" "+skilldist.ShellQuote(value))
 		}
+	}
+	add("harness", choices.Harness)
+	if choices.Resolved {
+		words = append(words, " --launch-resolved")
 	}
 	if choices.Mode == skilldist.TeamMode {
 		add("mode", choices.Mode)
@@ -49,7 +55,7 @@ func supplied(choice skilldist.SubagentChoice) *skilldist.SubagentChoice {
 
 // PresentDelivery binds known commands and evidence without exposing private
 // storage navigation or asking workers to choose an engine-resolvable procedure.
-// Implement renders and resumes with choices; Watchdog takes none.
+// Both phases carry the harness; only Implement uses subagent choices.
 func PresentDelivery(e *ledger.Execution, repository RepositoryContext, phase, operation string, source *workflow.DeliverySource, directory string, choices ImplementChoices) (skilldist.Packet, error) {
 	f, _, err := deliveryFacts(e, repository, phase, operation, source, directory, choices)
 	if err != nil {
@@ -137,11 +143,11 @@ func deliveryFacts(e *ledger.Execution, repository RepositoryContext, phase, ope
 	f.PrepareCommand += " --result-directory " + q(directory)
 	f.ResumeCommand += " --result-directory " + q(directory)
 	f.InspectCommand += " --result-directory " + q(directory)
+	f.PrepareCommand += choices.CommandFlags()
+	f.InspectCommand += choices.CommandFlags()
+	f.ResumeCommand += choices.CommandFlags()
 	if phase == ledger.ImplementPhase {
 		f.Mode, f.Helper, f.Reviewer = cmp.Or(choices.Mode, skilldist.StandardMode), supplied(choices.Helper), supplied(choices.Reviewer)
-		f.PrepareCommand += choices.flags()
-		f.InspectCommand += choices.flags()
-		f.ResumeCommand += choices.flags()
 	}
 	target := f.RecordedTarget
 	if source != nil {

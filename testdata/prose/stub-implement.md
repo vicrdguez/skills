@@ -6,4 +6,4 @@ disable-model-invocation: true
 
 <!-- skl-owned: skl.stub/v1 -->
 
-Run `skl implement next`.
+Run `skl implement next --harness codex`.

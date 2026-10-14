@@ -36,11 +36,10 @@ var embedded embed.FS
 // adapter is one Harness Adapter: the command it runs and the flags whose
 // values a user passes as its arguments, in order.
 type adapter struct {
-	name     string
-	command  string
-	slots    []string
-	defaults map[string]string
-	loop     bool
+	name    string
+	command string
+	slots   []string
+	loop    bool
 }
 
 var adapters = []adapter{
@@ -52,26 +51,16 @@ var adapters = []adapter{
 // Loop adapters are installed only into pi and OpenCode. Their outcomes own
 // the continuation; the entry points only supply dispatch arguments.
 var loopAdapters = []adapter{
-	{name: "implement-loop", command: "skl implement next --dispatch --wait", slots: []string{"worker-model", "worker-thinking", "reviewer-model", "reviewer-thinking", "auto"}, loop: true,
-		defaults: map[string]string{"worker-model": "openai-codex/gpt-6.1-sol", "worker-thinking": "high", "reviewer-model": "openai-codex/gpt-6-astra", "reviewer-thinking": "low", "auto": "false"}},
-	{name: "implement-team-loop", command: "skl implement next --mode team --dispatch --wait", slots: []string{"worker-model", "worker-thinking", "helper-model", "helper-thinking", "reviewer-model", "reviewer-thinking", "auto"}, loop: true,
-		defaults: map[string]string{"worker-model": "openai-codex/gpt-6.1-sol", "worker-thinking": "high", "helper-model": "openai-codex/gpt-6-luna", "helper-thinking": "xhigh", "reviewer-model": "openai-codex/gpt-6.1-sol", "reviewer-thinking": "high", "auto": "false"}},
-	{name: "watchdog-loop", command: "skl watchdog next --dispatch --wait", slots: []string{"worker-model", "worker-thinking", "auto"}, loop: true,
-		defaults: map[string]string{"worker-model": "openai-codex/gpt-6-astra", "worker-thinking": "high", "auto": "false"}},
-}
-
-// piDefaults are the values the pi adapters pass for an omitted argument.
-var piDefaults = map[string]string{
-	"helper-model":      "openai-codex/gpt-6-luna",
-	"helper-thinking":   "xhigh",
-	"reviewer-model":    "openai-codex/gpt-6.1-sol",
-	"reviewer-thinking": "high",
+	{name: "implement-loop", command: "skl implement next --dispatch --wait", slots: []string{"worker-model", "worker-thinking", "reviewer-model", "reviewer-thinking", "auto"}, loop: true},
+	{name: "implement-team-loop", command: "skl implement next --mode team --dispatch --wait", slots: []string{"worker-model", "worker-thinking", "helper-model", "helper-thinking", "reviewer-model", "reviewer-thinking", "auto"}, loop: true},
+	{name: "watchdog-loop", command: "skl watchdog next --dispatch --wait", slots: []string{"worker-model", "worker-thinking", "auto"}, loop: true},
 }
 
 // harness is where skl installs into one supported Agent Harness. A harness
 // with no argument-taking entry-point mechanism leaves entryPoint empty and
 // keeps a Skill Stub for each adapter, without its slots.
 type harness struct {
+	name       string
 	skills     string
 	entryPoint string
 	entryKeys  []string
@@ -83,15 +72,15 @@ type harness struct {
 }
 
 var harnesses = []harness{
-	{skills: ".pi/agent/skills", entryPoint: ".pi/agent/prompts/%s.md", entryKeys: []string{"description"},
+	{name: "pi", skills: ".pi/agent/skills", entryPoint: ".pi/agent/prompts/%s.md", entryKeys: []string{"description"},
 		argument: func(position int, flag, fallback string) string {
 			return fmt.Sprintf("${%d:-%s}", position+1, fallback)
 		},
 		slotKeys: func(slots []string) []string { return []string{argumentHint(slots)} }},
-	{skills: ".codex/skills"},
+	{name: "codex", skills: ".codex/skills"},
 	// Claude Code keeps an unfilled positional placeholder verbatim, and expands
 	// an unfilled named one to nothing.
-	{skills: ".claude/skills", entryPoint: ".claude/skills/%s/SKILL.md", entryKeys: []string{"name", "description", "disable-model-invocation"},
+	{name: "claude", skills: ".claude/skills", entryPoint: ".claude/skills/%s/SKILL.md", entryKeys: []string{"name", "description", "disable-model-invocation"},
 		argument: func(_ int, flag, _ string) string { return "$" + claudeArgument(flag) },
 		slotKeys: func(slots []string) []string {
 			names := make([]string, len(slots))
@@ -100,7 +89,7 @@ var harnesses = []harness{
 			}
 			return []string{"arguments: [" + strings.Join(names, ", ") + "]", argumentHint(slots)}
 		}},
-	{skills: ".config/opencode/skills", entryPoint: ".config/opencode/commands/%s.md", entryKeys: []string{"description"},
+	{name: "opencode", skills: ".config/opencode/skills", entryPoint: ".config/opencode/commands/%s.md", entryKeys: []string{"description"},
 		argument: func(position int, _, _ string) string { return fmt.Sprintf("$%d", position+1) }},
 }
 
@@ -117,11 +106,11 @@ func argumentHint(slots []string) string {
 // values stay outside the shell command so the Supervisor can quote each
 // supplied value as one opaque argument and omit blank slots.
 func (target harness) entry(a adapter, frontmatter string) (command, keys, arguments string) {
-	command = a.command
+	command = a.command + " --harness " + target.name
 	for position, flag := range a.slots {
-		fallback := piDefaults[flag]
-		if a.loop {
-			fallback = a.defaults[flag]
+		fallback := ""
+		if flag == "auto" {
+			fallback = "false"
 		}
 		value := target.argument(position, flag, fallback)
 		if a.loop {
@@ -219,7 +208,7 @@ func install(home string, preview bool) (installer, error) {
 		for _, a := range available {
 			stubPath := filepath.Join(home, target.skills, a.name, "SKILL.md")
 			if target.entryPoint == "" {
-				if err := outcome.writeStub(stubPath, stub, a.name, a.command); err != nil {
+				if err := outcome.writeStub(stubPath, stub, a.name, a.command+" --harness "+target.name); err != nil {
 					return outcome, fmt.Errorf("install %s for %s: %w", a.name, target.skills, err)
 				}
 				continue
