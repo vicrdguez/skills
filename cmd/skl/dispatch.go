@@ -69,22 +69,14 @@ func dispatchOutput(c *cli.Context, phase string, repository setup.RepositoryCon
 		case name != "repo" && name != "remote":
 			continuation = append(continuation, flagWords(c, name)...)
 		}
-		if !supervisorFlags[name] && name != "helper-model" && name != "helper-thinking" && name != "reviewer-model" && name != "reviewer-thinking" {
+		if !supervisorFlags[name] && name != "harness" && name != "mode" && name != "helper-model" && name != "helper-thinking" && name != "reviewer-model" && name != "reviewer-thinking" {
 			worker = append(worker, flagWords(c, name)...)
 		}
 	}
 	// Session choices are frozen in the worker command, whereas continuation
 	// above repeats only invocation flags so the next dispatch rereads defaults.
-	if choices.Resolved {
-		worker = append(worker, "--launch-resolved")
-	}
-	for _, choice := range []struct{ flag, value string }{
-		{"helper-model", choices.Helper.Model}, {"helper-thinking", choices.Helper.Thinking},
-		{"reviewer-model", choices.Reviewer.Model}, {"reviewer-thinking", choices.Reviewer.Thinking},
-	} {
-		if choice.value != "" {
-			worker = append(worker, "--"+choice.flag, skilldist.ShellQuote(choice.value))
-		}
+	if flags := strings.TrimSpace(choices.CommandFlags()); flags != "" {
+		worker = append(worker, flags)
 	}
 	defaults := settings.Implement
 	if phase == ledger.WatchdogPhase {

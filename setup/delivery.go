@@ -22,9 +22,9 @@ type ImplementChoices struct {
 	Reviewer skilldist.SubagentChoice
 }
 
-// flags repeats the supplied choices for the commands that render or print a
-// later Implement continuation.
-func (choices ImplementChoices) flags() string {
+// CommandFlags serializes the choices supplied to one Worker Session for its
+// worker and later prepare, inspect and resume commands.
+func (choices ImplementChoices) CommandFlags() string {
 	var words []string
 	add := func(flag, value string) {
 		if value != "" {
@@ -143,9 +143,9 @@ func deliveryFacts(e *ledger.Execution, repository RepositoryContext, phase, ope
 	f.PrepareCommand += " --result-directory " + q(directory)
 	f.ResumeCommand += " --result-directory " + q(directory)
 	f.InspectCommand += " --result-directory " + q(directory)
-	f.PrepareCommand += choices.flags()
-	f.InspectCommand += choices.flags()
-	f.ResumeCommand += choices.flags()
+	f.PrepareCommand += choices.CommandFlags()
+	f.InspectCommand += choices.CommandFlags()
+	f.ResumeCommand += choices.CommandFlags()
 	if phase == ledger.ImplementPhase {
 		f.Mode, f.Helper, f.Reviewer = cmp.Or(choices.Mode, skilldist.StandardMode), supplied(choices.Helper), supplied(choices.Reviewer)
 	}
