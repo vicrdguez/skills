@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 
 	"github.com/urfave/cli/v2"
@@ -23,14 +24,18 @@ type cleanupOutcome struct {
 
 func cleanupCommand(stdout io.Writer) *cli.Command {
 	return &cli.Command{
-		Name:  "cleanup",
-		Usage: "Archive terminal, unclaimed proposals and remove only safe merged local source work",
+		Name:        "cleanup",
+		Usage:       "Archive terminal, unclaimed proposals and remove only safe merged local source work",
+		Description: "Archive proposals before evaluating local source work. Preserved or failed source work does not undo archival; remote branches are never removed.",
 		Flags: []cli.Flag{
-			&cli.PathFlag{Name: "repo"},
-			&cli.StringFlag{Name: "remote"},
+			&cli.PathFlag{Name: "repo", Usage: "Source repository path (default: current directory)"},
+			&cli.StringFlag{Name: "remote", Usage: "Source repository remote (default: origin)"},
 			implementationFormatFlag(),
 		},
 		Action: func(command *cli.Context) error {
+			if command.NArg() != 0 {
+				return fmt.Errorf("cleanup takes no positional arguments")
+			}
 			format, err := implementationFormat(command.String("format"))
 			if err != nil {
 				return err
@@ -47,7 +52,7 @@ func cleanupCommand(stdout io.Writer) *cli.Command {
 			if err != nil {
 				return err
 			}
-			rerun := boundCommand(command, "skl propose cleanup")
+			rerun := boundCommand(command, "skl cleanup")
 			if failure != nil {
 				failure.rerun = rerun
 				return renderLedgerOutcome(stdout, format, *failure)

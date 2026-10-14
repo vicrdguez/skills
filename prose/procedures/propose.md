@@ -94,7 +94,7 @@ In an amendment, the slices this step covers are the added and changed Slices th
 {{template "issue-description" .}}
 ## 7. Record in the Workflow Ledger
 
-1. Run `skl propose cleanup --repo <root>` and follow its outcome. It archives finished Proposals and removes safe merged source work itself.
+1. Run `skl cleanup --repo <root>` and follow its outcome. It archives finished Proposals and removes safe merged source work itself.
 2. Commit durable `CONTEXT.md` and ADR changes to the target branch.
 3. Prepare one intake directory outside the source tree:
    - `proposal.md`: the durable description of the approved Proposal;
