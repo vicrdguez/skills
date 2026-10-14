@@ -154,6 +154,67 @@ func TestInstallPreviewsBeforeAcceptanceAndReportsActualCompletion(t *testing.T)
 	}
 }
 
+func TestInstallRetiresOnlyOwnedShapeAfterConfirmation(t *testing.T) {
+	for _, harness := range []string{".pi/agent/skills", ".codex/skills", ".claude/skills", ".config/opencode/skills"} {
+		t.Run(harness, func(t *testing.T) {
+			home := t.TempDir()
+			if _, err := skilldist.Install(home); err != nil {
+				t.Fatal(err)
+			}
+			owned := filepath.Join(home, harness, "shape/SKILL.md")
+			writeInstallFile(t, owned, "<!-- skl-owned: skl.stub/v1 -->\nold shape\n")
+			// A sibling and a collision in another destination have no installer ownership.
+			sibling := filepath.Join(filepath.Dir(owned), "notes.md")
+			writeInstallFile(t, sibling, "keep notes\n")
+			other := ".codex/skills"
+			if harness == other {
+				other = ".pi/agent/skills"
+			}
+			collision := filepath.Join(home, other, "shape/SKILL.md")
+			writeInstallFile(t, collision, "my shape skill\n")
+			history := filepath.Join(home, "consumer/.thinking/topic/shape.md")
+			writeInstallFile(t, history, "historical idea\n")
+			before := installSnapshot(t, home)
+			var output bytes.Buffer
+			app := newAppWithSkillHome(nil, strings.NewReader("n\n"), &output, &output, home)
+			if err := app.Run([]string{"skl", "install"}); err != nil {
+				t.Fatal(err)
+			}
+			if got := installSnapshot(t, home); !reflect.DeepEqual(got, before) {
+				t.Fatal("declined shape retirement changed files")
+			}
+			output.Reset()
+			input := &observeInput{Reader: strings.NewReader("yes\n"), observe: func() {
+				if got := installSnapshot(t, home); !reflect.DeepEqual(got, before) {
+					t.Fatal("shape retirement mutated files before confirmation")
+				}
+				if !strings.Contains(output.String(), "remove "+owned+"\n") || !strings.Contains(output.String(), "Preserved user-owned collision: "+collision) {
+					t.Fatalf("shape retirement preview = %q", output.String())
+				}
+			}}
+			app = newAppWithSkillHome(nil, input, &output, &output, home)
+			if err := app.Run([]string{"skl", "install"}); err != nil {
+				t.Fatal(err)
+			}
+			if input.observe != nil {
+				t.Fatal("shape retirement did not request confirmation")
+			}
+			if _, err := os.Stat(owned); !os.IsNotExist(err) {
+				t.Fatalf("owned shape stub remains: %v", err)
+			}
+			for path, want := range map[string]string{sibling: "keep notes\n", collision: "my shape skill\n", history: "historical idea\n"} {
+				if got := readFile(t, path); got != want {
+					t.Errorf("%s changed: %q", path, got)
+				}
+			}
+			plan, err := skilldist.PlanInstall(home)
+			if err != nil || len(plan.Actions) != 0 {
+				t.Fatalf("shape retirement not idempotent: %+v, %v", plan, err)
+			}
+		})
+	}
+}
+
 func TestInstallDeclineDefaultAndNoAnswerLeaveFilesUntouched(t *testing.T) {
 	for _, answer := range []string{"n\n", "no\n", "\n", "", "not yes\n"} {
 		t.Run(answer, func(t *testing.T) {
