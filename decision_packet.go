@@ -126,7 +126,7 @@ type DecisionRetirement struct {
 func DecisionApplyCommand(project, item, requestCommit, requestPath string) string {
 	return "skl decision apply" +
 		" --project " + ShellQuote(project) +
-		" --item " + ShellQuote(item) +
+		" --slice " + ShellQuote(item) +
 		" --request-commit " + ShellQuote(requestCommit) +
 		" --request-path " + ShellQuote(requestPath) +
 		" --route <implement|watchdog|supersede>" +

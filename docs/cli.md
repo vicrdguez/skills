@@ -127,7 +127,7 @@ Without `--public-body` it returns the current committed result with the Work It
 
 ```sh
 skl decision inbox [--project <name>]
-skl decision apply --project <p> --item <proposal>/<slice> \
+skl decision apply --project <p> --slice <proposal>/<slice> \
   --request-commit <sha> --request-path <ledger-path> \
   --route implement|watchdog|supersede --answer <answer.md>
 skl decision retire --project <p> --proposal <proposal>
