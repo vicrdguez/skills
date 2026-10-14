@@ -34,7 +34,7 @@ func TestDeliveryRefusesCrossProposalSourceOwnership(t *testing.T) {
 			if err != nil || claimed.Execution == nil {
 				t.Fatalf("first Claim: %#v %v", claimed, err)
 			}
-			prepared, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--item", "collision-one/foundation", "--claim", claimed.Execution.Claim.Commit, "--format", "json")
+			prepared, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--slice", "collision-one/foundation", "--claim", claimed.Execution.Claim.Commit, "--format", "json")
 			if err != nil || prepared.Source == nil {
 				t.Fatalf("first preparation: %#v %v", prepared, err)
 			}

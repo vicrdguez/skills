@@ -43,7 +43,7 @@ func TestWaitingDispatchRefreshesLaunchSettings(t *testing.T) {
 				done := make(chan struct{})
 				var out deliveryOutput
 				var runErr error
-				args := []string{"skl", tc.phase, "next", "--dispatch", "--repo", source, "--wait=2m", "--poll=30s", "--harness", "pi", "--format", "json"}
+				args := []string{"skl", tc.phase, "dispatch", "--repo", source, "--wait=2m", "--poll=30s", "--harness", "pi", "--format", "json"}
 				if tc.phase == "implement" {
 					args = append(args, "--mode", "team")
 				}

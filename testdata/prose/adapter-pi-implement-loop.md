@@ -5,7 +5,7 @@ argument-hint: "[worker-model] [worker-thinking] [reviewer-model] [reviewer-thin
 
 <!-- skl-owned: skl.adapter/v1 -->
 
-Run `skl implement next --dispatch --wait --harness pi` with each nonempty value below as one argument for its flag. Quote values for the shell without changing them; omit empty slots.
+Run `skl implement dispatch --wait --harness pi` with each nonempty value below as one argument for its flag. Quote values for the shell without changing them; omit empty slots.
 - --worker-model: ${1:-}
 - --worker-thinking: ${2:-}
 - --reviewer-model: ${3:-}

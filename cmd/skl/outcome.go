@@ -171,7 +171,7 @@ func flagWords(c *cli.Context, name string) []string {
 // claimCommand binds one Claim-scoped delivery command.
 func claimCommand(phase, operation string, repository setup.RepositoryContext, item, claim string) string {
 	q := skilldist.ShellQuote
-	return fmt.Sprintf("skl %s %s --repo %s --remote %s --item %s --claim %s", phase, operation, q(repository.Root), q(repository.Remote), q(item), q(claim))
+	return fmt.Sprintf("skl %s %s --repo %s --remote %s --slice %s --claim %s", phase, operation, q(repository.Root), q(repository.Remote), q(item), q(claim))
 }
 
 // statusInvocation binds the command that shows which Work Items hold a Claim.

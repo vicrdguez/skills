@@ -10,11 +10,9 @@ import (
 	"github.com/vicrdguez/skills/setup"
 )
 
-// dispatchFlags turn next into a Dispatch: the Claim goes to a fresh Worker
-// Session, and the caller receives commands instead of the Execution Skill.
+// dispatchFlags supply continuation and launch choices for a Dispatch.
 func dispatchFlags() []cli.Flag {
 	return []cli.Flag{
-		&cli.BoolFlag{Name: "dispatch", Usage: "claim work for a fresh Worker Session and answer with its worker and continue commands"},
 		&cli.StringFlag{Name: "after", Usage: "continue a dispatch after its worker returns: the exact Claim it dispatched"},
 		&cli.StringFlag{Name: "worker-model", Usage: "opaque model for the dispatched Worker Session"},
 		&cli.StringFlag{Name: "worker-thinking", Usage: "opaque thinking level for the dispatched Worker Session"},
@@ -23,7 +21,7 @@ func dispatchFlags() []cli.Flag {
 
 // supervisorFlags configure the Dispatch itself, so the worker command omits
 // them. repo and remote are bound to their resolved values instead.
-var supervisorFlags = map[string]bool{"repo": true, "remote": true, "format": true, "wait": true, "poll": true, "dispatch": true, "after": true, "auto": true, "worker-model": true, "worker-thinking": true}
+var supervisorFlags = map[string]bool{"repo": true, "remote": true, "format": true, "wait": true, "poll": true, "after": true, "auto": true, "worker-model": true, "worker-thinking": true}
 
 // dispatched is one dispatched Claim: how to start its Worker Session, and
 // how to continue once that session returns.
@@ -60,7 +58,7 @@ type stoppedFacts struct {
 func dispatchOutput(c *cli.Context, phase string, repository setup.RepositoryContext, execution *ledger.Execution, previous *ledger.ClaimEnding, merges []ledger.MergeAttempt, settings ledger.LaunchRoles, choices setup.ImplementChoices) deliveryOutput {
 	item, claim := execution.Item, execution.Claim.Commit
 	worker := []string{claimCommand(phase, "resume", repository, item, claim), "--dispatched"}
-	continuation := []string{nextInvocation(phase, repository)}
+	continuation := []string{fmt.Sprintf("skl %s dispatch --repo %s --remote %s", phase, skilldist.ShellQuote(repository.Root), skilldist.ShellQuote(repository.Remote))}
 	for _, flag := range c.Command.Flags {
 		name := flag.Names()[0]
 		switch {

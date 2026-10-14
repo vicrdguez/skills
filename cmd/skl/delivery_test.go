@@ -237,7 +237,7 @@ func TestDeliveryCLIEndToEnd(t *testing.T) {
 	}
 
 	// Rule B2: prepare uses the recorded available target without a remote.
-	prepared, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--item", deliveryTestItem, "--claim", claim, "--format", "json")
+	prepared, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--slice", deliveryTestItem, "--claim", claim, "--format", "json")
 	if err != nil {
 		t.Fatalf("implement prepare: %v", err)
 	}
@@ -256,7 +256,7 @@ func TestDeliveryCLIEndToEnd(t *testing.T) {
 	}
 
 	// Rule B3/B8: inspect resolves the prepared branch against the exact target.
-	inspected, err := cli.deliveryJSON(t, "skl", "implement", "inspect", "--repo", source, "--item", deliveryTestItem, "--claim", claim, "--target", target, "--format", "json")
+	inspected, err := cli.deliveryJSON(t, "skl", "implement", "inspect", "--repo", source, "--slice", deliveryTestItem, "--claim", claim, "--target", target, "--format", "json")
 	if err != nil {
 		t.Fatalf("implement inspect: %v", err)
 	}
@@ -292,7 +292,7 @@ func TestDeliveryCLIEndToEnd(t *testing.T) {
 	if err := os.RemoveAll(fixture.upstream); err != nil {
 		t.Fatal(err)
 	}
-	submitted, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", claim,
+	submitted, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--slice", deliveryTestItem, "--claim", claim,
 		"--head", head, "--target", target, "--body", bodyPath, "--public-body", publicPath, "--format", "json")
 	if err != nil {
 		t.Fatalf("implement submit: %v", err)
@@ -353,14 +353,14 @@ func TestDeliveryCLIEndToEnd(t *testing.T) {
 	if !strings.Contains(reviewInstructions, "--claim '"+reviewClaim+"'") {
 		t.Errorf("watchdog instructions do not bind the acquired Claim %s", reviewClaim)
 	}
-	reviewPrepared, err := cli.deliveryJSON(t, "skl", "watchdog", "prepare", "--repo", source, "--item", deliveryTestItem, "--claim", reviewClaim, "--format", "json")
+	reviewPrepared, err := cli.deliveryJSON(t, "skl", "watchdog", "prepare", "--repo", source, "--slice", deliveryTestItem, "--claim", reviewClaim, "--format", "json")
 	if err != nil {
 		t.Fatalf("watchdog prepare: %v", err)
 	}
 	if reviewPrepared.Source == nil || reviewPrepared.Source.Head != head || reviewPrepared.Source.Target != target {
 		t.Fatalf("watchdog prepare = %#v, want fixed head and target", reviewPrepared.Source)
 	}
-	reviewInspected, err := cli.deliveryJSON(t, "skl", "watchdog", "inspect", "--repo", source, "--item", deliveryTestItem, "--claim", reviewClaim, "--format", "json")
+	reviewInspected, err := cli.deliveryJSON(t, "skl", "watchdog", "inspect", "--repo", source, "--slice", deliveryTestItem, "--claim", reviewClaim, "--format", "json")
 	if err != nil {
 		t.Fatalf("watchdog inspect: %v", err)
 	}
@@ -373,7 +373,7 @@ func TestDeliveryCLIEndToEnd(t *testing.T) {
 	writeFile(t, reviewBodyPath, reviewBody)
 	reviewPublicPath := filepath.Join(t.TempDir(), "watchdog-public.md")
 	writeFile(t, reviewPublicPath, "# Review pending\n")
-	watchdogArguments := []string{"skl", "watchdog", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", reviewClaim,
+	watchdogArguments := []string{"skl", "watchdog", "submit", "--repo", source, "--slice", deliveryTestItem, "--claim", reviewClaim,
 		"--outcome", "rework", "--body", reviewBodyPath, "--public-body", reviewPublicPath, "--format", "json"}
 
 	// Rule B5: an interrupted acknowledgement leaves the committed handoff and
@@ -415,7 +415,7 @@ func TestDeliveryCLIEndToEnd(t *testing.T) {
 	if rework.Packet == nil || !strings.Contains(rework.Packet.Instructions, "--claim '"+reworkClaim+"'") {
 		t.Fatal("rework instructions do not bind the fresh Claim")
 	}
-	reprepared, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--item", deliveryTestItem, "--claim", reworkClaim, "--format", "json")
+	reprepared, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--slice", deliveryTestItem, "--claim", reworkClaim, "--format", "json")
 	if err != nil {
 		t.Fatalf("rework implement prepare: %v", err)
 	}
@@ -427,7 +427,7 @@ func TestDeliveryCLIEndToEnd(t *testing.T) {
 	runGit(t, worktree, "add", "feature.txt")
 	runGit(t, worktree, "commit", "-q", "-m", "resolve findings")
 	head2 := deliveryTrimmed(t, worktree, "rev-parse", "HEAD")
-	second, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", reworkClaim,
+	second, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--slice", deliveryTestItem, "--claim", reworkClaim,
 		"--head", head2, "--target", target, "--body", bodyPath, "--public-body", publicPath, "--format", "json")
 	if err != nil {
 		t.Fatalf("rework implement submit: %v", err)
@@ -443,14 +443,14 @@ func TestDeliveryCLIEndToEnd(t *testing.T) {
 		t.Fatalf("second watchdog next: %v", err)
 	}
 	reviewClaim2 := review2.Execution.Claim.Commit
-	inspected2, err := cli.deliveryJSON(t, "skl", "watchdog", "inspect", "--repo", source, "--item", deliveryTestItem, "--claim", reviewClaim2, "--format", "json")
+	inspected2, err := cli.deliveryJSON(t, "skl", "watchdog", "inspect", "--repo", source, "--slice", deliveryTestItem, "--claim", reviewClaim2, "--format", "json")
 	if err != nil {
 		t.Fatalf("second watchdog inspect: %v", err)
 	}
 	if inspected2.Source == nil || inspected2.Source.Scope != "incremental" || inspected2.Source.Previous != head {
 		t.Fatalf("second watchdog inspect = %#v, want incremental since %s", inspected2.Source, head)
 	}
-	round2, err := cli.deliveryJSON(t, "skl", "watchdog", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", reviewClaim2,
+	round2, err := cli.deliveryJSON(t, "skl", "watchdog", "submit", "--repo", source, "--slice", deliveryTestItem, "--claim", reviewClaim2,
 		"--outcome", "rework", "--body", reviewBodyPath, "--public-body", reviewPublicPath, "--format", "json")
 	if err != nil {
 		t.Fatalf("second watchdog submit: %v", err)
@@ -481,7 +481,7 @@ func TestDeliveryCLIEndToEnd(t *testing.T) {
 		t.Fatalf("directed implementation did not consume the human direction: %#v", directed.Execution)
 	}
 	directedClaim := directed.Execution.Claim.Commit
-	directedPrepared, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--item", deliveryTestItem, "--claim", directedClaim, "--format", "json")
+	directedPrepared, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--slice", deliveryTestItem, "--claim", directedClaim, "--format", "json")
 	if err != nil {
 		t.Fatalf("directed implement prepare: %v", err)
 	}
@@ -490,7 +490,7 @@ func TestDeliveryCLIEndToEnd(t *testing.T) {
 	}
 	// The direction resolves as no further source change: the directed
 	// implementation hands off the unchanged source revision for review.
-	directedSubmit, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", directedClaim,
+	directedSubmit, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--slice", deliveryTestItem, "--claim", directedClaim,
 		"--head", head2, "--target", target, "--body", bodyPath, "--public-body", publicPath, "--format", "json")
 	if err != nil {
 		t.Fatalf("directed implement submit: %v", err)
@@ -514,7 +514,7 @@ func TestDeliveryCLIEndToEnd(t *testing.T) {
 		t.Fatalf("review did not consume the carried human direction: %#v", review3.Execution)
 	}
 	reviewClaim3 := review3.Execution.Claim.Commit
-	passed, err := cli.deliveryJSON(t, "skl", "watchdog", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", reviewClaim3,
+	passed, err := cli.deliveryJSON(t, "skl", "watchdog", "submit", "--repo", source, "--slice", deliveryTestItem, "--claim", reviewClaim3,
 		"--outcome", "pass", "--body", reviewBodyPath, "--public-body", reviewPublicPath, "--format", "json")
 	if err != nil {
 		t.Fatalf("passing watchdog submit: %v", err)
@@ -568,14 +568,14 @@ func TestDeliveryCLINoWorkAndFormats(t *testing.T) {
 		t.Fatalf("markdown non-work = %q, want a truthful no_work status", markdown)
 	}
 
-	refused, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--item", "missing/slice", "--claim", strings.Repeat("a", 40), "--format", "json")
+	refused, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--slice", "missing/slice", "--claim", strings.Repeat("a", 40), "--format", "json")
 	if err != nil {
 		t.Fatalf("JSON refusal: %v", err)
 	}
 	if refused.Status != "fix_required" || refused.Reason == "" || refused.Repair == "" {
 		t.Fatalf("JSON refusal = %#v, want fix_required with reason and repair", refused)
 	}
-	markdown, err = cli.deliveryRun(t, "skl", "implement", "prepare", "--repo", source, "--item", "missing/slice", "--claim", strings.Repeat("a", 40))
+	markdown, err = cli.deliveryRun(t, "skl", "implement", "prepare", "--repo", source, "--slice", "missing/slice", "--claim", strings.Repeat("a", 40))
 	if err != nil {
 		t.Fatalf("markdown refusal: %v", err)
 	}
@@ -614,7 +614,7 @@ func TestDeliveryCLIDeliversSlashedPlannedBranch(t *testing.T) {
 	if err != nil || started.Status != "work_available" || started.Execution == nil {
 		t.Fatalf("implement next = %#v, err=%v", started, err)
 	}
-	prepared, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--item", started.Execution.Item, "--claim", started.Execution.Claim.Commit, "--format", "json")
+	prepared, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--slice", started.Execution.Item, "--claim", started.Execution.Claim.Commit, "--format", "json")
 	if err != nil || prepared.Status != "prepared" || prepared.Source == nil {
 		t.Fatalf("implement prepare = %#v, err=%v", prepared, err)
 	}
@@ -643,7 +643,7 @@ func TestDeliveryCLIClaimBoundaries(t *testing.T) {
 		t.Fatalf("first implement next: %v", err)
 	}
 	oldClaim := first.Execution.Claim.Commit
-	released, err := cli.deliveryJSON(t, "skl", "implement", "release", "--repo", source, "--item", deliveryTestItem, "--claim", oldClaim, "--format", "json")
+	released, err := cli.deliveryJSON(t, "skl", "implement", "release", "--repo", source, "--slice", deliveryTestItem, "--claim", oldClaim, "--format", "json")
 	if err != nil {
 		t.Fatalf("release: %v", err)
 	}
@@ -661,8 +661,8 @@ func TestDeliveryCLIClaimBoundaries(t *testing.T) {
 	}
 
 	for _, args := range [][]string{
-		{"skl", "implement", "resume", "--repo", source, "--item", deliveryTestItem, "--claim", oldClaim, "--format", "json"},
-		{"skl", "implement", "release", "--repo", source, "--item", deliveryTestItem, "--claim", oldClaim, "--format", "json"},
+		{"skl", "implement", "resume", "--repo", source, "--slice", deliveryTestItem, "--claim", oldClaim, "--format", "json"},
+		{"skl", "implement", "release", "--repo", source, "--slice", deliveryTestItem, "--claim", oldClaim, "--format", "json"},
 	} {
 		out, err := cli.deliveryJSON(t, args...)
 		if err != nil {
@@ -675,7 +675,7 @@ func TestDeliveryCLIClaimBoundaries(t *testing.T) {
 
 	bodyPath := filepath.Join(t.TempDir(), "implement-report.md")
 	writeFile(t, bodyPath, "# stale result\n")
-	stale, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", oldClaim, "--body", bodyPath, "--format", "json")
+	stale, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--slice", deliveryTestItem, "--claim", oldClaim, "--body", bodyPath, "--format", "json")
 	if err != nil {
 		t.Fatalf("stale submit: %v", err)
 	}
@@ -703,7 +703,7 @@ func TestDeliveryCLIRefusalsPreserveClaim(t *testing.T) {
 		t.Fatalf("implement next: %v", err)
 	}
 	claim := started.Execution.Claim.Commit
-	prepared, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--item", deliveryTestItem, "--claim", claim, "--format", "json")
+	prepared, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--slice", deliveryTestItem, "--claim", claim, "--format", "json")
 	if err != nil {
 		t.Fatalf("implement prepare: %v", err)
 	}
@@ -711,7 +711,7 @@ func TestDeliveryCLIRefusalsPreserveClaim(t *testing.T) {
 	progress := deliveryTrimmed(t, worktree, "rev-parse", "HEAD")
 
 	writeFile(t, filepath.Join(worktree, "dirty.txt"), "uncommitted\n")
-	dirty, err := cli.deliveryJSON(t, "skl", "implement", "inspect", "--repo", source, "--item", deliveryTestItem, "--claim", claim, "--target", target, "--format", "json")
+	dirty, err := cli.deliveryJSON(t, "skl", "implement", "inspect", "--repo", source, "--slice", deliveryTestItem, "--claim", claim, "--target", target, "--format", "json")
 	if err != nil {
 		t.Fatalf("dirty inspect: %v", err)
 	}
@@ -737,7 +737,7 @@ func TestDeliveryCLIRefusalsPreserveClaim(t *testing.T) {
 	divergent := deliveryTrimmed(t, source, "commit-tree", tree, "-m", "divergent root")
 	bodyPath := filepath.Join(t.TempDir(), "implement-report.md")
 	writeFile(t, bodyPath, "# result\n")
-	wrong, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", claim,
+	wrong, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--slice", deliveryTestItem, "--claim", claim,
 		"--head", head, "--target", divergent, "--body", bodyPath, "--format", "json")
 	if err != nil {
 		t.Fatalf("wrong-target submit: %v", err)
@@ -752,7 +752,7 @@ func TestDeliveryCLIRefusalsPreserveClaim(t *testing.T) {
 
 	// The Markdown refusal of a verified Claim says the Claim is kept and binds
 	// the submit to rerun.
-	text, err := cli.deliveryRun(t, "skl", "implement", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", claim,
+	text, err := cli.deliveryRun(t, "skl", "implement", "submit", "--repo", source, "--slice", deliveryTestItem, "--claim", claim,
 		"--head", head, "--target", divergent, "--body", bodyPath)
 	if err != nil {
 		t.Fatalf("markdown wrong-target submit: %v", err)
@@ -769,7 +769,7 @@ func TestDeliveryCLIRefusalsPreserveClaim(t *testing.T) {
 		t.Fatalf("markdown refusal does not bind the submit to rerun:\n%s", text)
 	}
 
-	good, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", claim,
+	good, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--slice", deliveryTestItem, "--claim", claim,
 		"--head", head, "--target", target, "--body", bodyPath, "--format", "json")
 	if err != nil {
 		t.Fatalf("correct submit: %v", err)

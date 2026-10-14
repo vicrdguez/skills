@@ -42,7 +42,7 @@ func newIntegrationJourney(t *testing.T) integrationJourney {
 		t.Fatalf("implement next --auto = %+v, %v", started, err)
 	}
 	claim := started.Execution.Claim.Commit
-	prepared, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--item", deliveryTestItem, "--claim", claim, "--format", "json")
+	prepared, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--slice", deliveryTestItem, "--claim", claim, "--format", "json")
 	if err != nil || prepared.Source == nil {
 		t.Fatalf("implement prepare = %+v, %v", prepared, err)
 	}
@@ -55,7 +55,7 @@ func newIntegrationJourney(t *testing.T) integrationJourney {
 		reportPath: filepath.Join(t.TempDir(), "report.md"), publicPath: filepath.Join(t.TempDir(), "public.md")}
 	writeFile(t, j.reportPath, "# Report\n\nEvidence.\n")
 	writeFile(t, j.publicPath, "# Summary\n")
-	submitted, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", claim,
+	submitted, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--slice", deliveryTestItem, "--claim", claim,
 		"--head", j.reviewed, "--target", j.target, "--body", j.reportPath, "--format", "json")
 	if err != nil || submitted.Status != ledger.AwaitingReview {
 		t.Fatalf("implement submit = %+v, %v", submitted, err)
@@ -79,7 +79,7 @@ func (j integrationJourney) advance(t *testing.T, name, contents string) string 
 
 func (j integrationJourney) review(t *testing.T, operation, claim string, extra ...string) (deliveryOutput, error) {
 	t.Helper()
-	args := append([]string{"skl", "watchdog", operation, "--repo", j.source, "--remote", "origin", "--item", deliveryTestItem, "--claim", claim, "--format", "json"}, extra...)
+	args := append([]string{"skl", "watchdog", operation, "--repo", j.source, "--remote", "origin", "--slice", deliveryTestItem, "--claim", claim, "--format", "json"}, extra...)
 	return j.cli.deliveryJSON(t, args...)
 }
 
@@ -154,7 +154,7 @@ func TestWatchdogIntegrationConflictEndsReviewInRework(t *testing.T) {
 	}
 
 	// The Outcome Instruction's submit command records the rework.
-	output, err := j.cli.deliveryRun(t, "skl", "watchdog", "prepare", "--repo", j.source, "--remote", "origin", "--item", deliveryTestItem, "--claim", claim)
+	output, err := j.cli.deliveryRun(t, "skl", "watchdog", "prepare", "--repo", j.source, "--remote", "origin", "--slice", deliveryTestItem, "--claim", claim)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestHumanRouteToWatchdogRunsTheIntegrationMergeAgain(t *testing.T) {
 	if prepared, err := j.review(t, "prepare", claim); err != nil || prepared.Source == nil || prepared.Source.Head != j.reviewed {
 		t.Fatalf("prepare with the branch integrated = %+v, %v", prepared, err)
 	}
-	if paused, err := j.review(t, "submit", claim, "--outcome", "needs-human", "--body", j.reportPath); err != nil || paused.Status != ledger.NeedsHuman {
+	if paused, err := j.review(t, "needs-human", claim, "--body", j.reportPath); err != nil || paused.Status != ledger.NeedsHuman {
 		t.Fatalf("needs-human submit = %+v, %v", paused, err)
 	}
 	if applied := deliveryRecordHumanDirection(t, j.cli, j.reviewed, ledger.RouteWatchdog); applied.Status == "fix_required" {

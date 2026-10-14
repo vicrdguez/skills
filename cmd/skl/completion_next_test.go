@@ -21,7 +21,11 @@ import (
 func completionNextCLI(t *testing.T, app *stageApp, output *bytes.Buffer, phase, repo string, options ...string) deliveryOutput {
 	t.Helper()
 	output.Reset()
-	args := append([]string{"skl", phase, "next", "--repo", repo, "--format", "json"}, options...)
+	operation := "next"
+	if len(options) > 0 && options[0] == "dispatch" {
+		operation, options = "dispatch", options[1:]
+	}
+	args := append([]string{"skl", phase, operation, "--repo", repo, "--format", "json"}, options...)
 	if err := app.Run(args); err != nil {
 		t.Fatalf("%s next: %v (%s)", phase, err, output.String())
 	}
@@ -415,12 +419,12 @@ func TestNextCompletionStoppedDispatchSkipsForgeObservation(t *testing.T) {
 		calls.Add(1)
 		_, _ = fmt.Fprint(w, fixturePull("closed", "true", "accepted-head", "merge-head", "acme/widgets", "acme/widgets", "main"))
 	})
-	first := completionNextCLI(t, app, output, ledger.ImplementPhase, source, "--dispatch")
+	first := completionNextCLI(t, app, output, ledger.ImplementPhase, source, "dispatch")
 	if first.Status != "dispatched" || first.Dispatch == nil || first.Dispatch.Item != "stopped-dependent/foundation" || calls.Load() != 0 {
 		t.Fatalf("initial dispatch did not claim local work without a forge read: %s (calls %d)", mustJSON(t, first), calls.Load())
 	}
 	attachFixture(t, fixture.clone, "stopped-dependent")
-	stopped := completionNextCLI(t, app, output, ledger.ImplementPhase, source, "--dispatch", "--after", first.Dispatch.Claim)
+	stopped := completionNextCLI(t, app, output, ledger.ImplementPhase, source, "dispatch", "--after", first.Dispatch.Claim)
 	if stopped.Status != "stopped" || stopped.Previous == nil || stopped.Previous.Ending != ledger.ClaimHeld || calls.Load() != 0 {
 		t.Fatalf("stopped continuation observed completion or continued: %s (calls %d)", mustJSON(t, stopped), calls.Load())
 	}

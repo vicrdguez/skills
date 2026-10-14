@@ -23,43 +23,71 @@ import (
 // Delivery commands have one authority: the configured private ledger. The
 // forge factory is invoked only after a locally committed handoff.
 func deliveryCommands(phase string, newBackend backendFactory, stdout io.Writer) []*cli.Command {
-	names := []string{"next", "resume", "prepare", "inspect", "release", "submit"}
-	if phase == ledger.ImplementPhase {
-		names = append(names, "needs-human")
-	}
+	names := []string{"next", "dispatch", "resume", "prepare", "inspect", "release", "submit", "needs-human"}
 	var commands []*cli.Command
 	for _, name := range names {
 		command := &cli.Command{Name: name, Flags: []cli.Flag{
-			&cli.PathFlag{Name: "repo", Value: "."}, &cli.StringFlag{Name: "remote"},
-			&cli.StringFlag{Name: "item"}, &cli.StringFlag{Name: "claim"},
-			&cli.StringFlag{Name: "head"}, &cli.StringFlag{Name: "target"},
-			&cli.StringFlag{Name: "outcome"}, &cli.PathFlag{Name: "body"}, &cli.PathFlag{Name: "public-body"}, &cli.PathFlag{Name: "result-directory"},
-			&cli.PathFlag{Name: "run-metadata", Usage: "optional JSON Run Metadata observed by the reporting Worker Session"},
+			&cli.PathFlag{Name: "repo", Value: ".", Usage: "source repository"},
+			&cli.StringFlag{Name: "remote", Usage: "repository remote (default: origin)"},
 			implementationFormatFlag(),
 		}, Action: func(c *cli.Context) error { return runDelivery(c, phase, name, newBackend, stdout) }}
-		if name == "next" {
+		selects := name == "next" || name == "dispatch"
+		presents := selects || name == "resume" || name == "prepare" || name == "inspect"
+		switch name {
+		case "next", "dispatch":
+			command.Usage = "select and claim eligible work, refreshing completion observations"
+			if name == "dispatch" {
+				command.Usage = "claim work for a fresh Worker Session and return worker and continuation commands"
+			}
 			usage := "open the Proposal Branch at the first implement Claim"
 			if phase == ledger.WatchdogPhase {
 				usage = "merge passing Slices into their open Proposal Branch, retrying pending merges on each poll"
 			}
 			command.Flags = append(command.Flags, &cli.BoolFlag{Name: "auto", Usage: usage})
 			command.Flags = append(command.Flags, waitFlags()...)
-			command.Flags = append(command.Flags, dispatchFlags()...)
-			command.Aliases = []string{"start"}
-		}
-		if name == "resume" {
+			if name == "dispatch" {
+				command.Flags = append(command.Flags, dispatchFlags()...)
+			}
+		case "resume":
+			command.Usage = "continue the exact held Claim"
 			command.Flags = append(command.Flags, &cli.BoolFlag{Name: "dispatched", Usage: "render the Execution Skill a Dispatch of this Claim stands for"})
-		}
-		if name == "next" || name == "resume" || name == "prepare" || name == "inspect" {
-			command.Flags = append(command.Flags, &cli.StringFlag{Name: "harness", Usage: "launch configuration selector: pi, opencode, claude or codex"})
-			if name != "next" {
-				command.Flags = append(command.Flags, &cli.BoolFlag{Name: "launch-resolved", Hidden: true, Usage: "keep the launch choices supplied to this Worker Session"})
+		case "prepare":
+			command.Usage = "prepare or reuse the claimed source worktree"
+		case "inspect":
+			command.Usage = "inspect prepared source revisions without preparing the worktree"
+			command.Flags = append(command.Flags, &cli.StringFlag{Name: "target", Usage: "observed source target commit"})
+		case "release":
+			command.Usage = "release the exact Claim without a phase handoff"
+		case "submit", "needs-human":
+			command.Usage = "record a phase report, release its Claim and attempt requested publication"
+			if name == "needs-human" {
+				command.Usage = "record a human handoff and release its Claim"
+			}
+			command.Flags = append(command.Flags,
+				&cli.StringFlag{Name: "head", Usage: "source head commit; existing phase evidence rules apply"},
+				&cli.StringFlag{Name: "target", Usage: "observed source target commit; existing phase evidence rules apply"},
+				&cli.PathFlag{Name: "body", Usage: "private phase Result Document"},
+				&cli.PathFlag{Name: "public-body", Usage: "separately authored public Result Document"},
+				&cli.PathFlag{Name: "run-metadata", Usage: "optional JSON Run Metadata observed by the reporting Worker Session"})
+			if phase == ledger.WatchdogPhase && name == "submit" {
+				command.Flags = append(command.Flags, &cli.StringFlag{Name: "outcome", Usage: "review outcome: pass or rework"})
 			}
 		}
-		// Prepare and inspect print the resume command, so they carry the
-		// choices too.
-		if phase == ledger.ImplementPhase && (name == "next" || name == "resume" || name == "prepare" || name == "inspect") {
-			command.Flags = append(command.Flags, implementFlags()...)
+		if !selects {
+			command.Flags = append(command.Flags,
+				&cli.StringFlag{Name: "slice", Usage: "exact proposal/slice identity"},
+				&cli.StringFlag{Name: "claim", Usage: "full acquisition commit of the exact Claim"})
+		}
+		if presents {
+			command.Flags = append(command.Flags,
+				&cli.StringFlag{Name: "harness", Usage: "launch configuration selector: pi, opencode, claude or codex"},
+				&cli.PathFlag{Name: "result-directory", Usage: "absolute path for Result Documents"})
+			if !selects {
+				command.Flags = append(command.Flags, &cli.BoolFlag{Name: "launch-resolved", Hidden: true, Usage: "keep the launch choices supplied to this Worker Session"})
+			}
+			if phase == ledger.ImplementPhase {
+				command.Flags = append(command.Flags, implementFlags()...)
+			}
 		}
 		commands = append(commands, command)
 	}
@@ -95,19 +123,20 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 		return err
 	}
 	emit := func(out deliveryOutput) error { return renderDelivery(stdout, format, phase, operation, out) }
-	item, claim := c.String("item"), c.String("claim")
+	item, claim := c.String("slice"), c.String("claim")
+	selects := operation == "next" || operation == "dispatch"
 	// Every refusal before acquisition leaves the worker without a Claim. A
 	// named Claim is reported kept only once the ledger confirms it current;
 	// until then the refusal only leaves it unchanged.
 	claimState := claimUnchanged
-	if operation == "next" {
+	if selects {
 		claimState = claimNone
 	}
 	verified := func() { claimState = claimKept }
 	statusCmd := ""
 	// A Dispatch ends its Supervisor's lane on every refusal: a rerun could
 	// replay a continuation or hide an interrupted worker.
-	dispatch := operation == "next" && c.Bool("dispatch")
+	dispatch := operation == "dispatch"
 	var continued *ledger.ClaimEnding
 	merges := map[string]ledger.MergeAttempt{}
 	refusal := func(err error) error {
@@ -118,15 +147,8 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 	if c.NArg() != 0 {
 		return refusal(fmt.Errorf("delivery commands take flags, not positional arguments"))
 	}
-	if operation == "next" {
-		if item != "" || claim != "" {
-			return refusal(fmt.Errorf("next selects its own project-scoped Work Item; resume an existing reservation explicitly"))
-		}
-		if !dispatch && (c.IsSet("after") || c.IsSet("worker-model") || c.IsSet("worker-thinking")) {
-			return refusal(fmt.Errorf("--after, --worker-model and --worker-thinking apply only to --dispatch"))
-		}
-	} else if item == "" || claim == "" {
-		return refusal(fmt.Errorf("%s requires --item <proposal>/<slice> and the exact --claim <acquisition-commit>", operation))
+	if !selects && (item == "" || claim == "") {
+		return refusal(fmt.Errorf("%s requires --slice <proposal>/<slice> and the exact --claim <acquisition-commit>", operation))
 	}
 	choices, err := implementChoices(c)
 	if err != nil {
@@ -153,7 +175,7 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 		return submitDelivery(c, phase, operation, repository, store, newBackend, emit, refusal, verified)
 	}
 	var execution *ledger.Execution
-	if operation == "next" {
+	if selects {
 		// A continuation passes only after its dispatched Claim's handoff,
 		// established before anything is selected, claimed or awaited.
 		if dispatch && c.IsSet("after") {
@@ -455,13 +477,11 @@ func submitDelivery(c *cli.Context, phase, operation string, repository setup.Re
 		outcome = ledger.NeedsHuman
 	} else if phase == ledger.WatchdogPhase {
 		outcome = strings.ReplaceAll(c.String("outcome"), "-", "_")
-		if outcome != "pass" && outcome != ledger.Rework && outcome != ledger.NeedsHuman {
-			return refusal(fmt.Errorf("watchdog submit requires --outcome pass, rework, or needs-human"))
+		if outcome != "pass" && outcome != ledger.Rework {
+			return refusal(fmt.Errorf("watchdog submit requires --outcome pass or rework"))
 		}
-	} else if c.IsSet("outcome") {
-		return refusal(fmt.Errorf("implementation uses submit or needs-human, not a second outcome flag"))
 	}
-	e, activeErr := ledger.ResumeDelivery(store, repository.Repository, c.String("item"), phase, c.String("claim"))
+	e, activeErr := ledger.ResumeDelivery(store, repository.Repository, c.String("slice"), phase, c.String("claim"))
 	source := ledger.SourceRevisions{Head: c.String("head"), Target: c.String("target")}
 	auto := false
 	if activeErr == nil {
@@ -495,7 +515,7 @@ func submitDelivery(c *cli.Context, phase, operation string, repository setup.Re
 		// No current Claim is not success. The ledger's exact current-report replay
 		// check alone can establish a completed effect, without touching later work.
 		if phase == ledger.WatchdogPhase {
-			report, _, err := ledger.CurrentReport(store, repository.Repository, c.String("item"), phase)
+			report, _, err := ledger.CurrentReport(store, repository.Repository, c.String("slice"), phase)
 			if err != nil {
 				return refusal(activeErr)
 			}
@@ -508,7 +528,7 @@ func submitDelivery(c *cli.Context, phase, operation string, repository setup.Re
 			}
 		}
 	}
-	result, err := ledger.HandoffDelivery(store, repository.Repository, c.String("item"), phase, c.String("claim"), source, outcome, string(body), runMetadata(c))
+	result, err := ledger.HandoffDelivery(store, repository.Repository, c.String("slice"), phase, c.String("claim"), source, outcome, string(body), runMetadata(c))
 	if err != nil {
 		return refusal(err)
 	}

@@ -25,7 +25,7 @@ func TestHarnessLaunchChoicesReachTheirRoles(t *testing.T) {
 			source, _ := deliverySourceRepo(t)
 			deliveryAcceptFixture(t, newForgeServer(t), source)
 			cli := deliveryNoForgeApp(t)
-			d := cli.dispatched(t, "skl implement next --dispatch --repo "+source+" "+tc.flags)
+			d := cli.dispatched(t, "skl implement dispatch --repo "+source+" "+tc.flags)
 			if d.WorkerModel != tc.model || d.WorkerThinking != tc.thinking {
 				t.Fatalf("launch = %q/%q, want %q/%q", d.WorkerModel, d.WorkerThinking, tc.model, tc.thinking)
 			}
@@ -68,7 +68,7 @@ func TestDispatchRefreshesDefaultsButFreezesSessionChoices(t *testing.T) {
 			if explicit {
 				flags += " --worker-model explicit-worker --reviewer-model explicit-review --helper-thinking explicit-helper"
 			}
-			first := cli.dispatched(t, "skl implement next --dispatch --repo "+source+flags)
+			first := cli.dispatched(t, "skl implement dispatch --repo "+source+flags)
 			configure("next")
 			session := cli.dispatchJSON(t, first.Worker)
 			wantReview, wantHelper := "review-first", "helper-first"
@@ -84,7 +84,7 @@ func TestDispatchRefreshesDefaultsButFreezesSessionChoices(t *testing.T) {
 				t.Fatal("prepare/resume lost session choices")
 			}
 			dispatchImplementHandoff(t, cli, source, target, first.Item, first.Claim)
-			watch := cli.dispatched(t, "skl watchdog next --dispatch --repo "+source+" --harness pi")
+			watch := cli.dispatched(t, "skl watchdog dispatch --repo "+source+" --harness pi")
 			if watch.WorkerModel != "watch-next" || watch.WorkerThinking != "watch-thinking" {
 				t.Fatalf("watchdog used another role: %#v", watch)
 			}
@@ -121,7 +121,7 @@ func TestEmptySessionChoicesStayInheritedAfterConfigurationEdit(t *testing.T) {
 	source, _ := deliverySourceRepo(t)
 	deliveryAcceptFixture(t, newForgeServer(t), source)
 	cli := deliveryNoForgeApp(t)
-	d := cli.dispatched(t, "skl implement next --dispatch --repo "+source+" --harness pi --mode team")
+	d := cli.dispatched(t, "skl implement dispatch --repo "+source+" --harness pi --mode team")
 	f.misconfigure(t, fmt.Sprintf(`{"ledger":%q,"harnesses":{"pi":{"reviewer":{"model":"later-review"},"helper":{"model":"later-helper"}}}}`, f.clone))
 	facts := cli.dispatchJSON(t, d.Worker).Packet.Facts.Delivery
 	if facts.Reviewer != nil || facts.Helper != nil {
@@ -138,7 +138,7 @@ func TestLaunchConfigurationRefusalsDoNotClaimWork(t *testing.T) {
 			f.misconfigure(t, fmt.Sprintf(`{"ledger":%q,"harnesses":%s}`, f.clone, config))
 			source, _ := deliverySourceRepo(t)
 			before := ledgerSnapshot(t, f.clone)
-			out := deliveryNoForgeApp(t).dispatchJSON(t, "skl implement next --dispatch --repo "+source+" --harness pi")
+			out := deliveryNoForgeApp(t).dispatchJSON(t, "skl implement dispatch --repo "+source+" --harness pi")
 			if out.Status != "fix_required" || ledgerSnapshot(t, f.clone) != before {
 				t.Fatalf("invalid configuration claimed: %#v", out)
 			}
@@ -147,7 +147,7 @@ func TestLaunchConfigurationRefusalsDoNotClaimWork(t *testing.T) {
 	f := newLedgerFixture(t)
 	source, _ := deliverySourceRepo(t)
 	before := ledgerSnapshot(t, f.clone)
-	out := deliveryNoForgeApp(t).dispatchJSON(t, "skl implement next --dispatch --repo "+source+" --harness unknown")
+	out := deliveryNoForgeApp(t).dispatchJSON(t, "skl implement dispatch --repo "+source+" --harness unknown")
 	if out.Status != "fix_required" || ledgerSnapshot(t, f.clone) != before {
 		t.Fatal("unknown selector did not refuse before claim")
 	}

@@ -17,6 +17,6 @@ Source fetch: fresh: fetched origin main and proposal/widget-alerts; widget-aler
 
 Preparation is done. Read the prepared state with:
 
-`skl watchdog inspect --repo '/work/widgets' --remote 'origin' --item 'widget-alerts/foundation' --claim '0000000000000000000000000000000000000001' --result-directory '/tmp/skl-watchdog-result'`
+`skl watchdog inspect --repo '/work/widgets' --remote 'origin' --slice 'widget-alerts/foundation' --claim '0000000000000000000000000000000000000001' --result-directory '/tmp/skl-watchdog-result'`
 
-Continue this Claim with `skl watchdog resume --repo '/work/widgets' --remote 'origin' --item 'widget-alerts/foundation' --claim '0000000000000000000000000000000000000001' --result-directory '/tmp/skl-watchdog-result'`, or release it with `skl watchdog release --repo '/work/widgets' --remote 'origin' --item 'widget-alerts/foundation' --claim '0000000000000000000000000000000000000001'`.
+Continue this Claim with `skl watchdog resume --repo '/work/widgets' --remote 'origin' --slice 'widget-alerts/foundation' --claim '0000000000000000000000000000000000000001' --result-directory '/tmp/skl-watchdog-result'`, or release it with `skl watchdog release --repo '/work/widgets' --remote 'origin' --slice 'widget-alerts/foundation' --claim '0000000000000000000000000000000000000001'`.

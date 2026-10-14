@@ -354,7 +354,7 @@ func TestLedgerStatusTerminalClaimExplicitRelease(t *testing.T) {
 			runRelease := func(command, reference string) deliveryOutput {
 				t.Helper()
 				cli.out.Reset()
-				if err := cli.app.Run([]string{"skl", "implement", command, "--repo", root, "--item", item, "--claim", reference, "--format", "json"}); err != nil {
+				if err := cli.app.Run([]string{"skl", "implement", command, "--repo", root, "--slice", item, "--claim", reference, "--format", "json"}); err != nil {
 					t.Fatalf("%s: %v", command, err)
 				}
 				var result deliveryOutput

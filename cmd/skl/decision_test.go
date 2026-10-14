@@ -94,7 +94,7 @@ func decisionPause(t *testing.T, cli ledgerCLI, source, item, claim string, extr
 	t.Helper()
 	bodyPath := filepath.Join(t.TempDir(), "pause.md")
 	writeFile(t, bodyPath, decisionPauseBody)
-	args := []string{"skl", "implement", "needs-human", "--repo", source, "--item", item, "--claim", claim, "--body", bodyPath, "--format", "json"}
+	args := []string{"skl", "implement", "needs-human", "--repo", source, "--slice", item, "--claim", claim, "--body", bodyPath, "--format", "json"}
 	args = append(args, extra...)
 	paused, err := cli.deliveryJSON(t, args...)
 	if err != nil || paused.Status != ledger.NeedsHuman {
@@ -569,13 +569,13 @@ func TestDecisionContinuationReachesWorkers(t *testing.T) {
 		t.Fatalf("implement consumed a different decision: %#v / %q", record, body)
 	}
 
-	prepared, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--item", deliveryTestItem, "--claim", directed.Execution.Claim.Commit, "--format", "json")
+	prepared, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--slice", deliveryTestItem, "--claim", directed.Execution.Claim.Commit, "--format", "json")
 	if err != nil || prepared.Source == nil {
 		t.Fatalf("prepare: %#v %v", prepared, err)
 	}
 	bodyPath := filepath.Join(t.TempDir(), "implement-report.md")
 	writeFile(t, bodyPath, "# implementation result\n")
-	submitted, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", directed.Execution.Claim.Commit,
+	submitted, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--slice", deliveryTestItem, "--claim", directed.Execution.Claim.Commit,
 		"--head", target, "--target", target, "--body", bodyPath, "--format", "json")
 	if err != nil || submitted.Status != ledger.AwaitingReview {
 		t.Fatalf("implement submit: %#v %v", submitted, err)
@@ -611,7 +611,7 @@ func TestDecisionContinuationReachesWorkers(t *testing.T) {
 	}
 	reviewBody := filepath.Join(t.TempDir(), "watchdog-report.md")
 	writeFile(t, reviewBody, "# review result\n")
-	passed, err := cli.deliveryJSON(t, "skl", "watchdog", "submit", "--repo", source, "--item", deliveryTestItem,
+	passed, err := cli.deliveryJSON(t, "skl", "watchdog", "submit", "--repo", source, "--slice", deliveryTestItem,
 		"--claim", review.Execution.Claim.Commit, "--outcome", "pass", "--head", target, "--body", reviewBody, "--format", "json")
 	if err != nil || passed.Status != ledger.ReadyForMerge {
 		t.Fatalf("watchdog pass: %#v %v", passed, err)
@@ -641,7 +641,7 @@ func TestDecisionWatchdogContinuationAtSameCode(t *testing.T) {
 
 	// Round 1: implementation at the prepared revision is reviewed as Rework.
 	started := decisionSelect(t, cli, source)
-	prepared, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--item", deliveryTestItem, "--claim", started.Execution.Claim.Commit, "--format", "json")
+	prepared, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--slice", deliveryTestItem, "--claim", started.Execution.Claim.Commit, "--format", "json")
 	if err != nil || prepared.Source == nil {
 		t.Fatalf("prepare: %#v %v", prepared, err)
 	}
@@ -651,7 +651,7 @@ func TestDecisionWatchdogContinuationAtSameCode(t *testing.T) {
 	}
 	bodyPath := filepath.Join(t.TempDir(), "implement-report.md")
 	writeFile(t, bodyPath, "# implementation result\n")
-	first, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", started.Execution.Claim.Commit,
+	first, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--slice", deliveryTestItem, "--claim", started.Execution.Claim.Commit,
 		"--head", head, "--target", target, "--body", bodyPath, "--format", "json")
 	if err != nil || first.Status != ledger.AwaitingReview {
 		t.Fatalf("implement submit: %#v %v", first, err)
@@ -659,7 +659,7 @@ func TestDecisionWatchdogContinuationAtSameCode(t *testing.T) {
 	reviewBody := filepath.Join(t.TempDir(), "watchdog-report.md")
 	writeFile(t, reviewBody, "# review result\n")
 	review1 := decisionSelectPhase(t, cli, ledger.WatchdogPhase, source)
-	reworked, err := cli.deliveryJSON(t, "skl", "watchdog", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", review1.Execution.Claim.Commit,
+	reworked, err := cli.deliveryJSON(t, "skl", "watchdog", "submit", "--repo", source, "--slice", deliveryTestItem, "--claim", review1.Execution.Claim.Commit,
 		"--outcome", "rework", "--body", reviewBody, "--format", "json")
 	if err != nil || reworked.Status != ledger.Rework {
 		t.Fatalf("round 1 rework: %#v %v", reworked, err)
@@ -668,17 +668,17 @@ func TestDecisionWatchdogContinuationAtSameCode(t *testing.T) {
 	// Round 2: rework without a new commit, then a failing review reaches the
 	// automatic-rework cap and pauses for human direction.
 	reworkClaim := decisionSelect(t, cli, source)
-	prepared2, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--item", deliveryTestItem, "--claim", reworkClaim.Execution.Claim.Commit, "--format", "json")
+	prepared2, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--slice", deliveryTestItem, "--claim", reworkClaim.Execution.Claim.Commit, "--format", "json")
 	if err != nil || prepared2.Source == nil || prepared2.Source.Head != head {
 		t.Fatalf("rework prepare: %#v %v", prepared2, err)
 	}
-	second, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", reworkClaim.Execution.Claim.Commit,
+	second, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--slice", deliveryTestItem, "--claim", reworkClaim.Execution.Claim.Commit,
 		"--head", head, "--target", target, "--body", bodyPath, "--format", "json")
 	if err != nil || second.Status != ledger.AwaitingReview {
 		t.Fatalf("rework submit: %#v %v", second, err)
 	}
 	review2 := decisionSelectPhase(t, cli, ledger.WatchdogPhase, source)
-	roundTwo, err := cli.deliveryJSON(t, "skl", "watchdog", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", review2.Execution.Claim.Commit,
+	roundTwo, err := cli.deliveryJSON(t, "skl", "watchdog", "submit", "--repo", source, "--slice", deliveryTestItem, "--claim", review2.Execution.Claim.Commit,
 		"--outcome", "rework", "--body", reviewBody, "--format", "json")
 	if err != nil || roundTwo.Status != ledger.NeedsHuman {
 		t.Fatalf("round 2 rework: %#v %v", roundTwo, err)
@@ -703,7 +703,7 @@ func TestDecisionWatchdogContinuationAtSameCode(t *testing.T) {
 	if review3.Execution.State.Claim.Inputs.Decision == nil {
 		t.Fatalf("round 3 did not consume the direction: %#v", review3.Execution)
 	}
-	passed, err := cli.deliveryJSON(t, "skl", "watchdog", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", review3.Execution.Claim.Commit,
+	passed, err := cli.deliveryJSON(t, "skl", "watchdog", "submit", "--repo", source, "--slice", deliveryTestItem, "--claim", review3.Execution.Claim.Commit,
 		"--outcome", "rework", "--body", reviewBody, "--format", "json")
 	if err != nil || passed.Status != ledger.NeedsHuman || passed.Result == nil {
 		t.Fatalf("round 3 rework: %#v %v", passed, err)

@@ -290,7 +290,7 @@ func TestAmendRefusesContractChangeOnceClaimed(t *testing.T) {
 		t.Fatalf("setup paused %s, want gate/paused", item)
 	}
 	released := decisionSelect(t, worker, source)
-	if output, err := worker.deliveryRun(t, "skl", "implement", "release", "--repo", source, "--item", released.Execution.Item, "--claim", released.Execution.Claim.Commit); err != nil {
+	if output, err := worker.deliveryRun(t, "skl", "implement", "release", "--repo", source, "--slice", released.Execution.Item, "--claim", released.Execution.Claim.Commit); err != nil {
 		t.Fatalf("release %s: %v\n%s", released.Execution.Item, err, output)
 	}
 	head := ledgerHead(t, fixture.clone)

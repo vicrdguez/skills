@@ -124,7 +124,7 @@ round: 1
 
 ## 1. Prepare
 
-Run `skl implement prepare --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --result-directory '/tmp/skl-implement-result'`. It creates the worktree, or reuses it with its changes, index and commits intact. Then run the inspection command it prints, and work only in `/work/widgets/.worktrees/widget-dashboard`. Continue this Claim later with `skl implement resume --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --result-directory '/tmp/skl-implement-result'`; release it with `skl implement release --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001'` only to abandon the work.
+Run `skl implement prepare --repo '/work/widgets' --remote 'origin' --slice 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --result-directory '/tmp/skl-implement-result'`. It creates the worktree, or reuses it with its changes, index and commits intact. Then run the inspection command it prints, and work only in `/work/widgets/.worktrees/widget-dashboard`. Continue this Claim later with `skl implement resume --repo '/work/widgets' --remote 'origin' --slice 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --result-directory '/tmp/skl-implement-result'`; release it with `skl implement release --repo '/work/widgets' --remote 'origin' --slice 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001'` only to abandon the work.
 
 Check: inspection prints the source head.
 
@@ -162,13 +162,13 @@ Check: `implement-report.md` and `public.md` exist in `/tmp/skl-implement-result
 
 ## 6. Submit
 
-Submit with `skl implement submit --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --body '/tmp/skl-implement-result/implement-report.md' --public-body '/tmp/skl-implement-result/public.md' --run-metadata '/tmp/skl-implement-result/run.json' --head <final-source-sha> --target <observed-target-sha>`.
+Submit with `skl implement submit --repo '/work/widgets' --remote 'origin' --slice 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --body '/tmp/skl-implement-result/implement-report.md' --public-body '/tmp/skl-implement-result/public.md' --run-metadata '/tmp/skl-implement-result/run.json' --head <final-source-sha> --target <observed-target-sha>`.
 
 Check: submit reports the work awaiting review.
 
 ## Pause for a human decision
 
-Finish the unblocked work and write the blocking report from the step 5 template. Then pause with `skl implement needs-human --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --body '/tmp/skl-implement-result/implement-report.md' --public-body '/tmp/skl-implement-result/public.md' --run-metadata '/tmp/skl-implement-result/run.json' --head <branch-head> --target <observed-target-sha>`, using the preparation target as `<observed-target-sha>` until step 3 records one. Leave a conflicted merge in place.
+Finish the unblocked work and write the blocking report from the step 5 template. Then pause with `skl implement needs-human --repo '/work/widgets' --remote 'origin' --slice 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --body '/tmp/skl-implement-result/implement-report.md' --public-body '/tmp/skl-implement-result/public.md' --run-metadata '/tmp/skl-implement-result/run.json' --head <branch-head> --target <observed-target-sha>`, using the preparation target as `<observed-target-sha>` until step 3 records one. Leave a conflicted merge in place.
 
 Check: the pause reports the work waiting on a human.
 
@@ -255,7 +255,7 @@ After the late target integration, the fixed point is `git merge-base <observed-
 
 ## Establish the facts once
 
-1. Run the inspection command with its `--target` replaced by `<observed-target-sha>`; the target it shows here is the preparation target: `skl implement inspect --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --result-directory '/tmp/skl-implement-result' --target '0000000000000000000000000000000000000003'`. Its output is the input-inspection result.
+1. Run the inspection command with its `--target` replaced by `<observed-target-sha>`; the target it shows here is the preparation target: `skl implement inspect --repo '/work/widgets' --remote 'origin' --slice 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --result-directory '/tmp/skl-implement-result' --target '0000000000000000000000000000000000000003'`. Its output is the input-inspection result.
 2. Run the Full Gate once on the integrated candidate: the project's entire test, typecheck and lint suite. Record the commands, head and results.
 
 Check: you hold the Contract documents supplied above, the diff command, the commit list, the gate result and the input-inspection result.

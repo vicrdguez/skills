@@ -71,34 +71,39 @@ Every added or changed Dependency must name a recorded Slice of the Project; no 
 
 ## Delivery lanes
 
-`skl implement` and `skl watchdog` share one command set. Every command takes `--repo` and `--remote`; the Execution Skill binds the rest.
+`skl implement` and `skl watchdog` share one command set. Every command takes `--repo`, `--remote` and `--format markdown|json` (default `markdown`); the Execution Skill binds the rest. `--slice` names the exact proposal/slice identity, `--claim` its full acquisition commit, and `--head` and `--target` source commits.
 
 | Command | What it does |
 |---|---|
-| `next` (alias `start`) | Selects one eligible Slice in this repository's Project, records a Claim, and returns the Execution Skill. Rework precedes new work; older acceptance precedes newer. Claimed Slices and Slices with unmerged blockers are skipped. |
-| `resume --item --claim` | Continues exactly that reservation. It cannot take over or clear a later one. |
+| `next` | Selects one eligible Slice in this repository's Project, records a Claim, and returns the Execution Skill. Rework precedes new work; older acceptance precedes newer. Claimed Slices and Slices with unmerged blockers are skipped. |
+| `dispatch` | Selects and claims like `next`, returning worker and continuation commands for a Supervisor. |
+| `resume --slice --claim` | Continues exactly that reservation. It cannot take over or clear a later one. |
 | `prepare` | Creates or safely reuses the planned branch and `.worktrees/<branch>`; never resets, rebases or stashes. Watchdog preparation of a Slice targeting a Proposal Branch also performs the Integration Merge: it fetches the branch and, when its head is not already an ancestor, commits one ordinary merge of it into the work branch. A conflict aborts the merge, leaves the worktree clean and refuses; the review then ends in `rework`. |
 | `inspect` | Read-only look at the prepared workspace; returns a narrow continuation. |
 | `submit --head --target --body [--public-body]` | Records the phase report, moves Workflow State and releases the Claim in one ledger commit, then attempts push and public presentation. |
-| `needs-human --body [--head --target]` | Implement only. Records a blocker question for a human and releases the Claim. |
-| `release --item --claim` | Gives the reservation back, preserving any source progress. |
+| `needs-human --body [--head --target]` | Records a blocker question for a human and releases the Claim. |
+| `release --slice --claim` | Gives the reservation back, preserving any source progress. |
 
-Only `next` takes `--auto` (also with `--dispatch`). An implement lane's first Claim on a closed Proposal records the Proposal Branch as open; source preparation creates that remote branch from fetched `main` if absent. Later Claims take the open branch even without `--auto`. A Slice keeps its Claim-time Integration Target across rework and review. Auto Mode is meant for one implement lane and one watchdog lane per Project; this is guidance, not an enforced limit. Without `--auto` and without an open Proposal Branch, Slices target `main`.
+Only `next` and `dispatch` take `--auto`. An implement lane's first Claim on a closed Proposal records the Proposal Branch as open; source preparation creates that remote branch from fetched `main` if absent. Later Claims take the open branch even without `--auto`. A Slice keeps its Claim-time Integration Target across rework and review. Auto Mode is meant for one implement lane and one watchdog lane per Project; this is guidance, not an enforced limit. Without `--auto` and without an open Proposal Branch, Slices target `main`.
 
 `watchdog next --auto` records Auto Mode on its Claim. When that Claim's `pass` targets an open Proposal Branch, submit squash-merges the presented pull request through the forge, pinned to the final head, and only when the branch's current remote head is an ancestor of that head. Before selecting, every `watchdog next --auto` poll retries the merge of each Ready-for-Merge Slice with an attached pull request on an open Proposal Branch, including Slices passed without the flag. A refusal (ancestry, pending presentation, branch protection or another forge error) is reported in the outcome and leaves the Slice `ready_for_merge`; the handoff still succeeds. A merge writes no Workflow State: the Slice becomes `merged` when completion observation reads the merged pull request, which the same poll does before selecting. Nothing targeting `main` is merged.
 
-Implement `next`, `resume`, `prepare` and `inspect` also take `--mode standard|team` (default `standard`), and the opaque values `--helper-model`, `--helper-thinking`, `--reviewer-model` and `--reviewer-thinking`. Team mode replaces the Execution Skill's delegation guidance with the team strategy. A reviewer value renders in the Audit dispatch step and a helper value in the team delegation step; helper values need team mode. An unknown mode is refused before anything is claimed, and the bound prepare, inspect and resume commands repeat the supplied values.
+Implement `next`, `dispatch`, `resume`, `prepare` and `inspect` also take `--mode standard|team` (default `standard`), and the opaque values `--helper-model`, `--helper-thinking`, `--reviewer-model` and `--reviewer-thinking`. Team mode replaces the Execution Skill's delegation guidance with the team strategy. A reviewer value renders in the Audit dispatch step and a helper value in the team delegation step; helper values need team mode. An unknown mode is refused before anything is claimed, and the bound prepare, inspect and resume commands repeat the supplied values.
 
-A Claim is a local ledger commit protected by a short lock. It never expires, so an interrupted worker is resumed or released explicitly rather than timed out. Implement submit records `awaiting_review` or `needs_human`. Watchdog submit takes `--outcome pass|rework|needs-human`: `pass` records `ready_for_merge`; the first `rework` returns the Slice to implementation, a second records `needs_human`. Success is recorded locally even when the push, replication or public presentation is still pending.
+A Claim is a local ledger commit protected by a short lock. It never expires, so an interrupted worker is resumed or released explicitly rather than timed out. Implement submit records `awaiting_review` or `needs_human`. Watchdog submit takes `--outcome pass|rework`: `pass` records `ready_for_merge`; the first `rework` returns the Slice to implementation, a second records `needs_human`. Both phases use `needs-human` for an explicit human handoff. Success is recorded locally even when the push, replication or public presentation is still pending.
+
+`--harness pi|opencode|claude|codex` and `--result-directory <absolute-path>` apply to next, dispatch, resume, prepare and inspect. Only resume accepts generated `--dispatched`. Inspect optionally accepts `--target`; preparation and inspection stay separate. Dispatch alone takes `--after`, `--worker-model` and `--worker-thinking`. Submit and needs-human take `--slice`, `--claim`, `--body`, optional `--public-body` and `--run-metadata`; source evidence uses `--head` and `--target` under the existing phase rules (both are required for implement submit). Release takes only the shared flags, `--slice` and `--claim`.
 
 Reports are Markdown bodies the worker writes from a template the engine hands over at the right step; the engine adds the metadata and exact input references described in [report-schema.md](report-schema.md) and never infers a verdict from prose.
 
-`next` checks once by default. `--wait` (bare: 15 minutes, or `--wait 2m`) keeps polling every `--poll` (default 30 seconds) and ends with work, a refusal, or `idle_timeout`, which means the queue was quiet, not that everything is done.
+`next` and `dispatch` check once by default. `--wait` (bare: 15 minutes, or `--wait 2m`) keeps polling every `--poll` (default 30 seconds) and ends with work, a refusal, or `idle_timeout`, which means the queue was quiet, not that everything is done.
+
+Upgrade the binary and installed adapters together between runs, after finishing or stopping active runs. Existing Claims remain intact: recover interrupted work with `skl <phase> resume --repo <path> --slice <proposal>/<slice> --claim <full-acquisition-commit>`, or explicitly release it to abandon the run. Removed spellings have no compatibility aliases.
 
 ## Supervisors
 
 ```sh
-skl implement next --dispatch --wait --repo <path> [--worker-model <m>] [--worker-thinking <t>]
+skl implement dispatch --wait --repo <path> [--worker-model <m>] [--worker-thinking <t>]
 ```
 
 A Dispatch claims a Slice like `next` but answers with two bound commands instead of the Execution Skill: a worker command (`skl <phase> resume … --dispatched`) that a fresh subagent runs, and a continue command that repeats the Dispatch with `--after <claim>`. Continuation first reads how that Claim ended and proceeds only after its phase handoff. A Claim still held or released without a handoff stops the Supervisor with the Claim untouched. Model and thinking values are passed through opaquely to the harness.
