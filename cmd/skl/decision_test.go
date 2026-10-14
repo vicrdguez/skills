@@ -131,10 +131,9 @@ func decisionApplyAnswer(t *testing.T, cli ledgerCLI, request skilldist.Decision
 	t.Helper()
 	answerPath := filepath.Join(t.TempDir(), "answer.md")
 	writeFile(t, answerPath, answer)
-	return cli.decisionJSON(t, "skl", "decision", "apply",
-		"--project", request.Project, "--item", request.Item,
-		"--request-commit", request.RequestCommit, "--request-path", request.RequestPath,
-		"--route", route, "--answer", answerPath, "--format", "json")
+	command := strings.ReplaceAll(request.ApplyCommand, "<implement|watchdog|supersede>", skilldist.ShellQuote(route))
+	command = strings.ReplaceAll(command, "<human-answer-file>", skilldist.ShellQuote(answerPath))
+	return cli.decisionJSON(t, append(shellWords(t, command), "--format", "json")...)
 }
 
 func decisionItemStatePath(project, proposal, slice string) string {
@@ -225,7 +224,9 @@ func TestDecisionInboxIsLedgerWideReadOnlyAndBound(t *testing.T) {
 	if len(request.Documents) < 3 {
 		t.Fatalf("request lacks accepted documents and the blocking report: %#v", request.Documents)
 	}
-	if !strings.Contains(request.ApplyCommand, "--request-commit '"+request.RequestCommit+"'") ||
+	if !strings.Contains(request.ApplyCommand, "--project 'widgets' --slice '"+widgetItem+"'") ||
+		strings.Contains(request.ApplyCommand, "--item") ||
+		!strings.Contains(request.ApplyCommand, "--request-commit '"+request.RequestCommit+"'") ||
 		!strings.Contains(request.ApplyCommand, "--request-path '"+request.RequestPath+"'") {
 		t.Fatalf("apply command did not bind the exact request: %q", request.ApplyCommand)
 	}
@@ -405,7 +406,7 @@ func TestDecisionRefusesReplacedRequestAndMalformedInput(t *testing.T) {
 	}
 	inputPath := filepath.Join(t.TempDir(), "batch.json")
 	writeFile(t, inputPath, "[]\n")
-	mixed := cli.decisionJSON(t, "skl", "decision", "apply", "--project", "widgets", "--item", item, "--input", inputPath, "--format", "json")
+	mixed := cli.decisionJSON(t, "skl", "decision", "apply", "--project", "widgets", "--slice", item, "--input", inputPath, "--format", "json")
 	if mixed.Status != ledger.DecisionRefused || mixed.Facts.Reason == "" {
 		t.Fatalf("mixed modes = %#v", mixed)
 	}
@@ -512,7 +513,7 @@ func TestDecisionPendingReplicationIsVisible(t *testing.T) {
 	answerPath := filepath.Join(t.TempDir(), "answer.md")
 	writeFile(t, answerPath, "continue offline\n")
 	markdown, err := cli.deliveryRun(t, "skl", "decision", "apply",
-		"--project", otherRequest.Project, "--item", otherRequest.Item,
+		"--project", otherRequest.Project, "--slice", otherRequest.Item,
 		"--request-commit", otherRequest.RequestCommit, "--request-path", otherRequest.RequestPath,
 		"--route", ledger.RouteImplement, "--answer", answerPath)
 	if err != nil {

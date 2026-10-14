@@ -21,7 +21,7 @@ Completed reviews: 2
 
 Apply command:
 
-`skl decision apply --project 'widgets' --item 'widget-dashboard/foundation' --request-commit '0000000000000000000000000000000000000001' --request-path 'projects/widgets/proposals/widget-dashboard/foundation/watchdog-report.md' --route <implement|watchdog|supersede> --answer <human-answer-file>`
+`skl decision apply --project 'widgets' --slice 'widget-dashboard/foundation' --request-commit '0000000000000000000000000000000000000001' --request-path 'projects/widgets/proposals/widget-dashboard/foundation/watchdog-report.md' --route <implement|watchdog|supersede> --answer <human-answer-file>`
 
 #### `projects/widgets/proposals/widget-dashboard/foundation/behavior.md`
 
