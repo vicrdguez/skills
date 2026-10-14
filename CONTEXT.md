@@ -106,6 +106,9 @@ _Avoid_: Phase report, implementation ledger, durable project knowledge
 An **Agent Worker**'s recorded outcome, evidence, and input references for one implementation or **Watchdog Review** phase. Its outcome is distinct from the resulting **Workflow State**.
 _Avoid_: Agent transcript, workflow state
 
+**Phase Handoff**:
+The recording of a **Phase Report**, its resulting **Workflow State**, and release of the reporting worker's exact **Claim** together. A Claim release without a Phase Report is not a Phase Handoff; **Forge Publication** is a separate effect.
+
 **Run Metadata**:
 The recorded execution context and measured effort of a **Worker Session** that produced a **Phase Report**, optionally including its participating child agents but excluding its **Supervisor**. It is observational evidence for later evaluation, not a prerequisite for a phase handoff or proof that its measurements are valid.
 
@@ -146,6 +149,13 @@ _Avoid_: Work item, claim
 **Integration Target**:
 The destination branch in a **Consumer Repository** into which the **Merge Authority** intends to merge a **Submission**. It is distinct from any particular observed revision of that branch.
 _Avoid_: Target snapshot, submitted revision
+
+**Observed Target Revision**:
+The exact source commit observed on an **Integration Target** and used as the integration cutoff for a delivery round. Later movement of the destination branch does not change that recorded revision.
+_Avoid_: Integration Target, latest target
+
+**Source Inspection**:
+A point-in-time observation of a Slice's prepared source workspace, its revisions, and the applicable review scope. It neither advances **Workflow State** nor authorizes a later **Phase Handoff**, which independently validates its source evidence.
 
 **Dependency**:
 A relationship in which one **Work Item** cannot become eligible until every blocking Work Item is **Merged** into `main` or into the dependent's own **Proposal Branch**. A blocker Merged only into another Proposal's open Proposal Branch does not satisfy it. Dependencies are human direction rather than part of the **Contract**; an **Amendment** may change them on any unclaimed, unmerged Slice.
@@ -210,6 +220,13 @@ _Avoid_: Validation result, inferred intent
 **Coordination Item**:
 A non-claimable parent that groups multiple child Work Items. It has no branch or Submission of its own until its **Proposal Branch** opens, when it carries the **Proposal Submission**. It completes when every child is **Merged**; retiring a partially delivered Proposal does not assert completion.
 _Avoid_: Work item, implementation slice
+
+**Proposal Retirement**:
+Explicit human-directed closure of a **Proposal** whose Slices are terminal and unclaimed, with either a **Superseded** Slice or an open **Proposal Branch** whose Proposal Submission has not completed. It records partial delivery rather than full completion, spends an open Proposal Branch, and preserves source work.
+_Avoid_: Archival, cleanup, completion
+
+**Proposal Archival**:
+Relocation of a terminal, unclaimed **Proposal** into the **Workflow Ledger**'s archive while preserving its recorded lifecycle and evidence. It is distinct from **Proposal Retirement** and local source cleanup.
 
 **Proposal Branch**:
 The branch, named at acceptance, into which a **Proposal**'s **Slices** integrate once it is open. An implement lane in **Auto Mode** opens it from the current `main` at its first **Claim** on the Proposal; while open it is the **Integration Target** of every Slice of that Proposal that starts implementation, whatever the lane's mode; it is spent once it enters `main` or the Proposal is retired, and is never reopened.
