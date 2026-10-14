@@ -13,7 +13,7 @@ import (
 	"github.com/vicrdguez/skills/ledger"
 )
 
-func TestStatusObservesHumanMergeIntoProposalBranch(t *testing.T) {
+func TestReconcileObservesHumanMergeIntoProposalBranch(t *testing.T) {
 	fixture := newLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	if accepted := newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", singleSlice("branch-status"))); accepted.Status != "accepted" {
@@ -26,7 +26,7 @@ func TestStatusObservesHumanMergeIntoProposalBranch(t *testing.T) {
 	app, output := completionStatusApp(t, func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = fmt.Fprint(w, fixturePull("closed", "true", "accepted-head", "merge-head", "acme/widgets", "acme/widgets", "proposal/branch-status"))
 	})
-	observed := runCompletionStatus(t, app, output, root, "--item", "branch-status/foundation")
+	observed := runCompletionStatus(t, app, output, root, "--slice", "branch-status/foundation")
 	if len(observed.Items) != 1 || observed.Items[0].State != ledger.Merged || observed.Items[0].Completion == nil || observed.Items[0].Completion.Target.Branch != "proposal/branch-status" {
 		t.Fatalf("branch merge observation = %+v", observed)
 	}
@@ -162,10 +162,23 @@ func openBranchStatusFixture(t *testing.T) (*ledgerFixture, string) {
 	return fixture, root
 }
 
-func TestStatusPresentsProposalSubmissionAndObservesItsMerge(t *testing.T) {
-	_, root := openBranchStatusFixture(t)
+func TestReconcilePresentsProposalSubmissionAndObservesItsMerge(t *testing.T) {
+	fixture, root := openBranchStatusFixture(t)
 	forge := &proposalPullForge{}
 	app, output := completionStatusApp(t, forge.serve(t))
+	browser, browsed := browseApp(t)
+	beforeLedger, beforeSource := ledgerSnapshot(t, fixture.clone), ledgerSnapshot(t, root)
+	local := browseQuery(t, browser, browsed, "slice", "--project", "widgets", "--item", "branch-status/foundation")
+	if local.Slice.Lifecycle != "ready_for_merge" || ledgerSnapshot(t, fixture.clone) != beforeLedger {
+		t.Fatalf("browse observed external completion or mutated records: %+v", local.Slice)
+	}
+	scoped := runCompletionStatus(t, app, output, root, "--slice", "branch-status/foundation")
+	if len(scoped.Items) != 1 || scoped.Items[0].State != ledger.Merged || scoped.Items[0].Claimed || len(scoped.Proposals) != 0 || forge.created != 1 || forge.proposal["draft"] != false {
+		t.Fatalf("scoped reconciliation lost parent maintenance or acquired a Claim: %+v; forge %+v", scoped, forge)
+	}
+	if ledgerSnapshot(t, root) != beforeSource {
+		t.Fatal("reconciliation changed source Git state")
+	}
 	first := runCompletionStatus(t, app, output, root)
 	if len(first.Proposals) != 1 || first.Proposals[0].Submission == nil || first.Proposals[0].Submission.Number != 50 || first.Proposals[0].BranchState != ledger.BranchOpen || first.Proposals[0].FullyDelivered {
 		t.Fatalf("first status = %s", mustJSON(t, first))
@@ -181,8 +194,13 @@ func TestStatusPresentsProposalSubmissionAndObservesItsMerge(t *testing.T) {
 	forge.mu.Lock()
 	forge.state, forge.merged = "closed", true
 	forge.mu.Unlock()
+	runCompletionStatus(t, app, output, root, "--slice", "branch-status/foundation")
+	parent := browseQuery(t, browser, browsed, "proposal", "--project", "widgets", "--proposal", "branch-status")
+	if parent.Proposal.Proposal.Completion == nil || parent.Proposal.Proposal.Completion.MergeCommit != "proposal-merge" {
+		t.Fatalf("scoped reconciliation did not record parent completion: %+v", parent.Proposal.Proposal)
+	}
 	output.Reset()
-	if err := app.Run([]string{"skl", "status", "--repo", root}); err != nil {
+	if err := app.Run([]string{"skl", "reconcile", "--repo", root}); err != nil {
 		t.Fatalf("status: %v (%s)", err, output)
 	}
 	text := output.String()
@@ -205,7 +223,7 @@ func TestStatusPresentsProposalSubmissionAndObservesItsMerge(t *testing.T) {
 	}
 }
 
-func TestStatusReportsClosedProposalSubmissionWithoutRecording(t *testing.T) {
+func TestReconcileReportsClosedProposalSubmissionWithoutRecording(t *testing.T) {
 	fixture, root := openBranchStatusFixture(t)
 	forge := &proposalPullForge{}
 	app, output := completionStatusApp(t, forge.serve(t))
@@ -215,7 +233,7 @@ func TestStatusReportsClosedProposalSubmissionWithoutRecording(t *testing.T) {
 	forge.state = "closed"
 	forge.mu.Unlock()
 	output.Reset()
-	if err := app.Run([]string{"skl", "status", "--repo", root}); err != nil {
+	if err := app.Run([]string{"skl", "reconcile", "--repo", root}); err != nil {
 		t.Fatalf("status: %v (%s)", err, output)
 	}
 	if !strings.Contains(output.String(), "Proposal Submission closed without merge") || !strings.Contains(output.String(), "Proposal Branch: proposal/branch-status (open)") {
