@@ -219,7 +219,7 @@ func TestAgentProseGoldens(t *testing.T) {
 	accepted := intake(proseProposal, contract)
 	g.capture("outcome-ledger-accept-accepted", proposer, "ledger", "accept", "--repo", source, "--proposal-dir", accepted, issue)
 	g.capture("outcome-ledger-accept-existing", proposer, "ledger", "accept", "--repo", source, "--proposal-dir", accepted, issue)
-	g.capture("outcome-ledger-show", proposer, "ledger", "show", "--repo", source, "--item", proseItem)
+	g.capture("outcome-ledger-show", proposer, "slice", "show", "--repo", source, "--slice", proseItem)
 	g.capture("outcome-ledger-publish", proposer, "ledger", "publish", "--repo", source, "--proposal", proseProposal, issue)
 	g.capture("outcome-ledger-export", proposer, "ledger", "export", "--repo", source, "--proposal", proseProposal, "--to", filepath.Join(temp, "export"))
 	g.capture("outcome-propose-cleanup", proposer, "cleanup", "--repo", source)

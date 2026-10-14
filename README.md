@@ -12,7 +12,7 @@ Most agent workflows are a folder of Markdown the model reads and interprets, wi
 
 `skl` moves the deterministic part out of prose. Selection, Claims, state transitions, dependency gating and handoffs are engine operations that behave the same whichever harness runs the agent. What the agent receives is an Execution Skill: one Procedure with its facts already bound (the item, branch, worktree, exact Contract references, the next commands to run), composed with the Craft that step needs. There is an example [below](#what-an-execution-skill-looks-like). Every command answers with an Outcome Instruction saying what happened and what to do next. The agent never navigates the ledger or keeps its own books.
 
-The CLI is mostly for agents. Humans use `skl browse`, `skl decision inbox` and `skl ledger show`. The rest is what the installed entry points and skill stubs run.
+The CLI is mostly for agents. Humans use `skl browse`, `skl decision inbox`, `skl slice show` and `skl ledger show`. The rest is what the installed entry points and skill stubs run.
 
 ## Where the ideas come from
 
@@ -231,7 +231,8 @@ After that update, edit launch defaults in the existing configuration file; no r
 | `skl watchdog next` | Watchdog entry point or Supervisor, fresh session | Claims the next Slice awaiting review and returns its Execution Skill |
 | `skl decision inbox` | Human, through the `decision` skill | Lists every request waiting on a human, with a bound command to answer it |
 | `skl browse` | Human | Terminal browser over projects, proposals and slices |
-| `skl ledger show` | Either | Reads a Contract, a phase report, or any exact ledger revision |
+| `skl slice show --slice <proposal>/<slice>` | Either | Reads the current Contract and report references, or a current report with `--phase` |
+| `skl ledger show --commit <sha> --path <ledger-path>` | Either | Reads an exact historical ledger document |
 
 The full command reference is in [docs/cli.md](docs/cli.md).
 

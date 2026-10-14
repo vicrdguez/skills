@@ -66,7 +66,7 @@ func TestImplementAutoFlagAppliesToNextAndDispatchOnly(t *testing.T) {
 		t.Fatalf("accept: %s", mustJSON(t, accepted))
 	}
 	before := runGitOutput(t, fixture.clone, "rev-parse", "HEAD")
-	if _, err := app.deliveryJSON(t, "skl", "implement", "resume", "--auto", "--repo", source, "--item", deliveryTestItem, "--claim", before, "--format", "json"); err == nil || !strings.Contains(err.Error(), "auto") {
+	if _, err := app.deliveryJSON(t, "skl", "implement", "resume", "--auto", "--repo", source, "--slice", deliveryTestItem, "--claim-phase", before, "--format", "json"); err == nil || !strings.Contains(err.Error(), "auto") {
 		t.Fatalf("resume --auto error = %v; want flag refusal", err)
 	}
 	if after := runGitOutput(t, fixture.clone, "rev-parse", "HEAD"); after != before {
@@ -168,7 +168,7 @@ func TestReconcilePresentsProposalSubmissionAndObservesItsMerge(t *testing.T) {
 	app, output := completionStatusApp(t, forge.serve(t))
 	browser, browsed := browseApp(t)
 	beforeLedger, beforeSource := ledgerSnapshot(t, fixture.clone), ledgerSnapshot(t, root)
-	local := browseQuery(t, browser, browsed, "slice", "--project", "widgets", "--item", "branch-status/foundation")
+	local := browseQuery(t, browser, browsed, "slice", "--project", "widgets", "--slice", "branch-status/foundation")
 	if local.Slice.Lifecycle != "ready_for_merge" || ledgerSnapshot(t, fixture.clone) != beforeLedger {
 		t.Fatalf("browse observed external completion or mutated records: %+v", local.Slice)
 	}

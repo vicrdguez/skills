@@ -3,7 +3,7 @@ Interview the user until you share one understanding of the change. Map its cons
 ## Start
 
 - When the user supplies the exact path to a `.thinking` artifact, read it as starting context and carry its settled concepts forward unless the project contradicts them. Read only the path the user gives.
-- When the user names a superseded slice, read its Contract with `skl ledger show --item <proposal>/<slice>`, then its reports by running that command once with `--phase implement` and once with `--phase watchdog`. Keep what the failed attempt established, and reopen the decisions its supersession implicates.
+- When the user names a superseded slice, read its Contract with `skl slice show --slice <proposal>/<slice>`, then its reports by running that command once with `--phase implement` and once with `--phase watchdog`. Keep what the failed attempt established, and reopen the decisions its supersession implicates.
 
 Check: you have read everything the user named.
 
