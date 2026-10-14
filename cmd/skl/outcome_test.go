@@ -55,7 +55,7 @@ func TestUnreachedOutcomeBranchesRender(t *testing.T) {
 		t.Errorf("rendering failure JSON changed: %s", &encoded)
 	}
 	result := ledger.CurrentResult{Item: "widget/foundation", Lifecycle: ledger.AwaitingReview, Phase: ledger.ImplementPhase, Outcome: ledger.AwaitingReview, Branch: "widget"}
-	guidance := &presentationGuidance{Result: result, Evidence: []string{"skl ledger show --commit 'a' --path 'r'"}, Authoring: "skl skill --resource pull-presentation.md implement", Continue: "skl ledger present --item 'widget/foundation' --public-body <file>"}
+	guidance := &presentationGuidance{Result: result, Evidence: []string{"skl ledger show --commit 'a' --path 'r'"}, Authoring: "skl skill --resource pull-presentation.md implement", Continue: "skl slice publish --slice 'widget/foundation' --public-body <file>"}
 	archive := &ledger.ArchiveResult{Archived: []ledger.ArchivedProposal{{Proposal: "done", FullyDelivered: true, Commit: "abc"}}}
 	cases := []struct {
 		name, kind string

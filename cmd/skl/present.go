@@ -27,12 +27,12 @@ type presentationGuidance struct {
 // its pull request, independently of any earlier presentation attempt.
 func presentCommand(newBackend backendFactory, stdout io.Writer) *cli.Command {
 	return &cli.Command{
-		Name:  "present",
-		Usage: "Present one Work Item's current committed phase result as its pull request",
+		Name:  "publish",
+		Usage: "Publish one Slice's current committed phase result to its pull request; omit --public-body for authoring guidance",
 		Flags: []cli.Flag{
-			&cli.PathFlag{Name: "repo", Value: "."},
-			&cli.StringFlag{Name: "remote"},
-			&cli.StringFlag{Name: "item", Required: true},
+			&cli.PathFlag{Name: "repo", Value: ".", Usage: "Source repository path"},
+			&cli.StringFlag{Name: "remote", Usage: "Source repository remote"},
+			&cli.StringFlag{Name: "slice", Required: true, Usage: "Accepted Slice identity: proposal/slice"},
 			&cli.PathFlag{Name: "public-body", Usage: "Freshly authored public prose for the current result; omit it to receive evidence and authoring guidance"},
 			implementationFormatFlag(),
 		},
@@ -41,10 +41,10 @@ func presentCommand(newBackend backendFactory, stdout io.Writer) *cli.Command {
 			if err != nil {
 				return err
 			}
-			rerun := boundCommand(command, "skl ledger present")
+			rerun := boundCommand(command, "skl slice publish")
 			refuse := func(err error) error { return refuseLedger(stdout, format, rerun, err) }
 			if command.NArg() != 0 {
-				return refuse(fmt.Errorf("ledger present takes flags, not arguments"))
+				return refuse(fmt.Errorf("slice publish takes flags, not arguments"))
 			}
 			repository, err := setup.ResolveRepository(command.Path("repo"), command.String("remote"))
 			if err != nil {
@@ -57,7 +57,7 @@ func presentCommand(newBackend backendFactory, stdout io.Writer) *cli.Command {
 			if err := store.RefuseSourceOverlap(repository.Root); err != nil {
 				return refuse(err)
 			}
-			selected, err := ledger.SelectCurrentResult(store, repository.Repository, command.String("item"))
+			selected, err := ledger.SelectCurrentResult(store, repository.Repository, command.String("slice"))
 			if err != nil {
 				return refuse(err)
 			}
@@ -112,7 +112,7 @@ func presentGuidance(repository setup.RepositoryContext, result ledger.CurrentRe
 // presentInvocation binds the explicit current-view presentation command.
 func presentInvocation(repository setup.RepositoryContext, item string) string {
 	q := skilldist.ShellQuote
-	return fmt.Sprintf("skl ledger present --repo %s --remote %s --item %s", q(repository.Root), q(repository.Remote), q(item))
+	return fmt.Sprintf("skl slice publish --repo %s --remote %s --slice %s", q(repository.Root), q(repository.Remote), q(item))
 }
 
 // presentFacts are one presentation outcome: the selected current result,
