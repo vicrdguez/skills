@@ -103,7 +103,17 @@ skl implement next --dispatch --wait --repo <path> [--worker-model <m>] [--worke
 
 A Dispatch claims a Slice like `next` but answers with two bound commands instead of the Execution Skill: a worker command (`skl <phase> resume … --dispatched`) that a fresh subagent runs, and a continue command that repeats the Dispatch with `--after <claim>`. Continuation first reads how that Claim ended and proceeds only after its phase handoff. A Claim still held or released without a handoff stops the Supervisor with the Claim untouched. Model and thinking values are passed through opaquely to the harness.
 
-Pi and OpenCode install `implement-loop`, `implement-team-loop` and `watchdog-loop` adapters. All use the runtime configuration and field-by-field precedence described above. Claude Code and Codex have no loop adapters. Pi workers retain ordinary extension-enabled subagent tool loading and scope: codemode is available when enabled under the normal Pi session configuration. Availability does not require the model to call it.
+Pi, OpenCode and Claude Code install both entry-point families, independently of local harness configuration:
+
+| Ordinary loop | Auto Mode loop | Optional arguments, in order |
+| --- | --- | --- |
+| `implement-loop` | `implement-auto` | worker-model, worker-thinking, reviewer-model, reviewer-thinking |
+| `implement-team-loop` | `implement-team-auto` | worker-model, worker-thinking, helper-model, helper-thinking, reviewer-model, reviewer-thinking |
+| `watchdog-loop` | `watchdog-auto` | worker-model, worker-thinking |
+
+Ordinary loops omit `--auto`; Auto Mode entries include it without needing any model/thinking arguments. Neither family has a positional auto toggle. Both start the same dispatch and waiting commands with their harness selector, using the runtime configuration and field-by-field precedence described above. Pi uses positional prompt arguments, OpenCode uses positional command arguments, and Claude Code uses named skill arguments (for example, `worker_model`). Omitted values remain configured or inherited. Direct CLI `next --auto` remains available. Codex has no loop/auto adapters.
+
+Pi workers retain ordinary extension-enabled subagent tool loading and scope: codemode is available when enabled under the normal Pi session configuration. Availability does not require the model to call it.
 
 ## Presenting a result
 

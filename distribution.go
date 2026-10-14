@@ -48,12 +48,15 @@ var adapters = []adapter{
 	{name: "watchdog", command: "skl watchdog next"},
 }
 
-// Loop adapters are installed only into pi and OpenCode. Their outcomes own
-// the continuation; the entry points only supply dispatch arguments.
+// Loop adapters use native argument-taking entry points. Their outcomes own
+// the continuation; the entry-point name selects the initial Auto Mode flag.
 var loopAdapters = []adapter{
-	{name: "implement-loop", command: "skl implement next --dispatch --wait", slots: []string{"worker-model", "worker-thinking", "reviewer-model", "reviewer-thinking", "auto"}, loop: true},
-	{name: "implement-team-loop", command: "skl implement next --mode team --dispatch --wait", slots: []string{"worker-model", "worker-thinking", "helper-model", "helper-thinking", "reviewer-model", "reviewer-thinking", "auto"}, loop: true},
-	{name: "watchdog-loop", command: "skl watchdog next --dispatch --wait", slots: []string{"worker-model", "worker-thinking", "auto"}, loop: true},
+	{name: "implement-loop", command: "skl implement next --dispatch --wait", slots: []string{"worker-model", "worker-thinking", "reviewer-model", "reviewer-thinking"}, loop: true},
+	{name: "implement-team-loop", command: "skl implement next --mode team --dispatch --wait", slots: []string{"worker-model", "worker-thinking", "helper-model", "helper-thinking", "reviewer-model", "reviewer-thinking"}, loop: true},
+	{name: "watchdog-loop", command: "skl watchdog next --dispatch --wait", slots: []string{"worker-model", "worker-thinking"}, loop: true},
+	{name: "implement-auto", command: "skl implement next --dispatch --wait --auto", slots: []string{"worker-model", "worker-thinking", "reviewer-model", "reviewer-thinking"}, loop: true},
+	{name: "implement-team-auto", command: "skl implement next --mode team --dispatch --wait --auto", slots: []string{"worker-model", "worker-thinking", "helper-model", "helper-thinking", "reviewer-model", "reviewer-thinking"}, loop: true},
+	{name: "watchdog-auto", command: "skl watchdog next --dispatch --wait --auto", slots: []string{"worker-model", "worker-thinking"}, loop: true},
 }
 
 // harness is where skl installs into one supported Agent Harness. A harness
@@ -66,22 +69,22 @@ type harness struct {
 	entryKeys  []string
 	// argument is the harness's placeholder for an adapter's argument at a
 	// 0-based position.
-	argument func(position int, flag, fallback string) string
+	argument func(position int, flag string) string
 	// slotKeys are the frontmatter lines that declare an adapter's arguments.
 	slotKeys func(slots []string) []string
 }
 
 var harnesses = []harness{
 	{name: "pi", skills: ".pi/agent/skills", entryPoint: ".pi/agent/prompts/%s.md", entryKeys: []string{"description"},
-		argument: func(position int, flag, fallback string) string {
-			return fmt.Sprintf("${%d:-%s}", position+1, fallback)
+		argument: func(position int, _ string) string {
+			return fmt.Sprintf("${%d:-}", position+1)
 		},
 		slotKeys: func(slots []string) []string { return []string{argumentHint(slots)} }},
 	{name: "codex", skills: ".codex/skills"},
 	// Claude Code keeps an unfilled positional placeholder verbatim, and expands
 	// an unfilled named one to nothing.
 	{name: "claude", skills: ".claude/skills", entryPoint: ".claude/skills/%s/SKILL.md", entryKeys: []string{"name", "description", "disable-model-invocation"},
-		argument: func(_ int, flag, _ string) string { return "$" + claudeArgument(flag) },
+		argument: func(_ int, flag string) string { return "$" + claudeArgument(flag) },
 		slotKeys: func(slots []string) []string {
 			names := make([]string, len(slots))
 			for i, flag := range slots {
@@ -90,7 +93,7 @@ var harnesses = []harness{
 			return []string{"arguments: [" + strings.Join(names, ", ") + "]", argumentHint(slots)}
 		}},
 	{name: "opencode", skills: ".config/opencode/skills", entryPoint: ".config/opencode/commands/%s.md", entryKeys: []string{"description"},
-		argument: func(position int, _, _ string) string { return fmt.Sprintf("$%d", position+1) }},
+		argument: func(position int, _ string) string { return fmt.Sprintf("$%d", position+1) }},
 }
 
 // claudeArgument is the Claude Code argument name of a flag.
@@ -108,11 +111,7 @@ func argumentHint(slots []string) string {
 func (target harness) entry(a adapter, frontmatter string) (command, keys, arguments string) {
 	command = a.command + " --harness " + target.name
 	for position, flag := range a.slots {
-		fallback := ""
-		if flag == "auto" {
-			fallback = "false"
-		}
-		value := target.argument(position, flag, fallback)
+		value := target.argument(position, flag)
 		if a.loop {
 			arguments += "- --" + flag + ": " + value + "\n"
 		} else {
@@ -136,7 +135,6 @@ type installData struct {
 	Frontmatter string
 	Loop        bool
 	Arguments   string
-	AutoSlot    bool
 	LegacyOwner []byte
 }
 
@@ -202,7 +200,7 @@ func install(home string, preview bool) (installer, error) {
 			}
 		}
 		available := adapters
-		if target.skills == ".pi/agent/skills" || target.skills == ".config/opencode/skills" {
+		if target.entryPoint != "" {
 			available = append(slices.Clone(adapters), loopAdapters...)
 		}
 		for _, a := range available {
@@ -219,7 +217,7 @@ func install(home string, preview bool) (installer, error) {
 			}
 			command, keys, arguments := target.entry(a, frontmatter)
 			adapterPath := filepath.Join(home, fmt.Sprintf(target.entryPoint, a.name))
-			data := installData{Command: command, Protocol: AdapterProtocol, Frontmatter: keys, Loop: a.loop, Arguments: arguments, AutoSlot: slices.Contains(a.slots, "auto")}
+			data := installData{Command: command, Protocol: AdapterProtocol, Frontmatter: keys, Loop: a.loop, Arguments: arguments}
 			if a.loop && target.skills == ".pi/agent/skills" {
 				data.LegacyOwner = piMarker
 			}
