@@ -6,4 +6,4 @@ Repair: restore its recorded intent.md in the intake; carry new obligations in a
 
 Make the repair, then rerun:
 
-`skl ledger amend --repo '/work/widgets' --proposal-dir '/tmp/amend-2/widget-search'`
+`skl proposal amend --repo '/work/widgets' --proposal-dir '/tmp/amend-2/widget-search'`

@@ -5,7 +5,7 @@ Turn the understanding the user confirmed in Explore into an accepted Proposal: 
 - Find Explore's user-confirmed final recap in this conversation, with every decision it names. It is your approved source for responsibilities, consequences, accepted limits and delegated choices. Without a confirmed recap, stop and suggest running `explore`; a superseded change also needs a fresh one.
 - When the user passes a reference, such as a spec path or an issue, read it in full.
 - Read `CONTEXT.md` and use its vocabulary. Respect the ADRs relevant to the change.
-- When the recap names an accepted Proposal to amend, this run is an **amendment**. Export that Proposal with `skl ledger export --repo <root> --proposal <proposal> --to <dir>` into an intake directory outside the source tree, and read its `proposal.json` and Contracts.
+- When the recap names an accepted Proposal to amend, this run is an **amendment**. Export that Proposal with `skl proposal export --repo <root> --proposal <proposal> --to <dir>` into an intake directory outside the source tree, and read its `proposal.json` and Contracts.
 
 Check: you hold the confirmed recap and every decision it names, and for an amendment, the exported intake.
 
@@ -101,7 +101,7 @@ In an amendment, the slices this step covers are the added and changed Slices th
    - `proposal.json`: `{"proposal": "<kebab-name>", "branch": "<optional Proposal Branch>", "parent_title": "<multi-slice only>", "slices": [{"name": "<slug>", "title": "<issue title>", "branch": "<planned source branch>", "depends": ["<sibling slug or proposals/<proposal>/<slice>"]}]}`;
    - one directory per slice, holding only its Contract documents.
    The Proposal Branch defaults to `proposal/<kebab-name>` when omitted. In an amendment, the edited export is the intake.
-4. Run `skl ledger accept --repo <root> --proposal-dir <dir> --issue <slice>=<body-file>`, repeating `--issue` per slice and adding `--parent-body <file>` for multi-slice work, and follow its outcome. Acceptance records the Proposal Branch and each planned Slice branch; it creates no branch or worktree. In an amendment, run `skl ledger amend --repo <root> --proposal-dir <dir> --issue <slice>=<body-file>` instead, repeating `--issue` per slice body from step 6 and adding `--parent-body <file>` for multi-slice work, and follow its outcome.
+4. Run `skl proposal accept --repo <root> --proposal-dir <dir> --issue <slice>=<body-file>`, repeating `--issue` per slice and adding `--parent-body <file>` for multi-slice work, and follow its outcome. Acceptance records the Proposal Branch and each planned Slice branch; it creates no branch or worktree. In an amendment, run `skl proposal amend --repo <root> --proposal-dir <dir> --issue <slice>=<body-file>` instead, repeating `--issue` per slice body from step 6 and adding `--parent-body <file>` for multi-slice work, and follow its outcome.
 5. Read each accepted or changed slice back with `skl ledger show --repo <root> --item <proposal>/<slice>`. Cite its ledger commit and path when you identify a document exactly.
 
 Check: the readback shows every accepted or changed slice's recorded documents.

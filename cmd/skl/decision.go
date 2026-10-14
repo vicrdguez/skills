@@ -31,7 +31,7 @@ type decisionOutput struct {
 	Packet     *skilldist.Packet        `json:"packet"`
 }
 
-func decisionCommands(newBackend backendFactory, stdout io.Writer) *cli.Command {
+func decisionCommands(stdout io.Writer) *cli.Command {
 	return &cli.Command{
 		Name:  "decision",
 		Usage: "Read the ledger-wide Decision Inbox and record explicitly scoped human direction",
@@ -58,15 +58,6 @@ func decisionCommands(newBackend backendFactory, stdout io.Writer) *cli.Command 
 				implementationFormatFlag(),
 			},
 			Action: func(command *cli.Context) error { return runDecisionApply(command, stdout) },
-		}, {
-			Name:  "retire",
-			Usage: "Explicitly retire a fully terminal, unclaimed proposal parent",
-			Flags: []cli.Flag{
-				&cli.StringFlag{Name: "project"},
-				&cli.StringFlag{Name: "proposal"},
-				implementationFormatFlag(),
-			},
-			Action: func(command *cli.Context) error { return runDecisionRetire(command, newBackend, stdout) },
 		}},
 	}
 }
@@ -250,13 +241,13 @@ func runDecisionRetire(command *cli.Context, newBackend backendFactory, stdout i
 	}
 	if command.NArg() != 0 {
 		return renderDecisionRefusal(stdout, format,
-			"decision retire takes flags, not positional arguments",
+			"proposal retire takes flags, not positional arguments",
 			"supply --project <name> and --proposal <name>")
 	}
 	project, proposal := command.String("project"), command.String("proposal")
 	if project == "" || proposal == "" {
 		return renderDecisionRefusal(stdout, format,
-			"decision retire requires --project <name> and --proposal <name>",
+			"proposal retire requires --project <name> and --proposal <name>",
 			"select the recorded Project and proposal whose every slice is terminal and unclaimed")
 	}
 	store, failure := openConfiguredLedger()

@@ -241,7 +241,7 @@ func TestDecisionRetirementGuardsPartialDelivery(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"skl decision retire --project 'atlas' --proposal 'old-repair'",
+		"skl proposal retire --project 'atlas' --proposal 'old-repair'",
 		"another slice is still claimed",
 		"release or complete the active slice before retiring",
 		"`repair/active`",

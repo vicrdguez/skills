@@ -61,7 +61,7 @@ func cleanupCommand(stdout io.Writer) *cli.Command {
 				return renderLedgerOutcome(stdout, format, ledgerOutcome{
 					Status: "fix_required",
 					Reason: "cleanup requires a configured ledger and an accepted Project for " + repository.Repository.Owner + "/" + repository.Repository.Name,
-					Repair: "configure skl/config.json with a ledger clone, then accept the Project with `skl ledger accept --repo <root> --proposal-dir <directory>` before running cleanup",
+					Repair: "configure skl/config.json with a ledger clone, then accept the Project with `skl proposal accept --repo <root> --proposal-dir <directory>` before running cleanup",
 					rerun:  rerun,
 				})
 			}

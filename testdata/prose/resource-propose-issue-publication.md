@@ -24,7 +24,7 @@ Check: every slice has a body file, plus a parent body for a multi-slice Proposa
 ## Publish
 
 ```
-skl ledger publish --repo '/work/widgets' --remote 'origin' --proposal 'widget-dashboard' --issue <slice>=<body-file> [--issue <slice>=<body-file> ...] [--parent-body <parent-body-file>]
+skl proposal publish --repo '/work/widgets' --remote 'origin' --proposal 'widget-dashboard' --issue <slice>=<body-file> [--issue <slice>=<body-file> ...] [--parent-body <parent-body-file>]
 ```
 
 Repeat `--issue` for each slice whose issue should be current. `skl` updates the issues it recorded, creates missing ones and groups children under the parent. Publish only through this command.
