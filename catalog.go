@@ -150,7 +150,6 @@ var skills = map[string]skill{
 	"explore":            {"procedures/explore.md", ""},
 	"implement":          {"procedures/implement.md", "documents/implement"},
 	"propose":            {"procedures/propose.md", "documents/propose"},
-	"shape":              {"procedures/shape.md", ""},
 	"testing":            {"craft/testing.md", "craft/testing"},
 	"watchdog":           {"procedures/watchdog.md", "documents/watchdog"},
 	"walkthrough":        {"procedures/walkthrough.md", ""},

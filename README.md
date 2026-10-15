@@ -22,7 +22,7 @@ Two projects shaped this and deserve the credit.
 
 [Matt Pocock's skills](https://github.com/mattpocock/skills) gave most of the judgment guidance. `writing-for-agents` came from his repo nearly verbatim. `explore` descends from his `grill-with-docs`: interview relentlessly, map a design tree, write durable ADRs and a glossary as you go. `design`, `domain` and `testing` follow the shape and reference material of his skills. All of them have since been rewritten once to fit this workflow ([ADR 0008](docs/adr/0008-compose-execution-skills-from-procedures-and-craft.md)), so they are adapted, not copied.
 
-What is mine is the rest: the engine, the private ledger, Claims, Watchdog Review as a separate fresh-context phase, Audit, the Decision Inbox, Supervisors and Dispatch, the harness adapters, Outcome Instructions, and the `brainstorm` and `shape` thinking tools.
+What is mine is the rest: the engine, the private ledger, Claims, Watchdog Review as a separate fresh-context phase, Audit, the Decision Inbox, Supervisors and Dispatch, the harness adapters, Outcome Instructions, and the `brainstorm` thinking tool.
 
 ## How a change flows
 
@@ -46,7 +46,7 @@ Each stage is a skill, entered cold and left behind at handoff. `propose` is the
 - **Frozen Contracts.** A Slice's Contract freezes at its first Claim. Before then, a renewed proposal may amend it, and the Amendment is recorded in the ledger; afterwards, changed obligations need a replacement Slice, not an edit.
 - **Tracer bullets.** Each Slice cuts a demoable path through its layers. A dependent Slice becomes eligible only once every blocker is merged.
 
-`brainstorm` and `shape` are optional thinking tools outside the pipeline. They preserve an open conversation or turn it into an implementation-independent design under `.thinking/`, which stays out of Git.
+`brainstorm` is an optional thinking tool outside the pipeline. It preserves an open conversation under `.thinking/`, which stays out of Git.
 
 Supporting Craft is available on its own: `design` (deep modules and seams), `domain` (glossary and ADRs), `testing` (behavioral evidence), `audit` (independent Standards and Contracts review) and `writing-for-agents`.
 
