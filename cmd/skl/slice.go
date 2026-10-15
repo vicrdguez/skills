@@ -11,9 +11,10 @@ import (
 	"github.com/vicrdguez/skills/setup"
 )
 
-func sliceCommands(stdout io.Writer) *cli.Command {
+func sliceCommands(newBackend backendFactory, stdout io.Writer) *cli.Command {
 	return &cli.Command{
-		Name: "slice",
+		Name:  "slice",
+		Usage: "Operate on an accepted Slice",
 		Subcommands: []*cli.Command{{
 			Name:  "show",
 			Usage: "Read a Slice's current Contract and report availability, or its current phase report",
@@ -69,6 +70,6 @@ func sliceCommands(stdout io.Writer) *cli.Command {
 						skilldist.ShellQuote(repository.Root), skilldist.ShellQuote(repository.Remote), skilldist.ShellQuote(item)),
 				})
 			},
-		}},
+		}, presentCommand(newBackend, stdout)},
 	}
 }
