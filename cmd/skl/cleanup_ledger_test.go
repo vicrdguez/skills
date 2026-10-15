@@ -406,13 +406,13 @@ func TestCleanupArchivesWholeTerminalProposals(t *testing.T) {
 	if readLedgerFile(t, fixture.clone, "projects/widgets/archive/widget/core/watchdog-report.md") != watchdog {
 		t.Fatal("review reference rewritten by archival")
 	}
-	shown, _ := cli.run(t, []string{"skl", "ledger", "show", "--repo", root, "--item", "widget/core", "--format", "json"})
+	shown, _ := cli.run(t, []string{"skl", "slice", "show", "--repo", root, "--slice", "widget/core", "--format", "json"})
 	if shown.Readback == nil || shown.Readback.State != ledger.Merged || shown.Readback.Documents[0].Path != "projects/widgets/archive/widget/core/behavior.md" {
 		t.Fatalf("archived identity not resolvable: %s", mustJSON(t, shown))
 	}
 	dependencies := map[string]string{}
 	for _, item := range []string{"consumer/uses-widget", "consumer/uses-dropped"} {
-		readback, _ := cli.run(t, []string{"skl", "ledger", "show", "--repo", root, "--item", item, "--format", "json"})
+		readback, _ := cli.run(t, []string{"skl", "slice", "show", "--repo", root, "--slice", item, "--format", "json"})
 		dependencies[readback.Readback.Dependencies[0].Item] = readback.Readback.Dependencies[0].State
 	}
 	if dependencies["proposals/widget/core"] != ledger.Merged || dependencies["proposals/mixed/dropped"] != ledger.Superseded {
