@@ -56,12 +56,16 @@ func TestMergeReadyMergesAtTheFinalHeadWithoutWritingState(t *testing.T) {
 	forge := &mergeForgeStub{commit: "squash"}
 	attempt := ledger.MergeReady(t.Context(), store, deliveryWidgets(), source.root, source.remote, deliveryPublicationItem, forge)
 	want := ledger.PullMerge{Number: 9, Branch: deliveryPublicationBranch, Head: source.head, Base: mergeProposalBranch}
-	if attempt.Status != ledger.MergeMerged || attempt.Commit != "squash" || len(forge.requests) != 1 || forge.requests[0] != want {
+	if attempt.Status != ledger.MergeMerged || attempt.Commit != "squash" || len(forge.requests) != 1 || forge.requests[0].Number != want.Number || forge.requests[0].Branch != want.Branch || forge.requests[0].Head != want.Head || forge.requests[0].Base != want.Base {
 		t.Fatalf("merge = %+v with requests %+v", attempt, forge.requests)
 	}
 	forge.err = errors.New("branch protection")
 	if refused := ledger.MergeReady(t.Context(), store, deliveryWidgets(), source.root, source.remote, deliveryPublicationItem, forge); refused.Status != ledger.MergeRefused || refused.Reason == "" {
 		t.Fatalf("forge refusal = %+v", refused)
+	}
+	forge.err = ledger.ErrMergeUncertain
+	if uncertain := ledger.MergeReady(t.Context(), store, deliveryWidgets(), source.root, source.remote, deliveryPublicationItem, forge); uncertain.Status != ledger.MergeUncertain {
+		t.Fatalf("uncertain merge = %+v", uncertain)
 	}
 	if after := deliveryGitOutput(t, l.root, "rev-parse", "HEAD"); after != before {
 		t.Fatal("a merge attempt wrote Workflow State")

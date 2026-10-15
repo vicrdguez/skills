@@ -7,7 +7,9 @@ Phase Report: `{{.Report.Path}}` at `{{.Report.Commit}}`
 {{template "outcome-notes" .Notes}}{{if .Present}}
 The pull request does not show this result yet. To present it later, without repeating the handoff, run `{{.Present}}`.
 {{end}}{{end}}
-{{- define "outcome-merge"}}Proposal Branch merge of `{{.Item}}`: {{if eq .Status "merged"}}squash-merged into `{{.Branch}}` as `{{.Commit}}`.{{else}}not merged, so it stays ready for a human to merge. Reason: {{.Reason}}{{end}}
+{{- define "outcome-merge"}}{{with .Review}}Review outcome: {{.}}.
+{{end}}{{with .Readiness}}Readiness recovery: {{.Status}} — {{.Detail}}
+{{end}}Proposal Branch merge of `{{.Item}}`: {{if eq .Status "merged"}}squash-merged into `{{.Branch}}` as `{{.Commit}}`.{{else if eq .Status "uncertain"}}merge outcome uncertain; a later poll can observe completion.{{else}}not merged; the Slice remains Ready for Merge. Reason: {{.Reason}}{{end}}
 {{end}}
 {{- define "outcome-merges"}}{{range .}}{{template "outcome-merge" .}}{{end}}{{if .}}
 {{end}}{{end}}
