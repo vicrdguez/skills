@@ -163,11 +163,11 @@ func TestBrowseDocumentsExposeCurrentAndArchivedEvidenceReadOnly(t *testing.T) {
 		t.Fatalf("--archived did not select the same-name archived Proposal: %+v", archivedSameName)
 	}
 
-	current := browseDocumentsJSON(t, app, output, "documents", "--project", "widgets", "--item", "orders/cancel")
+	current := browseDocumentsJSON(t, app, output, "documents", "--project", "widgets", "--slice", "orders/cancel")
 	if current.Status != "shown" || current.Documents == nil || current.Documents.Revision != fixture.currentRevision || current.Documents.Slice != "cancel" {
 		t.Fatalf("current Slice documents = %+v", current)
 	}
-	archivedSameNameSlice := browseDocumentsJSON(t, app, output, "documents", "--project", "widgets", "--item", "orders/cancel", "--archived")
+	archivedSameNameSlice := browseDocumentsJSON(t, app, output, "documents", "--project", "widgets", "--slice", "orders/cancel", "--archived")
 	if archivedSameNameSlice.Status != "shown" || archivedSameNameSlice.Documents == nil || !archivedSameNameSlice.Documents.Archived ||
 		!hasDocument(archivedSameNameSlice.Documents.Documents, ledger.ContractDocumentKind, "projects/widgets/archive/orders/cancel/intent.md") {
 		t.Fatalf("--archived did not select the same-name archived Slice: %+v", archivedSameNameSlice)
@@ -207,7 +207,7 @@ func TestBrowseDocumentsExposeCurrentAndArchivedEvidenceReadOnly(t *testing.T) {
 		t.Fatalf("archived Proposal documents = %+v", archived)
 	}
 
-	malformed := browseDocumentsJSON(t, app, output, "documents", "--project", "gadgets", "--item", "tools/hammer")
+	malformed := browseDocumentsJSON(t, app, output, "documents", "--project", "gadgets", "--slice", "tools/hammer")
 	if malformed.Status != "shown" || malformed.Documents == nil || !malformed.Documents.Incomplete {
 		t.Fatalf("malformed report metadata was not diagnosed: %+v", malformed)
 	}
@@ -235,7 +235,7 @@ func TestBrowseDocumentsExposeCurrentAndArchivedEvidenceReadOnly(t *testing.T) {
 		t.Errorf("readable malformed report availability = %+v", availability)
 	}
 	output.Reset()
-	if err := app.Run([]string{"skl", "browse", "documents", "--project", "gadgets", "--item", "tools/hammer"}); err != nil {
+	if err := app.Run([]string{"skl", "browse", "documents", "--project", "gadgets", "--slice", "tools/hammer"}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "watchdog for hammer — not yet available") ||
@@ -259,7 +259,7 @@ func TestBrowseDocumentsReportUnavailableOptionalReadFromTypedFact(t *testing.T)
 		t.Fatalf("remove report blob %s: %v", objectPath, err)
 	}
 
-	outcome := browseDocumentsJSON(t, app, output, "documents", "--project", "widgets", "--item", "orders/cancel")
+	outcome := browseDocumentsJSON(t, app, output, "documents", "--project", "widgets", "--slice", "orders/cancel")
 	if outcome.Documents == nil {
 		t.Fatalf("documents query returned no set: %+v", outcome)
 	}
@@ -269,7 +269,7 @@ func TestBrowseDocumentsReportUnavailableOptionalReadFromTypedFact(t *testing.T)
 		t.Fatalf("failed report read availability = %+v, want exact unavailable reference %+v", availability, wantReference)
 	}
 	output.Reset()
-	if err := app.Run([]string{"skl", "browse", "documents", "--project", "widgets", "--item", "orders/cancel"}); err != nil {
+	if err := app.Run([]string{"skl", "browse", "documents", "--project", "widgets", "--slice", "orders/cancel"}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "watchdog for cancel — unavailable; see diagnostic") ||
@@ -286,7 +286,7 @@ func TestBrowseDocumentsReportUnknownDecisionWhenStateIsMalformed(t *testing.T) 
 	runGit(t, fixture.ledger.clone, "add", statePath)
 	runGit(t, fixture.ledger.clone, "commit", "-q", "-m", "damage decision membership state")
 
-	outcome := browseDocumentsJSON(t, app, output, "documents", "--project", "widgets", "--item", "orders/cancel")
+	outcome := browseDocumentsJSON(t, app, output, "documents", "--project", "widgets", "--slice", "orders/cancel")
 	if outcome.Documents == nil {
 		t.Fatalf("documents query returned no set: %+v", outcome)
 	}
@@ -296,7 +296,7 @@ func TestBrowseDocumentsReportUnknownDecisionWhenStateIsMalformed(t *testing.T) 
 		t.Fatalf("malformed state decision availability = %+v, want unknown with state reference %+v", availability, wantState)
 	}
 	output.Reset()
-	if err := app.Run([]string{"skl", "browse", "documents", "--project", "widgets", "--item", "orders/cancel"}); err != nil {
+	if err := app.Run([]string{"skl", "browse", "documents", "--project", "widgets", "--slice", "orders/cancel"}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "Human Decision availability for cancel — unknown") {
@@ -404,7 +404,7 @@ func TestBrowseVersionsListExactContentChangesAndSelectHistoricalCLIBytes(t *tes
 	runGit(t, fixture.ledger.clone, "commit", "-q", "-m", "metadata-only version")
 	latest := browseDocumentsHead(t, fixture.ledger.clone)
 	runGit(t, fixture.ledger.clone, "commit", "--allow-empty", "-q", "-m", "unrelated ledger commit")
-	versions := browseDocumentsJSON(t, app, output, "versions", "--project", "widgets", "--item", "orders/cancel", "--phase", "implement")
+	versions := browseDocumentsJSON(t, app, output, "versions", "--project", "widgets", "--slice", "orders/cancel", "--phase", "implement")
 	if versions.Status != "shown" || versions.Versions == nil || versions.Versions.Incomplete || len(versions.Versions.Versions) != 2 ||
 		versions.Versions.Versions[0].Reference != (ledger.Reference{Commit: latest, Path: path}) ||
 		versions.Versions.Versions[1].Reference != (ledger.Reference{Commit: older, Path: path}) ||
@@ -416,7 +416,7 @@ func TestBrowseVersionsListExactContentChangesAndSelectHistoricalCLIBytes(t *tes
 		t.Fatalf("CLI historical selection = %+v", old)
 	}
 	output.Reset()
-	if err := app.Run([]string{"skl", "browse", "versions", "--project", "widgets", "--item", "orders/cancel", "--phase", "implement"}); err != nil {
+	if err := app.Run([]string{"skl", "browse", "versions", "--project", "widgets", "--slice", "orders/cancel", "--phase", "implement"}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "Ledger version: "+latest+":"+path) || !strings.Contains(output.String(), "Ledger version: "+older+":"+path) || !strings.Contains(output.String(), "Outcome: needs_human") {
@@ -429,7 +429,7 @@ func TestBrowseDocumentsRequiresUnambiguousSelection(t *testing.T) {
 	app, output := browseApp(t)
 	for _, args := range [][]string{
 		{"documents", "--project", "widgets"},
-		{"documents", "--project", "widgets", "--proposal", "orders", "--item", "orders/cancel"},
+		{"documents", "--project", "widgets", "--proposal", "orders", "--slice", "orders/cancel"},
 	} {
 		outcome := browseDocumentsJSON(t, app, output, args...)
 		if outcome.Status != "fix_required" || !strings.Contains(outcome.Reason, "exactly one") {

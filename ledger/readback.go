@@ -89,7 +89,7 @@ func ShowItem(store *Store, repository github.RepositoryID, item string) (*Readb
 	if err := readJSONAt(store, head, filepath.Join(directory, "state.json"), &state); err != nil {
 		return nil, refuse(
 			"no accepted record for "+item+" in project "+projectName+" at committed ledger head "+head,
-			"check the identity with the acceptance output, or supply an exact --commit and --path reference",
+			"check the identity with the acceptance output, or supply an exact reference with `skl ledger show --commit <ledger-commit> --path <ledger-path>`",
 		)
 	}
 	var meta ProposalMeta

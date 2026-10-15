@@ -59,13 +59,14 @@ Propose prepares an intake directory with `proposal.md`, `proposal.json` (name, 
 skl ledger accept --repo <path> --proposal-dir <dir> \
   --issue <slice>=<public-body.md> [--parent-body <parent.md>]
 skl ledger publish --repo <path> --proposal <proposal> --issue <slice>=<fresh-body.md>
-skl ledger show --repo <path> --item <proposal>/<slice>
+skl slice show --slice <proposal>/<slice> [--phase implement|watchdog] [--repo <path>] [--remote <name>] [--format markdown|json]
+skl ledger show --commit <ledger-commit> --path <ledger-path> [--format markdown|json]
 skl ledger export --repo <path> --proposal <proposal> --to <dir>
 skl ledger amend --repo <path> --proposal-dir <dir> \
   [--issue <slice>=<public-body.md>]... [--parent-body <parent.md>]
 ```
 
-`accept` freezes the Contracts under `projects/<repository>/` and commits locally, then attempts replication and issue publication. Unchanged acceptance is idempotent; a changed intake of an accepted Proposal is refused, and `amend` records it instead. A Project names exactly one source repository, and a different repository with the same name is refused. `publish` updates or creates the issues for an accepted proposal at any later time from freshly written prose. `show` returns the frozen Contract and the current report references; add `--phase implement` or `--phase watchdog` for a report body, or `--commit <sha> --path <ledger-path>` for any exact historical document. `export` writes one active accepted Proposal back out as an intake directory: `proposal.json` with the recorded Proposal Branch, parent title and every Slice's title, planned branch and Dependencies, `proposal.md`, and each Slice's frozen Contract files byte for byte. A Superseded Slice is declared with `"superseded": true`; acceptance refuses that flag on a new Proposal and compares it on re-acceptance, so accepting an unchanged export reports `existing`. Export reads the committed ledger head, names that commit in its outcome, changes no ledger record and contacts no forge. It refuses an unknown or archived Proposal (read archived records with `skl browse`) and a destination that exists and is not empty.
+`accept` freezes the Contracts under `projects/<repository>/` and commits locally, then attempts replication and issue publication. Unchanged acceptance is idempotent; a changed intake of an accepted Proposal is refused, and `amend` records it instead. A Project names exactly one source repository, and a different repository with the same name is refused. `publish` updates or creates the issues for an accepted proposal at any later time from freshly written prose. `slice show` returns the frozen Contract and the current report references; add `--phase implement` or `--phase watchdog` for a report body. `ledger show --commit <sha> --path <ledger-path>` reads any exact historical document, preserving its original contents rather than interpreting them. Raw `ledger show` has no Slice, phase or source-repository selectors. `export` writes one active accepted Proposal back out as an intake directory: `proposal.json` with the recorded Proposal Branch, parent title and every Slice's title, planned branch and Dependencies, `proposal.md`, and each Slice's frozen Contract files byte for byte. A Superseded Slice is declared with `"superseded": true`; acceptance refuses that flag on a new Proposal and compares it on re-acceptance, so accepting an unchanged export reports `existing`. Export reads the committed ledger head, names that commit in its outcome, changes no ledger record and contacts no forge. It refuses an unknown or archived Proposal (read archived records with `skl browse`) and a destination that exists and is not empty.
 
 `amend` takes an edited export of an accepted Proposal and records every difference from its committed record as one ledger commit whose message summarises the changes, or refuses and writes nothing. It may add Slices, recorded as acceptance records them and taking the Proposal's place in work selection; replace the Contract files, title or planned branch of a Slice that was never claimed (Ready for Implementation with no Claim, report, Submission or Human Decision; a Claim released without a handoff leaves none); change the Dependencies of any Slice that holds no Claim and is not Merged or Superseded; replace `proposal.md` or the parent title, so a single-Slice Proposal can grow into a multi-Slice one; and supersede, through `"superseded": true`, any Slice that holds no Claim and is not Merged, whatever its lifecycle. A superseded Slice keeps its Contract, reports, Submission and issue attachments, and only its `state.json` changes; no decision record is written and its issue and pull request are not contacted. Superseding a Needs Human Slice removes its request from the Decision Inbox, and a later answer to it is refused.
 
@@ -139,7 +140,7 @@ skl decision retire --project <p> --proposal <proposal>
 
 ## Browsing
 
-`skl browse` opens a terminal browser over the ledger: Projects, their Proposals (including the Proposal Branch as open or spent, or its absence for legacy records, and the Proposal Submission), and each Slice's state, Claim, dependencies, branch, attachments and the branch it merged into. It starts at the current checkout's Project when there is exactly one.
+`skl browse [--project <name>]` opens a terminal browser over the ledger: Projects, their Proposals (including the Proposal Branch as open or spent, or its absence for legacy records, and the Proposal Submission), and each Slice's state, Claim, dependencies, branch, attachments and the branch it merged into. It starts at the current checkout's Project when there is exactly one.
 
 To find Slices, `f` picks a lifecycle or Claim from the counted facts of the current Project (every Project from the overview), and `/` searches Project, Proposal and Slice names and Slice titles. The criteria narrow the same results together. In the results, `w` switches between the current Project and every Project, `g` groups by Proposal or lifecycle, `d` opens scrollable membership diagnostics (`esc` returns to results), and `enter` opens the Slice. Slices whose unreadable records leave a criterion undecided are listed apart, never counted as matches.
 
@@ -149,12 +150,15 @@ A Slice shows both Depends on and Blocks relationships, including targets in oth
 skl browse projects [--include-archived]
 skl browse project --project <name> [--include-archived]
 skl browse proposal --project <name> --proposal <proposal> [--archived]
-skl browse slice --project <name> --item <proposal>/<slice> [--archived]
-skl browse slices [--project <name>] [--lifecycle <state>]... [--claim implement|watchdog|none]... [--search <text>] [--group proposal|lifecycle] [--include-archived]
+skl browse slice --project <name> --slice <proposal>/<slice> [--archived]
+skl browse slices [--project <name>] [--lifecycle <state>]... [--claim-phase implement|watchdog|none]... [--search <text>] [--group proposal|lifecycle] [--include-archived]
 skl browse documents --project <name> --proposal <proposal> [--archived]
-skl browse documents --project <name> --item <proposal>/<slice> [--archived]
+skl browse documents --project <name> --slice <proposal>/<slice> [--archived]
+skl browse versions --project <name> --slice <proposal>/<slice> --phase implement|watchdog [--archived]
 skl browse document --commit <full-ledger-commit> --path <ledger-path>
 ```
+
+Every query above accepts `--format markdown|json`; bare `browse` is interactive and has no output-format flag.
 
 Detail queries prefer active records when active and archived Proposals share a name; `--archived` explicitly selects the archived one. `browse slice` exposes both relationship directions. A Dependency is satisfied only when its blocker is Merged into `main`, the dependent's own Proposal Branch, or another Proposal Branch whose Proposal records completion into `main`. A blocker Merged only into another open Proposal Branch does not unblock it. Missing or unreadable targets remain explicitly unresolved; reverse-dependency results disclose when unreadable records make them incomplete.
 

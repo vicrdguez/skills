@@ -92,7 +92,7 @@ func bindAuthoring(repository setup.RepositoryContext, outcome *ledger.Acceptanc
 		Continuation: "skl ledger publish " + selection + " --proposal " + skilldist.ShellQuote(outcome.Proposal),
 	}
 	for _, name := range names {
-		authoring.Readback = append(authoring.Readback, "skl ledger show "+selection+" --item "+skilldist.ShellQuote(outcome.Proposal+"/"+name))
+		authoring.Readback = append(authoring.Readback, "skl slice show "+selection+" --slice "+skilldist.ShellQuote(outcome.Proposal+"/"+name))
 		authoring.Continuation += " --issue " + skilldist.ShellQuote(name+"=") + "<body-file>"
 	}
 	if parent {
@@ -260,12 +260,8 @@ func ledgerCommands(newBackend backendFactory, stdout io.Writer) *cli.Command {
 			},
 		}, {
 			Name:  "show",
-			Usage: "Read accepted Contracts or inspect current and exact historical phase reports",
+			Usage: "Read one exact historical ledger document without interpreting its contents",
 			Flags: []cli.Flag{
-				&cli.PathFlag{Name: "repo", Value: ".", Usage: "Source repository whose Work Item to read"},
-				&cli.StringFlag{Name: "remote"},
-				&cli.StringFlag{Name: "item", Usage: "Accepted Work Item identity (<proposal>/<slice>)"},
-				&cli.StringFlag{Name: "phase", Usage: "Current report phase (implement or watchdog); requires --item"},
 				&cli.StringFlag{Name: "commit", Usage: "Full ledger commit for exact document retrieval"},
 				&cli.StringFlag{Name: "path", Usage: "Ledger-relative document path at --commit"},
 				implementationFormatFlag(),
@@ -280,45 +276,13 @@ func ledgerCommands(newBackend backendFactory, stdout io.Writer) *cli.Command {
 				if command.NArg() != 0 {
 					return fmt.Errorf("ledger show takes flags, not arguments")
 				}
-				item, phase, commit, path := command.String("item"), command.String("phase"), command.String("commit"), command.String("path")
-				explicit := commit != "" || path != ""
-				if item != "" && explicit {
-					return refuse(errors.New("ledger show takes either --item or an exact --commit with --path, not both; current --phase selection is available only with --item"))
-				}
-				if phase != "" && (item == "" || explicit) {
-					return refuse(errors.New("ledger show --phase is available only alongside --item; use --commit with --path to retrieve an exact historical document"))
-				}
-				if phase != "" && phase != ledger.ImplementPhase && phase != ledger.WatchdogPhase {
-					return refuse(errors.New("ledger show --phase must be implement or watchdog; omit --phase to inspect availability, or use --commit with --path for an exact historical document"))
-				}
-				if item == "" && (!explicit || commit == "" || path == "") {
-					return refuse(errors.New("ledger show requires --item <proposal>/<slice> or an exact --commit with --path; use the identity and readback command the acceptance reported"))
+				commit, path := command.String("commit"), command.String("path")
+				if commit == "" || path == "" {
+					return refuse(errors.New("ledger show requires an exact --commit with --path"))
 				}
 				store, failure := openConfiguredLedger()
 				if failure != nil {
 					return refuse(failure)
-				}
-				if item != "" {
-					repository, err := setup.ResolveRepository(command.Path("repo"), command.String("remote"))
-					if err != nil {
-						return refuse(err)
-					}
-					if phase != "" {
-						document, err := ledger.ShowReport(store, repository.Repository, item, phase)
-						if err != nil {
-							return refuse(err)
-						}
-						return renderLedgerOutcome(stdout, format, ledgerOutcome{Status: "shown", Document: &document})
-					}
-					readback, err := ledger.ShowItem(store, repository.Repository, item)
-					if err != nil {
-						return refuse(err)
-					}
-					return renderLedgerOutcome(stdout, format, ledgerOutcome{
-						Status: "shown", Readback: readback,
-						ReadbackCommand: fmt.Sprintf("skl ledger show --repo %s --remote %s --item %s",
-							skilldist.ShellQuote(repository.Root), skilldist.ShellQuote(repository.Remote), skilldist.ShellQuote(item)),
-					})
 				}
 				document, err := ledger.ShowReference(store, commit, path)
 				if err != nil {
@@ -578,7 +542,7 @@ func proposalFactsOf(repository setup.RepositoryContext, acceptance *ledger.Acce
 		view := sliceFacts{
 			Name: slice.Name, Title: slice.Title, Branch: slice.Branch, Dependencies: slice.Dependencies,
 			Issue:    attachmentWord(slice.Issue, slice.IssueStatus),
-			Readback: "skl ledger show --repo " + q(repository.Root) + " --remote " + q(repository.Remote) + " --item " + q(acceptance.Proposal+"/"+slice.Name),
+			Readback: "skl slice show --repo " + q(repository.Root) + " --remote " + q(repository.Remote) + " --slice " + q(acceptance.Proposal+"/"+slice.Name),
 		}
 		if slice.Issue != nil && slice.IssueStatus != nil {
 			view.IssuePublication = noteWord(slice.IssueStatus)
@@ -684,7 +648,7 @@ func gateUnsupportedDelivery(stdout io.Writer, format implementationFormatKind, 
 	return true, renderLedgerOutcome(stdout, format, ledgerOutcome{
 		Status: "unsupported",
 		Reason: operation + " is a legacy source-artifact operation and is unavailable for ledger-accepted work; this refusal grants no Claim and changes no source work",
-		Repair: "read the accepted Contract with `skl ledger show --item <proposal>/<slice>` and use the ledger-backed implement/watchdog commands for delivery; administrative cutover or cleanup requires human direction with normal workers stopped",
+		Repair: "read the accepted Contract with `skl slice show --slice <proposal>/<slice>` and use the ledger-backed implement/watchdog commands for delivery; administrative cutover or cleanup requires human direction with normal workers stopped",
 	})
 }
 
