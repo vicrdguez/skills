@@ -120,7 +120,7 @@ Pi workers retain ordinary extension-enabled subagent tool loading and scope: co
 ## Presenting a result
 
 ```sh
-skl ledger present --repo <path> --item <proposal>/<slice> [--public-body <fresh-prose.md>]
+skl slice publish --slice <proposal>/<slice> [--public-body <fresh-prose.md>] [--repo <path>] [--remote <name>] [--format markdown|json]
 ```
 
 Without `--public-body` it returns the current committed result with the Work Item's completed Review Count, private evidence references to its report and every ledger input that report consumed, and authoring guidance for a self-contained PR body. With one it pushes the recorded source revision (never forcing), opens or updates the pull request as the latest view of that result, and marks it ready only when the PR shows the reviewed final revision. It reruns no phase and changes no state; a pull request is a view of the local result, not a queue of updates.
