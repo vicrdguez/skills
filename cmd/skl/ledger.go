@@ -323,7 +323,7 @@ func ledgerCommands(newBackend backendFactory, stdout io.Writer) *cli.Command {
 				outcome.facts = outcome
 				return renderLedgerOutcome(stdout, format, outcome)
 			},
-		}, presentCommand(newBackend, stdout)},
+		}},
 	}
 }
 
