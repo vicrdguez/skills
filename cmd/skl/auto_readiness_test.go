@@ -74,6 +74,10 @@ func TestAutoReadinessMissingAssociationRequiresExplicitRecovery(t *testing.T) {
 	if len(polled.Merges) != 1 || !strings.Contains(polled.Merges[0].Reason, "explicit PR recovery") || polled.Merges[0].Status != ledger.MergeRefused {
 		t.Fatalf("missing association = %s", mustJSON(t, polled))
 	}
+	offline, err := deliveryNoForgeApp(t).deliveryJSON(t, "skl", "watchdog", "next", "--auto", "--repo", f.source, "--format", "json")
+	if err != nil || len(offline.Merges) != 1 || !strings.Contains(offline.Merges[0].Reason, "explicit PR recovery") || offline.Merges[0].Readiness == nil || offline.Merges[0].Review != "pass" {
+		t.Fatalf("offline missing association = %s, %v", mustJSON(t, offline), err)
+	}
 	f.pulls.mu.Lock()
 	defer f.pulls.mu.Unlock()
 	if len(f.pulls.requests) != 0 {
