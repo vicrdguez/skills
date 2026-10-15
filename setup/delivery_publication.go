@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/vicrdguez/skills/github"
 	"github.com/vicrdguez/skills/ledger"
@@ -64,13 +65,13 @@ func (b *GitHubBackend) PresentPull(ctx context.Context, presentation ledger.Pul
 }
 
 // locatePresentedPull resolves the single pull request the presentation
-// belongs to. An attached number is read and validated as-is; otherwise the
+// belongs to. An attached number is observed for exact-head convergence; otherwise the
 // open pull requests for the exact owner:branch and main base are listed to
 // completion. Anything already occupying the branch that is not the exact
 // expected source is a concrete refusal, never something to repair by guess.
 func (b *GitHubBackend) locatePresentedPull(ctx context.Context, repository github.RepositoryID, presentation ledger.PullPresentation) (*githubPull, error) {
 	if presentation.Number > 0 {
-		pull, err := b.pullForPresentation(ctx, repository, presentation.Number)
+		pull, err := b.observePresentedPull(ctx, repository, presentation.Number, presentation)
 		if err != nil {
 			return nil, err
 		}
@@ -174,7 +175,7 @@ type presentationAttempt struct {
 func (b *GitHubBackend) applyPresentedPull(ctx context.Context, repository github.RepositoryID, presentation ledger.PullPresentation, pull githubPull) (presentationAttempt, error) {
 	attempt := presentationAttempt{number: pull.Number, expected: presentation}
 	if presentation.Approved {
-		fresh, err := b.pullForPresentation(ctx, repository, pull.Number)
+		fresh, err := b.observePresentedPull(ctx, repository, pull.Number, presentation)
 		if err != nil {
 			return attempt, err
 		}
@@ -283,6 +284,49 @@ func (b *GitHubBackend) refreshPresentedPull(ctx context.Context, repository git
 	return pull.Number, nil
 }
 
+// observePresentedPull repeats only otherwise-correct observations of a stale
+// head. The expected head always comes from presentation, never the response.
+// Three observations and a five-second convergence budget bound the added work;
+// the first read retains the existing transport timeout and retries. Discovery,
+// creation, and post-write verification do not use this convergence policy.
+func (b *GitHubBackend) observePresentedPull(ctx context.Context, repository github.RepositoryID, number int, presentation ledger.PullPresentation) (*githubPull, error) {
+	pull, err := b.pullForPresentation(ctx, repository, number)
+	if err != nil {
+		return nil, err
+	}
+	if presentedPullIdentityMismatch(*pull, repository, presentation) != "" || presentation.Unpinned || pull.Head.SHA == presentation.Head {
+		return pull, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	for observation := 1; observation < 3; observation++ {
+		timer := time.NewTimer(250 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+		if err := presentationCurrent(presentation.Current); err != nil {
+			return nil, err
+		}
+		pull, err = b.pullForPresentation(ctx, repository, number)
+		if err != nil {
+			return nil, err
+		}
+		if presentedPullIdentityMismatch(*pull, repository, presentation) != "" || pull.Head.SHA == presentation.Head {
+			break
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := presentationCurrent(presentation.Current); err != nil {
+		return nil, err
+	}
+	return pull, nil
+}
+
 // pullForPresentation reads one pull request and refuses a response that does
 // not carry the requested stable number.
 func (b *GitHubBackend) pullForPresentation(ctx context.Context, repository github.RepositoryID, number int) (*githubPull, error) {
@@ -318,6 +362,18 @@ func (b *GitHubBackend) listPresentedPulls(ctx context.Context, repository githu
 // the exact planned branch, repository, base, head, and open state. An empty
 // result means the pull request is the exact attachment the presentation owns.
 func presentedPullMismatch(pull githubPull, repository github.RepositoryID, presentation ledger.PullPresentation) string {
+	if reason := presentedPullIdentityMismatch(pull, repository, presentation); reason != "" {
+		return reason
+	}
+	if !presentation.Unpinned && pull.Head.SHA != presentation.Head {
+		return fmt.Sprintf("pull request #%d presents source head %s, not the expected %s", pull.Number, pull.Head.SHA, presentation.Head)
+	}
+	return ""
+}
+
+// Identity failures take precedence over head lag: a different attachment or
+// non-open pull request is not eligible for convergence.
+func presentedPullIdentityMismatch(pull githubPull, repository github.RepositoryID, presentation ledger.PullPresentation) string {
 	switch {
 	case pull.Head.Ref != presentation.Branch:
 		return fmt.Sprintf("pull request #%d tracks branch %q, not the planned %q", pull.Number, pull.Head.Ref, presentation.Branch)
@@ -325,8 +381,6 @@ func presentedPullMismatch(pull githubPull, repository github.RepositoryID, pres
 		return fmt.Sprintf("pull request #%d has source repository %q, not %q", pull.Number, pull.Head.Repo.FullName, repository.Owner+"/"+repository.Name)
 	case pull.Base.Ref != presentation.Base:
 		return fmt.Sprintf("pull request #%d targets base %q, not %q", pull.Number, pull.Base.Ref, presentation.Base)
-	case !presentation.Unpinned && pull.Head.SHA != presentation.Head:
-		return fmt.Sprintf("pull request #%d presents source head %s, not the expected %s", pull.Number, pull.Head.SHA, presentation.Head)
 	case pull.State != "open":
 		return fmt.Sprintf("pull request #%d is %s, not open", pull.Number, pull.State)
 	}
