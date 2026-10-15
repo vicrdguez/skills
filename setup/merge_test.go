@@ -3,6 +3,7 @@ package setup
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +18,7 @@ import (
 type mergeForge struct {
 	head, mergeSHA string
 	refusal        string
+	lostResponse   bool
 	merges         []map[string]string
 }
 
@@ -42,9 +44,38 @@ func (f *mergeForge) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		f.mergeSHA = "squash"
+		if f.lostResponse {
+			http.Error(w, "response lost after merge", http.StatusServiceUnavailable)
+			return
+		}
 		_, _ = fmt.Fprint(w, `{"sha":"squash","merged":true}`)
 	default:
 		http.Error(w, "unexpected "+r.Method+" "+r.URL.Path, http.StatusNotFound)
+	}
+}
+
+func TestMergePullReportsUncertaintyAndChecksAuthorityBeforeEffect(t *testing.T) {
+	for _, uncertain := range []bool{true, false} {
+		t.Run(map[bool]string{true: "lost response", false: "superseded"}[uncertain], func(t *testing.T) {
+			forge := &mergeForge{head: "final", lostResponse: uncertain}
+			server := httptest.NewServer(http.HandlerFunc(forge.serve))
+			defer server.Close()
+			merge := ledger.PullMerge{Number: 7, Branch: "widget", Head: "final", Base: "proposal/feature"}
+			if !uncertain {
+				merge.Current = func() error { return errors.New("newer authority") }
+			}
+			commit, err := deliveryBackend(server).MergePull(t.Context(), merge)
+			if commit != "" || err == nil {
+				t.Fatalf("unconfirmed merge = %q, %v", commit, err)
+			}
+			if uncertain {
+				if !errors.Is(err, ledger.ErrMergeUncertain) || len(forge.merges) != 1 {
+					t.Fatalf("uncertain merge = %v, requests %v", err, forge.merges)
+				}
+			} else if len(forge.merges) != 0 {
+				t.Fatal("superseded authority reached merge effect")
+			}
+		})
 	}
 }
 

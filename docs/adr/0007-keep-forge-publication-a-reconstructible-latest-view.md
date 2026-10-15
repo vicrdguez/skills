@@ -30,6 +30,24 @@ Command spelling, internal helper structure, and bounded retry parameters are de
 
 Use existing Go verification tools and controlled Git/HTTP seams to establish the agreed behavior and failure modes, including interrupted publication followed by newer local work, preservation of local outcomes, bounded retries and uncertain creates, safe source publication, temporary stale presentation, and private report retrieval. Verify the absence of the prohibited durable publication machinery rather than merely renaming the old recovery protocol. ADR0005 continues to govern contract-grounded verification.
 
+## Readiness-only Auto Mode recovery
+
+Later Auto Mode polls may reconcile an established Slice PR's native readiness
+from the current PASS without publishing its review account. This is separate
+from full body presentation: it neither receives nor retains public prose,
+writes a body/title, exports private reports, discovers/creates a PR, nor repairs
+an association. Existing prose, including stale implementation text or human
+edits, is preserved and is not made authoritative. Readiness-only success does
+not establish successful publication of the latest review narrative.
+
+Each attempt reselects current authority, checks the recorded attachment and
+actual remote source at final Source.Head (not Source.Reviewed), and stops on
+observable invalidation before further effects. It never pushes or restores
+source and adds no persistent recovery machinery. Head-only API lag uses bounded
+exact-head convergence; uncertain readiness effects/readback remain uncertain.
+A later poll re-observes current state. Forge failure cannot undo local PASS;
+neither eventual success nor cross-system atomicity is promised.
+
 ## Why this boundary is explicit
 
 W3 in PR #78 demonstrated an interrupted implementation-publication reservation surviving a later local Watchdog handoff. Ordinary recovery refused the reservation, while explicit reconciliation refused because it referred to an older report. The human wanted the latest Watchdog result, not recovery of obsolete implementation prose. A protocol requiring the obsolete attempt to be resolved before newer presentation could proceed imposed an unintended architectural and operational burden.

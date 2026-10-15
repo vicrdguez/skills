@@ -521,5 +521,10 @@ func TestAgentProseGoldens(t *testing.T) {
 	}
 	g.check("setup-agents-block", setup.AgentsBlock)
 
+	// A fresh Auto poll reconciles a stranded Slice without its worker prose.
+	recovery := newAutoMergeFixture(t, true)
+	recovery.pass(t, false, false)
+	g.replace(recovery.source, "<recovery-source>")
+	g.capture("outcome-watchdog-auto-readiness", presentForgeApp(t, recovery.pulls), "watchdog", "next", "--auto", "--repo", recovery.source)
 	g.finish()
 }

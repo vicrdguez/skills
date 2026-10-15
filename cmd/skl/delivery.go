@@ -321,12 +321,12 @@ func retryMerges(ctx context.Context, store *ledger.Store, repository setup.Repo
 	forge, unavailable := mergeForge(repository, newBackend)
 	merged := false
 	for _, item := range pending {
+		attempt := ledger.RecoverAndMergeReady(ctx, store, repository.Repository, repository.Root, repository.Remote, item, forge)
 		if unavailable != "" {
-			merges[item] = ledger.RefusedMerge(item, unavailable)
-			continue
+			attempt.Reason += "; " + unavailable
 		}
-		merges[item] = ledger.MergeReady(ctx, store, repository.Repository, repository.Root, repository.Remote, item, forge)
-		merged = merged || merges[item].Status == ledger.MergeMerged
+		merges[item] = attempt
+		merged = merged || attempt.Status == ledger.MergeMerged
 	}
 	return merged, nil
 }
