@@ -27,11 +27,19 @@ type autoMergeFixture struct {
 // Proposal Branch when autoImplement is set; otherwise the Slice targets main.
 func newAutoMergeFixture(t *testing.T, autoImplement bool) *autoMergeFixture {
 	t.Helper()
+	return newAutoMergeProposalFixture(t, autoImplement, singleSlice(deliveryTestProposal))
+}
+
+func newAutoMergeProposalFixture(t *testing.T, autoImplement bool, spec proposalSpec) *autoMergeFixture {
+	t.Helper()
 	ledgerFixture := newLedgerFixture(t)
 	source, _ := deliverySourceRepo(t)
 	bare := routeSourcePushes(t)
 	runGit(t, source, "push", "-q", "origin", "main")
-	deliveryAcceptFixture(t, newForgeServer(t), source)
+	accepted := newLedgerApp(t, newForgeServer(t)).accept(t, source, writeProposal(t, "", spec))
+	if accepted.Status != "accepted" {
+		t.Fatalf("acceptance = %s", mustJSON(t, accepted))
+	}
 	pulls := newPullServer(t, bare)
 	f := &autoMergeFixture{clone: ledgerFixture.clone, source: source, bare: bare, pulls: pulls, cli: presentForgeApp(t, pulls)}
 	next := []string{"skl", "implement", "next", "--repo", source, "--format", "json"}

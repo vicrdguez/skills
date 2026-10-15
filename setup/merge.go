@@ -43,11 +43,18 @@ func (b *GitHubBackend) MergePull(ctx context.Context, merge ledger.PullMerge) (
 		Merged bool   `json:"merged"`
 	}
 	path := b.repositoryPath(b.repository) + fmt.Sprintf("/pulls/%d/merge", merge.Number)
-	if err := b.request(ctx, http.MethodPut, path, map[string]string{"merge_method": "squash", "sha": merge.Head}, &merged); err != nil {
+	if err := presentationCurrent(merge.Current); err != nil {
+		return "", err
+	}
+	status, err := b.requestStatus(ctx, http.MethodPut, path, map[string]string{"merge_method": "squash", "sha": merge.Head}, &merged)
+	if err != nil {
+		if transientPresentationFailure(status, err) {
+			return "", fmt.Errorf("%w: %v", ledger.ErrMergeUncertain, err)
+		}
 		return "", err
 	}
 	if !merged.Merged || merged.SHA == "" {
-		return "", fmt.Errorf("GitHub did not confirm the merge of pull request #%d", merge.Number)
+		return "", fmt.Errorf("%w: GitHub did not confirm the merge of pull request #%d", ledger.ErrMergeUncertain, merge.Number)
 	}
 	return merged.SHA, nil
 }

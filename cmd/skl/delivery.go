@@ -325,7 +325,7 @@ func retryMerges(ctx context.Context, store *ledger.Store, repository setup.Repo
 			merges[item] = ledger.RefusedMerge(item, unavailable)
 			continue
 		}
-		merges[item] = ledger.MergeReady(ctx, store, repository.Repository, repository.Root, repository.Remote, item, forge)
+		merges[item] = ledger.RecoverAndMergeReady(ctx, store, repository.Repository, repository.Root, repository.Remote, item, forge)
 		merged = merged || merges[item].Status == ledger.MergeMerged
 	}
 	return merged, nil

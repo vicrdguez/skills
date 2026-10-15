@@ -39,6 +39,9 @@ type pullServer struct {
 	readiness []string
 	// mergeRefusal, when set, is the reason the forge refuses every merge.
 	mergeRefusal string
+	// headOverride simulates a stale API view independently of actual Git.
+	headOverride   string
+	failAfterReady bool
 }
 
 func newPullServer(t *testing.T, bare string) *pullServer {
@@ -53,6 +56,9 @@ func (p *pullServer) record(number int) map[string]any {
 	pull := p.pulls[number]
 	branch := pull["branch"].(string)
 	sha := strings.TrimSpace(runGitOutput(p.t, p.bare, "rev-parse", "refs/heads/"+branch))
+	if p.headOverride != "" {
+		sha = p.headOverride
+	}
 	merged, _ := pull["merge_sha"].(string)
 	state, mergedAt := "open", any(nil)
 	if merged != "" {
@@ -109,6 +115,10 @@ func (p *pullServer) serve(w http.ResponseWriter, r *http.Request) {
 		fmt.Sscanf(strings.TrimPrefix(r.URL.Path, "/repos/acme/widgets/pulls/"), "%d", &number)
 		if p.pulls[number] == nil {
 			http.NotFound(w, r)
+			return
+		}
+		if r.Method == http.MethodGet && p.failAfterReady && p.pulls[number]["draft"] == false {
+			http.Error(w, "readback unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		if r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/merge") {
