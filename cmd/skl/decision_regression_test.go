@@ -137,11 +137,11 @@ func TestDecisionRetirementRefusesAllMerged(t *testing.T) {
 	})
 	cli := decisionReadOnlyApp(t)
 	before := ledgerSnapshot(t, fixture.clone)
-	out := cli.decisionJSON(t, "skl", "decision", "retire", "--project", "widgets", "--proposal", "delivered-work", "--format", "json")
+	out := cli.decisionJSON(t, "skl", "proposal", "retire", "--project", "widgets", "--proposal", "delivered-work", "--format", "json")
 	if out.Status != string(skilldist.DecisionRefused) || !strings.Contains(out.Facts.Retirement.Reason, "no Superseded") {
 		t.Fatalf("all-delivered proposal was retired as abandoned work: %#v", out)
 	}
-	text, err := cli.deliveryRun(t, "skl", "decision", "retire", "--project", "widgets", "--proposal", "delivered-work")
+	text, err := cli.deliveryRun(t, "skl", "proposal", "retire", "--project", "widgets", "--proposal", "delivered-work")
 	if err != nil || !strings.Contains(text, "no Superseded") || strings.Contains(text, "The parent is retired.") {
 		t.Fatalf("retirement transports disagree: %s / %v", text, err)
 	}

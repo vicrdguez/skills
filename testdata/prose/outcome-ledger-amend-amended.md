@@ -21,6 +21,6 @@ Issues not presented, for lack of a supplied body: `foundation`.
 
 Some issues lack public prose. To publish them, write fresh prose following `skl skill --resource issue-publication.md --input 'proposal=widget-share' --input 'project=widgets' --input 'repo=/work/widgets' --input 'remote=origin' propose`, then run:
 
-`skl ledger publish --repo '/work/widgets' --remote 'origin' --proposal 'widget-share' --issue 'foundation='<body-file>`
+`skl proposal publish --repo '/work/widgets' --remote 'origin' --proposal 'widget-share' --issue 'foundation='<body-file>`
 
 Next, read each listed slice back with its readback command.

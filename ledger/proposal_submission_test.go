@@ -301,7 +301,7 @@ func TestRetiringProposalWithClosedSubmissionSpendsItsBranch(t *testing.T) {
 	}
 }
 
-// A human may merge the Proposal Submission and run decision retire before
+// A human may merge the Proposal Submission and run proposal retire before
 // any status observes the merge; the merge still completes the Proposal.
 func TestRetiringMergedProposalSubmissionIsRefusedAndCompletionStillObserved(t *testing.T) {
 	l := openProposalLedger(t, map[string]string{"api": ledger.Merged})

@@ -279,10 +279,10 @@ func newLedgerApp(t *testing.T, forge *forgeServer) ledgerCLI {
 	return ledgerCLI{app: newApp(factory, bytes.NewReader(nil), &output, &output), out: &output}
 }
 
-// accept runs skl ledger accept and returns the parsed JSON outcome.
+// accept runs skl proposal accept and returns the parsed JSON outcome.
 func (c ledgerCLI) accept(t *testing.T, repo, directory string, issueFlags ...string) ledgerOutcome {
 	t.Helper()
-	args := append([]string{"skl", "ledger", "accept", "--repo", repo, "--proposal-dir", directory, "--format", "json"}, issueFlags...)
+	args := append([]string{"skl", "proposal", "accept", "--repo", repo, "--proposal-dir", directory, "--format", "json"}, issueFlags...)
 	outcome, text := c.run(t, args)
 	_ = text
 	return outcome
@@ -525,7 +525,7 @@ func TestLedgerConfigurationRefusals(t *testing.T) {
 			default:
 				fixture.misconfigure(t, body)
 			}
-			args := []string{"skl", "ledger", "accept", "--repo", root, "--proposal-dir", directory, "--format", "json"}
+			args := []string{"skl", "proposal", "accept", "--repo", root, "--proposal-dir", directory, "--format", "json"}
 			outcome, text := cli.run(t, args)
 			if outcome.Status != "fix_required" || outcome.Reason == "" || outcome.Repair == "" {
 				t.Fatalf("%s did not refuse with a concrete repair: %s", name, text)
@@ -766,7 +766,7 @@ func TestAcceptRefusesInvalidDeclarations(t *testing.T) {
 			spec.name = "invalid-case"
 			testCase.mutate(&spec)
 			directory := writeProposal(t, "", spec)
-			outcome, text := cli.run(t, []string{"skl", "ledger", "accept", "--repo", root, "--proposal-dir", directory, "--format", "json"})
+			outcome, text := cli.run(t, []string{"skl", "proposal", "accept", "--repo", root, "--proposal-dir", directory, "--format", "json"})
 			if outcome.Status != "fix_required" || !strings.Contains(outcome.Reason, testCase.reason) {
 				t.Fatalf("refusal did not name %q: %s", testCase.reason, text)
 			}
@@ -803,7 +803,7 @@ func TestAcceptRefusesMalformedDeclarations(t *testing.T) {
 			if body != "" {
 				writeFile(t, filepath.Join(directory, "proposal.json"), body)
 			}
-			outcome, _ := cli.run(t, []string{"skl", "ledger", "accept", "--repo", root, "--proposal-dir", directory, "--format", "json"})
+			outcome, _ := cli.run(t, []string{"skl", "proposal", "accept", "--repo", root, "--proposal-dir", directory, "--format", "json"})
 			if outcome.Status != "fix_required" {
 				t.Fatalf("%s did not refuse: %s", name, mustJSON(t, outcome))
 			}
@@ -1236,7 +1236,7 @@ func TestPublicationFailuresAreReportedWithoutPublicationState(t *testing.T) {
 		}
 	}
 	acceptanceCommits := runGitOutput(t, fixture.clone, "log", "--format=%H", "--grep=^accept ")
-	publication, _ := cli.run(t, []string{"skl", "ledger", "publish", "--repo", root, "--proposal", "partial-publication", "--format", "json",
+	publication, _ := cli.run(t, []string{"skl", "proposal", "publish", "--repo", root, "--proposal", "partial-publication", "--format", "json",
 		"--issue=" + missing + "=" + writeTemp(t, t, "fresh body\n"),
 		"--parent-body=" + writeTemp(t, t, "fresh parent body\n")})
 	if publication.Status != "attempted" || publication.Publication == nil || publication.Publication.ParentIssue == nil {
@@ -1310,7 +1310,7 @@ func TestUncertainIssueCreationIsReportedWithoutRetry(t *testing.T) {
 			forge.mu.Lock()
 			forge.drop, forge.truncate = nil, nil
 			forge.mu.Unlock()
-			later, _ := cli.run(t, []string{"skl", "ledger", "publish", "--repo", root, "--proposal", "uncertain-work", "--format", "json",
+			later, _ := cli.run(t, []string{"skl", "proposal", "publish", "--repo", root, "--proposal", "uncertain-work", "--format", "json",
 				"--issue=foundation=" + writeTemp(t, t, "fresh body\n")})
 			if later.Publication == nil || later.Publication.Slices[0].Issue == nil || later.Publication.Slices[0].IssueStatus.Status != ledger.IssueCreated {
 				t.Fatalf("later explicit publication did not publish the current view: %s", mustJSON(t, later))
@@ -1657,7 +1657,7 @@ func TestConcurrentAcceptanceHelper(t *testing.T) {
 	}
 	app := newApp(factory, bytes.NewReader(nil), &output, &output)
 	arguments := []string{
-		"skl", "ledger", "accept",
+		"skl", "proposal", "accept",
 		"--repo", os.Getenv("SKL_CONCURRENT_ACCEPT_REPO"),
 		"--proposal-dir", os.Getenv("SKL_CONCURRENT_ACCEPT_PROPOSAL"),
 		"--format", "json",
@@ -1797,7 +1797,7 @@ func TestLaterPublicationCompletesCurrentParentGrouping(t *testing.T) {
 		}
 	}
 	cli.out.Reset()
-	if err := cli.app.Run([]string{"skl", "ledger", "publish", "--repo", root, "--proposal", "grouping-retry"}); err != nil {
+	if err := cli.app.Run([]string{"skl", "proposal", "publish", "--repo", root, "--proposal", "grouping-retry"}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(cli.out.String(), "Parent grouping: failed") {
@@ -1810,7 +1810,7 @@ func TestLaterPublicationCompletesCurrentParentGrouping(t *testing.T) {
 	forge.fail = nil
 	forge.mu.Unlock()
 	parent := first.Acceptance.ParentIssue.Number
-	repeat, _ := cli.run(t, []string{"skl", "ledger", "publish", "--repo", root, "--proposal", "grouping-retry", "--format", "json",
+	repeat, _ := cli.run(t, []string{"skl", "proposal", "publish", "--repo", root, "--proposal", "grouping-retry", "--format", "json",
 		"--issue=" + missing.Name + "=" + writeTemp(t, t, "fresh child body\n")})
 	if repeat.Publication.ParentIssue == nil || repeat.Publication.ParentIssue.Number != parent || forge.createdCount() != 3 {
 		t.Fatalf("later publication did not reuse the parent and create only the missing child: %s (%d creates)", mustJSON(t, repeat), forge.createdCount())
@@ -2051,7 +2051,7 @@ func TestExplicitPublicationAfterInterruptedAttemptAndLocalProgress(t *testing.T
 		requests++
 		requireLedgerUnlocked(t, fixture.clone)
 	}
-	publication, _ := cli.run(t, []string{"skl", "ledger", "publish", "--repo", root, "--proposal", "interrupted-work", "--format", "json",
+	publication, _ := cli.run(t, []string{"skl", "proposal", "publish", "--repo", root, "--proposal", "interrupted-work", "--format", "json",
 		"--issue=foundation=" + writeTemp(t, t, "current foundation prose\n"),
 		"--issue=feature=" + writeTemp(t, t, "current feature prose\n"),
 		"--parent-body=" + writeTemp(t, t, "current parent prose\n")})
@@ -2117,7 +2117,7 @@ func TestPublicationReportsSupersededAndConflictingAttachments(t *testing.T) {
 			record["issue"] = map[string]any{"repository": "acme/widgets", "number": 900}
 			commitLedgerRecord(t, fixture.clone, featurePath, mustJSON(t, record)+"\n")
 		}
-		outcome, _ := cli.run(t, []string{"skl", "ledger", "publish", "--repo", root, "--proposal", "superseded-work", "--format", "json",
+		outcome, _ := cli.run(t, []string{"skl", "proposal", "publish", "--repo", root, "--proposal", "superseded-work", "--format", "json",
 			"--issue=feature=" + writeTemp(t, t, "feature prose\n"),
 			"--issue=foundation=" + writeTemp(t, t, "foundation prose\n")})
 		if forge.createdCount() != 1 || len(forge.updatedIssues()) != 0 {
@@ -2152,7 +2152,7 @@ func TestPublicationReportsSupersededAndConflictingAttachments(t *testing.T) {
 			record["issue"] = map[string]any{"repository": "acme/widgets", "number": 900}
 			commitLedgerRecord(t, fixture.clone, statePath, mustJSON(t, record)+"\n")
 		}
-		outcome, _ := cli.run(t, []string{"skl", "ledger", "publish", "--repo", root, "--proposal", "conflicting-work", "--format", "json",
+		outcome, _ := cli.run(t, []string{"skl", "proposal", "publish", "--repo", root, "--proposal", "conflicting-work", "--format", "json",
 			"--issue=foundation=" + writeTemp(t, t, "foundation prose\n")})
 		slice := outcome.Publication.Slices[0]
 		if slice.IssueStatus == nil || slice.IssueStatus.Status != ledger.IssueConflict || slice.Issue == nil || slice.Issue.Number != 900 || !strings.Contains(slice.IssueStatus.Detail, "#101") {
@@ -2243,7 +2243,7 @@ func TestGroupingRevalidatesSelectedRecords(t *testing.T) {
 			}
 			forge.mu.Unlock()
 
-			outcome, _ := cli.run(t, []string{"skl", "ledger", "publish", "--repo", root, "--proposal", "group-check", "--format", "json"})
+			outcome, _ := cli.run(t, []string{"skl", "proposal", "publish", "--repo", root, "--proposal", "group-check", "--format", "json"})
 			forge.mu.Lock()
 			grouped := append([]int(nil), forge.children[parent]...)
 			forge.mu.Unlock()
@@ -2287,7 +2287,7 @@ func TestGroupingRevalidatesSelectedRecords(t *testing.T) {
 			commitLedgerRecord(t, fixture.clone, statePath, mustJSON(t, record)+"\n")
 		}
 		forge.mu.Unlock()
-		outcome, _ := cli.run(t, []string{"skl", "ledger", "publish", "--repo", root, "--proposal", "new-child-check", "--format", "json", issueFile(t, "feature", "feature\n")})
+		outcome, _ := cli.run(t, []string{"skl", "proposal", "publish", "--repo", root, "--proposal", "new-child-check", "--format", "json", issueFile(t, "feature", "feature\n")})
 		forge.mu.Lock()
 		grouped := append([]int(nil), forge.children[parent]...)
 		forge.mu.Unlock()
@@ -2331,7 +2331,7 @@ func TestUpdateRetryStopsAfterSupersession(t *testing.T) {
 		return http.StatusServiceUnavailable
 	}
 	forge.mu.Unlock()
-	outcome, _ := cli.run(t, []string{"skl", "ledger", "publish", "--repo", root, "--proposal", "retry-check", "--format", "json", issueFile(t, "foundation", "current\n")})
+	outcome, _ := cli.run(t, []string{"skl", "proposal", "publish", "--repo", root, "--proposal", "retry-check", "--format", "json", issueFile(t, "foundation", "current\n")})
 	forge.mu.Lock()
 	sent := patches
 	forge.mu.Unlock()
@@ -2371,7 +2371,7 @@ func TestPublicationRefusesAttachmentsOfAnotherRepository(t *testing.T) {
 		forge.mu.Unlock()
 		head := strings.TrimSpace(runGitOutput(t, fixture.clone, "rev-parse", "HEAD"))
 
-		outcome, _ := cli.run(t, []string{"skl", "ledger", "publish", "--repo", root, "--proposal", "identity-check", "--format", "json",
+		outcome, _ := cli.run(t, []string{"skl", "proposal", "publish", "--repo", root, "--proposal", "identity-check", "--format", "json",
 			issueFile(t, "foundation", "current\n"), "--parent-body=" + writeTemp(t, t, "parent\n")})
 		if len(forge.updatedIssues()) != 0 {
 			t.Fatalf("publication mutated a same-numbered issue: updated %v", forge.updatedIssues())
@@ -2412,7 +2412,7 @@ func TestPublicationRefusesAttachmentsOfAnotherRepository(t *testing.T) {
 		forge.children[parent] = nil
 		forge.mu.Unlock()
 
-		outcome, _ := cli.run(t, []string{"skl", "ledger", "publish", "--repo", root, "--proposal", "child-identity", "--format", "json"})
+		outcome, _ := cli.run(t, []string{"skl", "proposal", "publish", "--repo", root, "--proposal", "child-identity", "--format", "json"})
 		forge.mu.Lock()
 		grouped := append([]int(nil), forge.children[parent]...)
 		forge.mu.Unlock()
@@ -2451,7 +2451,7 @@ func TestMissingProseGuidesFreshAuthoring(t *testing.T) {
 			"skl slice show " + selection + " --slice 'lost-prose/foundation'",
 		},
 		Guidance:     "skl skill --resource issue-publication.md --input 'proposal=lost-prose' --input 'project=widgets' --input 'repo=" + root + "' --input 'remote=upstream' propose",
-		Continuation: "skl ledger publish " + selection + " --proposal 'lost-prose' --issue 'feature='<body-file> --issue 'foundation='<body-file> --parent-body <parent-body-file>",
+		Continuation: "skl proposal publish " + selection + " --proposal 'lost-prose' --issue 'feature='<body-file> --issue 'foundation='<body-file> --parent-body <parent-body-file>",
 	}
 	if mustJSON(t, outcome.Authoring) != mustJSON(t, want) {
 		t.Fatalf("authoring pointers = %s\nwant %s", mustJSON(t, outcome.Authoring), mustJSON(t, want))
@@ -2469,7 +2469,7 @@ func TestMissingProseGuidesFreshAuthoring(t *testing.T) {
 	}
 	for _, wanted := range []string{
 		"skl browse documents --project 'widgets' --proposal 'lost-prose'",
-		"skl ledger publish " + selection + " --proposal 'lost-prose'",
+		"skl proposal publish " + selection + " --proposal 'lost-prose'",
 	} {
 		if !strings.Contains(cli.out.String(), wanted) {
 			t.Fatalf("authoring guidance lacks %q:\n%s", wanted, cli.out.String())
@@ -2493,7 +2493,7 @@ func TestMissingProseGuidesFreshAuthoring(t *testing.T) {
 		t.Fatalf("authoring evidence omits the Proposal description or a slice Contract: %s", cli.out.String())
 	}
 	cli.out.Reset()
-	if err := cli.app.Run([]string{"skl", "ledger", "publish", "--repo", root, "--remote", "upstream", "--proposal", "lost-prose"}); err != nil {
+	if err := cli.app.Run([]string{"skl", "proposal", "publish", "--repo", root, "--remote", "upstream", "--proposal", "lost-prose"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, wanted := range []string{"Issue: missing_input", "`" + want.Guidance + "`", "`" + want.Continuation + "`"} {
@@ -2505,7 +2505,7 @@ func TestMissingProseGuidesFreshAuthoring(t *testing.T) {
 	// Freshly authored prose is published verbatim: no accepted document,
 	// report, or other private evidence is appended, and nothing is stored.
 	prose := map[string]string{"feature": "Fresh feature prose.\n", "foundation": "Fresh foundation prose.\n", "parent": "Fresh parent prose.\n"}
-	published, _ := cli.run(t, []string{"skl", "ledger", "publish", "--repo", root, "--remote", "upstream", "--proposal", "lost-prose", "--format", "json",
+	published, _ := cli.run(t, []string{"skl", "proposal", "publish", "--repo", root, "--remote", "upstream", "--proposal", "lost-prose", "--format", "json",
 		"--issue=feature=" + writeTemp(t, t, prose["feature"]),
 		"--issue=foundation=" + writeTemp(t, t, prose["foundation"]),
 		"--parent-body=" + writeTemp(t, t, prose["parent"])})
@@ -2542,7 +2542,7 @@ func TestExplicitPublicationRefusesUnselectableInputs(t *testing.T) {
 		{[]string{"--proposal", "selected-work", "--issue=other=" + writeTemp(t, t, "prose\n")}, "not a slice of proposal selected-work"},
 		{[]string{"--proposal", "selected-work", "--parent-body=" + writeTemp(t, t, "prose\n")}, "single-slice proposals take no parent body"},
 	} {
-		outcome, _ := cli.run(t, append([]string{"skl", "ledger", "publish", "--repo", root, "--format", "json"}, tc.args...))
+		outcome, _ := cli.run(t, append([]string{"skl", "proposal", "publish", "--repo", root, "--format", "json"}, tc.args...))
 		if outcome.Status != "fix_required" || !strings.Contains(outcome.Reason, tc.want) {
 			t.Fatalf("publish %v = %s, want refusal %q", tc.args, mustJSON(t, outcome), tc.want)
 		}

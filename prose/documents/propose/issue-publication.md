@@ -14,7 +14,7 @@ Check: you have read the Proposal description and every slice's documents.
 ## Publish
 
 ```
-skl ledger publish --repo {{quote .Repo}} --remote {{quote .Remote}} --proposal {{quote .Proposal}} --issue <slice>=<body-file> [--issue <slice>=<body-file> ...] [--parent-body <parent-body-file>]
+skl proposal publish --repo {{quote .Repo}} --remote {{quote .Remote}} --proposal {{quote .Proposal}} --issue <slice>=<body-file> [--issue <slice>=<body-file> ...] [--parent-body <parent-body-file>]
 ```
 
 Repeat `--issue` for each slice whose issue should be current. `skl` updates the issues it recorded, creates missing ones and groups children under the parent. Publish only through this command.
