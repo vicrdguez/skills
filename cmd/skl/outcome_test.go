@@ -55,7 +55,7 @@ func TestUnreachedOutcomeBranchesRender(t *testing.T) {
 		t.Errorf("rendering failure JSON changed: %s", &encoded)
 	}
 	result := ledger.CurrentResult{Item: "widget/foundation", Lifecycle: ledger.AwaitingReview, Phase: ledger.ImplementPhase, Outcome: ledger.AwaitingReview, Branch: "widget"}
-	guidance := &presentationGuidance{Result: result, Evidence: []string{"skl ledger show --commit 'a' --path 'r'"}, Authoring: "skl skill --resource pull-presentation.md implement", Continue: "skl ledger present --item 'widget/foundation' --public-body <file>"}
+	guidance := &presentationGuidance{Result: result, Evidence: []string{"skl ledger show --commit 'a' --path 'r'"}, Authoring: "skl skill --resource pull-presentation.md implement", Continue: "skl slice publish --slice 'widget/foundation' --public-body <file>"}
 	archive := &ledger.ArchiveResult{Archived: []ledger.ArchivedProposal{{Proposal: "done", FullyDelivered: true, Commit: "abc"}}}
 	cases := []struct {
 		name, kind string
@@ -63,7 +63,7 @@ func TestUnreachedOutcomeBranchesRender(t *testing.T) {
 		want       []string
 	}{
 		{"rendering failed", failed.kind, failed.facts, []string{"`skl implement resume --repo '/work/widgets' --remote 'origin' --item 'widget/foundation' --claim '" + claim + "'`", "`skl implement release --repo", "template broke"}},
-		{"refusal with uncertain Claim", "refused", refusalFacts{Status: "fix_required", Reason: "ledger commit failed", ClaimState: claimUncertain, StatusCommand: statusInvocation(repository), Rerun: "skl implement next"}, []string{"may have been acquired", "`skl status --repo '/work/widgets' --remote 'origin'`", "`skl implement next`"}},
+		{"refusal with uncertain Claim", "refused", refusalFacts{Status: "fix_required", Reason: "ledger commit failed", ClaimState: claimUncertain, StatusCommand: statusInvocation(repository), Rerun: "skl implement next"}, []string{"may have been acquired", "`skl reconcile --repo '/work/widgets' --remote 'origin'`", "`skl implement next`"}},
 		{"presented", "ledger-present", presentFacts{Status: ledger.PullPresented, Result: &result, Notes: []noteFact{{Label: "Public presentation", Status: ledger.PullPresented, Detail: "pull request #21"}}}, []string{"is presented", "pull request #21", "You are done"}},
 		{"presentation uncertain", "ledger-present", presentFacts{Status: ledger.IssueUncertain, Result: &result, Guidance: guidance}, []string{"may or may not", "Check the forge", "`" + guidance.Continue + "`"}},
 		{"cleanup completed", "cleanup", cleanupFacts{cleanupOutcome{Status: "completed", Archive: archive}, "skl cleanup"}, []string{"Archived proposal: done (fully delivered)", "Cleanup is complete"}},

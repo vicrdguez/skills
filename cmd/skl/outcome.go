@@ -177,7 +177,7 @@ func claimCommand(phase, operation string, repository setup.RepositoryContext, i
 // statusInvocation binds the command that shows which Work Items hold a Claim.
 func statusInvocation(repository setup.RepositoryContext) string {
 	q := skilldist.ShellQuote
-	return fmt.Sprintf("skl status --repo %s --remote %s", q(repository.Root), q(repository.Remote))
+	return fmt.Sprintf("skl reconcile --repo %s --remote %s", q(repository.Root), q(repository.Remote))
 }
 
 // nextInvocation binds the command that selects the phase's next Work Item.

@@ -66,12 +66,13 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 		},
 	}, {
 		Name:      "skill",
+		Usage:     "Retrieve a standalone skill or a named resource; Implement and Watchdog use delivery commands",
 		ArgsUsage: "<name>",
 		Flags: []cli.Flag{
-			&cli.StringFlag{Name: "format", Value: "markdown"},
-			&cli.StringFlag{Name: "resource"},
+			&cli.StringFlag{Name: "format", Value: "markdown", Usage: "Output format for whole-skill retrieval only: markdown|json"},
+			&cli.StringFlag{Name: "resource", Usage: "Retrieve one exact owner-relative resource as raw text"},
 			newInputFlag(),
-			&cli.BoolFlag{Name: "describe-inputs", Usage: "Describe the named resource's accepted inputs without rendering it"},
+			&cli.BoolFlag{Name: "describe-inputs", Usage: "Describe the named resource's accepted inputs as raw text without rendering it; cannot combine with --input"},
 		},
 		Action: func(command *cli.Context) error {
 			if command.NArg() != 1 {
@@ -81,7 +82,16 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 			resource := command.String("resource")
 			describe := command.Bool("describe-inputs")
 			inputs := inputValues(command)
-			if resource == "" && describe {
+			if command.IsSet("resource") && resource == "" {
+				return fmt.Errorf("--resource requires a nonempty owner-relative name")
+			}
+			if resource != "" && command.IsSet("format") {
+				return fmt.Errorf("--format applies only to whole-skill retrieval, not --resource")
+			}
+			if command.IsSet("describe-inputs") && command.IsSet("input") {
+				return fmt.Errorf("--input cannot be combined with --describe-inputs")
+			}
+			if resource == "" && command.IsSet("describe-inputs") {
 				return fmt.Errorf("--describe-inputs requires --resource <owner-relative-name>")
 			}
 			if resource == "" && len(inputs) > 0 {
@@ -130,7 +140,7 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 			}
 			return fmt.Errorf("unsupported format %q", command.String("format"))
 		},
-	}, cleanupCommand(stdout), {
+	}, cleanupCommand(stdout), sliceCommands(newBackend, stdout), {
 		Name:        "implement",
 		Subcommands: deliveryCommands("implement", newBackend, stdout),
 	}, {
@@ -163,7 +173,7 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 			return err
 		},
 	}}
-	app.Commands = append(app.Commands, statusCommand(newBackend, stdout), ledgerCommands(newBackend, stdout), proposalCommands(newBackend, stdout), decisionCommands(stdout), browseCommand(stdin, stdout))
+	app.Commands = append(app.Commands, reconcileCommand(newBackend, stdout), ledgerCommands(newBackend, stdout), proposalCommands(newBackend, stdout), decisionCommands(stdout), browseCommand(stdin, stdout))
 	return &stageApp{app}
 }
 

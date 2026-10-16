@@ -940,7 +940,7 @@ func TestLedgerShowReturnsExactAcceptedContent(t *testing.T) {
 	if err := writeOutcome(&report, "ledger-accept", proposalFactsOf(repository, acceptance.Acceptance, nil)); err != nil {
 		t.Fatal(err)
 	}
-	readbackCommand := "skl ledger show --repo " + skilldist.ShellQuote(root) + " --remote 'origin' --item 'readback-work/foundation'"
+	readbackCommand := "skl slice show --repo " + skilldist.ShellQuote(root) + " --remote 'origin' --slice 'readback-work/foundation'"
 	if !strings.Contains(report.String(), readbackCommand) {
 		t.Fatalf("acceptance output names no concrete readback command:\n%s", report.String())
 	}
@@ -955,7 +955,7 @@ func TestLedgerShowReturnsExactAcceptedContent(t *testing.T) {
 	os.RemoveAll(directory)
 	forge.server.Close()
 
-	args := []string{"skl", "ledger", "show", "--repo", root, "--item", "readback-work/foundation", "--format", "json"}
+	args := []string{"skl", "slice", "show", "--repo", root, "--slice", "readback-work/foundation", "--format", "json"}
 	outcome, _ := cli.run(t, args)
 	if outcome.Status != "shown" || outcome.Readback == nil {
 		t.Fatalf("readback failed after other activity: %s", mustJSON(t, outcome))
@@ -988,7 +988,7 @@ func TestLedgerShowReturnsExactAcceptedContent(t *testing.T) {
 
 	// Default Markdown and explicit JSON convey equivalent facts.
 	cli.out.Reset()
-	if err := cli.app.Run([]string{"skl", "ledger", "show", "--repo", root, "--item", "readback-work/foundation"}); err != nil {
+	if err := cli.app.Run([]string{"skl", "slice", "show", "--repo", root, "--slice", "readback-work/foundation"}); err != nil {
 		t.Fatalf("markdown readback failed: %v\n%s", err, cli.out.String())
 	}
 	markdown := cli.out.String()
@@ -1015,14 +1015,14 @@ func TestLedgerShowRefusesMissingReferencesWithoutSubstitution(t *testing.T) {
 	head := strings.TrimSpace(runGitOutput(t, fixture.clone, "rev-parse", "HEAD"))
 
 	// Exact reference readback works.
-	outcome, _ := cli.run(t, []string{"skl", "ledger", "show", "--repo", root, "--commit", head,
+	outcome, _ := cli.run(t, []string{"skl", "ledger", "show", "--commit", head,
 		"--path", "projects/widgets/proposals/reference-work/foundation/intent.md", "--format", "json"})
 	if outcome.Status != "shown" || outcome.Document == nil || outcome.Document.Contents != spec.slices[0].files["intent.md"] {
 		t.Fatalf("exact reference readback failed: %s", mustJSON(t, outcome))
 	}
 
 	// A missing path at a valid commit is diagnosed, never substituted.
-	outcome, _ = cli.run(t, []string{"skl", "ledger", "show", "--repo", root, "--commit", head,
+	outcome, _ = cli.run(t, []string{"skl", "ledger", "show", "--commit", head,
 		"--path", "projects/widgets/proposals/reference-work/foundation/plan.md", "--format", "json"})
 	if outcome.Status != "fix_required" || !strings.Contains(outcome.Reason, "plan.md") {
 		t.Fatalf("missing path not diagnosed: %s", mustJSON(t, outcome))
@@ -1033,7 +1033,7 @@ func TestLedgerShowRefusesMissingReferencesWithoutSubstitution(t *testing.T) {
 
 	// A missing commit is diagnosed, never substituted.
 	missing := strings.Repeat("0", 40)
-	outcome, _ = cli.run(t, []string{"skl", "ledger", "show", "--repo", root, "--commit", missing,
+	outcome, _ = cli.run(t, []string{"skl", "ledger", "show", "--commit", missing,
 		"--path", "projects/widgets/proposals/reference-work/foundation/intent.md", "--format", "json"})
 	if outcome.Status != "fix_required" || !strings.Contains(outcome.Reason, "unavailable") {
 		t.Fatalf("missing commit not diagnosed: %s", mustJSON(t, outcome))
@@ -1043,7 +1043,7 @@ func TestLedgerShowRefusesMissingReferencesWithoutSubstitution(t *testing.T) {
 	}
 
 	// An unknown item identity is diagnosed without guessed content.
-	outcome, _ = cli.run(t, []string{"skl", "ledger", "show", "--repo", root, "--item", "never-accepted/foundation", "--format", "json"})
+	outcome, _ = cli.run(t, []string{"skl", "slice", "show", "--repo", root, "--slice", "never-accepted/foundation", "--format", "json"})
 	if outcome.Status != "fix_required" || !strings.Contains(outcome.Reason, "no accepted record") {
 		t.Fatalf("unknown item not diagnosed: %s", mustJSON(t, outcome))
 	}
@@ -1120,7 +1120,7 @@ func TestPublicationSucceedsWithoutPersistingBodies(t *testing.T) {
 		forge.list[index]["title"] = "Renamed by a human"
 	}
 	forge.mu.Unlock()
-	readback, _ := cli.run(t, []string{"skl", "ledger", "show", "--repo", root, "--item", "published-work/foundation", "--format", "json"})
+	readback, _ := cli.run(t, []string{"skl", "slice", "show", "--repo", root, "--slice", "published-work/foundation", "--format", "json"})
 	if readback.Status != "shown" || readback.Readback.Item != "published-work/foundation" {
 		t.Fatalf("readback changed after forge edits: %s", mustJSON(t, readback))
 	}
@@ -1210,7 +1210,7 @@ func TestPublicationFailuresAreReportedWithoutPublicationState(t *testing.T) {
 		t.Fatalf("failed parent publication was not reported: %s", mustJSON(t, outcome))
 	}
 	// Failures are immediate results, never durable publication state.
-	readback, _ := cli.run(t, []string{"skl", "ledger", "show", "--repo", root, "--item", "partial-publication/foundation", "--format", "json"})
+	readback, _ := cli.run(t, []string{"skl", "slice", "show", "--repo", root, "--slice", "partial-publication/foundation", "--format", "json"})
 	if readback.Status != "shown" {
 		t.Fatalf("readback unavailable after publication failure: %s", mustJSON(t, readback))
 	}
@@ -1394,7 +1394,7 @@ func TestCompetingLedgerHistoryRequiresReconciliation(t *testing.T) {
 		t.Fatal("ledger history lost")
 	}
 	// Readback remains available.
-	readback, _ := cli.run(t, []string{"skl", "ledger", "show", "--repo", root, "--item", "competing-work/foundation", "--format", "json"})
+	readback, _ := cli.run(t, []string{"skl", "slice", "show", "--repo", root, "--slice", "competing-work/foundation", "--format", "json"})
 	if readback.Status != "shown" {
 		t.Fatalf("readback unavailable during reconciliation: %s", mustJSON(t, readback))
 	}
@@ -1730,7 +1730,7 @@ func TestLedgerShowUsesOneCommittedRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(directory, "state.json"), `{"state":"ready_for_implementation","title":"Add foundation","branch":"uncommitted-branch"}`)
-	outcome, _ := cli.run(t, []string{"skl", "ledger", "show", "--repo", root, "--item", "committed-readback/foundation", "--format", "json"})
+	outcome, _ := cli.run(t, []string{"skl", "slice", "show", "--repo", root, "--slice", "committed-readback/foundation", "--format", "json"})
 	if outcome.Status != "shown" || outcome.Readback.Branch != "foundation" || len(outcome.Readback.Documents) != 2 {
 		t.Fatalf("readback mixed working-tree membership or state with HEAD: %s", mustJSON(t, outcome))
 	}
@@ -2447,8 +2447,8 @@ func TestMissingProseGuidesFreshAuthoring(t *testing.T) {
 	selection := "--repo '" + root + "' --remote 'upstream'"
 	want := &proseAuthoring{
 		Readback: []string{
-			"skl ledger show " + selection + " --item 'lost-prose/feature'",
-			"skl ledger show " + selection + " --item 'lost-prose/foundation'",
+			"skl slice show " + selection + " --slice 'lost-prose/feature'",
+			"skl slice show " + selection + " --slice 'lost-prose/foundation'",
 		},
 		Guidance:     "skl skill --resource issue-publication.md --input 'proposal=lost-prose' --input 'project=widgets' --input 'repo=" + root + "' --input 'remote=upstream' propose",
 		Continuation: "skl proposal publish " + selection + " --proposal 'lost-prose' --issue 'feature='<body-file> --issue 'foundation='<body-file> --parent-body <parent-body-file>",
@@ -2458,7 +2458,7 @@ func TestMissingProseGuidesFreshAuthoring(t *testing.T) {
 	}
 	// The readback pointer, run with exactly its bound arguments, reads the
 	// selected upstream Project.
-	readback, _ := cli.run(t, []string{"skl", "ledger", "show", "--repo", root, "--remote", "upstream", "--item", "lost-prose/feature", "--format", "json"})
+	readback, _ := cli.run(t, []string{"skl", "slice", "show", "--repo", root, "--remote", "upstream", "--slice", "lost-prose/feature", "--format", "json"})
 	if readback.Status != "shown" {
 		t.Fatalf("authoring readback cannot read the selected Project: %s", mustJSON(t, readback))
 	}

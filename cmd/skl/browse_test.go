@@ -85,24 +85,24 @@ func TestBrowseQueriesReadCommittedRecordsWithoutSideEffects(t *testing.T) {
 	if !proposal.Proposal.Proposal.Archived || proposal.Proposal.Proposal.FullyDelivered || proposal.Proposal.Slices[0].Lifecycle != "superseded" {
 		t.Fatalf("archived proposal = %+v", proposal.Proposal)
 	}
-	slice := browseQuery(t, app, output, "slice", "--project", "widgets", "--item", "orders/cancel")
+	slice := browseQuery(t, app, output, "slice", "--project", "widgets", "--slice", "orders/cancel")
 	if slice.Slice.Lifecycle != "awaiting_review" || slice.Slice.Claim == nil || slice.Slice.Claim.Phase != "watchdog" || slice.Slice.Issue.Number != 11 {
 		t.Fatalf("slice = %+v", slice.Slice)
 	}
 	if dependencies := slice.Slice.Dependencies; len(dependencies) != 1 || dependencies[0].Item != "legacy/old" || !dependencies[0].Archived || dependencies[0].Lifecycle != "superseded" || dependencies[0].Satisfied {
 		t.Fatalf("a Superseded archived blocker is recorded but never satisfies the dependency: %+v", dependencies)
 	}
-	blocker := browseQuery(t, app, output, "slice", "--project", "widgets", "--item", "legacy/old")
+	blocker := browseQuery(t, app, output, "slice", "--project", "widgets", "--slice", "legacy/old")
 	if blocks := blocker.Slice.Blocks; blocks.Incomplete || len(blocks.Slices) != 1 || blocks.Slices[0].Item != "orders/cancel" || blocks.Slices[0].Lifecycle != "awaiting_review" {
 		t.Fatalf("the archived blocker's reverse dependencies = %+v", blocks)
 	}
-	refused := browseQuery(t, app, output, "slice", "--project", "widgets", "--item", "orders/refund")
+	refused := browseQuery(t, app, output, "slice", "--project", "widgets", "--slice", "orders/refund")
 	if refused.Status != "fix_required" || !strings.Contains(refused.Reason, "orders/refund") || refused.Repair == "" {
 		t.Fatalf("unknown slice = %+v", refused)
 	}
 
 	output.Reset()
-	if err := app.Run([]string{"skl", "browse", "slice", "--project", "widgets", "--item", "orders/cancel"}); err != nil {
+	if err := app.Run([]string{"skl", "browse", "slice", "--project", "widgets", "--slice", "orders/cancel"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, fact := range []string{"Lifecycle: Awaiting Review", "Claim: watchdog reservation", "Issue: acme/widgets#11",
@@ -151,8 +151,8 @@ func TestBrowseCLISelectsArchivedLocationWhenNamesCollide(t *testing.T) {
 	if found.Slices.Matched != 1 || !found.Slices.Projects[0].Groups[0].Slices[0].Archived {
 		t.Fatalf("archive selection = %+v", found.Slices)
 	}
-	active := browseQuery(t, app, output, "slice", "--project", "widgets", "--item", "orders/cancel")
-	archived := browseQuery(t, app, output, "slice", "--project", "widgets", "--item", "orders/cancel", "--archived")
+	active := browseQuery(t, app, output, "slice", "--project", "widgets", "--slice", "orders/cancel")
+	archived := browseQuery(t, app, output, "slice", "--project", "widgets", "--slice", "orders/cancel", "--archived")
 	if active.Slice.Archived || active.Slice.Title != "Cancel orders" || !archived.Slice.Archived || archived.Slice.Title != "Archived cancellation" || archived.Slice.Lifecycle != "merged" {
 		t.Fatalf("active = %+v, archived = %+v", active.Slice, archived.Slice)
 	}
@@ -179,15 +179,19 @@ func TestBrowseSlicesSelectsByIndependentFacts(t *testing.T) {
 		return strings.Join(items, " ")
 	}
 
-	watchdog := browseQuery(t, app, output, "slices", "--claim", "watchdog")
+	watchdog := browseQuery(t, app, output, "slices", "--claim-phase", "watchdog")
 	if found(watchdog) != "widgets:orders/cancel" || watchdog.Slices.Incomplete {
 		t.Fatalf("watchdog claims = %+v", watchdog.Slices)
 	}
-	combined := browseQuery(t, app, output, "slices", "--claim", "none", "--lifecycle", "rework", "--lifecycle", "awaiting_review", "--search", "HAM")
+	either := browseQuery(t, app, output, "slices", "--claim-phase", "watchdog", "--claim-phase", "none")
+	if found(either) != "gadgets:tools/hammer widgets:orders/cancel" {
+		t.Fatalf("repeatable Claim phases = %+v", either.Slices)
+	}
+	combined := browseQuery(t, app, output, "slices", "--claim-phase", "none", "--lifecycle", "rework", "--lifecycle", "awaiting_review", "--search", "HAM")
 	if found(combined) != "gadgets:tools/hammer" {
 		t.Fatalf("combined selection = %+v", combined.Slices)
 	}
-	empty := browseQuery(t, app, output, "slices", "--project", "gadgets", "--claim", "watchdog")
+	empty := browseQuery(t, app, output, "slices", "--project", "gadgets", "--claim-phase", "watchdog")
 	if empty.Slices.Matched != 0 || empty.Slices.Incomplete || len(empty.Slices.Projects) != 1 {
 		t.Fatalf("an empty readable Project scope = %+v", empty.Slices)
 	}
@@ -195,13 +199,13 @@ func TestBrowseSlicesSelectsByIndependentFacts(t *testing.T) {
 	if found(archived) != "widgets:legacy/old" || archived.Slices.Projects[0].Groups[0].Lifecycle != "superseded" {
 		t.Fatalf("archived lifecycle grouping = %+v", archived.Slices)
 	}
-	refused := browseQuery(t, app, output, "slices", "--claim", "deploy")
+	refused := browseQuery(t, app, output, "slices", "--claim-phase", "deploy")
 	if refused.Status != "fix_required" || !strings.Contains(refused.Reason, `"deploy"`) || refused.Repair == "" {
 		t.Fatalf("unsupported claim = %+v", refused)
 	}
 
 	output.Reset()
-	if err := app.Run([]string{"skl", "browse", "slices", "--claim", "watchdog"}); err != nil {
+	if err := app.Run([]string{"skl", "browse", "slices", "--claim-phase", "watchdog"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, fact := range []string{"Selection: any lifecycle · watchdog claim in every Project", "Result: 1 matching slice",
@@ -217,13 +221,13 @@ func TestBrowseSlicesSelectsByIndependentFacts(t *testing.T) {
 	writeFile(t, filepath.Join(fixture.clone, "projects", "widgets", "proposals", "orders", "broken", "state.json"), "{broken")
 	runGit(t, fixture.clone, "add", "-A")
 	runGit(t, fixture.clone, "commit", "-q", "-m", "damage a record")
-	unknown := browseQuery(t, app, output, "slices", "--claim", "watchdog")
+	unknown := browseQuery(t, app, output, "slices", "--claim-phase", "watchdog")
 	undecided := unknown.Slices.Projects[0].Undecided
 	if found(unknown) != "widgets:orders/cancel" || !unknown.Slices.Incomplete || unknown.Slices.Undecided != 1 || len(undecided) != 1 || undecided[0].Item != "orders/broken" {
 		t.Fatalf("an unreadable Claim must be undecided, never a match: %+v", unknown.Slices)
 	}
 	output.Reset()
-	if err := app.Run([]string{"skl", "browse", "slices", "--claim", "watchdog"}); err != nil {
+	if err := app.Run([]string{"skl", "browse", "slices", "--claim-phase", "watchdog"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, fact := range []string{"Result: 1 matching slice; 1 undecided by unknown facts; incomplete", "### Undecided: unknown facts",

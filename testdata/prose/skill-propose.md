@@ -112,6 +112,6 @@ Check: every slice has a body file, plus a parent body for a multi-slice Proposa
    - one directory per slice, holding only its Contract documents.
    The Proposal Branch defaults to `proposal/<kebab-name>` when omitted. In an amendment, the edited export is the intake.
 4. Run `skl proposal accept --repo <root> --proposal-dir <dir> --issue <slice>=<body-file>`, repeating `--issue` per slice and adding `--parent-body <file>` for multi-slice work, and follow its outcome. Acceptance records the Proposal Branch and each planned Slice branch; it creates no branch or worktree. In an amendment, run `skl proposal amend --repo <root> --proposal-dir <dir> --issue <slice>=<body-file>` instead, repeating `--issue` per slice body from step 6 and adding `--parent-body <file>` for multi-slice work, and follow its outcome.
-5. Read each accepted or changed slice back with `skl ledger show --repo <root> --item <proposal>/<slice>`. Cite its ledger commit and path when you identify a document exactly.
+5. Read each accepted or changed slice back with `skl slice show --repo <root> --slice <proposal>/<slice>`. Cite its ledger commit and path when you identify a document exactly.
 
 Check: the readback shows every accepted or changed slice's recorded documents.

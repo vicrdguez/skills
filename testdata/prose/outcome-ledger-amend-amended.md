@@ -12,7 +12,7 @@ Parent issue: attached acme/widgets#107
 Slice `foundation`: Dashboard foundation (branch `widget-share`)
   Dependencies: none
   Issue: attached acme/widgets#105
-  Readback: `skl ledger show --repo '/work/widgets' --remote 'origin' --item 'widget-share/foundation'`
+  Readback: `skl slice show --repo '/work/widgets' --remote 'origin' --slice 'widget-share/foundation'`
 
 These active Slices depend on a changed Slice. Ask the user to confirm that their Contracts still hold:
 - `widget-share/followup` depends on `widget-share/foundation`

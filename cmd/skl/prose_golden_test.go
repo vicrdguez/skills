@@ -219,7 +219,7 @@ func TestAgentProseGoldens(t *testing.T) {
 	accepted := intake(proseProposal, contract)
 	g.capture("outcome-ledger-accept-accepted", proposer, "proposal", "accept", "--repo", source, "--proposal-dir", accepted, issue)
 	g.capture("outcome-ledger-accept-existing", proposer, "proposal", "accept", "--repo", source, "--proposal-dir", accepted, issue)
-	g.capture("outcome-ledger-show", proposer, "ledger", "show", "--repo", source, "--item", proseItem)
+	g.capture("outcome-ledger-show", proposer, "slice", "show", "--repo", source, "--slice", proseItem)
 	g.capture("outcome-ledger-publish", proposer, "proposal", "publish", "--repo", source, "--proposal", proseProposal, issue)
 	g.capture("outcome-ledger-export", proposer, "proposal", "export", "--repo", source, "--proposal", proseProposal, "--to", filepath.Join(temp, "export"))
 	g.capture("outcome-propose-cleanup", proposer, "cleanup", "--repo", source)
@@ -254,7 +254,7 @@ func TestAgentProseGoldens(t *testing.T) {
 		}
 	}
 	submit("outcome-implement-submit", claim, head)
-	g.capture("outcome-ledger-present", worker, "ledger", "present", "--repo", source, "--item", proseItem)
+	g.capture("outcome-ledger-present", worker, "slice", "publish", "--repo", source, "--slice", proseItem)
 
 	// First Watchdog review routes the Work Item to Rework.
 	review := func(name string) (string, string) {
@@ -301,8 +301,8 @@ func TestAgentProseGoldens(t *testing.T) {
 	g.capture("watchdog-inspect", worker, append([]string{"watchdog", "inspect"}, reviewIdentity(reviewClaim, reviewResult)...)...)
 	g.capture("watchdog-resume", worker, append([]string{"watchdog", "resume"}, reviewIdentity(reviewClaim, reviewResult)...)...)
 	verdict("outcome-watchdog-submit-rework", reviewClaim, "rework", ledger.Rework)
-	g.capture("outcome-ledger-present-watchdog", worker, "ledger", "present", "--repo", source, "--item", proseItem)
-	g.capture("outcome-ledger-present-public", worker, "ledger", "present", "--repo", source, "--item", proseItem, "--public-body", public)
+	g.capture("outcome-ledger-present-watchdog", worker, "slice", "publish", "--repo", source, "--slice", proseItem)
+	g.capture("outcome-ledger-present-public", worker, "slice", "publish", "--repo", source, "--slice", proseItem, "--public-body", public)
 
 	// Rework, then a repeat review of a descendant head is incremental and
 	// routes the Work Item to Needs Human.

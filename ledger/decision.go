@@ -1156,7 +1156,7 @@ func observeRetiredSubmission(ctx context.Context, s *Store, project, proposal s
 	case Merged:
 		return nil, refuse(
 			fmt.Sprintf("Proposal Submission %s#%d of %s has merged", attached.Repository, attached.Number, proposal),
-			"run skl status to record the Proposal's completion; a merged Proposal is completed, not retired",
+			"run skl reconcile to record the Proposal's completion; a merged Proposal is completed, not retired",
 		)
 	case "open", "closed":
 		return &attached, nil
