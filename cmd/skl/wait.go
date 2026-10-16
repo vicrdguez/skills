@@ -24,7 +24,7 @@ func (app *stageApp) RunContext(ctx context.Context, args []string) error {
 	args = append([]string(nil), args...)
 	if len(args) >= 3 && (args[1] == "implement" || args[1] == "watchdog") {
 		command := app.Command(args[1]).Command(args[2])
-		if command != nil && command.Name == "next" {
+		if command != nil && (command.Name == "next" || command.Name == "dispatch") {
 			for i := 3; i < len(args); i++ {
 				arg := args[i]
 				if arg == "--" || !strings.HasPrefix(arg, "-") {

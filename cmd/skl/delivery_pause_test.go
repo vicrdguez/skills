@@ -21,7 +21,7 @@ func TestDeliveryCLIConflictCanPauseWithoutResolvingSource(t *testing.T) {
 		t.Fatalf("start: %#v %v", started, err)
 	}
 	claim := started.Execution.Claim.Commit
-	prepared, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--item", deliveryTestItem, "--claim", claim, "--format", "json")
+	prepared, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--slice", deliveryTestItem, "--claim", claim, "--format", "json")
 	if err != nil || prepared.Source == nil {
 		t.Fatalf("prepare: %#v %v", prepared, err)
 	}
@@ -43,11 +43,11 @@ func TestDeliveryCLIConflictCanPauseWithoutResolvingSource(t *testing.T) {
 	}
 	body := filepath.Join(t.TempDir(), "question.md")
 	writeFile(t, body, "# Human decision needed\n\nThe integration conflict requires a choice between incompatible changes.\n")
-	completed, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", claim, "--head", head, "--target", target, "--body", body, "--format", "json")
+	completed, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--slice", deliveryTestItem, "--claim", claim, "--head", head, "--target", target, "--body", body, "--format", "json")
 	if err != nil || completed.Status != "fix_required" || deliveryPersistedState(t, fixture.clone).Claim == nil {
 		t.Fatalf("conflicted source was accepted as completed: %#v %v", completed, err)
 	}
-	args := []string{"skl", "implement", "needs-human", "--repo", source, "--item", deliveryTestItem, "--claim", claim, "--head", head, "--target", target, "--body", body, "--format", "json"}
+	args := []string{"skl", "implement", "needs-human", "--repo", source, "--slice", deliveryTestItem, "--claim", claim, "--head", head, "--target", target, "--body", body, "--format", "json"}
 	paused, err := cli.deliveryJSON(t, args...)
 	if err != nil || paused.Status != ledger.NeedsHuman || paused.Result == nil {
 		t.Fatalf("conflicted pause: %#v %v", paused, err)
@@ -90,14 +90,14 @@ func TestDeliveryCLIPauseSourceBoundary(t *testing.T) {
 			}
 			claim := start.Execution.Claim.Commit
 			if prepared {
-				out, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--item", deliveryTestItem, "--claim", claim, "--format", "json")
+				out, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--slice", deliveryTestItem, "--claim", claim, "--format", "json")
 				if err != nil || out.Status != "prepared" {
 					t.Fatalf("prepare: %#v %v", out, err)
 				}
 			}
 			body := filepath.Join(t.TempDir(), "decision.md")
 			writeFile(t, body, "# Decision needed\n\nB1 incomplete: a consequential choice remains human-owned.\n")
-			args := []string{"skl", "implement", "needs-human", "--repo", source, "--item", deliveryTestItem, "--claim", claim, "--body", body, "--format", "json"}
+			args := []string{"skl", "implement", "needs-human", "--repo", source, "--slice", deliveryTestItem, "--claim", claim, "--body", body, "--format", "json"}
 			out, err := cli.deliveryJSON(t, args...)
 			if err != nil {
 				t.Fatal(err)
@@ -148,7 +148,7 @@ func TestDeliveryCLIPauseSourceBoundary(t *testing.T) {
 			if err != nil || directed.Execution == nil {
 				t.Fatalf("directed start: %#v %v", directed, err)
 			}
-			paused, err := cli.deliveryJSON(t, "skl", "implement", "needs-human", "--repo", source, "--item", deliveryTestItem, "--claim", directed.Execution.Claim.Commit, "--head", target, "--target", target, "--body", body, "--format", "json")
+			paused, err := cli.deliveryJSON(t, "skl", "implement", "needs-human", "--repo", source, "--slice", deliveryTestItem, "--claim", directed.Execution.Claim.Commit, "--head", target, "--target", target, "--body", body, "--format", "json")
 			if err != nil || paused.Status != ledger.NeedsHuman || deliveryPersistedState(t, fixture.clone).Decision {
 				t.Fatalf("new blocker retained old authority: %#v %v", paused, err)
 			}

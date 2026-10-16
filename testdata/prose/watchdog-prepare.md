@@ -16,6 +16,6 @@ Source fetch: local: origin fetch failed (exit status 128); using available loca
 
 Preparation is done. Read the prepared state with:
 
-`skl watchdog inspect --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --result-directory '/tmp/skl-watchdog-result'`
+`skl watchdog inspect --repo '/work/widgets' --remote 'origin' --slice 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --result-directory '/tmp/skl-watchdog-result'`
 
-Continue this Claim with `skl watchdog resume --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --result-directory '/tmp/skl-watchdog-result'`, or release it with `skl watchdog release --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001'`.
+Continue this Claim with `skl watchdog resume --repo '/work/widgets' --remote 'origin' --slice 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --result-directory '/tmp/skl-watchdog-result'`, or release it with `skl watchdog release --repo '/work/widgets' --remote 'origin' --slice 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001'`.

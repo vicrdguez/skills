@@ -104,7 +104,7 @@ func TestImplementChoicesRenderWhereTheyApplyAndCarryThroughResume(t *testing.T)
 	cli.dispatchRun(t, team.ReleaseCommand)
 
 	// A dispatched worker receives the choices its Dispatch was given.
-	dispatch := cli.dispatched(t, "skl implement next --dispatch --repo "+source+" --mode team --reviewer-model openai-codex/gpt-6-sol")
+	dispatch := cli.dispatched(t, "skl implement dispatch --repo "+source+" --mode team --reviewer-model openai-codex/gpt-6-sol")
 	worker := delivery(cli.dispatchJSON(t, dispatch.Worker))
 	if worker.Mode != skilldist.TeamMode || !reflect.DeepEqual(worker.Reviewer, &skilldist.SubagentChoice{Model: "openai-codex/gpt-6-sol"}) {
 		t.Fatalf("dispatched worker facts = %s", mustJSON(t, worker))

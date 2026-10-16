@@ -39,7 +39,7 @@ func TestAutoDispatchWorkerResumesRecordedTargetAndContinuationKeepsAuto(t *test
 	if accepted := app.accept(t, source, writeProposal(t, "", dualSlice(deliveryTestProposal))); accepted.Status != "accepted" {
 		t.Fatalf("accept: %s", mustJSON(t, accepted))
 	}
-	dispatch := app.dispatched(t, "skl implement next --auto --dispatch --repo "+source)
+	dispatch := app.dispatched(t, "skl implement dispatch --auto --repo "+source)
 	worker := app.dispatchJSON(t, dispatch.Worker)
 	if worker.Status != ledger.WorkAvailable || worker.Execution == nil || worker.Packet == nil {
 		t.Fatalf("dispatched worker = %s, want an Execution Skill", mustJSON(t, worker))
@@ -66,7 +66,7 @@ func TestImplementAutoFlagAppliesToNextAndDispatchOnly(t *testing.T) {
 		t.Fatalf("accept: %s", mustJSON(t, accepted))
 	}
 	before := runGitOutput(t, fixture.clone, "rev-parse", "HEAD")
-	if _, err := app.deliveryJSON(t, "skl", "implement", "resume", "--auto", "--repo", source, "--item", deliveryTestItem, "--claim", before, "--format", "json"); err == nil || !strings.Contains(err.Error(), "auto") {
+	if _, err := app.deliveryJSON(t, "skl", "implement", "resume", "--auto", "--repo", source, "--slice", deliveryTestItem, "--claim", before, "--format", "json"); err == nil || !strings.Contains(err.Error(), "auto") {
 		t.Fatalf("resume --auto error = %v; want flag refusal", err)
 	}
 	if after := runGitOutput(t, fixture.clone, "rev-parse", "HEAD"); after != before {

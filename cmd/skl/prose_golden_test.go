@@ -227,25 +227,25 @@ func TestAgentProseGoldens(t *testing.T) {
 	// Implement: start, release, resume, prepare and inspect, then hand off.
 	g.capture("outcome-watchdog-next-no-work", worker, "watchdog", "next", "--repo", source)
 	released := proseMatch(t, proseClaimLine, g.capture("implement-start", worker, "implement", "next", "--repo", source))
-	g.capture("outcome-implement-release", worker, "implement", "release", "--repo", source, "--item", proseItem, "--claim", released)
+	g.capture("outcome-implement-release", worker, "implement", "release", "--repo", source, "--slice", proseItem, "--claim", released)
 	reviewer := []string{"--reviewer-model", "openai-codex/gpt-6.1-sol", "--reviewer-thinking", "high"}
 	team := append([]string{"--mode", "team", "--helper-model", "openai-codex/gpt-6-luna", "--helper-thinking", "xhigh"}, reviewer...)
 	released = proseMatch(t, proseClaimLine, g.capture("implement-start-reviewer", worker, append([]string{"implement", "next", "--repo", source}, reviewer...)...))
-	g.run(worker, "implement", "release", "--repo", source, "--item", proseItem, "--claim", released)
+	g.run(worker, "implement", "release", "--repo", source, "--slice", proseItem, "--claim", released)
 	started := g.capture("implement-team-start", worker, append([]string{"implement", "next", "--repo", source}, team...)...)
 	claim, result := proseMatch(t, proseClaimLine, started), proseMatch(t, proseResultLine, started)
-	identity := []string{"--repo", source, "--remote", "origin", "--item", proseItem, "--claim", claim, "--result-directory", result}
+	identity := []string{"--repo", source, "--remote", "origin", "--slice", proseItem, "--claim", claim, "--result-directory", result}
 	g.capture("implement-prepare", worker, append([]string{"implement", "prepare"}, identity...)...)
 	g.capture("implement-inspect", worker, append([]string{"implement", "inspect", "--target", target}, identity...)...)
 	g.capture("implement-resume", worker, append([]string{"implement", "resume"}, identity...)...)
 	g.capture("implement-team-resume", worker, append(append([]string{"implement", "resume"}, identity...), team...)...)
-	g.capture("outcome-implement-fix-required", worker, "implement", "resume", "--repo", source, "--item", proseItem, "--claim", released)
+	g.capture("outcome-implement-fix-required", worker, "implement", "resume", "--repo", source, "--slice", proseItem, "--claim", released)
 	worktree := filepath.Join(source, ".worktrees", proseProposal)
 	head := proseCommit(t, worktree, "dashboard.txt", "every widget\n")
 	report, public := proseFixturePath("implement-report.md"), proseFixturePath("public.md")
 	submit := func(name, claim, head string) {
 		t.Helper()
-		output := g.run(worker, "implement", "submit", "--repo", source, "--item", proseItem, "--claim", claim, "--head", head, "--target", target, "--body", report, "--public-body", public)
+		output := g.run(worker, "implement", "submit", "--repo", source, "--slice", proseItem, "--claim", claim, "--head", head, "--target", target, "--body", report, "--public-body", public)
 		if !strings.Contains(output, "Status: "+ledger.AwaitingReview) {
 			t.Fatalf("implement submit:\n%s", output)
 		}
@@ -266,11 +266,11 @@ func TestAgentProseGoldens(t *testing.T) {
 		return proseMatch(t, proseClaimLine, output), proseMatch(t, proseResultLine, output)
 	}
 	reviewIdentity := func(claim, result string) []string {
-		return []string{"--repo", source, "--remote", "origin", "--item", proseItem, "--claim", claim, "--result-directory", result}
+		return []string{"--repo", source, "--remote", "origin", "--slice", proseItem, "--claim", claim, "--result-directory", result}
 	}
 	verdict := func(name, claim, outcome, status string) {
 		t.Helper()
-		output := g.run(worker, "watchdog", "submit", "--repo", source, "--item", proseItem, "--claim", claim, "--outcome", outcome,
+		output := g.run(worker, "watchdog", "submit", "--repo", source, "--slice", proseItem, "--claim", claim, "--outcome", outcome,
 			"--body", proseFixturePath("watchdog-report.md"), "--public-body", public)
 		if !strings.Contains(output, "Status: "+status) {
 			t.Fatalf("watchdog submit %s:\n%s", outcome, output)
@@ -295,7 +295,7 @@ func TestAgentProseGoldens(t *testing.T) {
 		g.check(name, packet.Instructions)
 	}
 	releasedReview, _ := review("watchdog-start")
-	g.capture("outcome-watchdog-release", worker, "watchdog", "release", "--repo", source, "--item", proseItem, "--claim", releasedReview)
+	g.capture("outcome-watchdog-release", worker, "watchdog", "release", "--repo", source, "--slice", proseItem, "--claim", releasedReview)
 	reviewClaim, reviewResult := review("")
 	g.capture("watchdog-prepare", worker, append([]string{"watchdog", "prepare"}, reviewIdentity(reviewClaim, reviewResult)...)...)
 	g.capture("watchdog-inspect", worker, append([]string{"watchdog", "inspect"}, reviewIdentity(reviewClaim, reviewResult)...)...)
@@ -308,7 +308,7 @@ func TestAgentProseGoldens(t *testing.T) {
 	// routes the Work Item to Needs Human.
 	rework := g.capture("implement-rework", worker, "implement", "next", "--repo", source)
 	claim, result = proseMatch(t, proseClaimLine, rework), proseMatch(t, proseResultLine, rework)
-	g.run(worker, "implement", "prepare", "--repo", source, "--item", proseItem, "--claim", claim, "--result-directory", result)
+	g.run(worker, "implement", "prepare", "--repo", source, "--slice", proseItem, "--claim", claim, "--result-directory", result)
 	submit("", claim, proseCommit(t, worktree, "dashboard.txt", "every widget, unhealthy ones marked\n"))
 	reviewClaim, reviewResult = review("watchdog-repeat")
 	g.capture("watchdog-inspect-incremental", worker, append([]string{"watchdog", "inspect"}, reviewIdentity(reviewClaim, reviewResult)...)...)
@@ -332,7 +332,7 @@ func TestAgentProseGoldens(t *testing.T) {
 	// cannot build on the previous reviewed revision and is full.
 	directed := g.capture("implement-directed", worker, "implement", "next", "--repo", source)
 	claim, result = proseMatch(t, proseClaimLine, directed), proseMatch(t, proseResultLine, directed)
-	g.run(worker, "implement", "prepare", "--repo", source, "--item", proseItem, "--claim", claim, "--result-directory", result)
+	g.run(worker, "implement", "prepare", "--repo", source, "--slice", proseItem, "--claim", claim, "--result-directory", result)
 	runGit(t, worktree, "reset", "-q", "--hard", target)
 	submit("", claim, proseCommit(t, worktree, "dashboard.txt", "every widget, retired ones kept\n"))
 	reviewClaim, reviewResult = review("")
@@ -346,7 +346,7 @@ func TestAgentProseGoldens(t *testing.T) {
 		t.Fatalf("accept %s: %s", pausedProposal, mustJSON(t, outcome))
 	}
 	paused := proseMatch(t, proseClaimLine, g.run(worker, "implement", "next", "--repo", source))
-	g.capture("outcome-implement-needs-human", worker, "implement", "needs-human", "--repo", source, "--item", pausedProposal+"/foundation", "--claim", paused,
+	g.capture("outcome-implement-needs-human", worker, "implement", "needs-human", "--repo", source, "--slice", pausedProposal+"/foundation", "--claim", paused,
 		"--body", proseFixturePath("pause.md"), "--public-body", public)
 	g.capture("outcome-implement-next-no-work", worker, "implement", "next", "--repo", source)
 	g.capture("outcome-implement-next-idle-timeout", worker, "implement", "next", "--repo", source, "--wait", "1ms", "--poll", "1ms")
@@ -382,8 +382,8 @@ func TestAgentProseGoldens(t *testing.T) {
 		t.Helper()
 		output := g.run(worker, "implement", "next", "--auto", "--repo", source)
 		claim := proseMatch(t, proseClaimLine, output)
-		g.run(worker, "implement", "prepare", "--repo", source, "--remote", "origin", "--item", integrationItem, "--claim", claim)
-		submitted := g.run(worker, "implement", "submit", "--repo", source, "--item", integrationItem, "--claim", claim,
+		g.run(worker, "implement", "prepare", "--repo", source, "--remote", "origin", "--slice", integrationItem, "--claim", claim)
+		submitted := g.run(worker, "implement", "submit", "--repo", source, "--slice", integrationItem, "--claim", claim,
 			"--head", proseCommit(t, integrationWorktree, "alerts.txt", contents), "--target", deliveryTrimmed(t, source, "rev-parse", "refs/remotes/origin/proposal/"+integrationProposal), "--body", report)
 		if !strings.Contains(submitted, "Status: "+ledger.AwaitingReview) {
 			t.Fatalf("implement submit %s:\n%s", integrationItem, submitted)
@@ -392,11 +392,11 @@ func TestAgentProseGoldens(t *testing.T) {
 	implementAlerts("alert on every widget\n")
 	advance("other.txt", "another slice\n")
 	integrationClaim, integrationResult := review("watchdog-integration-start")
-	integrationIdentity := []string{"--repo", source, "--remote", "origin", "--item", integrationItem, "--claim", integrationClaim, "--result-directory", integrationResult}
+	integrationIdentity := []string{"--repo", source, "--remote", "origin", "--slice", integrationItem, "--claim", integrationClaim, "--result-directory", integrationResult}
 	g.capture("watchdog-integration-prepare", worker, append([]string{"watchdog", "prepare"}, integrationIdentity...)...)
 	g.capture("watchdog-integration-inspect", worker, append([]string{"watchdog", "inspect"}, integrationIdentity...)...)
 	g.capture("watchdog-integration-resume", worker, append([]string{"watchdog", "resume"}, integrationIdentity...)...)
-	reworked := g.run(worker, "watchdog", "submit", "--repo", source, "--item", integrationItem, "--claim", integrationClaim, "--outcome", "rework",
+	reworked := g.run(worker, "watchdog", "submit", "--repo", source, "--slice", integrationItem, "--claim", integrationClaim, "--outcome", "rework",
 		"--head", deliveryTrimmed(t, integrationWorktree, "rev-parse", "HEAD"), "--body", proseFixturePath("watchdog-report.md"))
 	if !strings.Contains(reworked, "Status: "+ledger.Rework) {
 		t.Fatalf("rework at the Integration Merge:\n%s", reworked)
@@ -404,7 +404,7 @@ func TestAgentProseGoldens(t *testing.T) {
 	implementAlerts("alert on unhealthy widgets\n")
 	advance("alerts.txt", "alerts from another slice\n")
 	integrationClaim, integrationResult = review("")
-	g.capture("outcome-watchdog-prepare-conflict", worker, "watchdog", "prepare", "--repo", source, "--remote", "origin", "--item", integrationItem, "--claim", integrationClaim, "--result-directory", integrationResult)
+	g.capture("outcome-watchdog-prepare-conflict", worker, "watchdog", "prepare", "--repo", source, "--remote", "origin", "--slice", integrationItem, "--claim", integrationClaim, "--result-directory", integrationResult)
 	// Later steps expect source pushes to fail, as before the shim.
 	t.Setenv("GIT_SSH_COMMAND", "false")
 
@@ -416,29 +416,29 @@ func TestAgentProseGoldens(t *testing.T) {
 			t.Fatalf("accept %s: %s", name, mustJSON(t, outcome))
 		}
 	}
-	dispatched := g.capture("outcome-implement-next-dispatch", worker, "implement", "next", "--dispatch", "--repo", source, "--worker-model", "openai-codex/gpt-6-astra", "--worker-thinking", "high")
+	dispatched := g.capture("outcome-implement-next-dispatch", worker, "implement", "dispatch", "--repo", source, "--worker-model", "openai-codex/gpt-6-astra", "--worker-thinking", "high")
 	searchClaim, continuation := proseMatch(t, dispatchClaim, dispatched), proseMatch(t, dispatchContinue, dispatched)
-	g.capture("outcome-implement-next-dispatch-held", worker, "implement", "next", "--dispatch", "--repo", source, "--after", searchClaim)
-	g.run(worker, "implement", "prepare", "--repo", source, "--item", "widget-search/foundation", "--claim", searchClaim)
-	submitted := g.run(worker, "implement", "submit", "--repo", source, "--item", "widget-search/foundation", "--claim", searchClaim,
+	g.capture("outcome-implement-next-dispatch-held", worker, "implement", "dispatch", "--repo", source, "--after", searchClaim)
+	g.run(worker, "implement", "prepare", "--repo", source, "--slice", "widget-search/foundation", "--claim", searchClaim)
+	submitted := g.run(worker, "implement", "submit", "--repo", source, "--slice", "widget-search/foundation", "--claim", searchClaim,
 		"--head", proseCommit(t, filepath.Join(source, ".worktrees", "widget-search"), "search.txt", "search widgets\n"), "--target", target, "--body", report, "--public-body", public)
 	if !strings.Contains(submitted, "Status: "+ledger.AwaitingReview) {
 		t.Fatalf("submit widget-search:\n%s", submitted)
 	}
 	// Hold the remaining Slice so the continued Dispatch finds no work.
 	shareClaim := proseMatch(t, proseClaimLine, g.run(worker, "implement", "next", "--repo", source))
-	g.capture("outcome-implement-next-dispatch-idle-timeout", worker, "implement", "next", "--dispatch", "--repo", source, "--after", searchClaim, "--wait", "1ms", "--poll", "1ms")
+	g.capture("outcome-implement-next-dispatch-idle-timeout", worker, "implement", "dispatch", "--repo", source, "--after", searchClaim, "--wait", "1ms", "--poll", "1ms")
 	interrupted, cancel = context.WithCancel(context.Background())
 	cancel()
 	worker.out.Reset()
-	err = worker.app.RunContext(interrupted, []string{"skl", "implement", "next", "--dispatch", "--repo", source, "--after", searchClaim, "--wait", "1m"})
+	err = worker.app.RunContext(interrupted, []string{"skl", "implement", "dispatch", "--repo", source, "--after", searchClaim, "--wait", "1m"})
 	g.check("outcome-implement-next-dispatch-interrupted", worker.out.String()+err.Error()+"\n")
-	g.run(worker, "implement", "release", "--repo", source, "--item", "widget-share/foundation", "--claim", shareClaim)
+	g.run(worker, "implement", "release", "--repo", source, "--slice", "widget-share/foundation", "--claim", shareClaim)
 	continued := g.capture("outcome-implement-next-dispatch-continued", worker, shellWords(t, continuation)[1:]...)
 	shareClaim = proseMatch(t, dispatchClaim, continued)
-	g.run(worker, "implement", "release", "--repo", source, "--item", "widget-share/foundation", "--claim", shareClaim)
-	g.capture("outcome-implement-next-dispatch-released", worker, "implement", "next", "--dispatch", "--repo", source, "--after", shareClaim)
-	g.capture("outcome-implement-next-dispatch-refused", worker, "implement", "next", "--dispatch", "--repo", source, "--after", "not-a-claim")
+	g.run(worker, "implement", "release", "--repo", source, "--slice", "widget-share/foundation", "--claim", shareClaim)
+	g.capture("outcome-implement-next-dispatch-released", worker, "implement", "dispatch", "--repo", source, "--after", shareClaim)
+	g.capture("outcome-implement-next-dispatch-refused", worker, "implement", "dispatch", "--repo", source, "--after", "not-a-claim")
 
 	// Amend: an unchanged export, a refused change to submitted work, then a
 	// Slice added behind the released widget-share/foundation, whose Contract

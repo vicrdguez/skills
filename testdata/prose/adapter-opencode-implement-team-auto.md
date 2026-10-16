@@ -4,7 +4,7 @@ description: Drain the Implement queue through dispatch outcomes in team Auto Mo
 
 <!-- skl-owned: skl.adapter/v1 -->
 
-Run `skl implement next --mode team --dispatch --wait --auto --harness opencode` with each nonempty value below as one argument for its flag. Quote values for the shell without changing them; omit empty slots.
+Run `skl implement dispatch --mode team --wait --auto --harness opencode` with each nonempty value below as one argument for its flag. Quote values for the shell without changing them; omit empty slots.
 - --worker-model: $1
 - --worker-thinking: $2
 - --helper-model: $3

@@ -24,13 +24,13 @@ func deliveryImplementFacts(operation, procedure string) *DeliveryFacts {
 		Worktree:        "/tmp/add-refunds",
 		ResultDirectory: "/tmp/result",
 		Claim:           claim,
-		PrepareCommand:  "skl implement prepare --repo '/tmp/add-refunds' --item 'add-refunds/refund' --claim '" + claim + "'",
-		InspectCommand:  "skl implement inspect --repo '/tmp/add-refunds' --item 'add-refunds/refund' --claim '" + claim + "'",
-		ResumeCommand:   "skl implement resume --repo '/tmp/add-refunds' --item 'add-refunds/refund' --claim '" + claim + "'",
-		ReleaseCommand:  "skl implement release --repo '/tmp/add-refunds' --item 'add-refunds/refund' --claim '" + claim + "'",
-		SubmitCommand: "skl implement submit --repo '/tmp/add-refunds' --item 'add-refunds/refund' --claim '" + claim + "'" +
+		PrepareCommand:  "skl implement prepare --repo '/tmp/add-refunds' --slice 'add-refunds/refund' --claim '" + claim + "'",
+		InspectCommand:  "skl implement inspect --repo '/tmp/add-refunds' --slice 'add-refunds/refund' --claim '" + claim + "'",
+		ResumeCommand:   "skl implement resume --repo '/tmp/add-refunds' --slice 'add-refunds/refund' --claim '" + claim + "'",
+		ReleaseCommand:  "skl implement release --repo '/tmp/add-refunds' --slice 'add-refunds/refund' --claim '" + claim + "'",
+		SubmitCommand: "skl implement submit --repo '/tmp/add-refunds' --slice 'add-refunds/refund' --claim '" + claim + "'" +
 			" --head <final-head> --target <observed-target-sha> --body '/tmp/result/implement-report.md'",
-		PauseCommand: "skl implement needs-human --repo '/tmp/add-refunds' --item 'add-refunds/refund' --claim '" + claim + "'" +
+		PauseCommand: "skl implement needs-human --repo '/tmp/add-refunds' --slice 'add-refunds/refund' --claim '" + claim + "'" +
 			" --body '/tmp/result/implement-report.md'",
 		ResultResourceCommand: "skl skill --resource ledger-submission.md --input result_directory='/tmp/result'" +
 			" --input procedure='" + procedure + "' implement",

@@ -151,11 +151,11 @@ func TestInstallWritesLoopAndAutoFamiliesForNativeHarnesses(t *testing.T) {
 				path := filepath.Join(home, fmt.Sprintf(entryPoints[harness], operation))
 				entry := readFile(t, path)
 				first[path] = entry
-				want := []string{"skl", strings.TrimSuffix(mode, "-team"), "next"}
+				want := []string{"skl", strings.TrimSuffix(mode, "-team"), "dispatch"}
 				if mode == "implement-team" {
 					want = append(want, "--mode", "team")
 				}
-				want = append(want, "--dispatch", "--wait")
+				want = append(want, "--wait")
 				if family == "auto" {
 					want = append(want, "--auto")
 				}
@@ -253,7 +253,7 @@ func TestInstallRefreshesOwnedEntryPointsAndLeavesUserTemplates(t *testing.T) {
 	if got := readFile(t, userPiLoop); got != "my pi loop\n" {
 		t.Fatalf("user-owned pi loop changed: %q", got)
 	}
-	if got := readFile(t, ownedLoop); strings.Contains(got, "stale") || !strings.Contains(got, "skl watchdog next --dispatch --wait") {
+	if got := readFile(t, ownedLoop); strings.Contains(got, "stale") || !strings.Contains(got, "skl watchdog dispatch --wait") {
 		t.Fatalf("owned pi loop was not refreshed:\n%s", got)
 	}
 }
@@ -288,7 +288,7 @@ func TestInstallRetiresOwnedPiRunnersAndReplacedStubs(t *testing.T) {
 	if !strings.Contains(readFile(t, filepath.Join(home, ".pi/agent/prompts/implement.md")), "skl implement next") {
 		t.Error("the pi Implement entry point was not installed")
 	}
-	if got := readFile(t, legacyLoop); strings.Contains(got, "legacy loop") || !strings.Contains(got, "skl implement next --dispatch --wait") {
+	if got := readFile(t, legacyLoop); strings.Contains(got, "legacy loop") || !strings.Contains(got, "skl implement dispatch --wait") {
 		t.Errorf("previously owned pi loop was not migrated: %s", got)
 	}
 	for path, want := range map[string]string{notes: "keep\n", userRunner: "mine\n", userRunnerCopy: "my own runner\n"} {

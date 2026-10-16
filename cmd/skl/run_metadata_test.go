@@ -62,7 +62,7 @@ func startRunImplementation(t *testing.T, cli ledgerCLI, source string) (claim, 
 		t.Fatalf("implement next = %#v, err=%v", started, err)
 	}
 	claim = started.Execution.Claim.Commit
-	prepared, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--item", deliveryTestItem, "--claim", claim, "--format", "json")
+	prepared, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--slice", deliveryTestItem, "--claim", claim, "--format", "json")
 	if err != nil || prepared.Source == nil {
 		t.Fatalf("implement prepare = %#v, err=%v", prepared, err)
 	}
@@ -145,7 +145,7 @@ func TestRunMetadataIsRecordedWithBothPhaseReports(t *testing.T) {
 		`"children":[{"role":"standards-review","elapsed_ms":1200}],"unfamiliar":[1.5,null]}`
 	claim, head := startRunImplementation(t, cli, source)
 	body := writeTemp(t, t, "# Implementation\n")
-	submitted, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", claim,
+	submitted, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--slice", deliveryTestItem, "--claim", claim,
 		"--head", head, "--target", target, "--body", body, "--run-metadata", runFile(t, implementRun), "--format", "json")
 	if err != nil || submitted.Status != ledger.AwaitingReview {
 		t.Fatalf("implement submit with Run Metadata = %#v, err=%v", submitted, err)
@@ -167,8 +167,8 @@ func TestRunMetadataIsRecordedWithBothPhaseReports(t *testing.T) {
 	if err != nil || started.Execution == nil {
 		t.Fatalf("watchdog next after a schema-2 report = %#v, err=%v", started, err)
 	}
-	paused, err := cli.deliveryJSON(t, "skl", "watchdog", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", started.Execution.Claim.Commit,
-		"--outcome", "needs-human", "--body", writeTemp(t, t, "# Review\n"), "--run-metadata", runFile(t, `{"worker":{"model":"example-reviewer"}}`), "--format", "json")
+	paused, err := cli.deliveryJSON(t, "skl", "watchdog", "needs-human", "--repo", source, "--slice", deliveryTestItem, "--claim", started.Execution.Claim.Commit,
+		"--body", writeTemp(t, t, "# Review\n"), "--run-metadata", runFile(t, `{"worker":{"model":"example-reviewer"}}`), "--format", "json")
 	if err != nil || paused.Status != ledger.NeedsHuman {
 		t.Fatalf("watchdog needs-human with Run Metadata = %#v, err=%v", paused, err)
 	}
@@ -226,7 +226,7 @@ func TestRunMetadataProblemsNeverBlockTheHandoff(t *testing.T) {
 			withBuildInfo(t, testCase.info)
 
 			claim, head := startRunImplementation(t, cli, source)
-			submitted, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", claim,
+			submitted, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--slice", deliveryTestItem, "--claim", claim,
 				"--head", head, "--target", target, "--body", writeTemp(t, t, "# Implementation\n"), "--run-metadata", testCase.run(t), "--format", "json")
 			if err != nil || submitted.Status != ledger.AwaitingReview {
 				t.Fatalf("submit = %#v, err=%v", submitted, err)
@@ -254,7 +254,7 @@ func TestRunMetadataLeavesAuthoritativeRefusalsInPlace(t *testing.T) {
 
 	claim, head := startRunImplementation(t, cli, source)
 	divergent := deliveryTrimmed(t, source, "commit-tree", deliveryTrimmed(t, source, "rev-parse", head+"^{tree}"), "-m", "divergent root")
-	refused, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", claim,
+	refused, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--slice", deliveryTestItem, "--claim", claim,
 		"--head", divergent, "--target", target, "--body", writeTemp(t, t, "# Implementation\n"), "--run-metadata", runFile(t, `{"mode":"standard"}`), "--format", "json")
 	if err != nil {
 		t.Fatalf("submit a head off the branch: %v", err)
@@ -275,7 +275,7 @@ func TestRunMetadataRetryReturnsTheRecordedReport(t *testing.T) {
 	body := writeTemp(t, t, "# Implementation\n")
 	submit := func(run string) deliveryOutput {
 		t.Helper()
-		out, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", claim,
+		out, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--slice", deliveryTestItem, "--claim", claim,
 			"--head", head, "--target", target, "--body", body, "--run-metadata", runFile(t, run), "--format", "json")
 		if err != nil || out.Result == nil {
 			t.Fatalf("submit = %#v, err=%v", out, err)

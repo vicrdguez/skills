@@ -6,4 +6,4 @@ Repair: preserve later work and use the exact acquisition reference for your res
 
 This refusal changed no Claim. Make the repair, then rerun:
 
-`skl implement resume --repo '/work/widgets' --item 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001'`
+`skl implement resume --repo '/work/widgets' --slice 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001'`

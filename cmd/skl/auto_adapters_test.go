@@ -25,7 +25,7 @@ func TestInstalledFamiliesDispatchWithRuntimeSettingsAndContinueSafely(t *testin
 				cli := deliveryNoForgeApp(t)
 				watchdog := strings.HasPrefix(operation, "watchdog")
 				if watchdog {
-					implemented := cli.dispatched(t, "skl implement next --dispatch --repo "+source)
+					implemented := cli.dispatched(t, "skl implement dispatch --repo "+source)
 					dispatchImplementHandoff(t, cli, source, target, implemented.Item, implemented.Claim)
 				}
 				entry := readFile(t, filepath.Join(home, fmt.Sprintf(entryPoints[harness], operation)))
