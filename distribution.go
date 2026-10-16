@@ -51,12 +51,12 @@ var adapters = []adapter{
 // Loop adapters use native argument-taking entry points. Their outcomes own
 // the continuation; the entry-point name selects the initial Auto Mode flag.
 var loopAdapters = []adapter{
-	{name: "implement-loop", command: "skl implement next --dispatch --wait", slots: []string{"worker-model", "worker-thinking", "reviewer-model", "reviewer-thinking"}, loop: true},
-	{name: "implement-team-loop", command: "skl implement next --mode team --dispatch --wait", slots: []string{"worker-model", "worker-thinking", "helper-model", "helper-thinking", "reviewer-model", "reviewer-thinking"}, loop: true},
-	{name: "watchdog-loop", command: "skl watchdog next --dispatch --wait", slots: []string{"worker-model", "worker-thinking"}, loop: true},
-	{name: "implement-auto", command: "skl implement next --dispatch --wait --auto", slots: []string{"worker-model", "worker-thinking", "reviewer-model", "reviewer-thinking"}, loop: true},
-	{name: "implement-team-auto", command: "skl implement next --mode team --dispatch --wait --auto", slots: []string{"worker-model", "worker-thinking", "helper-model", "helper-thinking", "reviewer-model", "reviewer-thinking"}, loop: true},
-	{name: "watchdog-auto", command: "skl watchdog next --dispatch --wait --auto", slots: []string{"worker-model", "worker-thinking"}, loop: true},
+	{name: "implement-loop", command: "skl implement dispatch --wait", slots: []string{"worker-model", "worker-thinking", "reviewer-model", "reviewer-thinking"}, loop: true},
+	{name: "implement-team-loop", command: "skl implement dispatch --mode team --wait", slots: []string{"worker-model", "worker-thinking", "helper-model", "helper-thinking", "reviewer-model", "reviewer-thinking"}, loop: true},
+	{name: "watchdog-loop", command: "skl watchdog dispatch --wait", slots: []string{"worker-model", "worker-thinking"}, loop: true},
+	{name: "implement-auto", command: "skl implement dispatch --wait --auto", slots: []string{"worker-model", "worker-thinking", "reviewer-model", "reviewer-thinking"}, loop: true},
+	{name: "implement-team-auto", command: "skl implement dispatch --mode team --wait --auto", slots: []string{"worker-model", "worker-thinking", "helper-model", "helper-thinking", "reviewer-model", "reviewer-thinking"}, loop: true},
+	{name: "watchdog-auto", command: "skl watchdog dispatch --wait --auto", slots: []string{"worker-model", "worker-thinking"}, loop: true},
 }
 
 // harness is where skl installs into one supported Agent Harness. A harness

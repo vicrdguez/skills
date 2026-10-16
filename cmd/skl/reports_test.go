@@ -346,7 +346,7 @@ func submitReportImplementation(t *testing.T, cli ledgerCLI, source, target, rou
 		consumedWatchdog = &copy
 	}
 	claim := started.Execution.Claim.Commit
-	prepared, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--item", deliveryTestItem, "--claim", claim, "--format", "json")
+	prepared, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--slice", deliveryTestItem, "--claim", claim, "--format", "json")
 	if err != nil || prepared.Source == nil {
 		t.Fatalf("implement prepare round %s = %#v, err=%v", round, prepared, err)
 	}
@@ -356,7 +356,7 @@ func submitReportImplementation(t *testing.T, cli ledgerCLI, source, target, rou
 	runGit(t, worktree, "commit", "-q", "-m", "implementation round "+round)
 	head := deliveryTrimmed(t, worktree, "rev-parse", "HEAD")
 	bodyPath := writeTemp(t, t, body)
-	submitted, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", claim,
+	submitted, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--slice", deliveryTestItem, "--claim", claim,
 		"--head", head, "--target", target, "--body", bodyPath, "--format", "json")
 	if err != nil || submitted.Result == nil || submitted.Status != ledger.AwaitingReview {
 		t.Fatalf("implement submit round %s = %#v, err=%v", round, submitted, err)
@@ -376,7 +376,7 @@ func submitReportWatchdog(t *testing.T, cli ledgerCLI, source, outcome, body str
 		consumedImplement = &copy
 	}
 	bodyPath := writeTemp(t, t, body)
-	submitted, err := cli.deliveryJSON(t, "skl", "watchdog", "submit", "--repo", source, "--item", deliveryTestItem,
+	submitted, err := cli.deliveryJSON(t, "skl", "watchdog", "submit", "--repo", source, "--slice", deliveryTestItem,
 		"--claim", started.Execution.Claim.Commit, "--outcome", outcome, "--body", bodyPath, "--format", "json")
 	if err != nil || submitted.Result == nil {
 		t.Fatalf("watchdog submit %s = %#v, err=%v", outcome, submitted, err)

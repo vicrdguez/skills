@@ -86,12 +86,12 @@ func (c ledgerCLI) dispatched(t *testing.T, command string) *dispatched {
 // and submits it for review, as a dispatched Implement worker does.
 func dispatchImplementHandoff(t *testing.T, cli ledgerCLI, source, target, item, claim string) {
 	t.Helper()
-	prepared, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--item", item, "--claim", claim, "--format", "json")
+	prepared, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--slice", item, "--claim", claim, "--format", "json")
 	if err != nil || prepared.Source == nil {
 		t.Fatalf("implement prepare: %#v %v", prepared, err)
 	}
 	head := proseCommit(t, prepared.Source.Worktree, "dispatch.txt", "claim "+claim+"\n")
-	submitted, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--item", item, "--claim", claim,
+	submitted, err := cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--slice", item, "--claim", claim,
 		"--head", head, "--target", target, "--body", proseFixturePath("implement-report.md"), "--public-body", proseFixturePath("public.md"), "--format", "json")
 	if err != nil || submitted.Status != ledger.AwaitingReview {
 		t.Fatalf("implement submit: %#v %v", submitted, err)
@@ -111,7 +111,7 @@ func dispatchReview(t *testing.T, cli ledgerCLI, source, outcome string) {
 // dispatchVerdict records a review's outcome for its Claim.
 func dispatchVerdict(t *testing.T, cli ledgerCLI, source, claim, outcome string) {
 	t.Helper()
-	reviewed, err := cli.deliveryJSON(t, "skl", "watchdog", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", claim,
+	reviewed, err := cli.deliveryJSON(t, "skl", "watchdog", "submit", "--repo", source, "--slice", deliveryTestItem, "--claim", claim,
 		"--outcome", outcome, "--body", proseFixturePath("watchdog-report.md"), "--public-body", proseFixturePath("public.md"), "--format", "json")
 	if err != nil || reviewed.Result == nil {
 		t.Fatalf("watchdog submit %s: %#v %v", outcome, reviewed, err)
@@ -145,7 +145,7 @@ func TestDispatchAnswersWithCommandsAndTheWorkerGetsNextsSkill(t *testing.T) {
 	}
 
 	// B1/B2: the dispatch claims, and answers with commands only.
-	dispatch := cli.dispatchRun(t, "skl implement next --dispatch --repo "+source+" --remote origin --wait=2m --poll=5s --worker-model openai-codex/gpt-6-astra --worker-thinking high")
+	dispatch := cli.dispatchRun(t, "skl implement dispatch --repo "+source+" --remote origin --wait=2m --poll=5s --worker-model openai-codex/gpt-6-astra --worker-thinking high")
 	state := deliveryPersistedState(t, fixture.clone)
 	if state.Claim == nil || state.Claim.Phase != ledger.ImplementPhase {
 		t.Fatalf("dispatch did not claim the Slice: %#v", state)
@@ -156,8 +156,8 @@ func TestDispatchAnswersWithCommandsAndTheWorkerGetsNextsSkill(t *testing.T) {
 			t.Errorf("dispatch output carries the Execution Skill (%q):\n%s", skill, dispatch)
 		}
 	}
-	wantWorker := "skl implement resume --repo '" + root + "' --remote 'origin' --item '" + deliveryTestItem + "' --claim '" + claim + "' --dispatched"
-	wantContinue := "skl implement next --repo '" + root + "' --remote 'origin' --wait=2m0s --poll=5s --dispatch --after '" + claim + "' --worker-model 'openai-codex/gpt-6-astra' --worker-thinking 'high'"
+	wantWorker := "skl implement resume --repo '" + root + "' --remote 'origin' --slice '" + deliveryTestItem + "' --claim '" + claim + "' --dispatched"
+	wantContinue := "skl implement dispatch --repo '" + root + "' --remote 'origin' --wait=2m0s --poll=5s --after '" + claim + "' --worker-model 'openai-codex/gpt-6-astra' --worker-thinking 'high'"
 	for _, want := range []string{"`openai-codex/gpt-6-astra`", "`high`", "`" + wantWorker + "`", "`" + wantContinue + "`"} {
 		if !strings.Contains(dispatch, want) {
 			t.Errorf("dispatch output lacks %s:\n%s", want, dispatch)
@@ -166,7 +166,7 @@ func TestDispatchAnswersWithCommandsAndTheWorkerGetsNextsSkill(t *testing.T) {
 
 	// B3: the worker receives the initial Procedure next would have returned.
 	dispatchedSkill := cli.dispatchRun(t, wantWorker)
-	cli.dispatchRun(t, "skl implement release --repo "+source+" --item "+deliveryTestItem+" --claim "+claim)
+	cli.dispatchRun(t, "skl implement release --repo "+source+" --slice "+deliveryTestItem+" --claim "+claim)
 	ordinary := cli.dispatchJSON(t, "skl implement next --repo "+source+"")
 	if ordinary.Packet == nil || ordinary.Packet.Facts.Delivery.Procedure != "initial" {
 		t.Fatalf("ordinary next: %s", mustJSON(t, ordinary))
@@ -176,25 +176,25 @@ func TestDispatchAnswersWithCommandsAndTheWorkerGetsNextsSkill(t *testing.T) {
 
 	// Watchdog: the ordinary review Procedure, with omitted worker values
 	// rendering no sentence.
-	review := cli.dispatchRun(t, "skl watchdog next --dispatch --repo "+source)
+	review := cli.dispatchRun(t, "skl watchdog dispatch --repo "+source)
 	if strings.Contains(review, "model") || strings.Contains(review, "thinking") {
 		t.Errorf("omitted worker values rendered a sentence:\n%s", review)
 	}
 	reviewClaim := deliveryTrimmed(t, fixture.clone, "rev-parse", "HEAD")
-	dispatchedReview := cli.dispatchRun(t, "skl watchdog resume --repo "+source+" --item "+deliveryTestItem+" --claim "+reviewClaim+" --dispatched")
-	cli.dispatchRun(t, "skl watchdog release --repo "+source+" --item "+deliveryTestItem+" --claim "+reviewClaim)
+	dispatchedReview := cli.dispatchRun(t, "skl watchdog resume --repo "+source+" --slice "+deliveryTestItem+" --claim "+reviewClaim+" --dispatched")
+	cli.dispatchRun(t, "skl watchdog release --repo "+source+" --slice "+deliveryTestItem+" --claim "+reviewClaim)
 	ordinary = cli.dispatchJSON(t, "skl watchdog next --repo "+source)
 	if ordinary.Packet == nil {
 		t.Fatalf("ordinary watchdog next: %s", mustJSON(t, ordinary))
 	}
 	sameRendering(t, dispatchedReview, ordinary.Packet.Instructions)
-	cli.dispatchRun(t, "skl watchdog release --repo "+source+" --item "+deliveryTestItem+" --claim "+ordinary.Execution.Claim.Commit)
+	cli.dispatchRun(t, "skl watchdog release --repo "+source+" --slice "+deliveryTestItem+" --claim "+ordinary.Execution.Claim.Commit)
 	dispatchReview(t, cli, source, "rework")
 
 	// Rework: the Rework Procedure.
-	reworked := cli.dispatched(t, "skl implement next --dispatch --repo "+source)
+	reworked := cli.dispatched(t, "skl implement dispatch --repo "+source)
 	dispatchedRework := cli.dispatchRun(t, reworked.Worker)
-	cli.dispatchRun(t, "skl implement release --repo "+source+" --item "+deliveryTestItem+" --claim "+reworked.Claim)
+	cli.dispatchRun(t, "skl implement release --repo "+source+" --slice "+deliveryTestItem+" --claim "+reworked.Claim)
 	ordinary = cli.dispatchJSON(t, "skl implement next --repo "+source)
 	if ordinary.Packet == nil || ordinary.Packet.Facts.Delivery.Procedure != "rework" {
 		t.Fatalf("ordinary rework next: %s", mustJSON(t, ordinary))
@@ -224,7 +224,7 @@ func TestDispatchContinuationFollowsTheNamedClaim(t *testing.T) {
 
 	// Watchdog advances the Slice to Ready for Merge before the Implement
 	// Supervisor continues after C1.
-	c1 := cli.dispatched(t, "skl implement next --dispatch --repo "+source)
+	c1 := cli.dispatched(t, "skl implement dispatch --repo "+source)
 	dispatchImplementHandoff(t, cli, source, target, deliveryTestItem, c1.Claim)
 	dispatchReview(t, cli, source, "pass")
 	if state := deliveryPersistedState(t, fixture.clone); state.State != ledger.ReadyForMerge {
@@ -246,12 +246,12 @@ func TestDispatchContinuationFollowsTheNamedClaim(t *testing.T) {
 
 	// The export worker crashed with its Claim held.
 	before := ledgerSnapshot(t, fixture.clone)
-	held := cli.dispatchRun(t, "skl implement next --dispatch --repo "+source+" --after "+exportClaim+" --wait 1h")
+	held := cli.dispatchRun(t, "skl implement dispatch --repo "+source+" --after "+exportClaim+" --wait 1h")
 	if !strings.Contains(held, "Status: stopped") {
 		t.Fatalf("held Claim did not stop the Supervisor:\n%s", held)
 	}
 	for _, command := range []string{"resume", "release"} {
-		bound := regexp.MustCompile("`skl implement " + command + " --repo '[^']+' --remote 'origin' --item 'delivery-export/foundation' --claim '" + exportClaim + "'`")
+		bound := regexp.MustCompile("`skl implement " + command + " --repo '[^']+' --remote 'origin' --slice 'delivery-export/foundation' --claim '" + exportClaim + "'`")
 		if !bound.MatchString(held) {
 			t.Errorf("stop outcome lacks %s:\n%s", bound, held)
 		}
@@ -261,9 +261,9 @@ func TestDispatchContinuationFollowsTheNamedClaim(t *testing.T) {
 	}
 
 	// A human releases it mid-run; the Slice is eligible again.
-	cli.dispatchRun(t, "skl implement release --repo "+source+" --item delivery-export/foundation --claim "+exportClaim)
+	cli.dispatchRun(t, "skl implement release --repo "+source+" --slice delivery-export/foundation --claim "+exportClaim)
 	before = ledgerSnapshot(t, fixture.clone)
-	if ending, status := cli.continued(t, "skl implement next --dispatch --repo "+source+" --after "+exportClaim); ending != ledger.ClaimReleased || status != "stopped" {
+	if ending, status := cli.continued(t, "skl implement dispatch --repo "+source+" --after "+exportClaim); ending != ledger.ClaimReleased || status != "stopped" {
 		t.Fatalf("released Claim continued: %s %s", ending, status)
 	}
 	if after := ledgerSnapshot(t, fixture.clone); after != before {
@@ -279,8 +279,8 @@ func TestDispatchContinuesAfterEveryHandoff(t *testing.T) {
 	deliveryAcceptFixture(t, newForgeServer(t), source)
 	cli := deliveryNoForgeApp(t)
 
-	paused := cli.dispatched(t, "skl implement next --dispatch --repo "+source)
-	out := cli.dispatchJSON(t, "skl implement needs-human --repo "+source+" --item "+deliveryTestItem+" --claim "+paused.Claim+" --body "+proseFixturePath("pause.md"))
+	paused := cli.dispatched(t, "skl implement dispatch --repo "+source)
+	out := cli.dispatchJSON(t, "skl implement needs-human --repo "+source+" --slice "+deliveryTestItem+" --claim "+paused.Claim+" --body "+proseFixturePath("pause.md"))
 	if out.Status != ledger.NeedsHuman {
 		t.Fatalf("pause: %s", mustJSON(t, out))
 	}
@@ -296,15 +296,15 @@ func TestDispatchContinuesAfterEveryHandoff(t *testing.T) {
 	request := decisionRequest(t, cli, "widgets", deliveryTestItem)
 	decisionApplyAnswer(t, cli, request, ledger.RouteImplement, "# Human direction\n\nContinue.\n")
 
-	directed := cli.dispatched(t, "skl implement next --dispatch --repo "+source)
+	directed := cli.dispatched(t, "skl implement dispatch --repo "+source)
 	dispatchImplementHandoff(t, cli, source, target, deliveryTestItem, directed.Claim)
-	reworked := cli.dispatched(t, "skl watchdog next --dispatch --repo "+source)
+	reworked := cli.dispatched(t, "skl watchdog dispatch --repo "+source)
 	dispatchVerdict(t, cli, source, reworked.Claim, "rework")
 	continueAfter(reworked, ledger.Rework)
 
-	fixed := cli.dispatched(t, "skl implement next --dispatch --repo "+source)
+	fixed := cli.dispatched(t, "skl implement dispatch --repo "+source)
 	dispatchImplementHandoff(t, cli, source, target, deliveryTestItem, fixed.Claim)
-	passed := cli.dispatched(t, "skl watchdog next --dispatch --repo "+source)
+	passed := cli.dispatched(t, "skl watchdog dispatch --repo "+source)
 	dispatchVerdict(t, cli, source, passed.Claim, "pass")
 	continueAfter(passed, "pass")
 
@@ -324,7 +324,7 @@ func TestDispatchEarlierHandoffCannotAuthorizeALaterRound(t *testing.T) {
 	deliveryAcceptFixture(t, newForgeServer(t), source)
 	cli := deliveryNoForgeApp(t)
 
-	c1 := cli.dispatched(t, "skl implement next --dispatch --repo "+source)
+	c1 := cli.dispatched(t, "skl implement dispatch --repo "+source)
 	dispatchImplementHandoff(t, cli, source, target, deliveryTestItem, c1.Claim)
 	dispatchReview(t, cli, source, "rework")
 	c2 := cli.dispatched(t, c1.Continue)
@@ -351,14 +351,14 @@ func TestDispatchRefusesInvalidContinuationBeforeAnyEffect(t *testing.T) {
 	cli := deliveryNoForgeApp(t)
 
 	// A watchdog Claim, and a Claim of another Project.
-	implemented := cli.dispatched(t, "skl implement next --dispatch --repo "+source)
+	implemented := cli.dispatched(t, "skl implement dispatch --repo "+source)
 	dispatchImplementHandoff(t, cli, source, target, deliveryTestItem, implemented.Claim)
-	watchdogClaim := cli.dispatched(t, "skl watchdog next --dispatch --repo "+source).Claim
+	watchdogClaim := cli.dispatched(t, "skl watchdog dispatch --repo "+source).Claim
 	gadgets := sourceRepository(t, "acme", "gadgets")
 	if accepted := newLedgerApp(t, forge).accept(t, gadgets, writeProposal(t, "", singleSlice("gadget"))); accepted.Status != "accepted" {
 		t.Fatalf("accept gadgets: %s", mustJSON(t, accepted))
 	}
-	gadgetClaim := cli.dispatched(t, "skl implement next --dispatch --repo "+gadgets).Claim
+	gadgetClaim := cli.dispatched(t, "skl implement dispatch --repo "+gadgets).Claim
 	// A fresh eligible Slice would be claimed by any continuation that passed.
 	spec := singleSlice("delivery-export")
 	spec.slices[0].branch = "export"
@@ -368,18 +368,18 @@ func TestDispatchRefusesInvalidContinuationBeforeAnyEffect(t *testing.T) {
 	acceptance := deliveryTrimmed(t, fixture.clone, "rev-parse", "HEAD")
 
 	for name, args := range map[string][]string{
-		"missing":       {"--dispatch", "--after"},
-		"empty":         {"--dispatch", "--after", ""},
-		"malformed":     {"--dispatch", "--after", "not-a-claim"},
-		"unknown":       {"--dispatch", "--after", strings.Repeat("a", 40)},
-		"not a Claim":   {"--dispatch", "--after", acceptance},
-		"other phase":   {"--dispatch", "--after", watchdogClaim},
-		"other Project": {"--dispatch", "--after", gadgetClaim},
+		"missing":       {"--after"},
+		"empty":         {"--after", ""},
+		"malformed":     {"--after", "not-a-claim"},
+		"unknown":       {"--after", strings.Repeat("a", 40)},
+		"not a Claim":   {"--after", acceptance},
+		"other phase":   {"--after", watchdogClaim},
+		"other Project": {"--after", gadgetClaim},
 	} {
 		t.Run(name, func(t *testing.T) {
 			before := ledgerSnapshot(t, fixture.clone)
 			start := time.Now()
-			output, err := cli.deliveryRun(t, append([]string{"skl", "implement", "next", "--repo", source, "--wait", "1h"}, args...)...)
+			output, err := cli.deliveryRun(t, append([]string{"skl", "implement", "dispatch", "--repo", source, "--wait", "1h"}, args...)...)
 			if err != nil {
 				t.Fatalf("refusal failed: %v\n%s", err, output)
 			}
@@ -406,8 +406,8 @@ func TestDispatchOptionsRequireDispatch(t *testing.T) {
 	cli := deliveryNoForgeApp(t)
 	for _, args := range []string{" --after " + strings.Repeat("a", 40), " --worker-model m", " --worker-thinking high"} {
 		before := ledgerSnapshot(t, fixture.clone)
-		if out := cli.dispatchJSON(t, "skl implement next --repo "+source+args); out.Status != "fix_required" {
-			t.Fatalf("%s accepted without --dispatch: %s", args, mustJSON(t, out))
+		if _, err := cli.deliveryRun(t, "skl", "implement", "next", "--repo", source, strings.Fields(args)[0], strings.Fields(args)[1]); err == nil || !strings.Contains(err.Error(), "flag provided but not defined") {
+			t.Fatalf("%s accepted by next: %v", args, err)
 		}
 		if after := ledgerSnapshot(t, fixture.clone); after != before {
 			t.Fatalf("%s changed the ledger", args)
@@ -425,7 +425,7 @@ func TestDispatchWaitingKeepsTheWaitContract(t *testing.T) {
 	cli := deliveryNoForgeApp(t)
 
 	before := ledgerSnapshot(t, fixture.clone)
-	idle := cli.dispatchJSON(t, "skl watchdog next --dispatch --repo "+source+" --wait 20ms --poll 5ms")
+	idle := cli.dispatchJSON(t, "skl watchdog dispatch --repo "+source+" --wait 20ms --poll 5ms")
 	if idle.Status != ledger.IdleTimeout || !strings.Contains(idle.Reason, "not global completion") {
 		t.Fatalf("idle window = %s", mustJSON(t, idle))
 	}
@@ -435,7 +435,7 @@ func TestDispatchWaitingKeepsTheWaitContract(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	cli.out.Reset()
-	err := cli.app.RunContext(ctx, []string{"skl", "watchdog", "next", "--dispatch", "--repo", source, "--wait", "1m"})
+	err := cli.app.RunContext(ctx, []string{"skl", "watchdog", "dispatch", "--repo", source, "--wait", "1m"})
 	if err == nil || !strings.Contains(cli.out.String(), "Status: interrupted") || !strings.Contains(cli.out.String(), "`skl reconcile --repo '") {
 		t.Fatalf("interrupted dispatch = %v:\n%s", err, cli.out)
 	}

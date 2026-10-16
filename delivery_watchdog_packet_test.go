@@ -27,14 +27,14 @@ func deliveryWatchdogFacts(operation, procedure, scope string, reviewCount uint6
 		Worktree:        "/tmp/add-refunds",
 		ResultDirectory: "/tmp/result",
 		Claim:           claim,
-		PrepareCommand:  "skl watchdog prepare --repo '/tmp/add-refunds' --item 'add-refunds/refund' --claim '" + claim + "'",
-		InspectCommand:  "skl watchdog inspect --repo '/tmp/add-refunds' --item 'add-refunds/refund' --claim '" + claim + "'",
-		ResumeCommand:   "skl watchdog resume --repo '/tmp/add-refunds' --item 'add-refunds/refund' --claim '" + claim + "'",
-		ReleaseCommand:  "skl watchdog release --repo '/tmp/add-refunds' --item 'add-refunds/refund' --claim '" + claim + "'",
-		SubmitCommand: "skl watchdog submit --repo '/tmp/add-refunds' --item 'add-refunds/refund' --claim '" + claim + "'" +
-			" --body '/tmp/result/watchdog-report.md' --public-body '/tmp/result/public.md' --outcome <pass|rework|needs-human>",
-		PauseCommand: "skl watchdog submit --repo '/tmp/add-refunds' --item 'add-refunds/refund' --claim '" + claim + "'" +
-			" --body '/tmp/result/watchdog-report.md' --public-body '/tmp/result/public.md' --outcome needs-human",
+		PrepareCommand:  "skl watchdog prepare --repo '/tmp/add-refunds' --slice 'add-refunds/refund' --claim '" + claim + "'",
+		InspectCommand:  "skl watchdog inspect --repo '/tmp/add-refunds' --slice 'add-refunds/refund' --claim '" + claim + "'",
+		ResumeCommand:   "skl watchdog resume --repo '/tmp/add-refunds' --slice 'add-refunds/refund' --claim '" + claim + "'",
+		ReleaseCommand:  "skl watchdog release --repo '/tmp/add-refunds' --slice 'add-refunds/refund' --claim '" + claim + "'",
+		SubmitCommand: "skl watchdog submit --repo '/tmp/add-refunds' --slice 'add-refunds/refund' --claim '" + claim + "'" +
+			" --body '/tmp/result/watchdog-report.md' --public-body '/tmp/result/public.md' --outcome <pass|rework>",
+		PauseCommand: "skl watchdog needs-human --repo '/tmp/add-refunds' --slice 'add-refunds/refund' --claim '" + claim + "'" +
+			" --body '/tmp/result/watchdog-report.md' --public-body '/tmp/result/public.md'",
 		ResultResourceCommand: "skl skill --resource ledger-review.md --input result_directory='/tmp/result'" +
 			" --input round=" + fmt.Sprint(reviewCount+1) + " --input reviewed_head='" + reviewed + "' watchdog",
 		RequiredHead:     reviewed,

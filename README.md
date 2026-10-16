@@ -98,7 +98,7 @@ Claim: `3f9c…`
     ### Scenario: An unhealthy widget is visible …
 
 ## 1. Prepare
-Run `skl implement prepare --repo /work/widgets --item widget-dashboard/foundation --claim 3f9c…`.
+Run `skl implement prepare --repo /work/widgets --slice widget-dashboard/foundation --claim 3f9c…`.
 Check: inspection prints the source head.
 
 ## 2. Implement
@@ -115,7 +115,7 @@ Run the Audit below once, over the integrated candidate …
 Retrieve the template with `skl skill --resource ledger-submission.md --input procedure=initial … implement` …
 
 ## 6. Submit
-Submit with `skl implement submit --repo /work/widgets --item widget-dashboard/foundation --claim 3f9c… --head <final-source-sha> --target <observed-target-sha>`.
+Submit with `skl implement submit --repo /work/widgets --slice widget-dashboard/foundation --claim 3f9c… --head <final-source-sha> --target <observed-target-sha>`.
 Check: submit reports the work awaiting review.
 
 # Testing
@@ -137,7 +137,7 @@ The point of composing at invocation time is that the worker reads only what app
 
 `skl install` puts the workflow into Pi, Codex, Claude Code and OpenCode. Every skill gets a one-line stub that runs `skl skill <name>`. Implement and Watchdog are installed as Harness Adapters in each harness's native entry point (a Pi prompt template, a user-invoked Claude Code skill, an OpenCode command; Codex keeps a stub) and run `skl implement next` or `skl watchdog next`. A second Implement entry point, `implement-team`, runs team mode, where the worker leads a team of implementer subagents. Changing harness changes nothing about the workflow.
 
-A Supervisor drains a queue by asking for work with `--dispatch --wait`: the engine claims a Slice for a fresh worker session and answers with the command that session runs and the command that continues afterwards (`skl <phase> next --dispatch --wait --after <claim>`). Continuation only proceeds once the ledger records that worker's handoff ([ADR 0010](docs/adr/0010-drive-supervisors-through-dispatch-outcomes.md)).
+A Supervisor drains a queue by asking for work with `dispatch --wait`: the engine claims a Slice for a fresh worker session and answers with the command that session runs and the command that continues afterwards (`skl <phase> dispatch --wait --after <claim>`). Continuation only proceeds once the ledger records that worker's handoff ([ADR 0010](docs/adr/0010-drive-supervisors-through-dispatch-outcomes.md)).
 
 Pi, OpenCode and Claude Code install `implement-loop` (standard Implement), `implement-team-loop` (team Implement) and `watchdog-loop`, plus the corresponding `implement-auto`, `implement-team-auto` and `watchdog-auto` entry points. Each starts Dispatch and follows its Outcome Instructions until one says to stop. Ordinary loops start without Auto Mode; the `*-auto` entries enable it even with no arguments. Neither family accepts a positional auto toggle. All accept optional worker model and thinking arguments; Implement also accepts reviewer arguments, and team mode accepts helper arguments. Codex entry-point support is unchanged.
 

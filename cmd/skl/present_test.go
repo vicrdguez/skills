@@ -283,7 +283,7 @@ func presentHandoff(t *testing.T, cli ledgerCLI, source, phase string, arguments
 		t.Fatalf("%s next = %#v, %v", phase, started, err)
 	}
 	claim := started.Execution.Claim.Commit
-	prepared, err := cli.deliveryJSON(t, "skl", phase, "prepare", "--repo", source, "--item", deliveryTestItem, "--claim", claim, "--format", "json")
+	prepared, err := cli.deliveryJSON(t, "skl", phase, "prepare", "--repo", source, "--slice", deliveryTestItem, "--claim", claim, "--format", "json")
 	if err != nil || prepared.Source == nil {
 		t.Fatalf("%s prepare = %#v, %v", phase, prepared, err)
 	}
@@ -300,7 +300,11 @@ func presentHandoff(t *testing.T, cli ledgerCLI, source, phase string, arguments
 	writeFile(t, body, "PRIVATE "+phase+" report at "+head+"\n")
 	public := filepath.Join(t.TempDir(), "public.md")
 	writeFile(t, public, "missed public "+phase+" update\n")
-	submitted, err := cli.deliveryJSON(t, append([]string{"skl", phase, "submit", "--repo", source, "--item", deliveryTestItem, "--claim", claim,
+	operation := "submit"
+	if len(arguments) >= 2 && arguments[0] == "--outcome" && arguments[1] == "needs-human" {
+		operation, arguments = "needs-human", arguments[2:]
+	}
+	submitted, err := cli.deliveryJSON(t, append([]string{"skl", phase, operation, "--repo", source, "--slice", deliveryTestItem, "--claim", claim,
 		"--body", body, "--public-body", public, "--format", "json"}, arguments...)...)
 	if err != nil || submitted.Result == nil {
 		t.Fatalf("%s submit = %#v, %v", phase, submitted, err)
@@ -521,7 +525,7 @@ func TestPresentationAuthoringCarriesTheCompletedReviewCount(t *testing.T) {
 	if err != nil || attempt.Execution == nil {
 		t.Fatalf("review attempt = %#v, %v", attempt, err)
 	}
-	if _, err := offline.deliveryJSON(t, "skl", "watchdog", "release", "--repo", source, "--item", deliveryTestItem, "--claim", attempt.Execution.Claim.Commit, "--format", "json"); err != nil {
+	if _, err := offline.deliveryJSON(t, "skl", "watchdog", "release", "--repo", source, "--slice", deliveryTestItem, "--claim", attempt.Execution.Claim.Commit, "--format", "json"); err != nil {
 		t.Fatal(err)
 	}
 	presented(ledger.ImplementPhase, ledger.AwaitingReview, 0)
@@ -569,7 +573,7 @@ func TestPresentationEvidenceReachesADecisionThroughRework(t *testing.T) {
 	}
 	question := filepath.Join(t.TempDir(), "pause.md")
 	writeFile(t, question, "# Decision needed\n\nWhich widgets does the dashboard list?\n")
-	if paused, err := offline.deliveryJSON(t, "skl", "implement", "needs-human", "--repo", source, "--item", deliveryTestItem, "--claim", start.Execution.Claim.Commit, "--body", question, "--format", "json"); err != nil || paused.Status != ledger.NeedsHuman {
+	if paused, err := offline.deliveryJSON(t, "skl", "implement", "needs-human", "--repo", source, "--slice", deliveryTestItem, "--claim", start.Execution.Claim.Commit, "--body", question, "--format", "json"); err != nil || paused.Status != ledger.NeedsHuman {
 		t.Fatalf("pause = %#v, %v", paused, err)
 	}
 	if direction := deliveryRecordHumanDirection(t, offline, target, ledger.RouteImplement); direction.Status != ledger.DecisionApplied {

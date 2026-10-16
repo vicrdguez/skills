@@ -52,7 +52,7 @@ func TestLaunchResolvedIsRejectedByTheParser(t *testing.T) {
 	cli := deliveryNoForgeApp(t)
 	before := ledgerSnapshot(t, f.clone)
 	for _, phase := range []string{"implement", "watchdog"} {
-		for _, operation := range []string{"next", "resume", "prepare", "inspect"} {
+		for _, operation := range []string{"next", "dispatch", "resume", "prepare", "inspect"} {
 			output, err := cli.deliveryRun(t, "skl", phase, operation, "--launch-resolved")
 			if err == nil || !strings.Contains(err.Error(), "flag provided but not defined") || strings.Contains(output, "Status: fix_required") {
 				t.Fatalf("%s %s: removed marker must be a parser error, got %v\n%s", phase, operation, err, output)

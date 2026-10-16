@@ -8,7 +8,7 @@ argument-hint: "[worker-model] [worker-thinking] [helper-model] [helper-thinking
 
 <!-- skl-owned: skl.adapter/v1 -->
 
-Run `skl implement next --mode team --dispatch --wait --auto --harness claude` with each nonempty value below as one argument for its flag. Quote values for the shell without changing them; omit empty slots.
+Run `skl implement dispatch --mode team --wait --auto --harness claude` with each nonempty value below as one argument for its flag. Quote values for the shell without changing them; omit empty slots.
 - --worker-model: $worker_model
 - --worker-thinking: $worker_thinking
 - --helper-model: $helper_model

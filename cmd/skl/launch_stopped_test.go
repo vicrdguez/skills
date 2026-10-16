@@ -10,7 +10,7 @@ func TestStoppedDispatchPreservesHarnessAndExplicitSessionOverrides(t *testing.T
 	source, _ := deliverySourceRepo(t)
 	deliveryAcceptFixture(t, newForgeServer(t), source)
 	cli := deliveryNoForgeApp(t)
-	d := cli.dispatched(t, "skl implement next --dispatch --repo "+source+" --harness pi --reviewer-model explicit-review")
+	d := cli.dispatched(t, "skl implement dispatch --repo "+source+" --harness pi --reviewer-model explicit-review")
 	stopped := cli.dispatchRun(t, d.Continue+" --format markdown")
 	for _, flag := range []string{"--harness 'pi'", "--reviewer-model 'explicit-review'"} {
 		if !strings.Contains(stopped, flag) {

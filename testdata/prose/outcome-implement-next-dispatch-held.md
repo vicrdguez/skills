@@ -4,7 +4,7 @@ Claim `0000000000000000000000000000000000000001` on Work Item `widget-search/fou
 
 Tell the user, and give them both commands to choose from:
 
-- resume the interrupted work: `skl implement resume --repo '/work/widgets' --remote 'origin' --item 'widget-search/foundation' --claim '0000000000000000000000000000000000000001'`
-- release the Claim: `skl implement release --repo '/work/widgets' --remote 'origin' --item 'widget-search/foundation' --claim '0000000000000000000000000000000000000001'`
+- resume the interrupted work: `skl implement resume --repo '/work/widgets' --remote 'origin' --slice 'widget-search/foundation' --claim '0000000000000000000000000000000000000001'`
+- release the Claim: `skl implement release --repo '/work/widgets' --remote 'origin' --slice 'widget-search/foundation' --claim '0000000000000000000000000000000000000001'`
 
 Then stop.

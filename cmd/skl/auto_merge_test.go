@@ -43,12 +43,12 @@ func newAutoMergeFixture(t *testing.T, autoImplement bool) *autoMergeFixture {
 		t.Fatalf("implement next = %#v, %v", started, err)
 	}
 	claim := started.Execution.Claim.Commit
-	prepared, err := f.cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--item", deliveryTestItem, "--claim", claim, "--format", "json")
+	prepared, err := f.cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--slice", deliveryTestItem, "--claim", claim, "--format", "json")
 	if err != nil || prepared.Source == nil {
 		t.Fatalf("implement prepare = %#v, %v", prepared, err)
 	}
 	head := proseCommit(t, prepared.Source.Worktree, "merge.txt", "merged work\n")
-	submitted, err := f.cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--item", deliveryTestItem, "--claim", claim,
+	submitted, err := f.cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", source, "--slice", deliveryTestItem, "--claim", claim,
 		"--head", head, "--target", prepared.Source.Target, "--body", proseFixturePath("implement-report.md"), "--public-body", proseFixturePath("public.md"), "--format", "json")
 	if err != nil || submitted.Status != ledger.AwaitingReview {
 		t.Fatalf("implement submit = %#v, %v", submitted, err)
@@ -73,7 +73,7 @@ func (f *autoMergeFixture) pass(t *testing.T, auto, public bool) deliveryOutput 
 
 func (f *autoMergeFixture) submitPass(t *testing.T, claim string, public bool) deliveryOutput {
 	t.Helper()
-	submit := []string{"skl", "watchdog", "submit", "--repo", f.source, "--item", deliveryTestItem, "--claim", claim,
+	submit := []string{"skl", "watchdog", "submit", "--repo", f.source, "--slice", deliveryTestItem, "--claim", claim,
 		"--outcome", "pass", "--body", proseFixturePath("watchdog-report.md"), "--format", "json"}
 	if public {
 		submit = append(submit, "--public-body", proseFixturePath("public.md"))
@@ -157,7 +157,7 @@ func TestAutoWatchdogPassMarkdownReportsTheMerge(t *testing.T) {
 	if err != nil || started.Execution == nil {
 		t.Fatalf("watchdog next = %#v, %v", started, err)
 	}
-	markdown, err := f.cli.deliveryRun(t, "skl", "watchdog", "submit", "--repo", f.source, "--item", deliveryTestItem, "--claim", started.Execution.Claim.Commit,
+	markdown, err := f.cli.deliveryRun(t, "skl", "watchdog", "submit", "--repo", f.source, "--slice", deliveryTestItem, "--claim", started.Execution.Claim.Commit,
 		"--outcome", "pass", "--body", proseFixturePath("watchdog-report.md"), "--public-body", proseFixturePath("public.md"))
 	if err != nil {
 		t.Fatal(err)
@@ -175,7 +175,7 @@ func TestAutoWatchdogRefusedMergeKeepsTheLaneAndRetriesEachPoll(t *testing.T) {
 	moved := deliveryTrimmed(t, f.bare, "-c", "user.name=Human", "-c", "user.email=human@example.com", "commit-tree", base+"^{tree}", "-p", base, "-m", "moved")
 	runGit(t, f.bare, "update-ref", "refs/heads/"+autoMergeBranch, moved, base)
 
-	dispatch := f.cli.dispatched(t, "skl watchdog next --auto --dispatch --repo "+f.source)
+	dispatch := f.cli.dispatched(t, "skl watchdog dispatch --auto --repo "+f.source)
 	if slices.Contains(shellWords(t, dispatch.Worker), "--auto") || !slices.Contains(shellWords(t, dispatch.Continue), "--auto") {
 		t.Fatalf("Auto Mode reaches the worker through its Claim and stays on the lane: worker %q, continue %q", dispatch.Worker, dispatch.Continue)
 	}

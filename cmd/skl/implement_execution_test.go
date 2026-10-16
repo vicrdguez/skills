@@ -22,7 +22,7 @@ func TestB19GenericImplementRetrievalRefusesWithoutWorkflowEffects(t *testing.T)
 			if err == nil {
 				t.Fatalf("generic Implement retrieval succeeded: %s", &output)
 			}
-			for _, guidance := range []string{"skl implement next", "skl implement resume --item"} {
+			for _, guidance := range []string{"skl implement next", "skl implement resume --slice"} {
 				if !strings.Contains(err.Error(), guidance) {
 					t.Errorf("refusal lacks %q: %v", guidance, err)
 				}
