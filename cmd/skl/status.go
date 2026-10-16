@@ -42,7 +42,7 @@ func reconcileCommand(newBackend backendFactory, stdout io.Writer) *cli.Command 
 			if !adopted {
 				return renderLedgerRefusal(stdout, format, &ledger.Refusal{
 					Invariant: "repository " + repository.Repository.Owner + "/" + repository.Repository.Name + " has no accepted ledger Project",
-					Repair:    "accept a Proposal for this repository with `skl ledger accept --repo <path> --proposal-dir <dir> --issue <slice>=<body-file>`; if another repository owns this Project name, select the correct ledger or resolve the name collision before running reconcile",
+					Repair:    "accept a Proposal for this repository with `skl proposal accept --repo <path> --proposal-dir <dir> --issue <slice>=<body-file>`; if another repository owns this Project name, select the correct ledger or resolve the name collision before running reconcile",
 				})
 			}
 			return ledgerStatus(c, store, repository.Repository, newBackend, stdout, format)

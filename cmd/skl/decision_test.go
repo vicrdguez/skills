@@ -755,7 +755,7 @@ func TestDecisionRetirementGuardsPartialDelivery(t *testing.T) {
 
 	// Active work prevents retirement.
 	headBefore := strings.TrimSpace(runGitOutput(t, fixture.clone, "rev-parse", "HEAD"))
-	refused := cli.decisionJSON(t, "skl", "decision", "retire", "--project", "widgets", "--proposal", "retire-proposal", "--format", "json")
+	refused := cli.decisionJSON(t, "skl", "proposal", "retire", "--project", "widgets", "--proposal", "retire-proposal", "--format", "json")
 	if refused.Status != ledger.DecisionRefused || refused.Facts.Retirement == nil || !strings.Contains(refused.Facts.Retirement.Reason, "active or claimed work") {
 		t.Fatalf("retirement guard = %#v", refused)
 	}
@@ -772,7 +772,7 @@ func TestDecisionRetirementGuardsPartialDelivery(t *testing.T) {
 	if superseded.Status != ledger.DecisionApplied || superseded.Results[0].State != ledger.Superseded {
 		t.Fatalf("supersede = %#v", superseded)
 	}
-	retired := cli.decisionJSON(t, "skl", "decision", "retire", "--project", "widgets", "--proposal", "retire-proposal", "--format", "json")
+	retired := cli.decisionJSON(t, "skl", "proposal", "retire", "--project", "widgets", "--proposal", "retire-proposal", "--format", "json")
 	if retired.Status != ledger.DecisionApplied || retired.Facts.Retirement == nil {
 		t.Fatalf("retirement = %#v", retired)
 	}

@@ -90,7 +90,7 @@ Superseded slices: {{.Superseded}}
 {{if .Active}}Active or claimed slices: {{range $index, $item := .Active}}{{if $index}}, {{end}}`{{$item}}`{{end}}
 {{end}}{{if .Reason}}Reason: {{.Reason}}
 {{end}}{{if .Repair}}Next: {{.Repair}}
-{{end}}Retire command: `skl decision retire --project {{quote .Project}} --proposal {{quote .Proposal}}`
+{{end}}Retire command: `skl proposal retire --project {{quote .Project}} --proposal {{quote .Proposal}}`
 
 {{if eq .Status "retired"}}The parent is retired. Report it as partial delivery: Superseded slices stay Superseded and their dependents stay blocked.{{else}}The parent is still open for the reason above, and nothing changed.{{end}}{{end}}{{end}}{{end}}
 {{- if eq .Status "unavailable"}}{{template "decision-unavailable" .}}{{else if eq .Status "empty"}}{{template "decision-empty" .}}{{else if eq .Status "inbox"}}{{template "decision-inbox" .}}{{else}}{{template "decision-result" .}}{{end}}

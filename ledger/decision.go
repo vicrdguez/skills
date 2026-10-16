@@ -1084,7 +1084,7 @@ func RetireProposal(ctx context.Context, s *Store, project, proposal string, for
 		branchUncompleted := meta.Target != nil
 		if branchUncompleted && !meta.Retired && !sameAttachment(meta.Submission, observed) {
 			return refuse("the Proposal Submission of "+proposal+" changed since it was observed",
-				"run decision retire again to observe the current Proposal Submission")
+				"run proposal retire again to observe the current Proposal Submission")
 		}
 		if len(result.Superseded) == 0 && !branchUncompleted {
 			return refuse("proposal "+proposal+" has no Superseded slices",
