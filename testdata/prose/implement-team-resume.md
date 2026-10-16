@@ -54,6 +54,7 @@ Show every widget's health on one dashboard page.
 - Only a human merges.
 - History is append-only: add commits, and leave existing ones as they are.
 - Leave behavior outside the Contract for a later change.
+- Keep this startup's helper and reviewer choices, including omitted fields, throughout this session. Use the resume command for a fresh recovery session.
 
 ## 1. Prepare
 

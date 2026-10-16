@@ -58,7 +58,7 @@ func completionStatusApp(t *testing.T, response func(http.ResponseWriter, *http.
 func runCompletionStatus(t *testing.T, app *stageApp, output *bytes.Buffer, repo string, options ...string) ledgerStatusOutcome {
 	t.Helper()
 	output.Reset()
-	arguments := append([]string{"skl", "status", "--repo", repo, "--format", "json"}, options...)
+	arguments := append([]string{"skl", "reconcile", "--repo", repo, "--format", "json"}, options...)
 	if err := app.Run(arguments); err != nil {
 		t.Fatalf("status: %v (%s)", err, output.String())
 	}
@@ -78,7 +78,7 @@ func attachFixture(t *testing.T, clone, proposal string) {
 	})
 }
 
-func TestLedgerStatusConfirmsExactMergeAndOfflineDependency(t *testing.T) {
+func TestLedgerReconcileConfirmsExactMergeAndOfflineDependency(t *testing.T) {
 	fixture := newLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	proposal := dualSlice("completion")
@@ -101,7 +101,7 @@ func TestLedgerStatusConfirmsExactMergeAndOfflineDependency(t *testing.T) {
 		}
 		_, _ = fmt.Fprint(w, fixturePull("closed", "true", acceptedHead, mergeHead, "acme/widgets", "acme/widgets", "main"))
 	})
-	first := runCompletionStatus(t, app, output, root, "--item", "completion/foundation")
+	first := runCompletionStatus(t, app, output, root, "--slice", "completion/foundation")
 	if len(first.Items) != 1 || first.Items[0].State != ledger.Merged || first.Items[0].Completion.SourceHead != acceptedHead || first.Items[0].Completion.MergeCommit != mergeHead || requests != 1 {
 		t.Fatalf("merge evidence not persisted from the owned PR: %+v, requests %d", first, requests)
 	}
@@ -122,7 +122,7 @@ func TestLedgerStatusConfirmsExactMergeAndOfflineDependency(t *testing.T) {
 	}
 }
 
-func TestLedgerStatusSquashMergeRetainsReviewedInputsWithoutSourceObjects(t *testing.T) {
+func TestLedgerReconcileSquashMergeRetainsReviewedInputsWithoutSourceObjects(t *testing.T) {
 	fixture := newLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", singleSlice("history")))
@@ -170,7 +170,7 @@ func TestLedgerStatusSquashMergeRetainsReviewedInputsWithoutSourceObjects(t *tes
 	app, output := completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprint(w, fixturePull("closed", "true", accepted, squash, "acme/widgets", "acme/widgets", "main"))
 	})
-	got := runCompletionStatus(t, app, output, root, "--item", "history/foundation")
+	got := runCompletionStatus(t, app, output, root, "--slice", "history/foundation")
 	if got.Items[0].State != ledger.Merged || got.Items[0].Completion.SourceHead != accepted || got.Items[0].Completion.MergeCommit != squash {
 		t.Fatalf("accepted head and merge revision conflated: %+v", got)
 	}
@@ -190,7 +190,7 @@ func TestLedgerStatusSquashMergeRetainsReviewedInputsWithoutSourceObjects(t *tes
 	}
 }
 
-func TestLedgerStatusUnmergedClosureAndUnknownIdentityCannotSatisfyBlocker(t *testing.T) {
+func TestLedgerReconcileUnmergedClosureAndUnknownIdentityCannotSatisfyBlocker(t *testing.T) {
 	for _, scenario := range []struct {
 		name, state, merged, head, sourceRepo, targetRepo, base, expected string
 	}{
@@ -220,7 +220,7 @@ func TestLedgerStatusUnmergedClosureAndUnknownIdentityCannotSatisfyBlocker(t *te
 				}
 				_, _ = fmt.Fprint(w, body)
 			})
-			got := runCompletionStatus(t, app, output, root, "--item", "candidate/foundation")
+			got := runCompletionStatus(t, app, output, root, "--slice", "candidate/foundation")
 			if got.Items[0].State != scenario.expected || (scenario.expected == ledger.ReadyForMerge) != (got.Items[0].Observation != "") {
 				t.Fatalf("incorrect terminal verdict for %s: %+v", scenario.name, got)
 			}
@@ -233,7 +233,7 @@ func TestLedgerStatusUnmergedClosureAndUnknownIdentityCannotSatisfyBlocker(t *te
 	}
 }
 
-func TestLedgerStatusStaleSelectedClaimAndReportsRefusedWithoutRequeue(t *testing.T) {
+func TestLedgerReconcileStaleSelectedClaimAndReportsRefusedWithoutRequeue(t *testing.T) {
 	fixture := newLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", singleSlice("race")))
@@ -250,7 +250,7 @@ func TestLedgerStatusStaleSelectedClaimAndReportsRefusedWithoutRequeue(t *testin
 		})
 		_, _ = fmt.Fprint(w, fixturePull("closed", "true", "human-head", "merge-head", "acme/widgets", "acme/widgets", "main"))
 	})
-	got := runCompletionStatus(t, app, output, root, "--item", "race/foundation")
+	got := runCompletionStatus(t, app, output, root, "--slice", "race/foundation")
 	if got.Items[0].State != ledger.ReadyForMerge || !got.Items[0].Claimed || !strings.Contains(got.Items[0].Observation, "changed") || readLedgerFile(t, fixture.clone, reportPath) != original {
 		t.Fatalf("stale observation damaged later work: %+v", got)
 	}
@@ -259,12 +259,12 @@ func TestLedgerStatusStaleSelectedClaimAndReportsRefusedWithoutRequeue(t *testin
 	secondApp, secondOutput := completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprint(w, fixturePull("closed", "true", "human-head", "merge-head", "acme/widgets", "acme/widgets", "main"))
 	})
-	second := runCompletionStatus(t, secondApp, secondOutput, root, "--item", "race/foundation")
+	second := runCompletionStatus(t, secondApp, secondOutput, root, "--slice", "race/foundation")
 	if second.Items[0].State != ledger.Merged || !second.Items[0].Claimed || readLedgerFile(t, fixture.clone, reportPath) != original {
 		t.Fatalf("terminal observation released a Claim or rewrote a report: %+v", second)
 	}
 	before := runGitOutput(t, fixture.clone, "rev-parse", "HEAD")
-	retry := runCompletionStatus(t, secondApp, secondOutput, root, "--item", "race/foundation")
+	retry := runCompletionStatus(t, secondApp, secondOutput, root, "--slice", "race/foundation")
 	if retry.Items[0].State != ledger.Merged || before != runGitOutput(t, fixture.clone, "rev-parse", "HEAD") {
 		t.Fatalf("terminal retry mutated prior result: %+v", retry)
 	}
@@ -272,7 +272,7 @@ func TestLedgerStatusStaleSelectedClaimAndReportsRefusedWithoutRequeue(t *testin
 
 // An externally completed item can retain a real acquisition Claim. Release is
 // explicit recovery, not another phase handoff or a return to worker selection.
-func TestLedgerStatusTerminalClaimExplicitRelease(t *testing.T) {
+func TestLedgerReconcileTerminalClaimExplicitRelease(t *testing.T) {
 	for _, tc := range []struct {
 		name, merged, terminal string
 		fullyDelivered         bool
@@ -406,7 +406,7 @@ func TestLedgerStatusTerminalClaimExplicitRelease(t *testing.T) {
 	}
 }
 
-func TestLedgerStatusUnrelatedCommitAndReplicationFailure(t *testing.T) {
+func TestLedgerReconcileUnrelatedCommitAndReplicationFailure(t *testing.T) {
 	fixture := newLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", dualSlice("unrelated")))
@@ -418,13 +418,13 @@ func TestLedgerStatusUnrelatedCommitAndReplicationFailure(t *testing.T) {
 		statusRecord(t, fixture.clone, "unrelated", "feature", func(state *ledger.SliceState) { state.Title = "Other work progressed" })
 		_, _ = fmt.Fprint(w, fixturePull("closed", "false", "last-head", "", "acme/widgets", "acme/widgets", "main"))
 	})
-	got := runCompletionStatus(t, app, output, root, "--item", "unrelated/foundation")
+	got := runCompletionStatus(t, app, output, root, "--slice", "unrelated/foundation")
 	if got.Items[0].State != ledger.Superseded || got.Items[0].Pending == nil || got.Items[0].Pending.Push == nil {
 		t.Fatalf("local closure or pending replication lost: %+v", got)
 	}
 }
 
-func TestLedgerStatusDoesNotClearNewerReplicationNote(t *testing.T) {
+func TestLedgerReconcileDoesNotClearNewerReplicationNote(t *testing.T) {
 	fixture := newLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", singleSlice("replication-race")))
@@ -453,14 +453,14 @@ git -C %q commit -q -m 'newer replication note' -- "$p" 2>> %q
 	app, output := completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprint(w, fixturePull("closed", "false", "last-head", "", "acme/widgets", "acme/widgets", "main"))
 	})
-	got := runCompletionStatus(t, app, output, root, "--item", "replication-race/foundation")
+	got := runCompletionStatus(t, app, output, root, "--slice", "replication-race/foundation")
 	if got.Items[0].State != ledger.Superseded || got.Items[0].Pending == nil || got.Items[0].Pending.Push == nil || got.Items[0].Pending.Push.Detail != "newer pending replication" {
 		diagnostics, _ := os.ReadFile(errorsPath)
 		t.Fatalf("newer pending replication overwritten by stale post-push cleanup: %+v; state %s; log %s; hook errors %s", got, readLedgerFile(t, fixture.clone, path), runGitOutput(t, fixture.clone, "log", "-3", "--oneline"), diagnostics)
 	}
 }
 
-func TestLedgerStatusUnavailableBlockerAndLocalReadScope(t *testing.T) {
+func TestLedgerReconcileUnavailableBlockerAndLocalReadScope(t *testing.T) {
 	fixture := newLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	proposal := dualSlice("bounded")
@@ -473,7 +473,7 @@ func TestLedgerStatusUnavailableBlockerAndLocalReadScope(t *testing.T) {
 		}
 		http.Error(w, "unavailable", http.StatusServiceUnavailable)
 	})
-	blocked := runCompletionStatus(t, app, output, root, "--item", "bounded/foundation")
+	blocked := runCompletionStatus(t, app, output, root, "--slice", "bounded/foundation")
 	if blocked.Items[0].State != ledger.ReadyForMerge || !strings.Contains(blocked.Items[0].Observation, "unavailable") {
 		t.Fatalf("forge outage invented completion: %+v", blocked)
 	}
@@ -488,13 +488,13 @@ func TestLedgerStatusUnavailableBlockerAndLocalReadScope(t *testing.T) {
 	writeFile(t, filepath.Join(fixture.clone, path), "not JSON\n")
 	runGit(t, fixture.clone, "add", path)
 	runGit(t, fixture.clone, "commit", "-q", "-m", "unrelated damaged record")
-	fixed := runCompletionStatus(t, app, output, root, "--item", "bounded/foundation")
+	fixed := runCompletionStatus(t, app, output, root, "--slice", "bounded/foundation")
 	if fixed.Items[0].State != ledger.ReadyForMerge || fixed.Items[0].Observation == "" {
 		t.Fatalf("fixed-item status hydrated unrelated child: %+v", fixed)
 	}
 }
 
-func TestLedgerStatusReportInterleaveRefusesStaleObservation(t *testing.T) {
+func TestLedgerReconcileReportInterleaveRefusesStaleObservation(t *testing.T) {
 	fixture := newLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", singleSlice("report-race")))
@@ -509,13 +509,13 @@ func TestLedgerStatusReportInterleaveRefusesStaleObservation(t *testing.T) {
 		runGit(t, fixture.clone, "commit", "-q", "-m", "later report")
 		_, _ = fmt.Fprint(w, fixturePull("closed", "false", "last-head", "", "acme/widgets", "acme/widgets", "main"))
 	})
-	got := runCompletionStatus(t, app, output, root, "--item", "report-race/foundation")
+	got := runCompletionStatus(t, app, output, root, "--slice", "report-race/foundation")
 	if got.Items[0].State != ledger.ReadyForMerge || !strings.Contains(got.Items[0].Observation, "phase results changed") || readLedgerFile(t, fixture.clone, path) != "new report\n" {
 		t.Fatalf("stale report observation clobbered later evidence: %+v", got)
 	}
 }
 
-func TestLedgerStatusMixedParentRetirementAndMissingAttachment(t *testing.T) {
+func TestLedgerReconcileMixedParentRetirementAndMissingAttachment(t *testing.T) {
 	fixture := newLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", dualSlice("parent")))
@@ -562,7 +562,7 @@ func TestLedgerStatusMixedParentRetirementAndMissingAttachment(t *testing.T) {
 		t.Fatalf("accept unpublished: %s", mustJSON(t, accepted))
 	}
 	statusRecord(t, fixture.clone, "unpublished", "foundation", func(state *ledger.SliceState) { state.State = ledger.ReadyForMerge })
-	missing := runCompletionStatus(t, app, output, root, "--item", "unpublished/foundation")
+	missing := runCompletionStatus(t, app, output, root, "--slice", "unpublished/foundation")
 	if missing.Items[0].State != ledger.ReadyForMerge || !strings.Contains(missing.Items[0].Observation, "no exact owned Submission") {
 		t.Fatalf("unpublished approval misreported: %+v", missing)
 	}
@@ -574,7 +574,7 @@ func TestLedgerStatusMixedParentRetirementAndMissingAttachment(t *testing.T) {
 		body := fixturePull("closed", "true", "accepted-head", "merged-head", "acme/widgets", "acme/widgets", "main")
 		_, _ = fmt.Fprint(w, strings.Replace(body, `"ref":"foundation"`, `"ref":"unpublished-branch"`, 1))
 	})
-	late := runCompletionStatus(t, lateApp, lateOutput, root, "--item", "unpublished/foundation")
+	late := runCompletionStatus(t, lateApp, lateOutput, root, "--slice", "unpublished/foundation")
 	if late.Items[0].State != ledger.Merged {
 		t.Fatalf("late ordinary attachment not observed: %+v", late)
 	}

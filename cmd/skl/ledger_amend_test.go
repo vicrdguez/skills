@@ -11,10 +11,10 @@ import (
 	"github.com/vicrdguez/skills/ledger"
 )
 
-// amend runs skl ledger amend and returns the parsed JSON outcome.
+// amend runs skl proposal amend and returns the parsed JSON outcome.
 func (c ledgerCLI) amend(t *testing.T, repo, directory string, flags ...string) ledgerOutcome {
 	t.Helper()
-	outcome, _ := c.run(t, append([]string{"skl", "ledger", "amend", "--repo", repo, "--proposal-dir", directory, "--format", "json"}, flags...))
+	outcome, _ := c.run(t, append([]string{"skl", "proposal", "amend", "--repo", repo, "--proposal-dir", directory, "--format", "json"}, flags...))
 	return outcome
 }
 
@@ -164,7 +164,7 @@ func TestAmendRefusesUnrecordedArchivedAndFinishedProposals(t *testing.T) {
 	addIntakeSlice(t, intake, "more")
 	head := ledgerHead(t, fixture.clone)
 
-	requireRefused(t, cli.amend(t, root, writeProposal(t, "", cleanupSpec("fresh", "only"))), fixture.clone, head, "no accepted Proposal fresh", "skl ledger accept")
+	requireRefused(t, cli.amend(t, root, writeProposal(t, "", cleanupSpec("fresh", "only"))), fixture.clone, head, "no accepted Proposal fresh", "skl proposal accept")
 	requireRefused(t, cli.amend(t, root, writeProposal(t, "", cleanupSpec("finished", "only"))), fixture.clone, head, "archived")
 	requireRefused(t, cli.amend(t, root, intake), fixture.clone, head, "finished", "new Proposal")
 }
@@ -697,7 +697,7 @@ func TestAmendSupersessionOutcome(t *testing.T) {
 
 	intake := exportedIntake(t, cli, root, "shared")
 	supersede(t, intake, "a")
-	text, err := cli.deliveryRun(t, "skl", "ledger", "amend", "--repo", root, "--proposal-dir", intake)
+	text, err := cli.deliveryRun(t, "skl", "proposal", "amend", "--repo", root, "--proposal-dir", intake)
 	if err != nil || !strings.Contains(text, "Slice `a`") || !strings.Contains(text, "- `other/x` depends on `shared/a`") {
 		t.Fatalf("the outcome does not list the supersession and the blocked dependent:\n%s", text)
 	}
@@ -819,7 +819,7 @@ func TestAmendSupersedingEverySliceMakesRetirementReachable(t *testing.T) {
 	supersede(t, intake, "first", "second")
 	requireAmended(t, cli.amend(t, root, intake))
 
-	retired := decisionReadOnlyApp(t).decisionJSON(t, "skl", "decision", "retire", "--project", "widgets", "--proposal", "unstarted", "--format", "json")
+	retired := decisionReadOnlyApp(t).decisionJSON(t, "skl", "proposal", "retire", "--project", "widgets", "--proposal", "unstarted", "--format", "json")
 	if retired.Status != ledger.DecisionApplied || retired.Retirement == nil || !retired.Retirement.PartialDelivery ||
 		!equalStrings(retired.Retirement.Superseded, []string{"first", "second"}) {
 		t.Fatalf("retirement = %s", mustJSON(t, retired))
@@ -840,7 +840,7 @@ func TestAmendRefusesActiveSliceBehindArchivedSupersededSlice(t *testing.T) {
 	abandoned := exportedIntake(t, cli, root, "gone")
 	supersede(t, abandoned, "old")
 	requireAmended(t, cli.amend(t, root, abandoned))
-	if retired := decisionReadOnlyApp(t).decisionJSON(t, "skl", "decision", "retire", "--project", "widgets", "--proposal", "gone", "--format", "json"); retired.Status != ledger.DecisionApplied {
+	if retired := decisionReadOnlyApp(t).decisionJSON(t, "skl", "proposal", "retire", "--project", "widgets", "--proposal", "gone", "--format", "json"); retired.Status != ledger.DecisionApplied {
 		t.Fatalf("setup retirement = %s", mustJSON(t, retired))
 	}
 	outcome := runCleanup(t, offlineForge(t), root)

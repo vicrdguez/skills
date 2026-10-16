@@ -95,11 +95,11 @@ func TestWaitingDispatchRefreshesLaunchSettings(t *testing.T) {
 				configure("after-dispatch")
 				facts := cli.dispatchJSON(t, out.Dispatch.Worker).Packet.Facts.Delivery
 				if tc.phase == "implement" {
-					wantReviewThinking, wantHelperModel := "edited-before-dispatch", "edited-before-dispatch"
+					wantReviewThinking, wantHelperModel := "after-dispatch", "after-dispatch"
 					if tc.explicit {
 						wantReviewThinking, wantHelperModel = "explicit", "explicit"
 					}
-					if facts.Reviewer == nil || facts.Helper == nil || facts.Reviewer.Model != "edited-before-dispatch" || facts.Reviewer.Thinking != wantReviewThinking || facts.Helper.Model != wantHelperModel || facts.Helper.Thinking != "edited-before-dispatch" {
+					if facts.Reviewer == nil || facts.Helper == nil || facts.Reviewer.Model != "after-dispatch" || facts.Reviewer.Thinking != wantReviewThinking || facts.Helper.Model != wantHelperModel || facts.Helper.Thinking != "after-dispatch" {
 						t.Fatalf("waiting session choices = reviewer %#v, helper %#v", facts.Reviewer, facts.Helper)
 					}
 				}

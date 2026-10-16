@@ -33,9 +33,9 @@ func TestLedgerShowReportsTraversesExactLocalHistoryReadOnly(t *testing.T) {
 
 	// A Work Item is already enough to discover that neither report exists.
 	initialFactoryCalls := factoryCalls
-	initial := cli.ledgerJSON(t, "skl", "ledger", "show", "--repo", source, "--item", deliveryTestItem, "--format", "json")
+	initial := cli.ledgerJSON(t, "skl", "slice", "show", "--repo", source, "--slice", deliveryTestItem, "--format", "json")
 	assertReportPhases(t, initial.Readback, nil, nil)
-	markdown, err := reportCLIText(t, cli, "skl", "ledger", "show", "--repo", source, "--item", deliveryTestItem)
+	markdown, err := reportCLIText(t, cli, "skl", "slice", "show", "--repo", source, "--slice", deliveryTestItem)
 	if err != nil {
 		t.Fatalf("initial Markdown readback: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestLedgerShowReportsTraversesExactLocalHistoryReadOnly(t *testing.T) {
 			t.Fatalf("Markdown did not mark %s absent:\n%s", phase, markdown)
 		}
 	}
-	absent := cli.ledgerJSON(t, "skl", "ledger", "show", "--repo", source, "--item", deliveryTestItem, "--phase", "implement", "--format", "json")
+	absent := cli.ledgerJSON(t, "skl", "slice", "show", "--repo", source, "--slice", deliveryTestItem, "--phase", "implement", "--format", "json")
 	if absent.Status != "fix_required" || absent.Document != nil || !strings.Contains(absent.Repair, "skl ledger show --commit") || !strings.Contains(absent.Repair, "--path") {
 		t.Fatalf("absent current report lacked an actionable historical route: %s", mustJSON(t, absent))
 	}
@@ -94,7 +94,7 @@ func TestLedgerShowReportsTraversesExactLocalHistoryReadOnly(t *testing.T) {
 	committedClaimState := deliveryGitShowForReportTest(t, fixture.clone, "HEAD", claimPath)
 	factoryCallsBeforeInspection := factoryCalls
 
-	current := cli.ledgerJSON(t, "skl", "ledger", "show", "--repo", source, "--item", deliveryTestItem, "--format", "json")
+	current := cli.ledgerJSON(t, "skl", "slice", "show", "--repo", source, "--slice", deliveryTestItem, "--format", "json")
 	if current.Status != "shown" || current.Readback == nil || current.Readback.State != ledger.ReadyForMerge {
 		t.Fatalf("Ready-for-Merge Work Item readback = %s", mustJSON(t, current))
 	}
@@ -110,7 +110,7 @@ func TestLedgerShowReportsTraversesExactLocalHistoryReadOnly(t *testing.T) {
 		t.Fatalf("committed selected Work Item state = %#v", readyState)
 	}
 
-	currentImplement := cli.ledgerJSON(t, "skl", "ledger", "show", "--repo", source, "--item", deliveryTestItem, "--phase", "implement", "--format", "json")
+	currentImplement := cli.ledgerJSON(t, "skl", "slice", "show", "--repo", source, "--slice", deliveryTestItem, "--phase", "implement", "--format", "json")
 	if currentImplement.Status != "shown" || currentImplement.Document == nil || currentImplement.Document.Commit != committedHead {
 		t.Fatalf("current implementation report = %s", mustJSON(t, currentImplement))
 	}
@@ -128,7 +128,7 @@ func TestLedgerShowReportsTraversesExactLocalHistoryReadOnly(t *testing.T) {
 		t.Fatalf("rework implementation lost its exact consumed Watchdog reference: got %#v want %#v", parsedImplement.Ledger.Watchdog, consumedWatchdog)
 	}
 
-	currentWatchdog := cli.ledgerJSON(t, "skl", "ledger", "show", "--repo", source, "--item", deliveryTestItem, "--phase", "watchdog", "--format", "json")
+	currentWatchdog := cli.ledgerJSON(t, "skl", "slice", "show", "--repo", source, "--slice", deliveryTestItem, "--phase", "watchdog", "--format", "json")
 	if currentWatchdog.Status != "shown" || currentWatchdog.Document == nil || currentWatchdog.Document.Commit != committedHead {
 		t.Fatalf("current Watchdog report = %s", mustJSON(t, currentWatchdog))
 	}
@@ -160,7 +160,7 @@ func TestLedgerShowReportsTraversesExactLocalHistoryReadOnly(t *testing.T) {
 	}
 
 	// The exact Markdown transport leaves authored trailing bytes untouched.
-	markdownCurrent, err := reportCLIText(t, cli, "skl", "ledger", "show", "--repo", source, "--item", deliveryTestItem, "--phase", "watchdog")
+	markdownCurrent, err := reportCLIText(t, cli, "skl", "slice", "show", "--repo", source, "--slice", deliveryTestItem, "--phase", "watchdog")
 	currentPrefix := "Status: shown\nDocument: " + currentWatchdog.Document.Path + " at " + committedHead + "\n\n"
 	if err != nil || markdownCurrent != currentPrefix+currentWatchdog.Document.Contents {
 		t.Fatalf("Markdown current document changed bytes: err=%v output=%q", err, markdownCurrent)
@@ -170,7 +170,7 @@ func TestLedgerShowReportsTraversesExactLocalHistoryReadOnly(t *testing.T) {
 	if err != nil || markdownOld != oldPrefix+oldWatchdog.Document.Contents {
 		t.Fatalf("Markdown historical document normalized its no-newline body: err=%v output=%q", err, markdownOld)
 	}
-	markdownDiscovery, err := reportCLIText(t, cli, "skl", "ledger", "show", "--repo", source, "--item", deliveryTestItem)
+	markdownDiscovery, err := reportCLIText(t, cli, "skl", "slice", "show", "--repo", source, "--slice", deliveryTestItem)
 	if err != nil {
 		t.Fatalf("Markdown report availability: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestLedgerShowReportsTraversesExactLocalHistoryReadOnly(t *testing.T) {
 		}
 	}
 
-	claimedReadback := cli.ledgerJSON(t, "skl", "ledger", "show", "--repo", source, "--item", "later-claim/foundation", "--format", "json")
+	claimedReadback := cli.ledgerJSON(t, "skl", "slice", "show", "--repo", source, "--slice", "later-claim/foundation", "--format", "json")
 	if claimedReadback.Status != "shown" || claimedReadback.Readback == nil || claimedReadback.Readback.Item != "later-claim/foundation" {
 		t.Fatalf("readback of a held Claim = %s", mustJSON(t, claimedReadback))
 	}
@@ -205,9 +205,11 @@ func TestLedgerShowReportsTraversesExactLocalHistoryReadOnly(t *testing.T) {
 
 	// A phase selector is deliberately narrower than the historical route.
 	for _, args := range [][]string{
-		{"skl", "ledger", "show", "--phase", "implement", "--format", "json"},
-		{"skl", "ledger", "show", "--repo", source, "--item", deliveryTestItem, "--commit", committedHead, "--path", implementRef.Path, "--phase", "implement", "--format", "json"},
-		{"skl", "ledger", "show", "--repo", source, "--item", deliveryTestItem, "--phase", "decision", "--format", "json"},
+		{"skl", "slice", "show", "--phase", "implement", "--format", "json"},
+		{"skl", "slice", "show", "--format", "json"},
+		{"skl", "ledger", "show", "--commit", committedHead, "--format", "json"},
+		{"skl", "ledger", "show", "--path", implementRef.Path, "--format", "json"},
+		{"skl", "slice", "show", "--repo", source, "--slice", deliveryTestItem, "--phase", "decision", "--format", "json"},
 	} {
 		refused := cli.ledgerJSON(t, args...)
 		if refused.Status != "fix_required" || refused.Document != nil {
@@ -235,8 +237,8 @@ func TestLedgerShowReportsTraversesExactLocalHistoryReadOnly(t *testing.T) {
 	sourceBefore := ledgerSnapshot(t, source)
 	factoryCallsBeforeReads := factoryCalls
 	for _, args := range [][]string{
-		{"skl", "ledger", "show", "--repo", source, "--item", deliveryTestItem, "--format", "json"},
-		{"skl", "ledger", "show", "--repo", source, "--item", deliveryTestItem, "--phase", "watchdog", "--format", "json"},
+		{"skl", "slice", "show", "--repo", source, "--slice", deliveryTestItem, "--format", "json"},
+		{"skl", "slice", "show", "--repo", source, "--slice", deliveryTestItem, "--phase", "watchdog", "--format", "json"},
 		{"skl", "ledger", "show", "--commit", watchdogOne.Report.Commit, "--path", watchdogOne.Report.Path, "--format", "json"},
 	} {
 		read := cli.ledgerJSON(t, args...)
@@ -262,7 +264,7 @@ func TestLedgerShowReportsTraversesExactLocalHistoryReadOnly(t *testing.T) {
 	if got := deliveryGitShowForReportTest(t, fixture.clone, "HEAD", claimPath); got != committedClaimState {
 		t.Fatal("read operations changed the later Claim")
 	}
-	if currentAfter := cli.ledgerJSON(t, "skl", "ledger", "show", "--repo", source, "--item", deliveryTestItem, "--phase", "watchdog", "--format", "json"); currentAfter.Document == nil || currentAfter.Document.Contents != currentWatchdog.Document.Contents {
+	if currentAfter := cli.ledgerJSON(t, "skl", "slice", "show", "--repo", source, "--slice", deliveryTestItem, "--phase", "watchdog", "--format", "json"); currentAfter.Document == nil || currentAfter.Document.Contents != currentWatchdog.Document.Contents {
 		t.Fatal("dirty working-tree report replaced the committed current report")
 	}
 	if forge.createdCount() != 0 {
@@ -284,7 +286,7 @@ func TestLedgerShowReportCommandsPreserveRepositorySelection(t *testing.T) {
 	runGit(t, selected, "remote", "set-url", "origin", "git@github.com:other/widgets.git")
 	runGit(t, selected, "remote", "add", "reports", "git@github.com:acme/widgets.git")
 	t.Chdir(t.TempDir())
-	markdown, err := reportCLIText(t, cli, "skl", "ledger", "show", "--repo", selected, "--remote", "reports", "--item", deliveryTestItem)
+	markdown, err := reportCLIText(t, cli, "skl", "slice", "show", "--repo", selected, "--remote", "reports", "--slice", deliveryTestItem)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,7 +300,7 @@ func TestLedgerShowReportCommandsPreserveRepositorySelection(t *testing.T) {
 	if command == "" {
 		t.Fatalf("report discovery supplies no current retrieval command:\n%s", markdown)
 	}
-	readback := cli.ledgerJSON(t, "skl", "ledger", "show", "--repo", selected, "--remote", "reports", "--item", deliveryTestItem, "--format", "json")
+	readback := cli.ledgerJSON(t, "skl", "slice", "show", "--repo", selected, "--remote", "reports", "--slice", deliveryTestItem, "--format", "json")
 	if readback.ReadbackCommand == "" || command != readback.ReadbackCommand+" --phase implement" {
 		t.Fatalf("Markdown and JSON lost equivalent bound selection: %q, %s", command, mustJSON(t, readback))
 	}

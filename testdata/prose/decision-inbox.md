@@ -21,7 +21,7 @@ Completed reviews: 2
 
 Apply command:
 
-`skl decision apply --project 'widgets' --item 'widget-dashboard/foundation' --request-commit '0000000000000000000000000000000000000001' --request-path 'projects/widgets/proposals/widget-dashboard/foundation/watchdog-report.md' --route <implement|watchdog|supersede> --answer <human-answer-file>`
+`skl decision apply --project 'widgets' --slice 'widget-dashboard/foundation' --request-commit '0000000000000000000000000000000000000001' --request-path 'projects/widgets/proposals/widget-dashboard/foundation/watchdog-report.md' --route <implement|watchdog|supersede> --answer <human-answer-file>`
 
 #### `projects/widgets/proposals/widget-dashboard/foundation/behavior.md`
 
@@ -130,6 +130,6 @@ round: 2
 - An obligation that is wrong goes back through `explore` and `propose`.
 - `supersede` abandons unmerged work only. A Superseded blocker leaves its dependents blocked.
 - The human can also abandon unclaimed work by amending its Proposal with the Slice marked `"superseded": true`.
-- When the human directs retiring the old parent of abandoned work, run `skl decision retire --project <project> --proposal <proposal>` once no slice is active or claimed. Retirement reports partial delivery.
+- When the human directs retiring the old parent of abandoned work, run `skl proposal retire --project <project> --proposal <proposal>` once no slice is active or claimed. Retirement reports partial delivery.
 
 

@@ -19,6 +19,8 @@ func TestInstalledFamiliesDispatchWithRuntimeSettingsAndContinueSafely(t *testin
 				f := newLedgerFixture(t)
 				f.misconfigure(t, fmt.Sprintf(`{"ledger":%q,"harnesses":{%q:{"implement":{"model":"configured-worker","thinking":"configured-thinking"},"watchdog":{"model":"configured-watchdog","thinking":"configured-watch-thinking"},"reviewer":{"model":"configured-reviewer","thinking":"configured-review-thinking"},"helper":{"model":"configured-helper","thinking":"configured-helper-thinking"}}}}`, f.clone, harness))
 				source, target := deliverySourceRepo(t)
+				routeSourcePushes(t)
+				runGit(t, source, "push", "-q", "origin", "main")
 				deliveryAcceptFixture(t, newForgeServer(t), source)
 				cli := deliveryNoForgeApp(t)
 				watchdog := strings.HasPrefix(operation, "watchdog")
@@ -58,6 +60,8 @@ func TestInstalledFamiliesDispatchWithRuntimeSettingsAndContinueSafely(t *testin
 				if slices.Contains(continuation, "--auto") != auto || !slices.Contains(continuation, "--wait=15m0s") {
 					t.Fatalf("continuation lost mode or waiting: %s", d.Continue)
 				}
+				// Installed Dispatch commands defer role defaults to worker startup.
+				f.misconfigure(t, fmt.Sprintf(`{"ledger":%q,"harnesses":{%q:{"reviewer":{"model":"startup-reviewer","thinking":"startup-review-thinking"},"helper":{"model":"startup-helper","thinking":"startup-helper-thinking"}}}}`, f.clone, harness))
 				worker := cli.dispatchJSON(t, d.Worker)
 				if worker.Execution == nil || worker.Execution.Claim.Commit != d.Claim || worker.Packet == nil {
 					t.Fatalf("worker did not resume its dispatched Claim: %s", mustJSON(t, worker))
@@ -75,15 +79,23 @@ func TestInstalledFamiliesDispatchWithRuntimeSettingsAndContinueSafely(t *testin
 						t.Fatalf("target = %s, want %s", worker.Execution.State.Target.Branch, wantTarget)
 					}
 					facts := worker.Packet.Facts.Delivery
-					if facts.Reviewer == nil || facts.Reviewer.Model != "configured-reviewer" || facts.Reviewer.Thinking != "configured-review-thinking" {
+					if facts.Reviewer == nil || facts.Reviewer.Model != "startup-reviewer" || facts.Reviewer.Thinking != "startup-review-thinking" {
 						t.Fatalf("reviewer choices lost: %#v", facts.Reviewer)
 					}
 					team := strings.Contains(operation, "-team-")
 					if (facts.Mode == "team") != team {
 						t.Fatalf("mode = %s, want team=%t", facts.Mode, team)
 					}
-					if team && (facts.Helper == nil || facts.Helper.Model != "configured-helper" || facts.Helper.Thinking != "configured-helper-thinking") {
+					if team && (facts.Helper == nil || facts.Helper.Model != "startup-helper" || facts.Helper.Thinking != "startup-helper-thinking") {
 						t.Fatalf("helper choices lost: %#v", facts.Helper)
+					}
+					prepared := cli.dispatchJSON(t, facts.PrepareCommand)
+					if prepared.Packet == nil {
+						t.Fatalf("installed prepare: %s", mustJSON(t, prepared))
+					}
+					inspected := cli.dispatchJSON(t, strings.ReplaceAll(prepared.Packet.Facts.Delivery.InspectCommand, "<observed-target-sha>", "HEAD"))
+					if inspected.Source == nil || inspected.Execution.Claim.Commit != d.Claim || inspected.Packet.Facts.Delivery.ResumeCommand != facts.ResumeCommand {
+						t.Fatal("installed worker follow-up journey lost source or recovery identity")
 					}
 				}
 				if ending, status := cli.continued(t, d.Continue); ending != ledger.ClaimHeld || status != "stopped" {

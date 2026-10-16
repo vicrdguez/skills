@@ -100,7 +100,7 @@ func decodeExact(literal string, value any) error {
 // public document browser, as JSON.
 func recordedRun(t *testing.T, cli ledgerCLI, phase string) any {
 	t.Helper()
-	text, err := cli.deliveryRun(t, "skl", "browse", "documents", "--project", "widgets", "--item", deliveryTestItem, "--format", "json")
+	text, err := cli.deliveryRun(t, "skl", "browse", "documents", "--project", "widgets", "--slice", deliveryTestItem, "--format", "json")
 	if err != nil {
 		t.Fatalf("browse documents: %v\n%s", err, text)
 	}

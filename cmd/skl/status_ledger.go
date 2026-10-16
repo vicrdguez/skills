@@ -18,7 +18,7 @@ type ledgerStatusOutcome struct {
 }
 
 func ledgerStatus(command *cli.Context, store *ledger.Store, repository github.RepositoryID, newBackend backendFactory, output io.Writer, format implementationFormatKind) error {
-	selected := command.String("item")
+	selected := command.String("slice")
 	items, err := ledger.StatusItems(store, repository, selected)
 	if err != nil {
 		return renderLedgerRefusal(output, format, err)

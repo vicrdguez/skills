@@ -117,7 +117,7 @@ func Accept(ctx context.Context, store *Store, repository github.RepositoryID, d
 			if len(differences) > 0 {
 				return refuse(
 					"proposal "+declaration.Proposal+" is already accepted with "+differences[0].fact(),
-					"re-acceptance records nothing new; change an accepted Proposal through renewed Proposal review and `skl ledger amend`",
+					"re-acceptance records nothing new; change an accepted Proposal through renewed Proposal review and `skl proposal amend`",
 				)
 			}
 			outcome.Status = "existing"

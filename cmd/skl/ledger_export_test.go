@@ -9,10 +9,10 @@ import (
 	"github.com/vicrdguez/skills/ledger"
 )
 
-// exportProposal runs skl ledger export and returns the parsed JSON outcome.
+// exportProposal runs skl proposal export and returns the parsed JSON outcome.
 func (c ledgerCLI) exportProposal(t *testing.T, repo, proposal, destination string) ledgerOutcome {
 	t.Helper()
-	outcome, _ := c.run(t, []string{"skl", "ledger", "export", "--repo", repo, "--proposal", proposal, "--to", destination, "--format", "json"})
+	outcome, _ := c.run(t, []string{"skl", "proposal", "export", "--repo", repo, "--proposal", proposal, "--to", destination, "--format", "json"})
 	return outcome
 }
 

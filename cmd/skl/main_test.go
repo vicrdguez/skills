@@ -219,7 +219,7 @@ func activeDeliveryPacket(t *testing.T, root, phase, operation string, state led
 		execution.Implement = &ledger.Report{Source: ledger.SourceRevisions{Head: strings.Repeat("a", 40), Target: strings.Repeat("b", 40)}}
 		execution.Watchdog = &ledger.Report{Round: 1, Source: ledger.SourceRevisions{Reviewed: strings.Repeat("a", 40)}}
 	}
-	packet, err := setup.PresentDelivery(execution, repository, phase, operation, nil, t.TempDir(), setup.ImplementChoices{})
+	packet, err := setup.PresentDelivery(execution, repository, phase, operation, nil, t.TempDir(), setup.ImplementChoices{}, setup.ImplementChoices{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -293,7 +293,7 @@ func TestInstallSupportedSkillStubs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	wantSkills := []string{"audit", "brainstorm", "decision", "design", "domain", "explore", "propose", "shape", "testing", "walkthrough", "writing-for-agents"}
+	wantSkills := []string{"audit", "brainstorm", "decision", "design", "domain", "explore", "propose", "testing", "walkthrough", "writing-for-agents"}
 	for _, harness := range []string{".pi/agent/skills", ".codex/skills", ".claude/skills", ".config/opencode/skills"} {
 		for _, name := range wantSkills {
 			path := filepath.Join(root, harness, name, "SKILL.md")

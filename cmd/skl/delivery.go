@@ -82,9 +82,6 @@ func deliveryCommands(phase string, newBackend backendFactory, stdout io.Writer)
 			command.Flags = append(command.Flags,
 				&cli.StringFlag{Name: "harness", Usage: "launch configuration selector: pi, opencode, claude or codex"},
 				&cli.PathFlag{Name: "result-directory", Usage: "absolute path for Result Documents"})
-			if !selects {
-				command.Flags = append(command.Flags, &cli.BoolFlag{Name: "launch-resolved", Hidden: true, Usage: "keep the launch choices supplied to this Worker Session"})
-			}
 			if phase == ledger.ImplementPhase {
 				command.Flags = append(command.Flags, implementFlags()...)
 			}
@@ -167,7 +164,6 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 		return refusal(err)
 	}
 	choices.Harness = c.String("harness")
-	choices.Resolved = choices.Harness != ""
 	if err := store.RefuseSourceOverlap(repository.Root); err != nil {
 		return refusal(err)
 	}
@@ -283,12 +279,6 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 		}
 		verified()
 	}
-	if phase == ledger.ImplementPhase && !c.Bool("launch-resolved") {
-		choices.Reviewer = resolveLaunchChoice(choices.Reviewer, settings.Reviewer)
-		if choices.Mode == skilldist.TeamMode {
-			choices.Helper = resolveLaunchChoice(choices.Helper, settings.Helper)
-		}
-	}
 	if dispatch {
 		return emit(dispatchOutput(c, phase, repository, execution, continued, sortedMerges(merges), settings, choices))
 	}
@@ -324,7 +314,16 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 	if operation == "resume" && c.Bool("dispatched") {
 		rendered = "next"
 	}
-	packet, err := setup.PresentDelivery(execution, repository, phase, rendered, source, c.Path("result-directory"), choices)
+	// Only next (without Dispatch) and resume start Worker Sessions. Follow-up
+	// renderings carry invocation overrides for recovery, not resolved defaults.
+	session := choices
+	if phase == ledger.ImplementPhase && (operation == "next" || operation == "resume") {
+		session.Reviewer = resolveLaunchChoice(choices.Reviewer, settings.Reviewer)
+		if choices.Mode == skilldist.TeamMode {
+			session.Helper = resolveLaunchChoice(choices.Helper, settings.Helper)
+		}
+	}
+	packet, err := setup.PresentDelivery(execution, repository, phase, rendered, source, c.Path("result-directory"), choices, session)
 	if err != nil {
 		return emit(renderingFailedOutput(phase, repository, execution.Item, execution.Claim.Commit, err))
 	}

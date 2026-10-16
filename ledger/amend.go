@@ -86,7 +86,7 @@ func Amend(ctx context.Context, store *Store, repository github.RepositoryID, de
 		if project.Created || !recorded {
 			return refuse(
 				"no accepted Proposal "+declaration.Proposal+" is recorded for "+identity,
-				"accept the intake with `skl ledger accept` instead",
+				"accept the intake with `skl proposal accept` instead",
 			)
 		}
 		states, err := store.recordedStates(project.Name, declaration.Proposal)

@@ -188,8 +188,10 @@ func install(home string, preview bool) (installer, error) {
 	}
 	outcome := installer{preview: preview}
 	for _, target := range harnesses {
-		if err := outcome.retireStub(filepath.Join(home, target.skills, "tdd", "SKILL.md")); err != nil {
-			return outcome, err
+		for _, name := range []string{"tdd", "shape"} {
+			if err := outcome.retireStub(filepath.Join(home, target.skills, name, "SKILL.md")); err != nil {
+				return outcome, err
+			}
 		}
 		for _, name := range SkillNames() {
 			if slices.ContainsFunc(adapters, func(a adapter) bool { return a.name == name }) {

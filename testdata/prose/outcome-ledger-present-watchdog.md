@@ -18,4 +18,4 @@ To present the current result, read the private evidence:
 
 Write fresh public prose following `skl skill --resource pull-presentation.md watchdog`, then run:
 
-`skl ledger present --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation' --public-body <fresh-public-prose.md>`
+`skl slice publish --repo '/work/widgets' --remote 'origin' --slice 'widget-dashboard/foundation' --public-body <fresh-public-prose.md>`

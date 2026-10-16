@@ -71,8 +71,8 @@ func dispatchOutput(c *cli.Context, phase string, repository setup.RepositoryCon
 			worker = append(worker, flagWords(c, name)...)
 		}
 	}
-	// Session choices are frozen in the worker command, whereas continuation
-	// above repeats only invocation flags so the next dispatch rereads defaults.
+	// Both commands carry only invocation choices. Startup resolves helper and
+	// reviewer defaults; the next Dispatch resolves its worker defaults.
 	if flags := strings.TrimSpace(choices.CommandFlags()); flags != "" {
 		worker = append(worker, flags)
 	}

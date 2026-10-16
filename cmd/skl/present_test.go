@@ -2,7 +2,7 @@ package main
 
 // Public-CLI coverage of current-view pull request presentation
 // (publish-current-pulls B1-B5, A1-A4). Real ledger and source Git
-// repositories drive the ordinary handoffs offline; `skl ledger present` then
+// repositories drive the ordinary handoffs offline; `skl slice publish` then
 // supplies current evidence and guidance and presents the latest result
 // through the production GitHub adapter against a controlled pull request
 // server. Expected outcomes follow the accepted behavior, not the engine.
@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -23,6 +24,94 @@ import (
 	"github.com/vicrdguez/skills/ledger"
 	"github.com/vicrdguez/skills/setup"
 )
+
+func TestSlicePublishSyntaxAndHelp(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"missing slice", nil, "Required flag"},
+		{"removed item", []string{"--item", deliveryTestItem}, "flag provided but not defined: -item"},
+		{"proposal option", []string{"--slice", deliveryTestItem, "--proposal", "widget-dashboard"}, "flag provided but not defined: -proposal"},
+		{"raw format", []string{"--slice", deliveryTestItem, "--format", "raw"}, "unsupported format"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var output bytes.Buffer
+			app := newApp(func(github.RepositoryID) (setup.Backend, error) {
+				t.Fatal("invalid syntax reached the forge")
+				return nil, nil
+			}, bytes.NewReader(nil), &output, &output)
+			err := app.Run(append([]string{"skl", "slice", "publish"}, test.args...))
+			if err == nil || !strings.Contains(err.Error(), test.want) || strings.Contains(output.String(), "\"status\"") {
+				t.Fatalf("parser rejection = %v, %q", err, &output)
+			}
+		})
+	}
+
+	var output bytes.Buffer
+	app := newApp(nil, bytes.NewReader(nil), &output, &output)
+	if err := app.Run([]string{"skl", "slice", "publish", "--help"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, flag := range []string{"--slice", "--public-body", "--repo", "--remote", "--format"} {
+		if !strings.Contains(output.String(), flag) {
+			t.Errorf("help lacks %s: %s", flag, &output)
+		}
+	}
+	if strings.Contains(output.String(), "--item") {
+		t.Fatalf("help advertises the removed option: %s", &output)
+	}
+}
+
+func TestLedgerPresentIsNotACommand(t *testing.T) {
+	command := exec.Command(os.Args[0], "-test.run=^TestRemovedLedgerPresentProcess$", "--", "ledger", "present", "--item", deliveryTestItem)
+	command.Env = append(os.Environ(), "SKL_REMOVED_LEDGER_PRESENT_PROCESS=1")
+	output, err := command.CombinedOutput()
+	if err == nil || !strings.Contains(string(output), "No help topic for 'present'") {
+		t.Fatalf("removed invocation = %v, %q", err, output)
+	}
+}
+
+func TestRemovedLedgerPresentProcess(t *testing.T) {
+	if os.Getenv("SKL_REMOVED_LEDGER_PRESENT_PROCESS") != "1" {
+		return
+	}
+	os.Args = append([]string{"skl"}, os.Args[3:]...)
+	main()
+}
+
+func TestSlicePublishPreservesStructuredRefusals(t *testing.T) {
+	fixture := newLedgerFixture(t)
+	source, target := deliverySourceRepo(t)
+	deliveryAcceptFixture(t, newForgeServer(t), source)
+	offline := deliveryNoForgeApp(t)
+	before := ledgerSnapshot(t, fixture.clone)
+	for _, args := range [][]string{
+		{"--slice", deliveryTestItem},
+		{"--slice", "unknown/foundation"},
+		{"--slice", deliveryTestItem, "unexpected"},
+	} {
+		refused := offline.ledgerJSON(t, append([]string{"skl", "slice", "publish", "--repo", source, "--format", "json"}, args...)...)
+		if refused.Status != "fix_required" || refused.Reason == "" || refused.Guidance != nil || refused.Presentation != nil {
+			t.Fatalf("semantic refusal = %s", mustJSON(t, refused))
+		}
+	}
+	if ledgerSnapshot(t, fixture.clone) != before {
+		t.Fatal("refused publication changed the ledger")
+	}
+
+	presentHandoff(t, offline, source, ledger.ImplementPhase, "--target", target)
+	before = ledgerSnapshot(t, fixture.clone)
+	refused := offline.ledgerJSON(t, "skl", "slice", "publish", "--repo", source, "--slice", deliveryTestItem,
+		"--public-body", filepath.Join(t.TempDir(), "absent.md"), "--format", "json")
+	if refused.Status != "fix_required" || !strings.Contains(refused.Reason, "read the freshly authored public prose") {
+		t.Fatalf("unreadable body = %s", mustJSON(t, refused))
+	}
+	if ledgerSnapshot(t, fixture.clone) != before {
+		t.Fatal("unreadable body changed the ledger")
+	}
+}
 
 // pullServer is a controlled GitHub pull request surface whose head SHA is
 // the local bare source remote's branch tip, so readiness is judged against
@@ -220,19 +309,19 @@ func presentHandoff(t *testing.T, cli ledgerCLI, source, phase string, arguments
 	if err != nil || submitted.Result == nil {
 		t.Fatalf("%s submit = %#v, %v", phase, submitted, err)
 	}
-	if submitted.Result.Publication == nil || submitted.Result.Publication.Status == ledger.PullPresented || !strings.Contains(submitted.Present, "skl ledger present") {
+	if submitted.Result.Publication == nil || submitted.Result.Publication.Status == ledger.PullPresented || !strings.Contains(submitted.Present, "skl slice publish") {
 		t.Fatalf("offline %s handoff = %#v, want pending presentation with a current-view continuation", phase, submitted)
 	}
 	return started, submitted, head
 }
 
-// TestLedgerPresentReauthorsTheCurrentResultAfterMissedPhases covers the B5
+// TestSlicePublishReauthorsTheCurrentResultAfterMissedPhases covers the B5
 // reauthoring scenario and B1/B3 through the public CLI: implementation,
 // rejection, rework, and approval completed while every public update was
 // missed. Explicit presentation offers the current result's evidence and
 // guidance rather than the missed updates, then presents freshly authored
 // prose for only that result; the private reports never reach the forge.
-func TestLedgerPresentReauthorsTheCurrentResultAfterMissedPhases(t *testing.T) {
+func TestSlicePublishReauthorsTheCurrentResultAfterMissedPhases(t *testing.T) {
 	fixture := newLedgerFixture(t)
 	source, target := deliverySourceRepo(t)
 	deliveryAcceptFixture(t, newForgeServer(t), source)
@@ -247,7 +336,7 @@ func TestLedgerPresentReauthorsTheCurrentResultAfterMissedPhases(t *testing.T) {
 
 	// Without prose, both transports carry the same current evidence and bound
 	// continuation, and no effect happens.
-	guided := offline.ledgerJSON(t, "skl", "ledger", "present", "--repo", source, "--item", deliveryTestItem, "--format", "json")
+	guided := offline.ledgerJSON(t, append(shellWords(t, passed.Present), "--format", "json")...)
 	if guided.Status != "prose_required" || guided.Guidance == nil {
 		t.Fatalf("present without prose = %#v", guided)
 	}
@@ -269,10 +358,10 @@ func TestLedgerPresentReauthorsTheCurrentResultAfterMissedPhases(t *testing.T) {
 	if !strings.Contains(evidence, "# Foundation intent") || !strings.Contains(evidence, "# Foundation behavior") {
 		t.Errorf("evidence lacks the accepted Contract:\n%s", evidence)
 	}
-	if !strings.Contains(guided.Guidance.Continue, "--item '"+deliveryTestItem+"'") || !strings.Contains(guided.Guidance.Authoring, "pull-presentation.md watchdog") {
+	if !strings.Contains(guided.Guidance.Continue, "--slice '"+deliveryTestItem+"'") || !strings.Contains(guided.Guidance.Authoring, "pull-presentation.md watchdog") {
 		t.Fatalf("guidance commands = %#v", guided.Guidance)
 	}
-	markdown, err := offline.deliveryRun(t, "skl", "ledger", "present", "--repo", source, "--item", deliveryTestItem)
+	markdown, err := offline.deliveryRun(t, "skl", "slice", "publish", "--repo", source, "--slice", deliveryTestItem)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,11 +394,11 @@ func TestLedgerPresentReauthorsTheCurrentResultAfterMissedPhases(t *testing.T) {
 	// While source cannot be published, both transports report the concrete
 	// limitation with the same guidance, and nothing is presented or recorded.
 	unreachable := presentForgeApp(t, newPullServer(t, ""))
-	pending := unreachable.ledgerJSON(t, "skl", "ledger", "present", "--repo", source, "--item", deliveryTestItem, "--public-body", prose, "--format", "json")
+	pending := unreachable.ledgerJSON(t, "skl", "slice", "publish", "--repo", source, "--slice", deliveryTestItem, "--public-body", prose, "--format", "json")
 	if pending.Status != ledger.IssuePending || pending.Presentation == nil || !strings.Contains(pending.Presentation.Publication.Detail, "source push unavailable") || pending.Guidance == nil {
 		t.Fatalf("present without source publication = %s", mustJSON(t, pending))
 	}
-	pendingMarkdown, err := unreachable.deliveryRun(t, "skl", "ledger", "present", "--repo", source, "--item", deliveryTestItem, "--public-body", prose)
+	pendingMarkdown, err := unreachable.deliveryRun(t, "skl", "slice", "publish", "--repo", source, "--slice", deliveryTestItem, "--public-body", prose)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +416,8 @@ func TestLedgerPresentReauthorsTheCurrentResultAfterMissedPhases(t *testing.T) {
 	bare := routeSourcePushes(t)
 	pulls := newPullServer(t, bare)
 	online := presentForgeApp(t, pulls)
-	presented := online.ledgerJSON(t, "skl", "ledger", "present", "--repo", source, "--item", deliveryTestItem, "--public-body", prose, "--format", "json")
+	continuation := strings.Replace(pending.Guidance.Continue, "<fresh-public-prose.md>", "'"+prose+"'", 1)
+	presented := online.ledgerJSON(t, append(shellWords(t, continuation), "--format", "json")...)
 	if presented.Status != ledger.PullPresented || presented.Presentation == nil || presented.Guidance != nil {
 		t.Fatalf("present = %s", mustJSON(t, presented))
 	}
@@ -349,7 +439,7 @@ func TestLedgerPresentReauthorsTheCurrentResultAfterMissedPhases(t *testing.T) {
 		}
 	}
 
-	again, err := online.deliveryRun(t, "skl", "ledger", "present", "--repo", source, "--item", deliveryTestItem, "--public-body", prose)
+	again, err := online.deliveryRun(t, "skl", "slice", "publish", "--repo", source, "--slice", deliveryTestItem, "--public-body", prose)
 	if err != nil || !strings.Contains(again, "Status: presented") || !strings.Contains(again, "Public presentation: presented — pull request #21") || !strings.Contains(again, "Submission: acme/widgets#21") || strings.Contains(again, "Present with fresh prose") {
 		t.Fatalf("Markdown presentation = %q, %v", again, err)
 	}
@@ -375,7 +465,7 @@ func presentGuided(t *testing.T, cli ledgerCLI, source string) *presentationGuid
 	t.Helper()
 	var first *presentationGuidance
 	for range 2 {
-		guided := cli.ledgerJSON(t, "skl", "ledger", "present", "--repo", source, "--item", deliveryTestItem, "--format", "json")
+		guided := cli.ledgerJSON(t, "skl", "slice", "publish", "--repo", source, "--slice", deliveryTestItem, "--format", "json")
 		if guided.Status != "prose_required" || guided.Guidance == nil {
 			t.Fatalf("present without prose = %s", mustJSON(t, guided))
 		}
@@ -421,7 +511,7 @@ func TestPresentationAuthoringCarriesTheCompletedReviewCount(t *testing.T) {
 		if result.Phase != phase || result.Lifecycle != lifecycle || result.ReviewCount != count {
 			t.Fatalf("current result = %s, want %s in %s after %d completed reviews", mustJSON(t, result), phase, lifecycle, count)
 		}
-		markdown, err := offline.deliveryRun(t, "skl", "ledger", "present", "--repo", source, "--item", deliveryTestItem)
+		markdown, err := offline.deliveryRun(t, "skl", "slice", "publish", "--repo", source, "--slice", deliveryTestItem)
 		if want := fmt.Sprintf("Completed reviews: %d\n", count); err != nil || !strings.Contains(markdown, want) {
 			t.Fatalf("Markdown guidance lacks %q: %v\n%s", want, err, markdown)
 		}

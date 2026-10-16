@@ -241,7 +241,7 @@ func TestDecisionRetirementGuardsPartialDelivery(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"skl decision retire --project 'atlas' --proposal 'old-repair'",
+		"skl proposal retire --project 'atlas' --proposal 'old-repair'",
 		"another slice is still claimed",
 		"release or complete the active slice before retiring",
 		"`repair/active`",
@@ -281,7 +281,7 @@ func TestDecisionRetirementGuardsPartialDelivery(t *testing.T) {
 func TestDecisionApplyCommandBindsKnownArguments(t *testing.T) {
 	commit := strings.Repeat("c", 40)
 	command := DecisionApplyCommand("atlas", "repair/fix", commit, "projects/atlas/proposals/repair/fix/watchdog-report.md")
-	want := "skl decision apply --project 'atlas' --item 'repair/fix'" +
+	want := "skl decision apply --project 'atlas' --slice 'repair/fix'" +
 		" --request-commit '" + commit + "'" +
 		" --request-path 'projects/atlas/proposals/repair/fix/watchdog-report.md'" +
 		" --route <implement|watchdog|supersede> --answer <human-answer-file>"
