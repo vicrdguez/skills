@@ -12,18 +12,17 @@ import (
 	"github.com/vicrdguez/skills/workflow"
 )
 
-// ImplementChoices carry the delivery harness and session snapshot marker,
-// plus Implement's mode and opaque subagent values. Empty values inherit.
+// ImplementChoices carry the delivery harness, Implement mode and opaque
+// subagent values. Empty values inherit.
 type ImplementChoices struct {
 	Mode     string
 	Harness  string
-	Resolved bool
 	Helper   skilldist.SubagentChoice
 	Reviewer skilldist.SubagentChoice
 }
 
-// CommandFlags serializes the choices supplied to one Worker Session for its
-// worker and later prepare, inspect and resume commands.
+// CommandFlags serializes invocation choices for startup and recovery.
+// Callers keep resolved session defaults out of these commands.
 func (choices ImplementChoices) CommandFlags() string {
 	var words []string
 	add := func(flag, value string) {
@@ -32,9 +31,6 @@ func (choices ImplementChoices) CommandFlags() string {
 		}
 	}
 	add("harness", choices.Harness)
-	if choices.Resolved {
-		words = append(words, " --launch-resolved")
-	}
 	if choices.Mode == skilldist.TeamMode {
 		add("mode", choices.Mode)
 	}
@@ -56,8 +52,9 @@ func supplied(choice skilldist.SubagentChoice) *skilldist.SubagentChoice {
 // PresentDelivery binds known commands and evidence without exposing private
 // storage navigation or asking workers to choose an engine-resolvable procedure.
 // Both phases carry the harness; only Implement uses subagent choices.
-func PresentDelivery(e *ledger.Execution, repository RepositoryContext, phase, operation string, source *workflow.DeliverySource, directory string, choices ImplementChoices) (skilldist.Packet, error) {
-	f, _, err := deliveryFacts(e, repository, phase, operation, source, directory, choices)
+// invocation binds commands; session supplies the choices rendered as guidance.
+func PresentDelivery(e *ledger.Execution, repository RepositoryContext, phase, operation string, source *workflow.DeliverySource, directory string, invocation, session ImplementChoices) (skilldist.Packet, error) {
+	f, _, err := deliveryFacts(e, repository, phase, operation, source, directory, invocation, session)
 	if err != nil {
 		return skilldist.Packet{}, err
 	}
@@ -67,7 +64,7 @@ func PresentDelivery(e *ledger.Execution, repository RepositoryContext, phase, o
 // ReviewRework binds what a review that ends in rework at the prepared head
 // runs: the report instructions and the submission.
 func ReviewRework(e *ledger.Execution, repository RepositoryContext, directory, head string) (report, submit string, err error) {
-	f, review, err := deliveryFacts(e, repository, ledger.WatchdogPhase, "prepare", nil, directory, ImplementChoices{})
+	f, review, err := deliveryFacts(e, repository, ledger.WatchdogPhase, "prepare", nil, directory, ImplementChoices{}, ImplementChoices{})
 	if err != nil {
 		return "", "", err
 	}
@@ -85,7 +82,7 @@ func IntegrationRef(repository RepositoryContext, state ledger.SliceState) strin
 
 // deliveryFacts binds one rendering's facts, and the submit command before
 // its outcome and head arguments.
-func deliveryFacts(e *ledger.Execution, repository RepositoryContext, phase, operation string, source *workflow.DeliverySource, directory string, choices ImplementChoices) (*skilldist.DeliveryFacts, string, error) {
+func deliveryFacts(e *ledger.Execution, repository RepositoryContext, phase, operation string, source *workflow.DeliverySource, directory string, choices, session ImplementChoices) (*skilldist.DeliveryFacts, string, error) {
 	worktree, err := workflow.DeliveryWorktree(repository.Root, e.State.Branch)
 	if err != nil {
 		return nil, "", err
@@ -147,7 +144,7 @@ func deliveryFacts(e *ledger.Execution, repository RepositoryContext, phase, ope
 	f.InspectCommand += choices.CommandFlags()
 	f.ResumeCommand += choices.CommandFlags()
 	if phase == ledger.ImplementPhase {
-		f.Mode, f.Helper, f.Reviewer = cmp.Or(choices.Mode, skilldist.StandardMode), supplied(choices.Helper), supplied(choices.Reviewer)
+		f.Mode, f.Helper, f.Reviewer = cmp.Or(choices.Mode, skilldist.StandardMode), supplied(session.Helper), supplied(session.Reviewer)
 	}
 	target := f.RecordedTarget
 	if source != nil {

@@ -143,7 +143,7 @@ Pi, OpenCode and Claude Code install `implement-loop` (standard Implement), `imp
 
 Adapters identify their harness with `--harness` and supply no compiled model or thinking defaults. Set optional `harnesses.<pi|opencode|claude|codex>.<implement|watchdog|helper|reviewer>.<model|thinking>` choices in the existing `skl/config.json`. Each field resolves from an explicit invocation choice, then the selected harness's configuration, then harness inheritance. Standard and team Implement share the same reviewer defaults. Direct CLI calls without a selector use only explicit launch flags. See [configuration and precedence](docs/cli.md#configuration) for an example.
 
-Each dispatch rereads configuration; continuation preserves explicit overrides rather than old defaults. Existing workers retain their supplied session choices. Pi-dispatched workers use ordinary extension-enabled subagent tool loading, so codemode is available when enabled under normal scope rules.
+Each dispatch rereads configuration for the worker launch; helper and reviewer defaults resolve at Worker Session startup. Continuation and fresh recovery preserve explicit overrides rather than old defaults. Running workers retain their supplied session choices in context through prepare and inspect; fresh recovery sessions resolve current defaults again. Pi-dispatched workers use ordinary extension-enabled subagent tool loading, so codemode is available when enabled under normal scope rules.
 
 Run one Supervisor per phase per Project. Configure the harness to allow subagent depth **2**: the Supervisor dispatches a worker, and that worker's Audit dispatches reviewers. `skl install` does not configure harness subagent depth.
 
