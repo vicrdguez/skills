@@ -215,13 +215,13 @@ func TestAgentProseGoldens(t *testing.T) {
 	contract := map[string]string{"intent.md": proseFixture(t, "intent.md"), "behavior.md": proseFixture(t, "behavior.md")}
 
 	// Propose: acceptance, readback, publication and cleanup.
-	g.capture("outcome-ledger-accept-fix-required", proposer, "ledger", "accept", "--repo", source, "--proposal-dir", intake(proseProposal, map[string]string{"intent.md": contract["intent.md"]}), issue)
+	g.capture("outcome-ledger-accept-fix-required", proposer, "proposal", "accept", "--repo", source, "--proposal-dir", intake(proseProposal, map[string]string{"intent.md": contract["intent.md"]}), issue)
 	accepted := intake(proseProposal, contract)
-	g.capture("outcome-ledger-accept-accepted", proposer, "ledger", "accept", "--repo", source, "--proposal-dir", accepted, issue)
-	g.capture("outcome-ledger-accept-existing", proposer, "ledger", "accept", "--repo", source, "--proposal-dir", accepted, issue)
-	g.capture("outcome-ledger-show", proposer, "ledger", "show", "--repo", source, "--item", proseItem)
-	g.capture("outcome-ledger-publish", proposer, "ledger", "publish", "--repo", source, "--proposal", proseProposal, issue)
-	g.capture("outcome-ledger-export", proposer, "ledger", "export", "--repo", source, "--proposal", proseProposal, "--to", filepath.Join(temp, "export"))
+	g.capture("outcome-ledger-accept-accepted", proposer, "proposal", "accept", "--repo", source, "--proposal-dir", accepted, issue)
+	g.capture("outcome-ledger-accept-existing", proposer, "proposal", "accept", "--repo", source, "--proposal-dir", accepted, issue)
+	g.capture("outcome-ledger-show", proposer, "slice", "show", "--repo", source, "--slice", proseItem)
+	g.capture("outcome-ledger-publish", proposer, "proposal", "publish", "--repo", source, "--proposal", proseProposal, issue)
+	g.capture("outcome-ledger-export", proposer, "proposal", "export", "--repo", source, "--proposal", proseProposal, "--to", filepath.Join(temp, "export"))
 	g.capture("outcome-propose-cleanup", proposer, "cleanup", "--repo", source)
 
 	// Implement: start, release, resume, prepare and inspect, then hand off.
@@ -254,7 +254,7 @@ func TestAgentProseGoldens(t *testing.T) {
 		}
 	}
 	submit("outcome-implement-submit", claim, head)
-	g.capture("outcome-ledger-present", worker, "ledger", "present", "--repo", source, "--item", proseItem)
+	g.capture("outcome-ledger-present", worker, "slice", "publish", "--repo", source, "--slice", proseItem)
 
 	// First Watchdog review routes the Work Item to Rework.
 	review := func(name string) (string, string) {
@@ -301,8 +301,8 @@ func TestAgentProseGoldens(t *testing.T) {
 	g.capture("watchdog-inspect", worker, append([]string{"watchdog", "inspect"}, reviewIdentity(reviewClaim, reviewResult)...)...)
 	g.capture("watchdog-resume", worker, append([]string{"watchdog", "resume"}, reviewIdentity(reviewClaim, reviewResult)...)...)
 	verdict("outcome-watchdog-submit-rework", reviewClaim, "rework", ledger.Rework)
-	g.capture("outcome-ledger-present-watchdog", worker, "ledger", "present", "--repo", source, "--item", proseItem)
-	g.capture("outcome-ledger-present-public", worker, "ledger", "present", "--repo", source, "--item", proseItem, "--public-body", public)
+	g.capture("outcome-ledger-present-watchdog", worker, "slice", "publish", "--repo", source, "--slice", proseItem)
+	g.capture("outcome-ledger-present-public", worker, "slice", "publish", "--repo", source, "--slice", proseItem, "--public-body", public)
 
 	// Rework, then a repeat review of a descendant head is incremental and
 	// routes the Work Item to Needs Human.
@@ -448,22 +448,22 @@ func TestAgentProseGoldens(t *testing.T) {
 		t.Helper()
 		exports++
 		directory := filepath.Join(temp, fmt.Sprintf("amend-%d", exports), proposal)
-		g.run(proposer, "ledger", "export", "--repo", source, "--proposal", proposal, "--to", directory)
+		g.run(proposer, "proposal", "export", "--repo", source, "--proposal", proposal, "--to", directory)
 		return directory
 	}
-	g.capture("outcome-ledger-amend-existing", proposer, "ledger", "amend", "--repo", source, "--proposal-dir", amendIntake("widget-share"))
+	g.capture("outcome-ledger-amend-existing", proposer, "proposal", "amend", "--repo", source, "--proposal-dir", amendIntake("widget-share"))
 	submittedIntake := amendIntake("widget-search")
 	writeFile(t, filepath.Join(submittedIntake, "foundation", "intent.md"), "# Search intent, revised\n")
-	g.capture("outcome-ledger-amend-fix-required", proposer, "ledger", "amend", "--repo", source, "--proposal-dir", submittedIntake)
+	g.capture("outcome-ledger-amend-fix-required", proposer, "proposal", "amend", "--repo", source, "--proposal-dir", submittedIntake)
 	grown := amendIntake("widget-share")
 	addIntakeSlice(t, grown, "followup", "foundation")
-	if output := g.run(proposer, "ledger", "amend", "--repo", source, "--proposal-dir", grown,
+	if output := g.run(proposer, "proposal", "amend", "--repo", source, "--proposal-dir", grown,
 		"--issue=followup="+proseFixturePath("issue.md"), "--parent-body", proseFixturePath("issue.md")); !strings.Contains(output, "Status: amended") {
-		t.Fatalf("ledger amend widget-share:\n%s", output)
+		t.Fatalf("proposal amend widget-share:\n%s", output)
 	}
 	replaced := amendIntake("widget-share")
 	writeFile(t, filepath.Join(replaced, "foundation", "behavior.md"), "# Share behavior, revised\n")
-	g.capture("outcome-ledger-amend-amended", proposer, "ledger", "amend", "--repo", source, "--proposal-dir", replaced)
+	g.capture("outcome-ledger-amend-amended", proposer, "proposal", "amend", "--repo", source, "--proposal-dir", replaced)
 
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	g.capture("outcome-implement-next-unconfigured", worker, "implement", "next", "--repo", source)

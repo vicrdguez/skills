@@ -10,6 +10,6 @@ Slice `foundation`: Dashboard foundation (branch `widget-dashboard`)
   Dependencies: none
   Issue: attached acme/widgets#101
   Issue publication: updated
-  Readback: `skl ledger show --repo '/work/widgets' --remote 'origin' --item 'widget-dashboard/foundation'`
+  Readback: `skl slice show --repo '/work/widgets' --remote 'origin' --slice 'widget-dashboard/foundation'`
 
 Report each surface's result to the user, and stop.

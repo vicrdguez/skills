@@ -6,7 +6,7 @@ Use the fixed point the user gave: a commit, branch, tag or merge-base. When non
 
 ## Find the Contract
 
-When the branch belongs to a ledger Work Item, read its Contract with `skl ledger show --item <proposal>/<slice>`. Otherwise use the issue or path the user supplies. When there is no Contract, skip the Contracts axis and say so in the report.
+When the branch belongs to a ledger Work Item, read its Contract with `skl slice show --slice <proposal>/<slice>`. Otherwise use the issue or path the user supplies. When there is no Contract, skip the Contracts axis and say so in the report.
 
 ## Run the gate once
 

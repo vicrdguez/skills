@@ -105,15 +105,15 @@ func browseCommand(stdin io.Reader, stdout io.Writer) *cli.Command {
 		}, {
 			Name:  "slice",
 			Usage: "Show every recorded fact of one Slice",
-			Flags: []cli.Flag{projectFlag("Project of the Slice"), &cli.StringFlag{Name: "item", Usage: "Slice identity (<proposal>/<slice>)"}, locationFlag(), implementationFormatFlag()},
+			Flags: []cli.Flag{projectFlag("Project of the Slice"), &cli.StringFlag{Name: "slice", Usage: "Slice identity (<proposal>/<slice>)"}, locationFlag(), implementationFormatFlag()},
 			Action: func(command *cli.Context) error {
 				return runBrowseQuery(command, stdout, func(snapshot *ledger.Snapshot) (browseOutcome, error) {
 					var slice *ledger.SliceDetail
 					var err error
 					if command.Bool("archived") {
-						slice, err = snapshot.SliceAt(command.String("project"), command.String("item"), true)
+						slice, err = snapshot.SliceAt(command.String("project"), command.String("slice"), true)
 					} else {
-						slice, err = snapshot.Slice(command.String("project"), command.String("item"))
+						slice, err = snapshot.Slice(command.String("project"), command.String("slice"))
 					}
 					return browseOutcome{Slice: slice}, err
 				})
@@ -124,7 +124,7 @@ func browseCommand(stdin io.Reader, stdout io.Writer) *cli.Command {
 			Flags: []cli.Flag{
 				projectFlag("Project to search; every Project when omitted"), archivedFlag,
 				&cli.StringSliceFlag{Name: "lifecycle", Usage: "Select any of these recorded lifecycles (" + strings.Join(ledger.Lifecycles, ", ") + ")"},
-				&cli.StringSliceFlag{Name: "claim", Usage: "Select any of these Claims (" + strings.Join(ledger.Claims, ", ") + ")"},
+				&cli.StringSliceFlag{Name: "claim-phase", Usage: "Select any of these recorded Claim phases (" + strings.Join(ledger.Claims, ", ") + ")"},
 				&cli.StringFlag{Name: "search", Usage: "Select Slices whose project/proposal/slice identity or title contains this text"},
 				&cli.StringFlag{Name: "group", Value: ledger.GroupByProposal, Usage: "Group each Project's Slices by " + ledger.GroupByProposal + " or " + ledger.GroupByLifecycle},
 				implementationFormatFlag(),
@@ -133,7 +133,7 @@ func browseCommand(stdin io.Reader, stdout io.Writer) *cli.Command {
 				return runBrowseQuery(command, stdout, func(snapshot *ledger.Snapshot) (browseOutcome, error) {
 					search, err := snapshot.FindSlices(ledger.SliceQuery{
 						Project: command.String("project"), IncludeArchived: command.Bool("include-archived"),
-						Lifecycles: command.StringSlice("lifecycle"), Claims: command.StringSlice("claim"),
+						Lifecycles: command.StringSlice("lifecycle"), Claims: command.StringSlice("claim-phase"),
 						Text: command.String("search"), GroupBy: command.String("group"),
 					})
 					return browseOutcome{Slices: search}, err
@@ -145,14 +145,14 @@ func browseCommand(stdin io.Reader, stdout io.Writer) *cli.Command {
 			Flags: []cli.Flag{
 				projectFlag("Project of the Proposal or Slice"), locationFlag(),
 				&cli.StringFlag{Name: "proposal", Usage: "Proposal whose description and Slice documents to read"},
-				&cli.StringFlag{Name: "item", Usage: "Slice identity (<proposal>/<slice>) whose current documents to read"},
+				&cli.StringFlag{Name: "slice", Usage: "Slice identity (<proposal>/<slice>) whose current documents to read"},
 				implementationFormatFlag(),
 			},
 			Action: func(command *cli.Context) error {
 				return runBrowseQuery(command, stdout, func(snapshot *ledger.Snapshot) (browseOutcome, error) {
-					proposalSet, itemSet := command.IsSet("proposal"), command.IsSet("item")
+					proposalSet, itemSet := command.IsSet("proposal"), command.IsSet("slice")
 					if proposalSet == itemSet {
-						return browseOutcome{}, errors.New("browse documents requires exactly one of --proposal or --item")
+						return browseOutcome{}, errors.New("browse documents requires exactly one of --proposal or --slice")
 					}
 					var documents *ledger.DocumentSet
 					var err error
@@ -163,9 +163,9 @@ func browseCommand(stdin io.Reader, stdout io.Writer) *cli.Command {
 							documents, err = snapshot.ProposalDocuments(command.String("project"), command.String("proposal"))
 						}
 					} else if command.Bool("archived") {
-						documents, err = snapshot.SliceDocumentsAt(command.String("project"), command.String("item"), true)
+						documents, err = snapshot.SliceDocumentsAt(command.String("project"), command.String("slice"), true)
 					} else {
-						documents, err = snapshot.SliceDocuments(command.String("project"), command.String("item"))
+						documents, err = snapshot.SliceDocuments(command.String("project"), command.String("slice"))
 					}
 					return browseOutcome{Documents: documents}, err
 				})
@@ -174,7 +174,7 @@ func browseCommand(stdin io.Reader, stdout io.Writer) *cli.Command {
 			Name:  "versions",
 			Usage: "List committed content versions of a Slice's implementation or watchdog report",
 			Flags: []cli.Flag{
-				projectFlag("Project of the Slice"), &cli.StringFlag{Name: "item", Usage: "Slice identity (<proposal>/<slice>)"},
+				projectFlag("Project of the Slice"), &cli.StringFlag{Name: "slice", Usage: "Slice identity (<proposal>/<slice>)"},
 				&cli.StringFlag{Name: "phase", Usage: "implement or watchdog"}, locationFlag(), implementationFormatFlag(),
 			},
 			Action: func(command *cli.Context) error {
@@ -182,9 +182,9 @@ func browseCommand(stdin io.Reader, stdout io.Writer) *cli.Command {
 					var versions *ledger.ReportVersions
 					var err error
 					if command.Bool("archived") {
-						versions, err = snapshot.VersionsAt(command.String("project"), command.String("item"), command.String("phase"), true)
+						versions, err = snapshot.VersionsAt(command.String("project"), command.String("slice"), command.String("phase"), true)
 					} else {
-						versions, err = snapshot.Versions(command.String("project"), command.String("item"), command.String("phase"))
+						versions, err = snapshot.Versions(command.String("project"), command.String("slice"), command.String("phase"))
 					}
 					return browseOutcome{Versions: versions}, err
 				})

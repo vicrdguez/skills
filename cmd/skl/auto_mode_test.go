@@ -168,7 +168,7 @@ func TestReconcilePresentsProposalSubmissionAndObservesItsMerge(t *testing.T) {
 	app, output := completionStatusApp(t, forge.serve(t))
 	browser, browsed := browseApp(t)
 	beforeLedger, beforeSource := ledgerSnapshot(t, fixture.clone), ledgerSnapshot(t, root)
-	local := browseQuery(t, browser, browsed, "slice", "--project", "widgets", "--item", "branch-status/foundation")
+	local := browseQuery(t, browser, browsed, "slice", "--project", "widgets", "--slice", "branch-status/foundation")
 	if local.Slice.Lifecycle != "ready_for_merge" || ledgerSnapshot(t, fixture.clone) != beforeLedger {
 		t.Fatalf("browse observed external completion or mutated records: %+v", local.Slice)
 	}
@@ -255,8 +255,8 @@ func TestDecisionRetireObservesMergedProposalSubmission(t *testing.T) {
 	forge.state, forge.merged = "closed", true
 	forge.mu.Unlock()
 	output.Reset()
-	if err := app.Run([]string{"skl", "decision", "retire", "--project", "widgets", "--proposal", "branch-status", "--format", "json"}); err != nil {
-		t.Fatalf("decision retire: %v (%s)", err, output)
+	if err := app.Run([]string{"skl", "proposal", "retire", "--project", "widgets", "--proposal", "branch-status", "--format", "json"}); err != nil {
+		t.Fatalf("proposal retire: %v (%s)", err, output)
 	}
 	if text := output.String(); !strings.Contains(text, `"status":"refused"`) || !strings.Contains(text, "has merged") {
 		t.Fatalf("retirement of a merged Proposal Submission:\n%s", text)

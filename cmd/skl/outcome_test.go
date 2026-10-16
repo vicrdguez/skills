@@ -55,7 +55,7 @@ func TestUnreachedOutcomeBranchesRender(t *testing.T) {
 		t.Errorf("rendering failure JSON changed: %s", &encoded)
 	}
 	result := ledger.CurrentResult{Item: "widget/foundation", Lifecycle: ledger.AwaitingReview, Phase: ledger.ImplementPhase, Outcome: ledger.AwaitingReview, Branch: "widget"}
-	guidance := &presentationGuidance{Result: result, Evidence: []string{"skl ledger show --commit 'a' --path 'r'"}, Authoring: "skl skill --resource pull-presentation.md implement", Continue: "skl ledger present --item 'widget/foundation' --public-body <file>"}
+	guidance := &presentationGuidance{Result: result, Evidence: []string{"skl ledger show --commit 'a' --path 'r'"}, Authoring: "skl skill --resource pull-presentation.md implement", Continue: "skl slice publish --slice 'widget/foundation' --public-body <file>"}
 	archive := &ledger.ArchiveResult{Archived: []ledger.ArchivedProposal{{Proposal: "done", FullyDelivered: true, Commit: "abc"}}}
 	cases := []struct {
 		name, kind string
@@ -68,7 +68,7 @@ func TestUnreachedOutcomeBranchesRender(t *testing.T) {
 		{"presentation uncertain", "ledger-present", presentFacts{Status: ledger.IssueUncertain, Result: &result, Guidance: guidance}, []string{"may or may not", "Check the forge", "`" + guidance.Continue + "`"}},
 		{"cleanup completed", "cleanup", cleanupFacts{cleanupOutcome{Status: "completed", Archive: archive}, "skl cleanup"}, []string{"Archived proposal: done (fully delivered)", "Cleanup is complete"}},
 		{"cleanup needs repair", "cleanup", cleanupFacts{cleanupOutcome{Status: "fix_required", SourceRepair: &ledgerOutcome{Reason: "branch busy", Repair: "free it"}}, "skl cleanup --repo '/work/widgets'"}, []string{"Source cleanup refused: branch busy", "Repair: free it", "`skl cleanup --repo '/work/widgets'`"}},
-		{"acceptance with pending issue", "ledger-accept", proposalFacts{Status: "accepted", Proposal: "widget", Unpublished: true, Publish: "skl ledger publish --repo '/work/widgets' --remote 'origin' --proposal 'widget'"}, []string{"`skl ledger publish --repo '/work/widgets' --remote 'origin' --proposal 'widget'`"}},
+		{"acceptance with pending issue", "ledger-accept", proposalFacts{Status: "accepted", Proposal: "widget", Unpublished: true, Publish: "skl proposal publish --repo '/work/widgets' --remote 'origin' --proposal 'widget'"}, []string{"`skl proposal publish --repo '/work/widgets' --remote 'origin' --proposal 'widget'`"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

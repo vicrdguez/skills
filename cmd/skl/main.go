@@ -140,7 +140,7 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 			}
 			return fmt.Errorf("unsupported format %q", command.String("format"))
 		},
-	}, cleanupCommand(stdout), {
+	}, cleanupCommand(stdout), sliceCommands(newBackend, stdout), {
 		Name:        "implement",
 		Subcommands: deliveryCommands("implement", newBackend, stdout),
 	}, {
@@ -173,7 +173,7 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 			return err
 		},
 	}}
-	app.Commands = append(app.Commands, reconcileCommand(newBackend, stdout), ledgerCommands(newBackend, stdout), decisionCommands(newBackend, stdout), browseCommand(stdin, stdout))
+	app.Commands = append(app.Commands, reconcileCommand(newBackend, stdout), ledgerCommands(newBackend, stdout), proposalCommands(newBackend, stdout), decisionCommands(stdout), browseCommand(stdin, stdout))
 	return &stageApp{app}
 }
 

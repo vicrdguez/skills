@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/urfave/cli/v2"
 	skilldist "github.com/vicrdguez/skills"
@@ -89,10 +88,10 @@ func bindAuthoring(repository setup.RepositoryContext, outcome *ledger.Acceptanc
 	selection := "--repo " + skilldist.ShellQuote(repository.Root) + " --remote " + skilldist.ShellQuote(repository.Remote)
 	authoring := &proseAuthoring{
 		Guidance:     "skl skill --resource issue-publication.md --input " + skilldist.ShellQuote("proposal="+outcome.Proposal) + " --input " + skilldist.ShellQuote("project="+outcome.Project) + " --input " + skilldist.ShellQuote("repo="+repository.Root) + " --input " + skilldist.ShellQuote("remote="+repository.Remote) + " propose",
-		Continuation: "skl ledger publish " + selection + " --proposal " + skilldist.ShellQuote(outcome.Proposal),
+		Continuation: "skl proposal publish " + selection + " --proposal " + skilldist.ShellQuote(outcome.Proposal),
 	}
 	for _, name := range names {
-		authoring.Readback = append(authoring.Readback, "skl ledger show "+selection+" --item "+skilldist.ShellQuote(outcome.Proposal+"/"+name))
+		authoring.Readback = append(authoring.Readback, "skl slice show "+selection+" --slice "+skilldist.ShellQuote(outcome.Proposal+"/"+name))
 		authoring.Continuation += " --issue " + skilldist.ShellQuote(name+"=") + "<body-file>"
 	}
 	if parent {
@@ -105,167 +104,9 @@ func ledgerCommands(newBackend backendFactory, stdout io.Writer) *cli.Command {
 	return &cli.Command{
 		Name: "ledger",
 		Subcommands: []*cli.Command{{
-			Name:  "accept",
-			Usage: "Freeze one prepared proposal into the local Workflow Ledger and attempt initial publication",
-			Flags: []cli.Flag{
-				&cli.PathFlag{Name: "repo", Value: "."},
-				&cli.StringFlag{Name: "remote"},
-				&cli.PathFlag{Name: "proposal-dir", Required: true},
-				newIssueBodyFlag(),
-				&cli.PathFlag{Name: "parent-body"},
-				implementationFormatFlag(),
-			},
-			Action: func(command *cli.Context) error {
-				format, err := implementationFormat(command.String("format"))
-				if err != nil {
-					return err
-				}
-				rerun := boundCommand(command, "skl ledger accept")
-				refuse := func(err error) error { return refuseLedger(stdout, format, rerun, err) }
-				bodies, parentBody, err := issueBodyInputs(command)
-				if err != nil {
-					return err
-				}
-				repository, err := setup.ResolveRepository(command.Path("repo"), command.String("remote"))
-				if err != nil {
-					return renderLedgerOutcome(stdout, format, ledgerOutcome{Status: "fix_required", Reason: "repository or remote resolution failed: " + err.Error(), Repair: "run acceptance inside the source repository, or pass --repo and --remote explicitly", rerun: rerun})
-				}
-				declaration, err := ledger.LoadDeclaration(command.Path("proposal-dir"), bodies, parentBody)
-				if err != nil {
-					return refuse(err)
-				}
-				store, failure := openConfiguredLedger()
-				if failure != nil {
-					return refuse(failure)
-				}
-				if err := store.RefuseSourceOverlap(repository.Root); err != nil {
-					return refuse(err)
-				}
-				backend, err := newBackend(repository.Repository)
-				if err != nil {
-					return refuse(err)
-				}
-				forge, ok := backend.(ledger.Forge)
-				if !ok {
-					return fmt.Errorf("workflow backend does not support ledger issue publication")
-				}
-				acceptance, err := ledger.Accept(command.Context, store, repository.Repository, declaration, forge, time.Now)
-				if err != nil {
-					return refuse(err)
-				}
-				authoring := authoringFor(repository, acceptance)
-				return renderLedgerOutcome(stdout, format, ledgerOutcome{Status: acceptance.Status, Acceptance: acceptance, Authoring: authoring,
-					kind: "ledger-accept", facts: proposalFactsOf(repository, acceptance, authoring)})
-			},
-		}, {
-			Name:  "amend",
-			Usage: "Record an edited intake of one accepted proposal as one ledger revision and publish the changed issues",
-			Flags: []cli.Flag{
-				&cli.PathFlag{Name: "repo", Value: "."},
-				&cli.StringFlag{Name: "remote"},
-				&cli.PathFlag{Name: "proposal-dir", Required: true},
-				newIssueBodyFlag(),
-				&cli.PathFlag{Name: "parent-body"},
-				implementationFormatFlag(),
-			},
-			Action: func(command *cli.Context) error {
-				format, err := implementationFormat(command.String("format"))
-				if err != nil {
-					return err
-				}
-				rerun := boundCommand(command, "skl ledger amend")
-				refuse := func(err error) error { return refuseLedger(stdout, format, rerun, err) }
-				bodies, parentBody, err := issueBodyInputs(command)
-				if err != nil {
-					return err
-				}
-				repository, err := setup.ResolveRepository(command.Path("repo"), command.String("remote"))
-				if err != nil {
-					return renderLedgerOutcome(stdout, format, ledgerOutcome{Status: "fix_required", Reason: "repository or remote resolution failed: " + err.Error(), Repair: "run the amendment inside the source repository, or pass --repo and --remote explicitly", rerun: rerun})
-				}
-				declaration, err := ledger.LoadDeclaration(command.Path("proposal-dir"), bodies, parentBody)
-				if err != nil {
-					return refuse(err)
-				}
-				store, failure := openConfiguredLedger()
-				if failure != nil {
-					return refuse(failure)
-				}
-				if err := store.RefuseSourceOverlap(repository.Root); err != nil {
-					return refuse(err)
-				}
-				backend, err := newBackend(repository.Repository)
-				if err != nil {
-					return refuse(err)
-				}
-				forge, ok := backend.(ledger.Forge)
-				if !ok {
-					return fmt.Errorf("workflow backend does not support ledger issue publication")
-				}
-				amendment, err := ledger.Amend(command.Context, store, repository.Repository, declaration, forge)
-				if err != nil {
-					return refuse(err)
-				}
-				return renderLedgerOutcome(stdout, format, ledgerOutcome{Status: amendment.Status, Amendment: amendment,
-					kind: "ledger-amend", facts: amendFactsOf(repository, amendment)})
-			},
-		}, {
-			Name:  "publish",
-			Usage: "Publish the current descriptive issue and parent presentation of one accepted proposal",
-			Flags: []cli.Flag{
-				&cli.PathFlag{Name: "repo", Value: "."},
-				&cli.StringFlag{Name: "remote"},
-				&cli.StringFlag{Name: "proposal", Required: true},
-				newIssueBodyFlag(),
-				&cli.PathFlag{Name: "parent-body"},
-				implementationFormatFlag(),
-			},
-			Action: func(command *cli.Context) error {
-				format, err := implementationFormat(command.String("format"))
-				if err != nil {
-					return err
-				}
-				rerun := boundCommand(command, "skl ledger publish")
-				refuse := func(err error) error { return refuseLedger(stdout, format, rerun, err) }
-				bodies, parentBody, err := issueBodyInputs(command)
-				if err != nil {
-					return err
-				}
-				repository, err := setup.ResolveRepository(command.Path("repo"), command.String("remote"))
-				if err != nil {
-					return renderLedgerOutcome(stdout, format, ledgerOutcome{Status: "fix_required", Reason: "repository or remote resolution failed: " + err.Error(), Repair: "run publication inside the source repository, or pass --repo and --remote explicitly", rerun: rerun})
-				}
-				store, failure := openConfiguredLedger()
-				if failure != nil {
-					return refuse(failure)
-				}
-				if err := store.RefuseSourceOverlap(repository.Root); err != nil {
-					return refuse(err)
-				}
-				backend, err := newBackend(repository.Repository)
-				if err != nil {
-					return refuse(err)
-				}
-				forge, ok := backend.(ledger.Forge)
-				if !ok {
-					return fmt.Errorf("workflow backend does not support ledger issue publication")
-				}
-				publication, err := ledger.PublishCurrent(command.Context, store, repository.Repository, command.String("proposal"), ledger.IssueProse{Bodies: bodies, Parent: parentBody}, forge)
-				if err != nil {
-					return refuse(err)
-				}
-				authoring := authoringFor(repository, publication)
-				return renderLedgerOutcome(stdout, format, ledgerOutcome{Status: publication.Status, Publication: publication, Authoring: authoring,
-					kind: "ledger-publish", facts: proposalFactsOf(repository, publication, authoring)})
-			},
-		}, {
 			Name:  "show",
-			Usage: "Read accepted Contracts or inspect current and exact historical phase reports",
+			Usage: "Read one exact historical ledger document without interpreting its contents",
 			Flags: []cli.Flag{
-				&cli.PathFlag{Name: "repo", Value: ".", Usage: "Source repository whose Work Item to read"},
-				&cli.StringFlag{Name: "remote"},
-				&cli.StringFlag{Name: "item", Usage: "Accepted Work Item identity (<proposal>/<slice>)"},
-				&cli.StringFlag{Name: "phase", Usage: "Current report phase (implement or watchdog); requires --item"},
 				&cli.StringFlag{Name: "commit", Usage: "Full ledger commit for exact document retrieval"},
 				&cli.StringFlag{Name: "path", Usage: "Ledger-relative document path at --commit"},
 				implementationFormatFlag(),
@@ -280,45 +121,13 @@ func ledgerCommands(newBackend backendFactory, stdout io.Writer) *cli.Command {
 				if command.NArg() != 0 {
 					return fmt.Errorf("ledger show takes flags, not arguments")
 				}
-				item, phase, commit, path := command.String("item"), command.String("phase"), command.String("commit"), command.String("path")
-				explicit := commit != "" || path != ""
-				if item != "" && explicit {
-					return refuse(errors.New("ledger show takes either --item or an exact --commit with --path, not both; current --phase selection is available only with --item"))
-				}
-				if phase != "" && (item == "" || explicit) {
-					return refuse(errors.New("ledger show --phase is available only alongside --item; use --commit with --path to retrieve an exact historical document"))
-				}
-				if phase != "" && phase != ledger.ImplementPhase && phase != ledger.WatchdogPhase {
-					return refuse(errors.New("ledger show --phase must be implement or watchdog; omit --phase to inspect availability, or use --commit with --path for an exact historical document"))
-				}
-				if item == "" && (!explicit || commit == "" || path == "") {
-					return refuse(errors.New("ledger show requires --item <proposal>/<slice> or an exact --commit with --path; use the identity and readback command the acceptance reported"))
+				commit, path := command.String("commit"), command.String("path")
+				if commit == "" || path == "" {
+					return refuse(errors.New("ledger show requires an exact --commit with --path"))
 				}
 				store, failure := openConfiguredLedger()
 				if failure != nil {
 					return refuse(failure)
-				}
-				if item != "" {
-					repository, err := setup.ResolveRepository(command.Path("repo"), command.String("remote"))
-					if err != nil {
-						return refuse(err)
-					}
-					if phase != "" {
-						document, err := ledger.ShowReport(store, repository.Repository, item, phase)
-						if err != nil {
-							return refuse(err)
-						}
-						return renderLedgerOutcome(stdout, format, ledgerOutcome{Status: "shown", Document: &document})
-					}
-					readback, err := ledger.ShowItem(store, repository.Repository, item)
-					if err != nil {
-						return refuse(err)
-					}
-					return renderLedgerOutcome(stdout, format, ledgerOutcome{
-						Status: "shown", Readback: readback,
-						ReadbackCommand: fmt.Sprintf("skl ledger show --repo %s --remote %s --item %s",
-							skilldist.ShellQuote(repository.Root), skilldist.ShellQuote(repository.Remote), skilldist.ShellQuote(item)),
-					})
 				}
 				document, err := ledger.ShowReference(store, commit, path)
 				if err != nil {
@@ -326,40 +135,7 @@ func ledgerCommands(newBackend backendFactory, stdout io.Writer) *cli.Command {
 				}
 				return renderLedgerOutcome(stdout, format, ledgerOutcome{Status: "shown", Document: &document})
 			},
-		}, {
-			Name:  "export",
-			Usage: "Write one active accepted proposal back out as an intake directory",
-			Flags: []cli.Flag{
-				&cli.PathFlag{Name: "repo", Value: "."},
-				&cli.StringFlag{Name: "remote"},
-				&cli.StringFlag{Name: "proposal", Required: true},
-				&cli.PathFlag{Name: "to", Required: true, Usage: "Absent or empty destination directory"},
-				implementationFormatFlag(),
-			},
-			Action: func(command *cli.Context) error {
-				format, err := implementationFormat(command.String("format"))
-				if err != nil {
-					return err
-				}
-				rerun := boundCommand(command, "skl ledger export")
-				refuse := func(err error) error { return refuseLedger(stdout, format, rerun, err) }
-				repository, err := setup.ResolveRepository(command.Path("repo"), command.String("remote"))
-				if err != nil {
-					return refuse(err)
-				}
-				store, failure := openConfiguredLedger()
-				if failure != nil {
-					return refuse(failure)
-				}
-				export, err := ledger.ExportProposal(store, repository.Repository, command.String("proposal"), command.Path("to"))
-				if err != nil {
-					return refuse(err)
-				}
-				outcome := ledgerOutcome{Status: "exported", Export: export, kind: "ledger-export"}
-				outcome.facts = outcome
-				return renderLedgerOutcome(stdout, format, outcome)
-			},
-		}, presentCommand(newBackend, stdout)},
+		}},
 	}
 }
 
@@ -568,7 +344,7 @@ func proposalFactsOf(repository setup.RepositoryContext, acceptance *ledger.Acce
 		facts.Bookkeeping = noteWord(acceptance.BookkeepingStatus)
 	}
 	q := skilldist.ShellQuote
-	facts.Publish = "skl ledger publish --repo " + q(repository.Root) + " --remote " + q(repository.Remote) + " --proposal " + q(acceptance.Proposal)
+	facts.Publish = "skl proposal publish --repo " + q(repository.Root) + " --remote " + q(repository.Remote) + " --proposal " + q(acceptance.Proposal)
 	current := func(note *ledger.PublicationNote) bool {
 		return note == nil || note.Status == ledger.IssueCreated || note.Status == ledger.IssueUpdated
 	}
@@ -578,7 +354,7 @@ func proposalFactsOf(repository setup.RepositoryContext, acceptance *ledger.Acce
 		view := sliceFacts{
 			Name: slice.Name, Title: slice.Title, Branch: slice.Branch, Dependencies: slice.Dependencies,
 			Issue:    attachmentWord(slice.Issue, slice.IssueStatus),
-			Readback: "skl ledger show --repo " + q(repository.Root) + " --remote " + q(repository.Remote) + " --item " + q(acceptance.Proposal+"/"+slice.Name),
+			Readback: "skl slice show --repo " + q(repository.Root) + " --remote " + q(repository.Remote) + " --slice " + q(acceptance.Proposal+"/"+slice.Name),
 		}
 		if slice.Issue != nil && slice.IssueStatus != nil {
 			view.IssuePublication = noteWord(slice.IssueStatus)
@@ -684,7 +460,7 @@ func gateUnsupportedDelivery(stdout io.Writer, format implementationFormatKind, 
 	return true, renderLedgerOutcome(stdout, format, ledgerOutcome{
 		Status: "unsupported",
 		Reason: operation + " is a legacy source-artifact operation and is unavailable for ledger-accepted work; this refusal grants no Claim and changes no source work",
-		Repair: "read the accepted Contract with `skl ledger show --item <proposal>/<slice>` and use the ledger-backed implement/watchdog commands for delivery; administrative cutover or cleanup requires human direction with normal workers stopped",
+		Repair: "read the accepted Contract with `skl slice show --slice <proposal>/<slice>` and use the ledger-backed implement/watchdog commands for delivery; administrative cutover or cleanup requires human direction with normal workers stopped",
 	})
 }
 
