@@ -135,14 +135,14 @@ func TestAutoReadinessUsesFinalIntegrationHeadNotReviewedImplementation(t *testi
 	if err != nil || started.Execution == nil {
 		t.Fatalf("claim review: %+v, %v", started, err)
 	}
-	prepared, err := f.cli.deliveryJSON(t, "skl", "watchdog", "prepare", "--repo", f.source, "--item", deliveryTestItem, "--claim", started.Execution.Claim.Commit, "--format", "json")
+	prepared, err := f.cli.deliveryJSON(t, "skl", "watchdog", "prepare", "--repo", f.source, "--slice", deliveryTestItem, "--claim", started.Execution.Claim.Commit, "--format", "json")
 	if err != nil || prepared.Source == nil || prepared.Source.Head == implementation {
 		t.Fatalf("integration: %+v, %v", prepared, err)
 	}
 	final := prepared.Source.Head
 	// Source publication completed, but the worker's presentation is absent.
 	runGit(t, prepared.Source.Worktree, "push", "-q", "origin", final+":refs/heads/"+deliveryTestBranch)
-	passed, err := f.cli.deliveryJSON(t, "skl", "watchdog", "submit", "--repo", f.source, "--item", deliveryTestItem, "--claim", started.Execution.Claim.Commit,
+	passed, err := f.cli.deliveryJSON(t, "skl", "watchdog", "submit", "--repo", f.source, "--slice", deliveryTestItem, "--claim", started.Execution.Claim.Commit,
 		"--outcome", "pass", "--head", final, "--body", proseFixturePath("watchdog-report.md"), "--format", "json")
 	if err != nil || passed.Status != ledger.ReadyForMerge {
 		t.Fatalf("submit = %+v, %v", passed, err)
