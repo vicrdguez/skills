@@ -440,6 +440,19 @@ func dualSlice(name string) proposalSpec {
 	return spec
 }
 
+// independentSlices declares one proposal whose Slices have no dependencies,
+// so each is claimable on its own.
+func independentSlices(name string, slices ...string) proposalSpec {
+	spec := proposalSpec{name: name, description: "# " + name + "\n\nDurable description.\n", parentTitle: "Deliver " + name}
+	for _, slice := range slices {
+		spec.slices = append(spec.slices, proposalSliceSpec{name: slice, title: "Add " + slice, files: map[string]string{
+			"intent.md":   "# " + slice + " intent\n",
+			"behavior.md": "# " + slice + " behavior\n",
+		}})
+	}
+	return spec
+}
+
 // ledgerPaths lists the record paths present in the ledger working tree.
 func ledgerPaths(t *testing.T, clone string) []string {
 	t.Helper()
