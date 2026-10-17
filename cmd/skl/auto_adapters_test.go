@@ -23,29 +23,27 @@ func TestInstalledFamiliesDispatchWithRuntimeSettingsAndContinueSafely(t *testin
 	} {
 		operation := tc.operation
 		t.Run(operation, func(t *testing.T) {
-			// Each harness's installed Implement entry claims its own fresh
-			// Slice of one accepted proposal; Watchdog entries claim one review
-			// in turn. The lifecycle setup runs once per operation.
+			// Each harness's installed entry claims its own fresh Slice (or
+			// that Slice's review) of one accepted proposal, so the lifecycle
+			// setup runs once per operation.
 			f := newLedgerFixture(t)
 			source, target := deliverySourceRepo(t)
 			routeSourcePushes(t)
 			runGit(t, source, "push", "-q", "origin", "main")
 			cli := deliveryNoForgeApp(t)
 			watchdog := strings.HasPrefix(operation, "watchdog")
-			if !watchdog {
-				spec := independentSlices(deliveryTestProposal, harnesses...)
-				if accepted := newLedgerApp(t, newForgeServer(t)).accept(t, source, writeProposal(t, "", spec)); accepted.Status != "accepted" {
-					t.Fatalf("acceptance = %s", mustJSON(t, accepted))
+			spec := independentSlices(deliveryTestProposal, harnesses...)
+			if accepted := newLedgerApp(t, newForgeServer(t)).accept(t, source, writeProposal(t, "", spec)); accepted.Status != "accepted" {
+				t.Fatalf("acceptance = %s", mustJSON(t, accepted))
+			}
+			if watchdog {
+				for range harnesses {
+					implemented := cli.dispatched(t, "skl implement dispatch --repo "+source)
+					dispatchImplementHandoff(t, cli, source, target, implemented.Item, implemented.Claim)
 				}
-			} else {
-				deliveryAcceptFixture(t, newForgeServer(t), source)
-				implemented := cli.dispatched(t, "skl implement dispatch --repo "+source)
-				dispatchImplementHandoff(t, cli, source, target, implemented.Item, implemented.Claim)
 			}
 			for _, harness := range harnesses {
-				// A failed harness can leave its Claim held, and the next
-				// waiting Dispatch would then block, so the journey stops.
-				if !t.Run(harness, func(t *testing.T) {
+				t.Run(harness, func(t *testing.T) {
 					f.misconfigure(t, fmt.Sprintf(`{"ledger":%q,"harnesses":{%q:{"implement":{"model":"configured-worker","thinking":"configured-thinking"},"watchdog":{"model":"configured-watchdog","thinking":"configured-watch-thinking"},"reviewer":{"model":"configured-reviewer","thinking":"configured-review-thinking"},"helper":{"model":"configured-helper","thinking":"configured-helper-thinking"}}}}`, f.clone, harness))
 					entry := readFile(t, filepath.Join(home, fmt.Sprintf(entryPoints[harness], operation)))
 					wantModel, wantThinking := "configured-worker", "configured-thinking"
@@ -122,12 +120,7 @@ func TestInstalledFamiliesDispatchWithRuntimeSettingsAndContinueSafely(t *testin
 					if ending, status := cli.continued(t, d.Continue); ending != ledger.ClaimHeld || status != "stopped" {
 						t.Fatalf("held Claim continued: %s/%s", ending, status)
 					}
-					if watchdog {
-						cli.dispatchRun(t, "skl watchdog release --repo "+source+" --slice "+d.Item+" --claim "+d.Claim)
-					}
-				}) {
-					break
-				}
+				})
 			}
 		})
 	}
