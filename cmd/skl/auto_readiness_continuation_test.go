@@ -22,12 +22,12 @@ func TestAutoReadinessRefusalContinuesIndependentSiblingWhileDependentWaits(t *t
 	if err != nil || b.Execution == nil || b.Execution.Item != deliveryTestProposal+"/z-independent" {
 		t.Fatalf("independent implement = %+v, %v", b, err)
 	}
-	prepared, err := f.cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", f.source, "--item", b.Execution.Item, "--claim", b.Execution.Claim.Commit, "--format", "json")
+	prepared, err := f.cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", f.source, "--slice", b.Execution.Item, "--claim", b.Execution.Claim.Commit, "--format", "json")
 	if err != nil || prepared.Source == nil {
 		t.Fatalf("prepare B = %+v, %v", prepared, err)
 	}
 	head := proseCommit(t, prepared.Source.Worktree, "independent.txt", "B\n")
-	submitted, err := f.cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", f.source, "--item", b.Execution.Item, "--claim", b.Execution.Claim.Commit,
+	submitted, err := f.cli.deliveryJSON(t, "skl", "implement", "submit", "--repo", f.source, "--slice", b.Execution.Item, "--claim", b.Execution.Claim.Commit,
 		"--head", head, "--target", prepared.Source.Target, "--body", proseFixturePath("implement-report.md"), "--format", "json")
 	if err != nil || submitted.Status != ledger.AwaitingReview {
 		t.Fatalf("submit B = %+v, %v", submitted, err)
