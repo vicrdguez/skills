@@ -613,7 +613,7 @@ func TestDecisionContinuationReachesWorkers(t *testing.T) {
 	reviewBody := filepath.Join(t.TempDir(), "watchdog-report.md")
 	writeFile(t, reviewBody, "# review result\n")
 	passed, err := cli.deliveryJSON(t, "skl", "watchdog", "submit", "--repo", source, "--slice", deliveryTestItem,
-		"--claim", review.Execution.Claim.Commit, "--outcome", "pass", "--head", target, "--body", reviewBody, "--format", "json")
+		"--claim", review.Execution.Claim.Commit, "--outcome", "pass", "--rank", "tests", "--head", target, "--body", reviewBody, "--format", "json")
 	if err != nil || passed.Status != ledger.ReadyForMerge {
 		t.Fatalf("watchdog pass: %#v %v", passed, err)
 	}
@@ -732,8 +732,8 @@ func TestDecisionRetirementGuardsPartialDelivery(t *testing.T) {
 		description: "# Retire proposal\n",
 		parentTitle: "Retire proposal",
 		slices: []proposalSliceSpec{
-			{name: "foundation", title: "Foundation", files: map[string]string{"intent.md": "# Foundation\n", "behavior.md": "# Foundation behavior\n"}},
-			{name: "feature", title: "Feature", files: map[string]string{"intent.md": "# Feature\n", "behavior.md": "# Feature behavior\n"}},
+			{name: "foundation", title: "Foundation", files: map[string]string{"intent.md": "# Foundation\n", "behavior.md": "# Foundation behavior\n", "plan.md": minimalPlan}},
+			{name: "feature", title: "Feature", files: map[string]string{"intent.md": "# Feature\n", "behavior.md": "# Feature behavior\n", "plan.md": minimalPlan}},
 		},
 	}
 	decisionAccept(t, forge, "acme", "widgets", retiring)

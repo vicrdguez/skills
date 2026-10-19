@@ -32,7 +32,7 @@ func cleanupSpec(name string, slices ...string) proposalSpec {
 	for _, slice := range slices {
 		spec.slices = append(spec.slices, proposalSliceSpec{
 			name: slice, title: "Deliver " + name + " " + slice, branch: name + "-" + slice,
-			files: map[string]string{"intent.md": "# " + slice + " intent\n", "behavior.md": "# " + slice + " behavior\n"},
+			files: map[string]string{"intent.md": "# " + slice + " intent\n", "behavior.md": "# " + slice + " behavior\n", "plan.md": minimalPlan},
 		})
 	}
 	return spec

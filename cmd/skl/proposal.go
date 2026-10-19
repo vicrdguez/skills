@@ -42,13 +42,13 @@ func proposalCommands(newBackend backendFactory, stdout io.Writer) *cli.Command 
 				if err != nil {
 					return renderLedgerOutcome(stdout, format, ledgerOutcome{Status: "fix_required", Reason: "repository or remote resolution failed: " + err.Error(), Repair: "run acceptance inside the source repository, or pass --repo and --remote explicitly", rerun: rerun})
 				}
-				declaration, err := ledger.LoadDeclaration(command.Path("proposal-dir"), bodies, parentBody)
-				if err != nil {
-					return refuse(err)
-				}
 				store, failure := openConfiguredLedger()
 				if failure != nil {
 					return refuse(failure)
+				}
+				declaration, err := ledger.LoadDeclaration(command.Path("proposal-dir"), bodies, parentBody, store.ContractSources(repository.Root, repository.Repository))
+				if err != nil {
+					return refuse(err)
 				}
 				if err := store.RefuseSourceOverlap(repository.Root); err != nil {
 					return refuse(err)
@@ -96,13 +96,13 @@ func proposalCommands(newBackend backendFactory, stdout io.Writer) *cli.Command 
 				if err != nil {
 					return renderLedgerOutcome(stdout, format, ledgerOutcome{Status: "fix_required", Reason: "repository or remote resolution failed: " + err.Error(), Repair: "run the amendment inside the source repository, or pass --repo and --remote explicitly", rerun: rerun})
 				}
-				declaration, err := ledger.LoadDeclaration(command.Path("proposal-dir"), bodies, parentBody)
-				if err != nil {
-					return refuse(err)
-				}
 				store, failure := openConfiguredLedger()
 				if failure != nil {
 					return refuse(failure)
+				}
+				declaration, err := ledger.LoadDeclaration(command.Path("proposal-dir"), bodies, parentBody, store.ContractSources(repository.Root, repository.Repository))
+				if err != nil {
+					return refuse(err)
 				}
 				if err := store.RefuseSourceOverlap(repository.Root); err != nil {
 					return refuse(err)

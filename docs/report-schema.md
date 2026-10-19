@@ -1,12 +1,13 @@
-# Phase report schema 2
+# Phase report schema 3
 
 `implement-report.md` and `watchdog-report.md` are the durable phase results a
 worker produces and the next phase consumes. Both use the same persisted
-format: schema-2 YAML frontmatter followed by an opaque Markdown body. The
+format: schema-3 YAML frontmatter followed by an opaque Markdown body. The
 engine writes and reads the file in the private ledger; a worker submits its
 judgment and evidence through the semantic command and never navigates or edits
-the ledger record. Historical schema-1 reports, which predate Run Metadata,
-remain readable unchanged; the engine never rewrites them.
+the ledger record. Historical schema-1 reports, which predate Run Metadata, and
+schema-2 reports, which predate the evidence rank, remain readable unchanged;
+the engine never rewrites them.
 
 ## Persisted shape
 
@@ -14,7 +15,7 @@ Implementation report:
 
 ```text
 ---
-schema: 2
+schema: 3
 outcome: awaiting_review
 source:
   head: 4f3c8a1d5b6e7092c4d8e0f1a2b3c4d5e6f70819
@@ -47,13 +48,14 @@ Watchdog report:
 
 ```text
 ---
-schema: 2
+schema: 3
 outcome: pass
 round: 2
 source:
   head: 7c8d9e0f1a2b3c4d5e6f708192a3b4c5d6e7f809
   target: 9a1b2c3d4e5f60718293a4b5c6d7e8f901234567
   reviewed: 1b2c3d4e5f60718293a4b5c6d7e8f90123456789
+rank: tests
 ledger:
   claim:
     commit: 2b7e6f5a4d3c2b1a09876543210fedcba9876543
@@ -76,7 +78,7 @@ closing delimiter, every later `---` belongs to the opaque body.
 
 ## Fields
 
-Schemas 1 and 2 support SHA-1 repositories: every source and ledger commit identity
+Schemas 1 to 3 support SHA-1 repositories: every source and ledger commit identity
 is exactly 40 lowercase hexadecimal characters. SHA-256 repository identities
 are not supported by this schema; resources and handoffs refuse them.
 
@@ -88,18 +90,24 @@ its meaning at that revision.
 
 | Field | Type | Required | Owner |
 | --- | --- | --- | --- |
-| `schema` | integer | always: `2` when written, `1` in historical reports | engine |
+| `schema` | integer | always: `3` when written, `1` or `2` in historical reports | engine |
 | `outcome` | string | always | worker, through the semantic command |
 | `source.head` | commit SHA | see phase rules | worker evidence, engine-recorded |
 | `source.target` | commit SHA | see phase rules | worker evidence, engine-recorded |
 | `source.reviewed` | commit SHA | watchdog only | engine, from the consumed implementation |
+| `rank` | string | schema-3 watchdog `pass`; optional on `rework`; never in an implementation report or before schema 3 | worker, through `--rank`, validated against the evidence ladder |
 | `ledger.claim` | Reference | always | engine |
 | `ledger.contract` | Reference list | always, at least one | engine |
 | `ledger.implement` | Reference | required for watchdog; optional prior input for implement | engine |
 | `ledger.watchdog` | Reference | optional | engine |
 | `ledger.decision` | Reference | optional | engine |
 | `round` | integer | watchdog only, at least `1` | engine bookkeeping |
-| `run` | Run Metadata | never; schema 2 only | worker observations, `run.skl` from the engine |
+| `run` | Run Metadata | never; schema 2 and later | worker observations, `run.skl` from the engine |
+
+`rank` names the evidence rank a Watchdog verdict claims for the reviewed head,
+by name rather than position. The built-in ladder is `tests`, `build`,
+`inspection`, strongest first; submit refuses a rank outside it. A verdict is
+evidence about that head only.
 
 `round` counts completed independent reviews, not attempts and not
 publications. It is omitted from an implementation report; a watchdog
@@ -175,7 +183,7 @@ A watchdog report (`outcome` `pass`, `rework`, or `needs_human`):
 ## Ownership boundary
 
 The engine supplies `schema`, every `ledger` reference, and `round`. The worker
-supplies the semantic `outcome`, the source revisions it knows, and the Markdown
+supplies the semantic `outcome`, a Watchdog verdict's `rank`, the source revisions it knows, and the Markdown
 body. The body carries the completion-and-evidence table, findings, and
 limitations as opaque data. The engine preserves it unchanged and never reads
 it to infer completion, obligations, or a second verdict: the typed `outcome`
@@ -184,11 +192,13 @@ is the only machine outcome channel.
 ## Refusal
 
 An incompatible report is refused explicitly rather than reinterpreted. This
-covers an unknown phase, a `schema` other than `1` or `2`, an absent or malformed
+covers an unknown phase, a `schema` other than `1`, `2` or `3`, an absent or malformed
 required field, a wrong YAML scalar type, a commit or path that is not a valid
 identity, a second YAML document, and fields that do not belong to the phase
-(for example a review round or a reviewed revision in an implementation
-report). A missing or unrecognized schema never silently defaults to a supported one,
+(for example a review round, a reviewed revision or a rank in an implementation
+report, or a rank before schema 3), and a schema-3 watchdog `pass` without a
+rank. A missing or unrecognized schema never silently defaults to a supported one,
 and stored history is never rewritten to match a newer format. Binaries that
-predate schema 2 refuse schema-2 reports and must be upgraded to consume them.
+predate schema 2 refuse schema-2 reports, and binaries that predate schema 3
+refuse schema-3 reports; both must be upgraded to consume them.
 Refusal never applies to values within `run`.

@@ -75,7 +75,7 @@ func TestExportedProposalReacceptsUnchanged(t *testing.T) {
 		t.Fatalf("setup acceptance failed: %s", mustJSON(t, outcome))
 	}
 	spec := cleanupSpec("trio", "alpha", "beta", "gamma")
-	spec.slices[1].files["plan.md"] = "# Beta plan\n\nNo trailing newline at the end"
+	spec.slices[1].files["plan.md"] = minimalPlan + "\nNo trailing newline at the end"
 	spec.depends = map[string][]string{"beta": {"alpha"}, "gamma": {"proposals/earlier-work/foundation", "proposals/trio/beta"}}
 	intake := writeProposal(t, "", spec)
 	if outcome := cli.accept(t, root, intake); outcome.Status != "accepted" {

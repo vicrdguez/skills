@@ -16,7 +16,7 @@ Check: the relevant hunks have a source revision and defensible Slice attributio
 
 ## Tour
 
-Open with the Proposal's intent as context. In one pass over the delivered state, stop in this order across the included Slices:
+Open with the Proposal's intent as context, and each Slice's latest Watchdog verdict beside the `rank` its report records. In one pass over the delivered state, stop in this order across the included Slices:
 
 1. Each `A<n>`: quote the architectural commitment, explain how the code meets it, show the relevant hunks and their Slice attribution.
 2. Each `B<n>`: quote the behavior rule, explain how the code meets it, show the relevant hunks and their Slice attribution.
