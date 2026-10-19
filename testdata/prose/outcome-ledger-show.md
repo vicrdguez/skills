@@ -43,6 +43,7 @@ Show every widget's health on one dashboard page.
 ## Definition of Done
 
 - [ ] The dashboard lists every widget with its health (B1).
+- [ ] The `health-corpus` catalog row holds the unhealthy-widget case (B1).
 
 ## Manual verification
 
@@ -67,6 +68,8 @@ Show every widget's health on one dashboard page.
 
 | Covers | Check | Rank |
 | --- | --- | --- |
-| B1 | Dashboard test listing a widget whose last check failed as unhealthy | tests |
+| B1 | widget-tests TestUnhealthyWidgetListed | tests |
+| B1 | dashboard | live |
+| B1 | new health-corpus unhealthy-widget | tests |
 
 ```

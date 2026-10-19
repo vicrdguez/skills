@@ -167,3 +167,114 @@ func TestAmendLintsOnlyTheContractsItChanges(t *testing.T) {
 		t.Fatalf("the unchanged recorded Slice changed: %q", got)
 	}
 }
+
+// lintSkill is a verification skill declaring corpus, tests and build, with
+// rows of every kind but journey.
+const lintSkill = "---\nranks: [corpus, tests, build]\n---\n\n# Widgets verification\n\n## Launch\n\nRun from the root.\n\n## Doctor\n\nNothing to check.\n\n## Channels\n\n- `oracle`: the corpus.\n\n## Catalog\n\n" +
+	"| Name | Channel | Kind | Run | Expectations | Rank |\n| --- | --- | --- | --- | --- | --- |\n" +
+	"| gate | oracle | executed | `make gate` | every case passes | corpus |\n" +
+	"| tests | tests | executed | `go test ./...` | every test passes | tests |\n" +
+	"| routes | driven-surface | generated | `make routes` | every route | |\n" +
+	"| review | human-observed | human | the dashboard | a person approves | build |\n" +
+	"\n## Cleanup\n\nNothing.\n\n## Extend\n\nAdd a case.\n\n## Traps\n\nNone.\n"
+
+// skillRepository is a source repository whose committed verification skill
+// is contents.
+func skillRepository(t *testing.T, contents string) string {
+	t.Helper()
+	root := sourceRepository(t, "acme", "widgets")
+	writeFile(t, filepath.Join(root, ".skl", "verify.md"), contents)
+	runGit(t, root, "add", ".")
+	runGit(t, root, "commit", "-q", "-m", "verification skill")
+	return root
+}
+
+// strategy replaces the linted Contract's Verification strategy rows.
+func strategy(rows string) map[string]string {
+	files := lintedContract()
+	files["plan.md"] = strings.Replace(files["plan.md"], "| B1, B2, A1 | Focused tests | tests |\n", rows, 1)
+	return files
+}
+
+func TestAcceptLintsVerificationStrategyAgainstTheCatalog(t *testing.T) {
+	fixture := newLedgerFixture(t)
+	root := skillRepository(t, lintSkill)
+	forge := newForgeServer(t)
+	cli := newLedgerApp(t, forge)
+	declared := strategy("| B1, A1 | gate 17 | corpus |\n| B2 | new corpus-case 17 | tests |\n")
+	declared["intent.md"] = strings.Replace(declared["intent.md"], "## Manual", "- [ ] The `corpus-case` row holds the second rule's case (B2).\n\n## Manual", 1)
+
+	accepted := map[string]map[string]string{
+		"project-rank": strategy("| B1, B2, A1 | gate 17 | corpus |\n"),
+		"declared":     declared,
+		"commitment":   strategy("| B1, B2 | gate | corpus |\n| A1 | read the parser against A1 | build |\n"),
+	}
+	for name, files := range accepted {
+		if outcome := cli.accept(t, root, writeProposal(t, "", lintSpec(name, files))); outcome.Status != "accepted" {
+			t.Fatalf("accept %s: %s", name, mustJSON(t, outcome))
+		}
+	}
+
+	head := ledgerHead(t, fixture.clone)
+	undeclared := strategy("| B1, A1 | gate 17 | corpus |\n| B2 | new corpus-case 17 | tests |\n")
+	declaredExisting := func(name string) map[string]string {
+		files := strategy("| B1, B2, A1 | new " + name + " | tests |\n")
+		files["intent.md"] = strings.Replace(files["intent.md"], "## Manual", "- [ ] Add `"+name+"` (B1, B2).\n\n## Manual", 1)
+		return files
+	}
+	refused := []struct {
+		name      string
+		files     map[string]string
+		fragments []string
+	}{
+		{"a built-in rank", strategy("| B1, B2, A1 | gate 17 | inspection |\n"), []string{"inspection", "corpus, tests, build"}},
+		{"an unknown row", strategy("| B1 | corpus 17 | corpus |\n| B2, A1 | tests | tests |\n"), []string{"foundation", "plan.md", "B1", "corpus"}},
+		{"a generated row", strategy("| B1, B2, A1 | routes | tests |\n"), []string{"routes", "generated"}},
+		{"a human row", strategy("| B1, B2, A1 | review | build |\n"), []string{"review", "human"}},
+		{"a declared existing generated row", declaredExisting("routes"), []string{"routes", "generated"}},
+		{"a declared existing human row", declaredExisting("review"), []string{"review", "human"}},
+		{"an undeclared new row", undeclared, []string{"corpus-case", "Definition of Done"}},
+	}
+	for _, testCase := range refused {
+		t.Run(testCase.name, func(t *testing.T) {
+			outcome, text := cli.run(t, []string{"skl", "proposal", "accept", "--repo", root, "--proposal-dir", writeProposal(t, "", lintSpec("refused", testCase.files)), "--format", "json"})
+			if outcome.Status != "fix_required" {
+				t.Fatalf("acceptance was not refused: %s", text)
+			}
+			for _, fragment := range testCase.fragments {
+				if !strings.Contains(outcome.Reason+outcome.Repair, fragment) {
+					t.Fatalf("refusal lacks %q: %s", fragment, text)
+				}
+			}
+			requireLedgerUnchanged(t, fixture.clone, head)
+		})
+	}
+}
+
+func TestAcceptRefusesAMalformedVerificationSkill(t *testing.T) {
+	fixture := newLedgerFixture(t)
+	cli := newLedgerApp(t, newForgeServer(t))
+	head := ledgerHead(t, fixture.clone)
+	journey := "| checkout | driven-surface | journey | `.skl/journeys/checkout.md` | the order is placed | tests |\n"
+	for name, testCase := range map[string]struct {
+		skill     string
+		fragments []string
+	}{
+		"an unknown rank":            {strings.Replace(lintSkill, "| every test passes | tests |", "| every test passes | live |", 1), []string{".skl/verify.md", "line 24", "tests", "live", "corpus, tests, build"}},
+		"a journey without its file": {strings.Replace(lintSkill, "| every route | |\n", "| every route | |\n"+journey, 1), []string{".skl/verify.md", "checkout", ".skl/journeys/checkout.md"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := skillRepository(t, testCase.skill)
+			outcome, text := cli.run(t, []string{"skl", "proposal", "accept", "--repo", root, "--proposal-dir", writeProposal(t, "", lintSpec("malformed", strategy("| B1, B2, A1 | gate | corpus |\n"))), "--format", "json"})
+			if outcome.Status != "fix_required" {
+				t.Fatalf("acceptance was not refused: %s", text)
+			}
+			for _, fragment := range testCase.fragments {
+				if !strings.Contains(outcome.Reason, fragment) {
+					t.Fatalf("refusal lacks %q: %s", fragment, text)
+				}
+			}
+			requireLedgerUnchanged(t, fixture.clone, head)
+		})
+	}
+}

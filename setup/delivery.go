@@ -80,6 +80,32 @@ func IntegrationRef(repository RepositoryContext, state ledger.SliceState) strin
 	return workflow.IntegrationRef(repository.Remote, state.Target.Branch)
 }
 
+// deliveryVerification reads the verification skill a rendering binds:
+// Watchdog's at the reviewed head; Implement's in the prepared worktree, or,
+// before preparation creates it, at the Integration Target it starts from.
+func deliveryVerification(repository RepositoryContext, state ledger.SliceState, phase, worktree, reviewed string) (*ledger.Verification, error) {
+	if phase == ledger.WatchdogPhase {
+		// A reviewed head that preparation has yet to fetch binds no checks.
+		if _, err := git(repository.Root, "rev-parse", "--verify", "--quiet", reviewed+"^{commit}"); reviewed == "" || err != nil {
+			return nil, nil
+		}
+		return ledger.ReadVerificationAt(repository.Root, reviewed)
+	}
+	if info, err := os.Stat(worktree); err == nil && info.IsDir() {
+		return ledger.ReadVerification(worktree)
+	}
+	// An absent Proposal Branch starts from main.
+	for _, ref := range []string{IntegrationRef(repository, state), "refs/remotes/" + repository.Remote + "/main"} {
+		if ref == "" {
+			continue
+		}
+		if _, err := git(repository.Root, "rev-parse", "--verify", "--quiet", ref+"^{commit}"); err == nil {
+			return ledger.ReadVerificationAt(repository.Root, ref)
+		}
+	}
+	return nil, nil
+}
+
 // deliveryFacts binds one rendering's facts, and the submit command before
 // its outcome and head arguments.
 func deliveryFacts(e *ledger.Execution, repository RepositoryContext, phase, operation string, source *workflow.DeliverySource, directory string, choices, session ImplementChoices) (*skilldist.DeliveryFacts, string, error) {
@@ -130,6 +156,14 @@ func deliveryFacts(e *ledger.Execution, repository RepositoryContext, phase, ope
 			f.Merged = workflow.IntegrationMerged(repository.Root, e.State.Branch, f.RequiredHead, integration)
 		}
 	}
+	verification, err := deliveryVerification(repository, e.State, phase, worktree, f.RequiredHead)
+	if err != nil {
+		if phase != ledger.WatchdogPhase {
+			return nil, "", err
+		}
+		f.VerificationError = err.Error()
+	}
+	f.Checks = ledger.CitedChecks(e.ContractFile("plan.md"), verification)
 	q := skilldist.ShellQuote
 	identity := fmt.Sprintf(" --repo %s --remote %s --slice %s --claim %s", q(repository.Root), q(repository.Remote), q(e.Item), q(e.Claim.Commit))
 	command := func(operation string) string { return "skl " + phase + " " + operation + identity }

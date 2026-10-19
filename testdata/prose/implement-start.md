@@ -42,6 +42,7 @@ Show every widget's health on one dashboard page.
 ## Definition of Done
 
 - [ ] The dashboard lists every widget with its health (B1).
+- [ ] The `health-corpus` catalog row holds the unhealthy-widget case (B1).
 
 ## Manual verification
 
@@ -65,7 +66,9 @@ Show every widget's health on one dashboard page.
 
 | Covers | Check | Rank |
 | --- | --- | --- |
-| B1 | Dashboard test listing a widget whose last check failed as unhealthy | tests |
+| B1 | widget-tests TestUnhealthyWidgetListed | tests |
+| B1 | dashboard | live |
+| B1 | new health-corpus unhealthy-widget | tests |
 
 ```
 
@@ -88,7 +91,13 @@ Deliver every behavior, scenario and architecture commitment in the Contract, ea
 
 Build in any order, refactor whenever it helps, and run the typecheck and focused checks as you go. For additions and extensions, establish agreement for consequences such as authority, coordination, blocking later work, persistence lifetime and recovery ownership. Inspect an inherited mechanism when your change relies on its effects; leave unrelated inherited code alone. Its prior existence, private placement, small size or passing checks do not settle new consequences. Choose details freely within accepted behavior, architecture and mandatory standards, and implement clearly implied cases. If a consequential choice remains open, finish unblocked work and use the human-decision pause below; if resolving it changes frozen obligations, seek renewed proposal. Repair a concrete violation against the accepted outcome, but treat a reviewer's suggested mechanism or disposition as evidence, not permission for a new protocol.
 
-Check: every `B<n>`, `A<n>` and warranted `T<n>` has evidence, and the focused checks pass.
+Before Audit, add to `.skl/verify.md` each row this slice adds. Then run each check the Verification strategy cites, as the worktree's `.skl/verify.md` defines it, and record its result and rank in the report's Verification section:
+
+- `widget-tests` `TestUnhealthyWidgetListed`, for B1: run `go test ./...`; expect every test passes, the cited test among them; rank `tests`.
+- `dashboard`, for B1: perform the journey `.skl/journeys/dashboard.md`; expect the page shows what the cited rule expects; rank `live`.
+- `health-corpus` `unhealthy-widget`, for B1: a row this slice adds, missing from `.skl/verify.md` here.
+
+Check: every `B<n>`, `A<n>` and warranted `T<n>` has evidence, every cited check has its result, and the focused checks pass.
 
 ## 3. Integrate the target
 

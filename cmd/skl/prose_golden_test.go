@@ -195,7 +195,15 @@ func TestAgentProseGoldens(t *testing.T) {
 	g := newProseGoldens(t)
 	fixture := newLedgerFixture(t)
 	forge := newForgeServer(t)
-	source, target := deliverySourceRepo(t)
+	source, _ := deliverySourceRepo(t)
+	// The source repository has a verification skill with a journey, so the
+	// Contract cites catalog rows and the delivery renderings bind them.
+	writeFile(t, filepath.Join(source, ".skl", "verify.md"), "---\nranks: [live, tests, build]\n---\n\n"+proseFixture(t, "verify.md"))
+	writeFile(t, filepath.Join(source, ".skl", "journeys", "dashboard.md"), proseFixture(t, "journey-dashboard.md"))
+	runGit(t, source, "add", ".skl")
+	runGit(t, source, "commit", "-q", "-m", "verification skill")
+	target := deliveryTrimmed(t, source, "rev-parse", "HEAD")
+	runGit(t, source, "update-ref", "refs/remotes/origin/main", target)
 	temp := t.TempDir()
 	t.Setenv("TMPDIR", temp)
 	g.replace(source, "/work/widgets")
@@ -338,6 +346,9 @@ func TestAgentProseGoldens(t *testing.T) {
 	claim, result = proseMatch(t, proseClaimLine, directed), proseMatch(t, proseResultLine, directed)
 	g.run(worker, "implement", "prepare", "--repo", source, "--slice", proseItem, "--claim", claim, "--result-directory", result)
 	runGit(t, worktree, "reset", "-q", "--hard", target)
+	// The passing submission supplies the check its Contract declared new.
+	completedSkill := strings.Replace(proseFixture(t, "verify.md"), "| routes |", "| health-corpus | tests | executed | `make health-corpus` | unhealthy widgets are listed | tests |\n| routes |", 1)
+	writeFile(t, filepath.Join(worktree, ".skl", "verify.md"), "---\nranks: [live, tests, build]\n---\n\n"+completedSkill)
 	submit("", claim, proseCommit(t, worktree, "dashboard.txt", "every widget, retired ones kept\n"))
 	reviewClaim, reviewResult = review("")
 	g.capture("watchdog-inspect-full", worker, append([]string{"watchdog", "inspect"}, reviewIdentity(reviewClaim, reviewResult)...)...)
@@ -457,7 +468,7 @@ func TestAgentProseGoldens(t *testing.T) {
 	}
 	g.capture("outcome-ledger-amend-existing", proposer, "proposal", "amend", "--repo", source, "--proposal-dir", amendIntake("widget-share"))
 	submittedIntake := amendIntake("widget-search")
-	writeFile(t, filepath.Join(submittedIntake, "foundation", "intent.md"), "# Search intent, revised\n")
+	writeFile(t, filepath.Join(submittedIntake, "foundation", "intent.md"), strings.Replace(contract["intent.md"], "# Dashboard foundation", "# Search intent, revised", 1))
 	g.capture("outcome-ledger-amend-fix-required", proposer, "proposal", "amend", "--repo", source, "--proposal-dir", submittedIntake)
 	grown := amendIntake("widget-share")
 	addIntakeSlice(t, grown, "followup", "foundation")
@@ -475,11 +486,15 @@ func TestAgentProseGoldens(t *testing.T) {
 	// Standalone Execution Skills, the refusals for the delivered ones, and
 	// every named resource a rendering tells the worker to retrieve.
 	for _, name := range skilldist.SkillNames() {
-		if name == "implement" || name == "watchdog" {
+		switch name {
+		case "implement", "watchdog":
 			g.capture("outcome-skill-"+name, worker, "skill", name)
-			continue
+		case "verify":
+			g.capture("skill-verify", worker, "skill", "--repo", source, "verify")
+			g.capture("outcome-skill-verify-missing", worker, "skill", "--repo", fixture.clone, "verify")
+		default:
+			g.capture("skill-"+name, worker, "skill", name)
 		}
-		g.capture("skill-"+name, worker, "skill", name)
 	}
 	resources := map[string][]string{
 		"audit":              {"acceptance.md", "smells.md"},
@@ -489,6 +504,8 @@ func TestAgentProseGoldens(t *testing.T) {
 		"propose":            {"behavior.md", "intent.md", "plan.md", "tasks.md"},
 		"implement":          {"pull-presentation.md"},
 		"testing":            {"mocking.md", "tests.md"},
+		"verify":             {"driven-surface.md", "human-observed.md", "introspection.md", "oracle.md", "process.md", "static.md", "tests.md"},
+		"verify-create":      {"journey.md", "verify.md"},
 		"watchdog":           {"pull-presentation.md"},
 		"writing-for-agents": {"SKILL-MECHANICS.md"},
 	}

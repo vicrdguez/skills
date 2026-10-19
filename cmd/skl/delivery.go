@@ -459,6 +459,48 @@ func deliverySourceInputs(e *ledger.Execution, phase string) (head, target, prev
 	return
 }
 
+// checkVerdictRank requires a pass to carry a rank, any verdict rank to be of
+// the ladder in force at the reviewed head and, for a pass, no stronger than
+// the weakest catalog row the plan cites for a B<n>.
+func checkVerdictRank(root, reviewed string, plan []byte, outcome, rank string) error {
+	// Returning a verification defect for repair must not require fixing the
+	// immutable reviewed source. An unranked negative verdict makes no claim
+	// about its ladder or evidence.
+	if outcome != "pass" && rank == "" {
+		return nil
+	}
+	verification, err := ledger.ReadVerificationAt(root, reviewed)
+	if err != nil {
+		return err
+	}
+	ladder := verification.LadderInForce()
+	if rank == "" && outcome == "pass" {
+		return fmt.Errorf("watchdog submit --outcome pass requires --rank, one of the ladder's ranks: %s", ladder)
+	}
+	if rank != "" && !ladder.Has(rank) {
+		return fmt.Errorf("--rank %s is not a rank of the ladder in force; its ranks are %s", rank, ladder)
+	}
+	checks := ledger.CitedChecks(plan, verification)
+	if outcome == "pass" {
+		for _, check := range checks {
+			if check.Rule == "" {
+				continue
+			}
+			if check.Missing {
+				return fmt.Errorf("catalog row %s cited for %s is missing from %s at the reviewed source; return the defect for rework before passing", check.Name, check.Rule, ledger.VerificationFile)
+			}
+			if check.Kind != ledger.ExecutedCheck && check.Kind != ledger.JourneyCheck {
+				return fmt.Errorf("catalog row %s cited for %s has kind %s at the reviewed source; only executed or journey rows can cover a B<n> rule", check.Name, check.Rule, check.Kind)
+			}
+		}
+	}
+	bound, row := ledger.RankBound(checks, ladder)
+	if outcome == "pass" && bound != "" && ladder.Stronger(rank, bound) {
+		return fmt.Errorf("--rank %s is stronger than %s, the rank of %s, the weakest catalog row the Verification strategy cites for a B<n>; submit --rank %s or a weaker rank of %s", rank, bound, row, bound, ladder)
+	}
+	return nil
+}
+
 func submitDelivery(c *cli.Context, phase, operation string, repository setup.RepositoryContext, store *ledger.Store, newBackend backendFactory, emit func(deliveryOutput) error, refusal func(error) error, verified func()) error {
 	body, err := os.ReadFile(c.Path("body"))
 	if err != nil {
@@ -482,12 +524,6 @@ func submitDelivery(c *cli.Context, phase, operation string, repository setup.Re
 			return refusal(fmt.Errorf("watchdog submit requires --outcome pass or rework"))
 		}
 		rank = c.String("rank")
-		if rank == "" && outcome == "pass" {
-			return refusal(fmt.Errorf("watchdog submit --outcome pass requires --rank, one of the ladder's ranks: %s", ledger.BuiltinLadder))
-		}
-		if rank != "" && !ledger.BuiltinLadder.Has(rank) {
-			return refusal(fmt.Errorf("--rank %s is not a rank of the ladder; its ranks are %s", rank, ledger.BuiltinLadder))
-		}
 	}
 	e, activeErr := ledger.ResumeDelivery(store, repository.Repository, c.String("slice"), phase, c.String("claim"))
 	source := ledger.SourceRevisions{Head: c.String("head"), Target: c.String("target")}
@@ -506,6 +542,9 @@ func submitDelivery(c *cli.Context, phase, operation string, repository setup.Re
 			}
 			if c.IsSet("target") && c.String("target") != source.Target {
 				return refusal(fmt.Errorf("review cannot replace its fixed Integration Target"))
+			}
+			if err := checkVerdictRank(repository.Root, source.Reviewed, e.ContractFile("plan.md"), outcome, rank); err != nil {
+				return refusal(err)
 			}
 		}
 		if phase == ledger.ImplementPhase && outcome == ledger.NeedsHuman {
@@ -530,6 +569,11 @@ func submitDelivery(c *cli.Context, phase, operation string, repository setup.Re
 			source.Reviewed = report.Source.Reviewed
 			if source.Head == "" {
 				source.Head = source.Reviewed
+			}
+			// A replay matches the recorded report, whose rank passed the bound
+			// when it was submitted; only the ladder is checked again.
+			if err := checkVerdictRank(repository.Root, source.Reviewed, nil, outcome, rank); err != nil {
+				return refusal(err)
 			}
 			if source.Target == "" {
 				source.Target = report.Source.Target

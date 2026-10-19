@@ -46,7 +46,11 @@ func proposalCommands(newBackend backendFactory, stdout io.Writer) *cli.Command 
 				if failure != nil {
 					return refuse(failure)
 				}
-				declaration, err := ledger.LoadDeclaration(command.Path("proposal-dir"), bodies, parentBody, store.ContractSources(repository.Root, repository.Repository))
+				sources, err := store.ContractSources(repository.Root, repository.Repository)
+				if err != nil {
+					return refuse(err)
+				}
+				declaration, err := ledger.LoadDeclaration(command.Path("proposal-dir"), bodies, parentBody, sources)
 				if err != nil {
 					return refuse(err)
 				}
@@ -100,7 +104,11 @@ func proposalCommands(newBackend backendFactory, stdout io.Writer) *cli.Command 
 				if failure != nil {
 					return refuse(failure)
 				}
-				declaration, err := ledger.LoadDeclaration(command.Path("proposal-dir"), bodies, parentBody, store.ContractSources(repository.Root, repository.Repository))
+				sources, err := store.ContractSources(repository.Root, repository.Repository)
+				if err != nil {
+					return refuse(err)
+				}
+				declaration, err := ledger.LoadDeclaration(command.Path("proposal-dir"), bodies, parentBody, sources)
 				if err != nil {
 					return refuse(err)
 				}

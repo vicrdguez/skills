@@ -105,7 +105,8 @@ its meaning at that revision.
 | `run` | Run Metadata | never; schema 2 and later | worker observations, `run.skl` from the engine |
 
 `rank` names the evidence rank a Watchdog verdict claims for the reviewed head,
-by name rather than position. The built-in ladder is `tests`, `build`,
+by name rather than position. The ladder is the `ranks` of the reviewed
+head's `.skl/verify.md`, or else the built-in `tests`, `build`,
 `inspection`, strongest first; submit refuses a rank outside it. A verdict is
 evidence about that head only.
 
