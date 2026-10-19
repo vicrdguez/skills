@@ -70,9 +70,25 @@ _Avoid_: Workflow implementation, skill stub
 The authored, harness-independent script for one workflow operation or user-invoked activity: its ordered steps, completion criteria, and commands. The **Workflow Engine** specializes it only with invocation facts and deterministic conditions.
 _Avoid_: Skill definition, template
 
+**Playbook**:
+The authored step source for one task **Shape**, one design phase or one user-invoked activity, under `prose/playbooks/`. The **Procedure** is what the **Workflow Engine** renders from it with facts bound and **Principles** composed.
+_Avoid_: Procedure (the rendered result), prompt, template
+
+**Shape**:
+The classification of a task that selects its **Playbook**, **Principles**, **Document Templates** and evidence expectations: bug, perf, investigation, change or design. The **Agent Worker** classifies and the human confirms; the **Workflow Engine** records it on the **Proposal**.
+_Avoid_: Task type, ticket kind, workflow
+
 **Craft**:
 Authored judgment guidance, such as testing, review, or design vocabulary, independent of any harness or invocation. It is written once and composed into the **Procedures** that need it.
 _Avoid_: Skill module, included skill, workflow policy
+
+**Principle**:
+The current name of **Craft**: judgment guidance written once by skl under `prose/principles/`, composed into the **Playbooks** that need it. The deep-module guidance is the `modules` principle.
+_Avoid_: Craft (former name), skill module
+
+**Project Principle**:
+A **Consumer Repository**'s own standing order at `.skl/principles/<name>.md`: a one-line statement the **Workflow Engine** pastes into every **Procedure** it renders for that repository, and a body it serves in full where judgment is steered. A **Contract**'s Forbidden section may cite one.
+_Avoid_: Preference, convention, skl-owned principle
 
 **Execution Skill**:
 The instruction content delivered for one invocation: one **Procedure** with its facts bound, composed with the **Craft** it needs. It contains only what the **Agent Worker** acts on in that invocation.
@@ -127,6 +143,30 @@ _Avoid_: Work item, implementation ledger
 A human-directed change to an accepted **Proposal**, recorded as one ledger revision: added **Slices**, replaced **Contracts** of never-claimed Slices, changed **Dependencies** of unclaimed Slices, and supersession of unclaimed Slices. It never writes a claimed or **Merged** Slice.
 _Avoid_: Re-acceptance, contract edit, replacement proposal
 
+**Checkpoint**:
+One of three design reviews of a **Proposal** before it has **Slices**: seams, modules and proposal, in that order. Each is a document in the ledger's `review/` directory that the human annotates in an editor and approves or sends back through the **Workflow Engine**. Its states are drafting, awaiting, rework and approved. The seams checkpoint never auto-approves.
+_Avoid_: Gate, round, interview
+
+**Altitude**:
+The level of a **Checkpoint**: seams (the modules that will exist and their interfaces), modules (shapes inside the approved seams) or proposal (the **Slices** and their **Contracts**).
+_Avoid_: Phase, stage
+
+**Annotation**:
+A human edit to an emitted **Checkpoint** document, extracted by the **Workflow Engine** as the diff against the recorded bytes and answered in the next revision as acted on, considered or dismissed with reason.
+_Avoid_: Comment syntax, review finding
+
+**Experiment**:
+Executable evidence for a design decision: a protocol, candidates built in engine-owned worktrees with one writer each, a parent comparison over read-only snapshots, and one report committed at `experiments/<name>.md` in the **Proposal**'s ledger directory. Never a commitment, and never copied into the **Consumer Repository**.
+_Avoid_: Prototype branch, spike, proof of concept
+
+**Challenger**:
+A launch role that reads a **Checkpoint** draft with a fixed question set and the **Project Principles** on a different model family, before the human sees it. Its objections and their dispositions form the document's contested list.
+_Avoid_: Reviewer, panel
+
+**Trust Settings**:
+Per-**Project** settings in the ledger that decide which **Checkpoints** need a human, whether judgment nodes get a panel, the minimum **Evidence Rank**, and whether the **Watchdog Review** must run on a different model than the implementer.
+_Avoid_: Auto Mode, harness config
+
 **Slice**:
 One accepted unit of a **Proposal** whose identity remains stable from acceptance through merge or supersession. Issues, submissions, branches, worktrees, and contract documents are attachments or projections of it.
 _Avoid_: Agent session, issue, pull request
@@ -141,6 +181,26 @@ _Avoid_: Mutable plan, implementation ledger, incidental implementation detail
 **Contract Item**:
 An individually identified obligation or task within a **Contract**, carrying a local label and descriptive title. Labels distinguish behavior (`B<n>`), architecture (`A<n>`), tasks (`T<n>`), and **Manual Verification** (`M<n>`).
 _Avoid_: Review finding, test case, document row number
+
+**Delegated Decision**:
+A choice a **Contract**'s plan names as explicitly the implementer's.
+_Avoid_: Unspecified detail, silence
+
+**Forbidden Decision**:
+A decision class a **Contract**'s plan rules out even though the design never addressed it, such as a new public seam, a compatibility facade or a second representation. A violation is a `HARD` **Audit Finding** and a `BLOCK` **Review Finding** whatever its merit.
+_Avoid_: Judgment finding, preference
+
+**Evidence Rank**:
+A name from a **Consumer Repository**'s ordered evidence ladder, strongest first, carried by every Verification strategy row of a **Contract** and by every passing **Watchdog Review** verdict, keyed to the reviewed revision.
+_Avoid_: Score, confidence, test count
+
+**Verification Skill**:
+The thin, repo-owned file at `.skl/verify.md` that declares the evidence ladder, the **Catalog** and the facts a fresh verifier needs, created and maintained by skl-owned **Playbooks** and read by the **Workflow Engine** for the ladder and the catalog only.
+_Avoid_: Feature map, capability document, test plan
+
+**Catalog**:
+The table in a **Verification Skill** with one row per check the repository can run: name, channel, kind, run, expectations and **Evidence Rank**. A row is generated or executed, never hand-maintained; a row that cannot run is invalid.
+_Avoid_: Feature list, index of behaviors
 
 **Submission**:
 The proposed code changes explicitly attached to exactly one **Work Item** for independent review and merge. A Work Item has at most one Submission; ownership is independent of names.
