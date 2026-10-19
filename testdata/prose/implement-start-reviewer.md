@@ -188,7 +188,7 @@ Judge the complete final implementation against every accepted behavior, scenari
 
 ## Tag every finding
 
-Start each finding with `HARD` or `JUDGEMENT` and anchor it to `file:line`. Contract violations, unresolved consequential architectural choices, material risks, specific evidence gaps and a red gate are `HARD`. So is a decision the plan's Forbidden section rules out, whatever its merit: cite the Forbidden line. A breach of an explicit mandatory standard can be `HARD`. Generic smells are always `JUDGEMENT`, and so is a plan divergence that breaks no accepted obligation. Keep each report under 500 words by compressing findings rather than dropping any.
+Start each finding with `HARD` or `JUDGEMENT` and anchor it to `file:line`. Contract violations, unresolved consequential architectural choices, material risks, specific evidence gaps and a red gate are `HARD`. So is a decision the plan's Forbidden section rules out, even a sound one; cite the Forbidden line. A breach of an explicit mandatory standard can be `HARD`. Generic smells are always `JUDGEMENT`, and so is a plan divergence that breaks no accepted obligation. Keep each report under 500 words by compressing findings rather than dropping any.
 
 ## Aggregate without reranking
 

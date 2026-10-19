@@ -41,7 +41,7 @@ A finding keeps its Work-Item-local `W<n>` across rounds: list resolved ones as 
 
 ## Verdict
 
-Write the report as `{{.ResultResourceCommand}}` instructs, then submit with `{{.SubmitCommand}}`, where `<rank>` is the weakest rank achieved across the Verification strategy rows that cover `B<n>` items, or the weakest rank your evidence reached when no row covers one:
+Write the report as `{{.ResultResourceCommand}}` instructs, then submit with `{{.SubmitCommand}}`. For `<rank>`, take the weakest rank reached among the Verification strategy rows that cover a `B<n>`; with no such row, take the weakest rank your evidence reached. Choose the outcome:
 
 - `pass` only when no `BLOCK` or `HUMAN` finding is active;
 - `rework` when a `BLOCK` finding is active;

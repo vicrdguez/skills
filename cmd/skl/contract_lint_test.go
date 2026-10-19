@@ -48,6 +48,8 @@ func TestAcceptRefusesContractsThatFailLint(t *testing.T) {
 			[]string{"foundation", "behavior.md", "B2"}},
 		{"a Definition of Done citing a missing rule", replace("intent.md", "(B1–B2, A1)", "(B1–B2, A1, B4)"),
 			[]string{"foundation", "intent.md", "B4"}},
+		{"a range citing a missing rule", replace("intent.md", "(B1–B2, A1)", "(B1–B3, A1)"),
+			[]string{"foundation", "intent.md", "B3"}},
 		{"a Definition of Done bullet citing nothing", replace("intent.md", "## Manual", "- [ ] Everything works.\n\n## Manual"),
 			[]string{"foundation", "intent.md", "Everything works."}},
 		{"a commitment defined in behavior.md", func(files map[string]string) { files["behavior.md"] += "\n## A1: Misplaced commitment\n" },

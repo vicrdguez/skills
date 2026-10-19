@@ -278,6 +278,7 @@ func lintVerificationStrategy(slice string, lines []contractLine, labels []strin
 	}
 	covered := map[string]bool{}
 	for row, cells := range table[2:] {
+		// Pad a short row so its Covers and Rank cells read as empty.
 		cells = append(cells, "", "", "")
 		rank := strings.Trim(cells[2], "` ")
 		if !ladder.Has(rank) {

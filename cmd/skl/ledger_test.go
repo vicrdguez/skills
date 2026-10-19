@@ -439,7 +439,7 @@ func dualSlice(name string) proposalSpec {
 		files: map[string]string{
 			"intent.md":   "# Feature intent\n",
 			"behavior.md": "# Feature behavior\n",
-			"plan.md":     "# Feature plan\n" + minimalPlan,
+			"plan.md":     minimalPlan,
 		},
 	})
 	return spec

@@ -135,7 +135,7 @@ A finding keeps its Work-Item-local `W<n>` across rounds: list resolved ones as 
 
 ## Verdict
 
-Write the report as `skl skill --resource ledger-review.md --input result_directory='/tmp/skl-watchdog-result' --input round=1 --input reviewed_head='0000000000000000000000000000000000000002' --input rework_pauses=false watchdog` instructs, then submit with `skl watchdog submit --repo '/work/widgets' --remote 'origin' --slice 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --body '/tmp/skl-watchdog-result/watchdog-report.md' --public-body '/tmp/skl-watchdog-result/public.md' --run-metadata '/tmp/skl-watchdog-result/run.json' --outcome <pass|rework> --rank <rank>`, where `<rank>` is the weakest rank achieved across the Verification strategy rows that cover `B<n>` items, or the weakest rank your evidence reached when no row covers one:
+Write the report as `skl skill --resource ledger-review.md --input result_directory='/tmp/skl-watchdog-result' --input round=1 --input reviewed_head='0000000000000000000000000000000000000002' --input rework_pauses=false watchdog` instructs, then submit with `skl watchdog submit --repo '/work/widgets' --remote 'origin' --slice 'widget-dashboard/foundation' --claim '0000000000000000000000000000000000000001' --body '/tmp/skl-watchdog-result/watchdog-report.md' --public-body '/tmp/skl-watchdog-result/public.md' --run-metadata '/tmp/skl-watchdog-result/run.json' --outcome <pass|rework> --rank <rank>`. For `<rank>`, take the weakest rank reached among the Verification strategy rows that cover a `B<n>`; with no such row, take the weakest rank your evidence reached. Choose the outcome:
 
 - `pass` only when no `BLOCK` or `HUMAN` finding is active;
 - `rework` when a `BLOCK` finding is active;

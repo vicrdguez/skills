@@ -485,7 +485,7 @@ func validateWatchdogReport(report Report) error {
 	}
 	if report.Outcome == outcomePass && report.Schema == ReportSchema && report.Rank == "" {
 		return refuse(
-			"schema-3 watchdog pass report records no evidence rank",
+			fmt.Sprintf("schema-%d watchdog pass report records no evidence rank", ReportSchema),
 			"record the evidence rank the pass claims for its reviewed head",
 		)
 	}

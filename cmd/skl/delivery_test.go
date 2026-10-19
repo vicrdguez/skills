@@ -374,7 +374,7 @@ func TestDeliveryCLIEndToEnd(t *testing.T) {
 	reviewPublicPath := filepath.Join(t.TempDir(), "watchdog-public.md")
 	writeFile(t, reviewPublicPath, "# Review pending\n")
 	watchdogArguments := []string{"skl", "watchdog", "submit", "--repo", source, "--slice", deliveryTestItem, "--claim", reviewClaim,
-		"--outcome", "rework", "--body", reviewBodyPath, "--public-body", reviewPublicPath, "--format", "json"}
+		"--outcome", "rework", "--rank", "build", "--body", reviewBodyPath, "--public-body", reviewPublicPath, "--format", "json"}
 
 	// Rule B5: an interrupted acknowledgement leaves the committed handoff and
 	// the same-command retry recognizes it without recording a second round.
@@ -394,8 +394,8 @@ func TestDeliveryCLIEndToEnd(t *testing.T) {
 		t.Fatalf("retry = %#v, want the recognized completed rework", retried)
 	}
 	roundOne, _ := deliveryCommittedReport(t, cli, retried.Result.Report, ledger.WatchdogPhase)
-	if roundOne.Round != 1 {
-		t.Fatalf("retry advanced the completed-review count to %d, want 1", roundOne.Round)
+	if roundOne.Round != 1 || roundOne.Rank != "build" {
+		t.Fatalf("retry = round %d at rank %q, want the recorded round 1 at rank build", roundOne.Round, roundOne.Rank)
 	}
 
 	// Rule B2/B7: recreate the source worktree, resume the preserved branch
