@@ -24,13 +24,17 @@ const (
 )
 
 // ReportSchema is the frontmatter schema this codec writes. It also reads
-// historical schema-1 reports unchanged; a report carrying any other value
-// belongs to a format this CLI does not understand and is refused rather than
-// reinterpreted.
-const ReportSchema = 2
+// historical schema-1 and schema-2 reports unchanged; a report carrying any
+// other value belongs to a format this CLI does not understand and is refused
+// rather than reinterpreted.
+const ReportSchema = 3
 
-// reportSchemaWithoutRun is the historical schema that predates Run Metadata.
-const reportSchemaWithoutRun = 1
+// reportSchemaWithoutRun is the historical schema that predates Run Metadata,
+// and reportSchemaWithoutRank the one that predates the verdict's evidence rank.
+const (
+	reportSchemaWithoutRun  = 1
+	reportSchemaWithoutRank = 2
+)
 
 // Accepted semantic outcomes. The phase decides which subset applies; the
 // outcome is always worker judgment supplied through the semantic command,
@@ -86,12 +90,15 @@ type ReportInputs struct {
 // Report is the phase-report frontmatter. The engine supplies Schema, the
 // exact ledger references, and the completed review Round; a worker supplies
 // the semantic Outcome and, through the Markdown body, its evidence and
-// judgment. Run holds the optional schema-2 Run Metadata: observations that
-// are preserved as supplied and never validated or consulted by the workflow.
+// judgment. Run holds the optional Run Metadata: observations that are
+// preserved as supplied and never validated or consulted by the workflow.
+// Rank is the evidence rank a schema-3 Watchdog verdict claims for its
+// reviewed head; a pass requires it.
 type Report struct {
 	Schema  int             `yaml:"schema" json:"schema"`
 	Outcome string          `yaml:"outcome" json:"outcome"`
 	Source  SourceRevisions `yaml:"source,omitempty" json:"source"`
+	Rank    string          `yaml:"rank,omitempty" json:"rank,omitempty"`
 	Ledger  ReportInputs    `yaml:"ledger" json:"ledger"`
 	Round   uint64          `yaml:"round,omitempty" json:"round,omitempty"`
 	Run     any             `yaml:"run,omitempty" json:"run,omitempty"`
@@ -130,7 +137,7 @@ func FormatReport(phase string, report Report, body string) ([]byte, error) {
 	return document.Bytes(), nil
 }
 
-// ParseReport reads one schema-1 or schema-2 phase report. Only the leading
+// ParseReport reads one schema-1, schema-2 or schema-3 phase report. Only the leading
 // frontmatter between the opening --- line and the first full-line closing ---
 // delimiter is interpreted; the body is returned byte for byte as opaque data,
 // so delimiter-looking lines or template-like instructions inside it are never
@@ -360,9 +367,9 @@ func validateReport(phase string, report Report) error {
 	if err := validatePhase(phase); err != nil {
 		return err
 	}
-	if report.Schema != ReportSchema && report.Schema != reportSchemaWithoutRun {
+	if report.Schema != ReportSchema && report.Schema != reportSchemaWithoutRank && report.Schema != reportSchemaWithoutRun {
 		return refuse(
-			fmt.Sprintf("report schema %d is not a supported schema (%d or %d)", report.Schema, reportSchemaWithoutRun, ReportSchema),
+			fmt.Sprintf("report schema %d is not a supported schema (%d, %d or %d)", report.Schema, reportSchemaWithoutRun, reportSchemaWithoutRank, ReportSchema),
 			fmt.Sprintf("write schema as the bare integer %d; a different version requires a CLI that understands it", ReportSchema),
 		)
 	}
@@ -410,6 +417,12 @@ func validateImplementReport(report Report) error {
 		return refuse(
 			"implement report outcome "+strconv.Quote(report.Outcome)+" is not "+outcomeAwaitingReview+" or "+outcomeNeedsHuman,
 			"submit "+outcomeAwaitingReview+" when the work is ready for independent review, or "+outcomeNeedsHuman+" for a permitted human decision",
+		)
+	}
+	if report.Rank != "" {
+		return refuse(
+			"implement report records evidence rank "+strconv.Quote(report.Rank),
+			"record the evidence rank only in a watchdog report",
 		)
 	}
 	if report.Round != 0 {
@@ -462,6 +475,18 @@ func validateWatchdogReport(report Report) error {
 		return refuse(
 			"watchdog report outcome "+strconv.Quote(report.Outcome)+" is not "+outcomePass+", "+outcomeRework+", or "+outcomeNeedsHuman,
 			"submit "+outcomePass+" for an approved review, "+outcomeRework+" for another implementation round, or "+outcomeNeedsHuman+" for a permitted human decision",
+		)
+	}
+	if report.Rank != "" && report.Schema < ReportSchema {
+		return refuse(
+			fmt.Sprintf("schema-%d watchdog report records evidence rank %q", report.Schema, report.Rank),
+			fmt.Sprintf("record the evidence rank only in a schema-%d report", ReportSchema),
+		)
+	}
+	if report.Outcome == outcomePass && report.Schema == ReportSchema && report.Rank == "" {
+		return refuse(
+			"schema-3 watchdog pass report records no evidence rank",
+			"record the evidence rank the pass claims for its reviewed head",
 		)
 	}
 	if report.Round < 1 {

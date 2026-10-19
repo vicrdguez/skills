@@ -212,7 +212,7 @@ func TestAgentProseGoldens(t *testing.T) {
 		spec := proposalSpec{name: name, description: proseFixture(t, "proposal.md"), slices: []proposalSliceSpec{{name: "foundation", title: "Dashboard foundation", branch: name, files: files}}}
 		return writeProposal(t, "", spec)
 	}
-	contract := map[string]string{"intent.md": proseFixture(t, "intent.md"), "behavior.md": proseFixture(t, "behavior.md")}
+	contract := map[string]string{"intent.md": proseFixture(t, "intent.md"), "behavior.md": proseFixture(t, "behavior.md"), "plan.md": proseFixture(t, "plan.md")}
 
 	// Propose: acceptance, readback, publication and cleanup.
 	g.capture("outcome-ledger-accept-fix-required", proposer, "proposal", "accept", "--repo", source, "--proposal-dir", intake(proseProposal, map[string]string{"intent.md": contract["intent.md"]}), issue)
@@ -270,8 +270,12 @@ func TestAgentProseGoldens(t *testing.T) {
 	}
 	verdict := func(name, claim, outcome, status string) {
 		t.Helper()
-		output := g.run(worker, "watchdog", "submit", "--repo", source, "--slice", proseItem, "--claim", claim, "--outcome", outcome,
-			"--body", proseFixturePath("watchdog-report.md"), "--public-body", public)
+		arguments := []string{"watchdog", "submit", "--repo", source, "--slice", proseItem, "--claim", claim, "--outcome", outcome,
+			"--body", proseFixturePath("watchdog-report.md"), "--public-body", public}
+		if outcome == "pass" {
+			arguments = append(arguments, "--rank", "tests")
+		}
+		output := g.run(worker, arguments...)
 		if !strings.Contains(output, "Status: "+status) {
 			t.Fatalf("watchdog submit %s:\n%s", outcome, output)
 		}
@@ -462,7 +466,7 @@ func TestAgentProseGoldens(t *testing.T) {
 		t.Fatalf("proposal amend widget-share:\n%s", output)
 	}
 	replaced := amendIntake("widget-share")
-	writeFile(t, filepath.Join(replaced, "foundation", "behavior.md"), "# Share behavior, revised\n")
+	writeFile(t, filepath.Join(replaced, "foundation", "behavior.md"), strings.Replace(contract["behavior.md"], "# Dashboard foundation behavior", "# Share behavior, revised", 1))
 	g.capture("outcome-ledger-amend-amended", proposer, "proposal", "amend", "--repo", source, "--proposal-dir", replaced)
 
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())

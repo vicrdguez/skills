@@ -168,7 +168,7 @@ func deliveryFacts(e *ledger.Execution, repository RepositoryContext, phase, ope
 		f.PauseCommand += " --head <branch-head> --target <observed-target-sha>"
 		f.ResultResourceCommand = fmt.Sprintf("skl skill --resource ledger-submission.md --input result_directory=%s --input procedure=%s --input review_count=%d --input mode=%s implement", q(directory), f.Procedure, f.ReviewCount, f.Mode)
 	} else {
-		f.SubmitCommand += " --outcome <pass|rework>"
+		f.SubmitCommand += " --outcome <pass|rework> --rank <rank>"
 		if f.Integrates {
 			// The prepared head may carry the Integration Merge.
 			head := " --head <prepared-source-sha>"

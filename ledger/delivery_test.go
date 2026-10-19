@@ -227,7 +227,11 @@ func deliveryStart(t *testing.T, store *ledger.Store, repository github.Reposito
 // deliveryHandoff submits a phase result and fails the test on refusal.
 func deliveryHandoff(t *testing.T, store *ledger.Store, repository github.RepositoryID, item, phase, claimCommit string, source ledger.SourceRevisions, outcome, body string) *ledger.DeliveryResult {
 	t.Helper()
-	result, err := ledger.HandoffDelivery(store, repository, item, phase, claimCommit, source, outcome, body, nil)
+	rank := ""
+	if outcome == "pass" {
+		rank = "tests"
+	}
+	result, err := ledger.HandoffDelivery(store, repository, item, phase, claimCommit, source, outcome, rank, body, nil)
 	if err != nil {
 		t.Fatalf("handoff %s %s: %v", phase, item, err)
 	}
@@ -675,7 +679,7 @@ func TestDeliveryHandoffIsAtomicAndReplaySafe(t *testing.T) {
 	// An exact retry recognizes the completed effect: no commit, no new round.
 	commitsAfter := l.commitCount()
 	stateAfter := deliveryGitShow(t, l.root, "HEAD", statePath)
-	retry, err := ledger.HandoffDelivery(store, deliveryWidgets(), item, ledger.ImplementPhase, claim, source, "awaiting_review", body, nil)
+	retry, err := ledger.HandoffDelivery(store, deliveryWidgets(), item, ledger.ImplementPhase, claim, source, "awaiting_review", "", body, nil)
 	if err != nil {
 		t.Fatalf("exact retry was not recognized: %v", err)
 	}
@@ -695,7 +699,7 @@ func TestDeliveryHandoffIsAtomicAndReplaySafe(t *testing.T) {
 	// A later execution owns the Work Item; the old one cannot interfere.
 	later := deliveryStart(t, store, deliveryWidgets(), ledger.WatchdogPhase)
 	headBeforeOld := l.head()
-	if _, err := ledger.HandoffDelivery(store, deliveryWidgets(), item, ledger.ImplementPhase, claim, source, "awaiting_review", body, nil); err == nil {
+	if _, err := ledger.HandoffDelivery(store, deliveryWidgets(), item, ledger.ImplementPhase, claim, source, "awaiting_review", "", body, nil); err == nil {
 		t.Fatal("an old execution overwrote a later Claim's result")
 	}
 	if _, err := ledger.ResumeDelivery(store, deliveryWidgets(), item, ledger.ImplementPhase, claim); err == nil {
@@ -725,7 +729,7 @@ func TestDeliveryHandoffIsAtomicAndReplaySafe(t *testing.T) {
 	}
 	headAfterChanged := l.head()
 	supersededState := deliveryGitShow(t, l.root, headAfterChanged, statePath)
-	if _, err := ledger.HandoffDelivery(store, deliveryWidgets(), item, ledger.ImplementPhase, claim, source, "awaiting_review", body, nil); err == nil {
+	if _, err := ledger.HandoffDelivery(store, deliveryWidgets(), item, ledger.ImplementPhase, claim, source, "awaiting_review", "", body, nil); err == nil {
 		t.Fatal("an old execution overwrote a changed result")
 	}
 	if err := ledger.ReleaseDelivery(store, deliveryWidgets(), item, ledger.ImplementPhase, claim); err == nil {
@@ -852,7 +856,7 @@ func TestDeliveryRefusesIncompatibleReportSchema(t *testing.T) {
 	reportPath := deliveryReportPath("widgets", item, ledger.ImplementPhase)
 	compatible := deliveryGitShow(t, l.root, "HEAD", reportPath)
 
-	l.addFile(reportPath, "---\nschema: 3\noutcome: awaiting_review\n---\nnewer format\n")
+	l.addFile(reportPath, "---\nschema: 4\noutcome: awaiting_review\n---\nnewer format\n")
 	l.commitAll("write incompatible report")
 	headBefore := l.head()
 	if _, err := ledger.StartDelivery(store, deliveryWidgets(), ledger.WatchdogPhase); err == nil {
@@ -891,7 +895,7 @@ func TestDeliveryRefusesDirtyRecord(t *testing.T) {
 		leftoverPath := filepath.Join(l.root, filepath.FromSlash(deliveryReportPath("widgets", item, ledger.ImplementPhase)))
 		deliveryWrite(t, leftoverPath, "half written result")
 		if _, err := ledger.HandoffDelivery(store, deliveryWidgets(), item, ledger.ImplementPhase, claim,
-			ledger.SourceRevisions{Head: deliveryHead, Target: deliveryTarget}, "awaiting_review", "body\n", nil); err == nil {
+			ledger.SourceRevisions{Head: deliveryHead, Target: deliveryTarget}, "awaiting_review", "", "body\n", nil); err == nil {
 			t.Fatal("handoff proceeded over an interrupted record")
 		}
 		if l.head() != claim {

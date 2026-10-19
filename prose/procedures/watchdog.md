@@ -22,7 +22,7 @@ You judge the Contract: `intent.md`, `behavior.md`, and any `plan.md` or `tasks.
 
 1. Run the Full Gate yourself: the full suite, typecheck and lint. A green suite you did not run is not evidence.
 2. Check the report's completion table: every `B<n>`, `A<n>` and warranted `T<n>` is `complete` or `incomplete`, and a missing entry is `incomplete`. Is each `complete` true at this head? Leave the `M<n>` Manual Verification items to the human.
-3. Verify every Audit `F<n>` disposition: is each `fixed` true, each `declined` defensible and really a `JUDGEMENT`? A declined `HARD` is a `BLOCK`. Do not rerun Audit.
+3. Verify every Audit `F<n>` disposition: is each `fixed` true, each `declined` defensible and really a `JUDGEMENT`? A declined `HARD` is a `BLOCK`. A decision the plan's Forbidden section rules out is a `BLOCK` citing that line, and so is a declined finding about one. Do not rerun Audit.
 4. {{if eq .ReviewScope "incremental"}}Review {{template "watchdog-incremental" .}}.{{else if or (eq .ReviewScope "full") (not .PreviousReviewed)}}Review {{template "watchdog-full" .}}.{{else}}Review the scope inspection reports:
    - `incremental`: {{template "watchdog-incremental" .}}.
    - `full`: {{template "watchdog-full" .}}.
@@ -41,7 +41,7 @@ A finding keeps its Work-Item-local `W<n>` across rounds: list resolved ones as 
 
 ## Verdict
 
-Write the report as `{{.ResultResourceCommand}}` instructs, then submit with `{{.SubmitCommand}}`:
+Write the report as `{{.ResultResourceCommand}}` instructs, then submit with `{{.SubmitCommand}}`, where `<rank>` is the weakest rank achieved across the Verification strategy rows that cover `B<n>` items, or the weakest rank your evidence reached when no row covers one:
 
 - `pass` only when no `BLOCK` or `HUMAN` finding is active;
 - `rework` when a `BLOCK` finding is active;

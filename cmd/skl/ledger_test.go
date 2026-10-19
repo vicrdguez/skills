@@ -408,6 +408,10 @@ func readFileString(t *testing.T, path string) string {
 	return string(readFile(t, path))
 }
 
+// minimalPlan is the lightest plan.md acceptance takes for a Contract that
+// labels no rule or commitment.
+const minimalPlan = "# Plan\n\n## Verification strategy\n\n| Covers | Check | Rank |\n| --- | --- | --- |\n\n## Delegated\n\n## Forbidden\n"
+
 // singleSlice is one minimal but complete single-slice proposal whose only
 // slice is named foundation. dualSlice adds a feature slice and a parent.
 func singleSlice(name string) proposalSpec {
@@ -420,6 +424,7 @@ func singleSlice(name string) proposalSpec {
 			files: map[string]string{
 				"intent.md":   "# Foundation intent\n\n## Manual verification\n\n- [ ] Confirm the dashboard by hand.\n",
 				"behavior.md": "# Foundation behavior\n\n## Rule: Foundation works\n\nIt works.\n",
+				"plan.md":     minimalPlan,
 			},
 		}},
 	}
@@ -434,7 +439,7 @@ func dualSlice(name string) proposalSpec {
 		files: map[string]string{
 			"intent.md":   "# Feature intent\n",
 			"behavior.md": "# Feature behavior\n",
-			"plan.md":     "# Feature plan\n",
+			"plan.md":     "# Feature plan\n" + minimalPlan,
 		},
 	})
 	return spec
@@ -654,6 +659,7 @@ func TestAcceptSingleSliceFreezesExactLayout(t *testing.T) {
 		"projects/widgets/project.json",
 		"projects/widgets/proposals/record-foundation/foundation/behavior.md",
 		"projects/widgets/proposals/record-foundation/foundation/intent.md",
+		"projects/widgets/proposals/record-foundation/foundation/plan.md",
 		"projects/widgets/proposals/record-foundation/foundation/state.json",
 		"projects/widgets/proposals/record-foundation/proposal.json",
 		"projects/widgets/proposals/record-foundation/proposal.md",
@@ -733,7 +739,7 @@ func TestAcceptRefusesInvalidDeclarations(t *testing.T) {
 			spec.slices[0].files["notes.md"] = "unexpected"
 		}, "unexpected file"},
 		{"nested directory", func(spec *proposalSpec) {
-			spec.slices[0].files["plan.md/sub"] = "nested"
+			spec.slices[0].files["notes/sub"] = "nested"
 		}, ""},
 		{"escaping slice name", func(spec *proposalSpec) {
 			spec.slices[0].name = "../escape"
@@ -746,7 +752,7 @@ func TestAcceptRefusesInvalidDeclarations(t *testing.T) {
 		}, "depends on itself"},
 		{"cycle", func(spec *proposalSpec) {
 			spec.parentTitle = "Break the cycle"
-			spec.slices = append(spec.slices, proposalSliceSpec{name: "second", files: map[string]string{"intent.md": "i", "behavior.md": "b"}})
+			spec.slices = append(spec.slices, proposalSliceSpec{name: "second", files: map[string]string{"intent.md": "i", "behavior.md": "b", "plan.md": minimalPlan}})
 			spec.depends = map[string][]string{
 				spec.slices[0].name: {"second"},
 				"second":            {spec.slices[0].name},
@@ -1023,8 +1029,8 @@ func TestLedgerShowRefusesMissingReferencesWithoutSubstitution(t *testing.T) {
 
 	// A missing path at a valid commit is diagnosed, never substituted.
 	outcome, _ = cli.run(t, []string{"skl", "ledger", "show", "--commit", head,
-		"--path", "projects/widgets/proposals/reference-work/foundation/plan.md", "--format", "json"})
-	if outcome.Status != "fix_required" || !strings.Contains(outcome.Reason, "plan.md") {
+		"--path", "projects/widgets/proposals/reference-work/foundation/tasks.md", "--format", "json"})
+	if outcome.Status != "fix_required" || !strings.Contains(outcome.Reason, "tasks.md") {
 		t.Fatalf("missing path not diagnosed: %s", mustJSON(t, outcome))
 	}
 	if outcome.Document != nil && outcome.Document.Contents != "" {
@@ -1731,10 +1737,10 @@ func TestLedgerShowUsesOneCommittedRecord(t *testing.T) {
 	}
 	writeFile(t, filepath.Join(directory, "state.json"), `{"state":"ready_for_implementation","title":"Add foundation","branch":"uncommitted-branch"}`)
 	outcome, _ := cli.run(t, []string{"skl", "slice", "show", "--repo", root, "--slice", "committed-readback/foundation", "--format", "json"})
-	if outcome.Status != "shown" || outcome.Readback.Branch != "foundation" || len(outcome.Readback.Documents) != 2 {
+	if outcome.Status != "shown" || outcome.Readback.Branch != "foundation" || len(outcome.Readback.Documents) != 3 {
 		t.Fatalf("readback mixed working-tree membership or state with HEAD: %s", mustJSON(t, outcome))
 	}
-	if !strings.Contains(outcome.Readback.Documents[1].Contents+outcome.Readback.Documents[0].Contents, "Manual verification") {
+	if !strings.Contains(outcome.Readback.Documents[2].Contents+outcome.Readback.Documents[1].Contents+outcome.Readback.Documents[0].Contents, "Manual verification") {
 		t.Fatalf("committed human obligations disappeared: %s", mustJSON(t, outcome.Readback.Documents))
 	}
 }

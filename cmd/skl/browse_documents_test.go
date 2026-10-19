@@ -104,6 +104,7 @@ func newBrowseDocumentsFixture(t *testing.T) browseDocumentsFixture {
 		Schema:  ledger.ReportSchema,
 		Outcome: "pass",
 		Source:  ledger.SourceRevisions{Head: result.sourceHead, Target: result.sourceTarget, Reviewed: result.sourceHead},
+		Rank:    "tests",
 		Ledger: ledger.ReportInputs{
 			Claim: claim, Contract: contract, Implement: &implementReference, Decision: &decisionReference,
 		},

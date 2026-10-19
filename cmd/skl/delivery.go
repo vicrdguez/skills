@@ -70,7 +70,9 @@ func deliveryCommands(phase string, newBackend backendFactory, stdout io.Writer)
 				&cli.PathFlag{Name: "public-body", Usage: "separately authored public Result Document"},
 				&cli.PathFlag{Name: "run-metadata", Usage: "optional JSON Run Metadata observed by the reporting Worker Session"})
 			if phase == ledger.WatchdogPhase && name == "submit" {
-				command.Flags = append(command.Flags, &cli.StringFlag{Name: "outcome", Usage: "review outcome: pass or rework"})
+				command.Flags = append(command.Flags,
+					&cli.StringFlag{Name: "outcome", Usage: "review outcome: pass or rework"},
+					&cli.StringFlag{Name: "rank", Usage: "evidence rank the verdict claims for the reviewed head; required with pass"})
 			}
 		}
 		if !selects {
@@ -471,13 +473,20 @@ func submitDelivery(c *cli.Context, phase, operation string, repository setup.Re
 		text := string(contents)
 		public = &text
 	}
-	outcome := ledger.AwaitingReview
+	outcome, rank := ledger.AwaitingReview, ""
 	if operation == "needs-human" {
 		outcome = ledger.NeedsHuman
 	} else if phase == ledger.WatchdogPhase {
 		outcome = strings.ReplaceAll(c.String("outcome"), "-", "_")
 		if outcome != "pass" && outcome != ledger.Rework {
 			return refusal(fmt.Errorf("watchdog submit requires --outcome pass or rework"))
+		}
+		rank = c.String("rank")
+		if rank == "" && outcome == "pass" {
+			return refusal(fmt.Errorf("watchdog submit --outcome pass requires --rank, one of the ladder's ranks: %s", ledger.BuiltinLadder))
+		}
+		if rank != "" && !ledger.BuiltinLadder.Has(rank) {
+			return refusal(fmt.Errorf("--rank %s is not a rank of the ladder; its ranks are %s", rank, ledger.BuiltinLadder))
 		}
 	}
 	e, activeErr := ledger.ResumeDelivery(store, repository.Repository, c.String("slice"), phase, c.String("claim"))
@@ -527,7 +536,7 @@ func submitDelivery(c *cli.Context, phase, operation string, repository setup.Re
 			}
 		}
 	}
-	result, err := ledger.HandoffDelivery(store, repository.Repository, c.String("slice"), phase, c.String("claim"), source, outcome, string(body), runMetadata(c))
+	result, err := ledger.HandoffDelivery(store, repository.Repository, c.String("slice"), phase, c.String("claim"), source, outcome, rank, string(body), runMetadata(c))
 	if err != nil {
 		return refusal(err)
 	}

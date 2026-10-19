@@ -45,8 +45,9 @@ func CurrentReport(s *Store, repository github.RepositoryID, item, phase string)
 // caller validates source Git identities before entering this local mutation.
 // Completion prose remains opaque; only the semantic outcome chooses state.
 // Run Metadata is recorded with a new report but never compared on replay, so
-// a retry returns the recorded report with its original observations.
-func HandoffDelivery(s *Store, repository github.RepositoryID, item, phase, claimCommit string, source SourceRevisions, outcome, body string, run any) (*DeliveryResult, error) {
+// a retry returns the recorded report with its original observations. rank is
+// the evidence rank a Watchdog verdict claims, validated by the caller.
+func HandoffDelivery(s *Store, repository github.RepositoryID, item, phase, claimCommit string, source SourceRevisions, outcome, rank, body string, run any) (*DeliveryResult, error) {
 	var result *DeliveryResult
 	err := s.withMutation(func() error {
 		state, directory, head, err := s.deliveryState(repository, item)
@@ -73,7 +74,7 @@ func HandoffDelivery(s *Store, repository github.RepositoryID, item, phase, clai
 			if err != nil {
 				return err
 			}
-			if recorded.Ledger.Claim != claimRef || recorded.Outcome != outcome || !reflect.DeepEqual(recorded.Source, source) || recordedBody != body || state.State != target {
+			if recorded.Ledger.Claim != claimRef || recorded.Outcome != outcome || recorded.Rank != rank || !reflect.DeepEqual(recorded.Source, source) || recordedBody != body || state.State != target {
 				return refuse("the old execution cannot replace the current result or lifecycle", "preserve later work; use the original exact handoff only when current evidence establishes its completed effect")
 			}
 			result = &DeliveryResult{Status: state.State, Item: item, Report: Reference{Commit: head, Path: reportPath}, State: state, AlreadyCompleted: true}
@@ -86,7 +87,7 @@ func HandoffDelivery(s *Store, repository github.RepositoryID, item, phase, clai
 		if err := s.requireCleanPaths(directory); err != nil {
 			return err
 		}
-		report := Report{Schema: ReportSchema, Outcome: outcome, Source: source, Ledger: ReportInputs{
+		report := Report{Schema: ReportSchema, Outcome: outcome, Source: source, Rank: rank, Ledger: ReportInputs{
 			Claim: execution.Claim, Contract: execution.State.Claim.Inputs.Contract,
 			Implement: execution.State.Claim.Inputs.Implement, Watchdog: execution.State.Claim.Inputs.Watchdog, Decision: execution.State.Claim.Inputs.Decision,
 		}, Run: portableRun(run)}

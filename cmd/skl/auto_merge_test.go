@@ -82,7 +82,7 @@ func (f *autoMergeFixture) pass(t *testing.T, auto, public bool) deliveryOutput 
 func (f *autoMergeFixture) submitPass(t *testing.T, claim string, public bool) deliveryOutput {
 	t.Helper()
 	submit := []string{"skl", "watchdog", "submit", "--repo", f.source, "--slice", deliveryTestItem, "--claim", claim,
-		"--outcome", "pass", "--body", proseFixturePath("watchdog-report.md"), "--format", "json"}
+		"--outcome", "pass", "--rank", "tests", "--body", proseFixturePath("watchdog-report.md"), "--format", "json"}
 	if public {
 		submit = append(submit, "--public-body", proseFixturePath("public.md"))
 	}
@@ -166,7 +166,7 @@ func TestAutoWatchdogPassMarkdownReportsTheMerge(t *testing.T) {
 		t.Fatalf("watchdog next = %#v, %v", started, err)
 	}
 	markdown, err := f.cli.deliveryRun(t, "skl", "watchdog", "submit", "--repo", f.source, "--slice", deliveryTestItem, "--claim", started.Execution.Claim.Commit,
-		"--outcome", "pass", "--body", proseFixturePath("watchdog-report.md"), "--public-body", proseFixturePath("public.md"))
+		"--outcome", "pass", "--rank", "tests", "--body", proseFixturePath("watchdog-report.md"), "--public-body", proseFixturePath("public.md"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -49,3 +49,24 @@ Show every widget's health on one dashboard page.
 - [ ] M1: Open the dashboard and confirm each widget's health by hand.
 
 ```
+
+## projects/widgets/proposals/widget-dashboard/foundation/plan.md at 0000000000000000000000000000000000000001
+
+```
+# Dashboard foundation plan
+
+## Delegated
+
+- The dashboard's layout and styling.
+
+## Forbidden
+
+- A second source of widget health beside the recorded checks.
+
+## Verification strategy
+
+| Covers | Check | Rank |
+| --- | --- | --- |
+| B1 | Dashboard test listing a widget whose last check failed as unhealthy | tests |
+
+```

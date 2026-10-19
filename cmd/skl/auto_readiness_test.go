@@ -143,7 +143,7 @@ func TestAutoReadinessUsesFinalIntegrationHeadNotReviewedImplementation(t *testi
 	// Source publication completed, but the worker's presentation is absent.
 	runGit(t, prepared.Source.Worktree, "push", "-q", "origin", final+":refs/heads/"+deliveryTestBranch)
 	passed, err := f.cli.deliveryJSON(t, "skl", "watchdog", "submit", "--repo", f.source, "--slice", deliveryTestItem, "--claim", started.Execution.Claim.Commit,
-		"--outcome", "pass", "--head", final, "--body", proseFixturePath("watchdog-report.md"), "--format", "json")
+		"--outcome", "pass", "--rank", "tests", "--head", final, "--body", proseFixturePath("watchdog-report.md"), "--format", "json")
 	if err != nil || passed.Status != ledger.ReadyForMerge {
 		t.Fatalf("submit = %+v, %v", passed, err)
 	}

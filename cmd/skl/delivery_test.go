@@ -317,11 +317,11 @@ func TestDeliveryCLIEndToEnd(t *testing.T) {
 		t.Fatalf("committed state = %#v, want released Claim awaiting review", state)
 	}
 
-	// Rule B4: the persisted report carries schema 2, repository namespaces,
+	// Rule B4: the persisted report carries schema 3, repository namespaces,
 	// and the opaque private body byte for byte.
 	report, committedBody := deliveryCommittedReport(t, cli, submitted.Result.Report, ledger.ImplementPhase)
-	if report.Schema != 2 {
-		t.Fatalf("report schema = %d, want 2", report.Schema)
+	if report.Schema != 3 {
+		t.Fatalf("report schema = %d, want 3", report.Schema)
 	}
 	if report.Source.Head != head || report.Source.Target != target {
 		t.Fatalf("report source = %#v, want head %s target %s", report.Source, head, target)
@@ -514,8 +514,26 @@ func TestDeliveryCLIEndToEnd(t *testing.T) {
 		t.Fatalf("review did not consume the carried human direction: %#v", review3.Execution)
 	}
 	reviewClaim3 := review3.Execution.Claim.Commit
+	// A pass names the evidence rank of a ladder rank; an absent or unknown
+	// rank is refused and the review keeps its Claim.
+	for rank, fragments := range map[string][]string{"": {"--rank", "tests, build, inspection"}, "corpus": {"corpus", "tests, build, inspection"}} {
+		arguments := []string{"skl", "watchdog", "submit", "--repo", source, "--slice", deliveryTestItem, "--claim", reviewClaim3,
+			"--outcome", "pass", "--body", reviewBodyPath, "--public-body", reviewPublicPath, "--format", "json"}
+		if rank != "" {
+			arguments = append(arguments, "--rank", rank)
+		}
+		refused, _ := cli.deliveryJSON(t, arguments...)
+		for _, fragment := range fragments {
+			if refused.Status != "fix_required" || !strings.Contains(refused.Reason, fragment) {
+				t.Fatalf("pass with rank %q = %#v, want a refusal naming %q", rank, refused, fragment)
+			}
+		}
+		if kept := deliveryPersistedState(t, fixture.clone); kept.Claim == nil || kept.Claim.Phase != ledger.WatchdogPhase {
+			t.Fatalf("refused pass with rank %q released the Claim: %#v", rank, kept)
+		}
+	}
 	passed, err := cli.deliveryJSON(t, "skl", "watchdog", "submit", "--repo", source, "--slice", deliveryTestItem, "--claim", reviewClaim3,
-		"--outcome", "pass", "--body", reviewBodyPath, "--public-body", reviewPublicPath, "--format", "json")
+		"--outcome", "pass", "--rank", "tests", "--body", reviewBodyPath, "--public-body", reviewPublicPath, "--format", "json")
 	if err != nil {
 		t.Fatalf("passing watchdog submit: %v", err)
 	}
@@ -523,8 +541,8 @@ func TestDeliveryCLIEndToEnd(t *testing.T) {
 		t.Fatalf("pass = %#v, want ready_for_merge", passed)
 	}
 	roundThree, _ := deliveryCommittedReport(t, cli, passed.Result.Report, ledger.WatchdogPhase)
-	if roundThree.Round != 3 || roundThree.Source.Reviewed != head2 {
-		t.Fatalf("passing review = round %d of %s, want round 3 of the unchanged %s", roundThree.Round, roundThree.Source.Reviewed, head2)
+	if roundThree.Round != 3 || roundThree.Source.Reviewed != head2 || roundThree.Rank != "tests" || roundThree.Schema != 3 {
+		t.Fatalf("passing review = schema %d round %d of %s at rank %q, want schema 3 round 3 of the unchanged %s at rank tests", roundThree.Schema, roundThree.Round, roundThree.Source.Reviewed, roundThree.Rank, head2)
 	}
 	if final := deliveryPersistedState(t, fixture.clone); final.Claim != nil || final.State != ledger.ReadyForMerge || final.Decision {
 		t.Fatalf("final state = %#v, want released Claim ready for merge with the direction consumed", final)
@@ -794,7 +812,7 @@ func TestDeliveryCLIRejectsUnknownSchema(t *testing.T) {
 
 	claim := strings.Repeat("a", 40)
 	report := fmt.Sprintf(`---
-schema: 3
+schema: 4
 outcome: awaiting_review
 source:
   head: %s
@@ -816,7 +834,7 @@ body
 	before := ledgerSnapshot(t, fixture.clone)
 	refused, err := cli.deliveryJSON(t, "skl", "watchdog", "next", "--repo", source, "--format", "json")
 	if err != nil {
-		t.Fatalf("watchdog next with schema 3: %v", err)
+		t.Fatalf("watchdog next with schema 4: %v", err)
 	}
 	if refused.Status != "fix_required" || refused.Execution != nil {
 		t.Fatalf("incompatible schema = %#v, want fix_required without an execution", refused)

@@ -64,13 +64,35 @@ Show every widget's health on one dashboard page.
 - [ ] M1: Open the dashboard and confirm each widget's health by hand.
 
 ```
+#### `projects/widgets/proposals/widget-dashboard/foundation/plan.md`
+
+Reference: `0000000000000000000000000000000000000001:projects/widgets/proposals/widget-dashboard/foundation/plan.md`
+
+```
+# Dashboard foundation plan
+
+## Delegated
+
+- The dashboard's layout and styling.
+
+## Forbidden
+
+- A second source of widget health beside the recorded checks.
+
+## Verification strategy
+
+| Covers | Check | Rank |
+| --- | --- | --- |
+| B1 | Dashboard test listing a widget whose last check failed as unhealthy | tests |
+
+```
 #### `projects/widgets/proposals/widget-dashboard/foundation/watchdog-report.md`
 
 Reference: `0000000000000000000000000000000000000001:projects/widgets/proposals/widget-dashboard/foundation/watchdog-report.md`
 
 ```
 ---
-schema: 2
+schema: 3
 outcome: rework
 source:
   head: 0000000000000000000000000000000000000002
@@ -85,6 +107,8 @@ ledger:
       path: projects/widgets/proposals/widget-dashboard/foundation/behavior.md
     - commit: 0000000000000000000000000000000000000005
       path: projects/widgets/proposals/widget-dashboard/foundation/intent.md
+    - commit: 0000000000000000000000000000000000000005
+      path: projects/widgets/proposals/widget-dashboard/foundation/plan.md
   implement:
     commit: 0000000000000000000000000000000000000005
     path: projects/widgets/proposals/widget-dashboard/foundation/implement-report.md
