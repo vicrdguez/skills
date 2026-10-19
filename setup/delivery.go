@@ -58,7 +58,22 @@ func PresentDelivery(e *ledger.Execution, repository RepositoryContext, phase, o
 	if err != nil {
 		return skilldist.Packet{}, err
 	}
-	return skilldist.BuildPacket(phase, skilldist.InvocationFacts{Delivery: f})
+	principles, err := deliveryPrinciples(repository, e.State)
+	if err != nil {
+		return skilldist.Packet{}, err
+	}
+	return skilldist.BuildPacket(phase, skilldist.InvocationFacts{Delivery: f, Principles: principles})
+}
+
+// deliveryPrinciples reads the project principles of the Integration Target
+// both phases work toward, so a reviewed source cannot change the principles
+// its own review lists.
+func deliveryPrinciples(repository RepositoryContext, state ledger.SliceState) ([]ledger.Principle, error) {
+	target := integrationRevision(repository, state)
+	if target == "" {
+		return nil, nil
+	}
+	return ledger.ReadPrinciplesAt(repository.Root, target)
 }
 
 // ReviewRework binds what a review that ends in rework at the prepared head
@@ -94,16 +109,25 @@ func deliveryVerification(repository RepositoryContext, state ledger.SliceState,
 	if info, err := os.Stat(worktree); err == nil && info.IsDir() {
 		return ledger.ReadVerification(worktree)
 	}
-	// An absent Proposal Branch starts from main.
+	if target := integrationRevision(repository, state); target != "" {
+		return ledger.ReadVerificationAt(repository.Root, target)
+	}
+	return nil, nil
+}
+
+// integrationRevision is the local tracking ref of the Integration Target a
+// Slice starts from, or empty when none is fetched. An absent Proposal Branch
+// starts from main.
+func integrationRevision(repository RepositoryContext, state ledger.SliceState) string {
 	for _, ref := range []string{IntegrationRef(repository, state), "refs/remotes/" + repository.Remote + "/main"} {
 		if ref == "" {
 			continue
 		}
 		if _, err := git(repository.Root, "rev-parse", "--verify", "--quiet", ref+"^{commit}"); err == nil {
-			return ledger.ReadVerificationAt(repository.Root, ref)
+			return ref
 		}
 	}
-	return nil, nil
+	return ""
 }
 
 // deliveryFacts binds one rendering's facts, and the submit command before

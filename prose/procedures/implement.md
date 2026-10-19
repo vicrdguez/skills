@@ -16,7 +16,7 @@ The Contract is `intent.md`, `behavior.md`, and any `plan.md` or `tasks.md`: del
 - History is append-only: add commits, and leave existing ones as they are.
 - Leave behavior outside the Contract for a later change.
 - Keep this startup's helper and reviewer choices, including omitted fields, throughout this session. Use the resume command for a fresh recovery session.
-
+{{template "project-principles"}}
 ## 1. Prepare
 
 Run `{{.PrepareCommand}}`. It creates the worktree, or reuses it with its changes, index and commits intact. Then run the inspection command it prints, and work only in `{{.Worktree}}`. Continue this Claim later with `{{.ResumeCommand}}`; release it with `{{.ReleaseCommand}}` only to abandon the work.

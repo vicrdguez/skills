@@ -11,4 +11,6 @@ After the late target integration, the fixed point is `git merge-base <observed-
 
 Check: you hold the Contract documents supplied above, the diff command, the commit list, the gate result and the input-inspection result.
 
-{{template "audit-dispatch" .Reviewer}}
+{{if principles}}Tell the Contracts reviewer to read each principle a Forbidden line cites as `principle:<name>`, with `skl skill --resource <name>.md principles`, before judging that line.
+
+{{end}}{{template "audit-dispatch" .Reviewer}}

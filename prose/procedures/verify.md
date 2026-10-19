@@ -4,4 +4,4 @@ Verify this repository as its skill below directs, and rank each result on its l
 
 {{range .}}- `{{.}}`: `skl skill --resource {{.}}.md verify`
 {{end}}{{end}}
-{{.Body}}
+{{.Body}}{{template "project-principles"}}

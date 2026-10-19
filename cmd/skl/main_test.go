@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"slices"
 	"strconv"
@@ -293,7 +294,7 @@ func TestInstallSupportedSkillStubs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	wantSkills := []string{"audit", "brainstorm", "decision", "domain", "explore", "modules", "propose", "testing", "verify", "verify-create", "verify-maintain", "walkthrough", "writing-for-agents"}
+	wantSkills := []string{"audit", "brainstorm", "decision", "domain", "explore", "modules", "principles", "propose", "testing", "verify", "verify-create", "verify-maintain", "walkthrough", "writing-for-agents"}
 	for _, harness := range []string{".pi/agent/skills", ".codex/skills", ".claude/skills", ".config/opencode/skills"} {
 		for _, name := range wantSkills {
 			path := filepath.Join(root, harness, name, "SKILL.md")
@@ -575,7 +576,7 @@ func TestRetrieveEquivalentTypedInstructions(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &packet); err != nil {
 		t.Fatalf("stdout is not a JSON packet: %v\n%s", err, stdout.String())
 	}
-	if packet.Protocol != "skl.instructions/v1" || packet.Skill != "testing" || packet.Facts != (skilldist.InvocationFacts{}) || len(packet.IncludedSkills) != 0 || !slices.Equal(packet.Resources, wantResources) || packet.Instructions == "" || markdown.String() != packet.Instructions {
+	if packet.Protocol != "skl.instructions/v1" || packet.Skill != "testing" || !reflect.DeepEqual(packet.Facts, skilldist.InvocationFacts{}) || len(packet.IncludedSkills) != 0 || !slices.Equal(packet.Resources, wantResources) || packet.Instructions == "" || markdown.String() != packet.Instructions {
 		t.Fatalf("JSON and Markdown packets differ: %#v", packet)
 	}
 	if stderr.Len() != 0 {

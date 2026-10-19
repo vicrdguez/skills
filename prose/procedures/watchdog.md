@@ -17,7 +17,7 @@ You judge the Contract: `intent.md`, `behavior.md`, and any `plan.md` or `tasks.
 
 {{evidence .Contents}}
 {{end}}{{else}}No document was supplied. Stop and report that the Contract and the implementation report are missing.
-{{end}}
+{{end}}{{template "project-principles"}}
 {{with .VerificationError}}## Verification defect
 
 Record this reviewed-source defect as a finding and submit `rework`, or use `needs-human` for a human decision, with the commands below; omit `--rank` for either handoff.
@@ -37,7 +37,7 @@ Check: every cited check has its result.
 
 1. Run the Full Gate yourself: the full suite, typecheck and lint. A green suite you did not run is not evidence.
 2. Check the report's completion table: every `B<n>`, `A<n>` and warranted `T<n>` is `complete` or `incomplete`, and a missing entry is `incomplete`. Is each `complete` true at this head? Leave the `M<n>` Manual Verification items to the human.
-3. Verify every Audit `F<n>` disposition: is each `fixed` true, each `declined` defensible and really a `JUDGEMENT`? A declined `HARD` is a `BLOCK`. A decision the plan's Forbidden section rules out is a `BLOCK` citing that line, and so is a declined finding about one. Do not rerun Audit.
+3. Verify every Audit `F<n>` disposition: is each `fixed` true, each `declined` defensible and really a `JUDGEMENT`? A declined `HARD` is a `BLOCK`. A decision the plan's Forbidden section rules out is a `BLOCK` citing that line, and so is a declined finding about one.{{if principles}} Read each principle a Forbidden line cites as `principle:<name>` with `skl skill --resource <name>.md principles` before judging that line.{{end}} Do not rerun Audit.
 4. {{if eq .ReviewScope "incremental"}}Review {{template "watchdog-incremental" .}}.{{else if or (eq .ReviewScope "full") (not .PreviousReviewed)}}Review {{template "watchdog-full" .}}.{{else}}Review the scope inspection reports:
    - `incremental`: {{template "watchdog-incremental" .}}.
    - `full`: {{template "watchdog-full" .}}.

@@ -355,12 +355,20 @@ func TestAgentProseGoldens(t *testing.T) {
 	scoped("watchdog-repeat-full", reviewIdentity(reviewClaim, reviewResult), "full")
 	verdict("outcome-watchdog-submit-pass", reviewClaim, "pass", ledger.ReadyForMerge)
 
-	// A pause before any source progress, then no remaining work.
+	// The source repository gains project principles, which every later
+	// rendering for it lists. A pause before any source progress, then no
+	// remaining work.
+	for _, name := range []string{"no-facade", "one-representation"} {
+		writeFile(t, filepath.Join(source, ".skl", "principles", name+".md"), proseFixture(t, filepath.Join("principles", name+".md")))
+	}
+	runGit(t, source, "add", ".skl")
+	runGit(t, source, "commit", "-q", "-m", "project principles")
+	runGit(t, source, "update-ref", "refs/remotes/origin/main", deliveryTrimmed(t, source, "rev-parse", "HEAD"))
 	pausedProposal := "widget-export"
 	if outcome := proposer.accept(t, source, intake(pausedProposal, contract), issue); outcome.Status != "accepted" {
 		t.Fatalf("accept %s: %s", pausedProposal, mustJSON(t, outcome))
 	}
-	paused := proseMatch(t, proseClaimLine, g.run(worker, "implement", "next", "--repo", source))
+	paused := proseMatch(t, proseClaimLine, g.capture("implement-start-principles", worker, "implement", "next", "--repo", source))
 	g.capture("outcome-implement-needs-human", worker, "implement", "needs-human", "--repo", source, "--slice", pausedProposal+"/foundation", "--claim", paused,
 		"--body", proseFixturePath("pause.md"), "--public-body", public)
 	g.capture("outcome-implement-next-no-work", worker, "implement", "next", "--repo", source)
@@ -492,6 +500,10 @@ func TestAgentProseGoldens(t *testing.T) {
 		case "verify":
 			g.capture("skill-verify", worker, "skill", "--repo", source, "verify")
 			g.capture("outcome-skill-verify-missing", worker, "skill", "--repo", fixture.clone, "verify")
+		case "principles":
+			g.capture("skill-principles", worker, "skill", "--repo", source, "principles")
+			g.capture("skill-principles-none", worker, "skill", "--repo", fixture.clone, "principles")
+			g.capture("resource-principles-no-facade", worker, "skill", "--repo", source, "--resource", "no-facade.md", "principles")
 		default:
 			g.capture("skill-"+name, worker, "skill", name)
 		}

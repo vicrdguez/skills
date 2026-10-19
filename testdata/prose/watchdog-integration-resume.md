@@ -119,6 +119,13 @@ No findings.
 
 ```
 
+## Project principles
+
+This repository's principles apply to this work. Read one in full with `skl skill --resource <name>.md principles`.
+
+- `no-facade`: Replace an interface outright; no compatibility facade keeps the old one alive beside it.
+- `one-representation`: One native representation; no duplicate payload graph, attribute map or replay log beside it.
+
 ## Cited checks
 
 Run each check the Verification strategy cites, as `.skl/verify.md` defines it at the reviewed source, and record its result and rank in the report. A cited row the reviewed source lacks is a finding.
@@ -133,7 +140,7 @@ Check: every cited check has its result.
 
 1. Run the Full Gate yourself: the full suite, typecheck and lint. A green suite you did not run is not evidence.
 2. Check the report's completion table: every `B<n>`, `A<n>` and warranted `T<n>` is `complete` or `incomplete`, and a missing entry is `incomplete`. Is each `complete` true at this head? Leave the `M<n>` Manual Verification items to the human.
-3. Verify every Audit `F<n>` disposition: is each `fixed` true, each `declined` defensible and really a `JUDGEMENT`? A declined `HARD` is a `BLOCK`. A decision the plan's Forbidden section rules out is a `BLOCK` citing that line, and so is a declined finding about one. Do not rerun Audit.
+3. Verify every Audit `F<n>` disposition: is each `fixed` true, each `declined` defensible and really a `JUDGEMENT`? A declined `HARD` is a `BLOCK`. A decision the plan's Forbidden section rules out is a `BLOCK` citing that line, and so is a declined finding about one. Read each principle a Forbidden line cites as `principle:<name>` with `skl skill --resource <name>.md principles` before judging that line. Do not rerun Audit.
 4. Review the complete change, `git diff 0000000000000000000000000000000000000003...HEAD`, against every Contract item. Apply the method and criteria below.
 5. Preparation merged the current head of `proposal/widget-alerts`, `0000000000000000000000000000000000000004`, into this branch when it was missing; inspection names it as the merged head. Judge that merge and its effects as part of this change, together with the implementation's merges and conflict resolutions; code inherited unchanged from `proposal/widget-alerts` is outside the review.
 

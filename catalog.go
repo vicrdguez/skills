@@ -82,6 +82,9 @@ type InvocationFacts struct {
 	Delivery *DeliveryFacts `json:"delivery,omitempty"`
 	Decision *DecisionFacts `json:"decision,omitempty"`
 	Verify   *VerifyFacts   `json:"verify,omitempty"`
+	// Principles are the project principles of the repository a Procedure
+	// renders for, which its shared block lists.
+	Principles []ledger.Principle `json:"principles,omitempty"`
 }
 
 // VerifyFacts bind the verify skill to one repository's verification skill:
@@ -186,6 +189,7 @@ var skills = map[string]skill{
 	"explore":            {"procedures/explore.md", ""},
 	"implement":          {"procedures/implement.md", "documents/implement"},
 	"modules":            {"principles/modules.md", "principles/modules"},
+	"principles":         {"procedures/principles.md", ""},
 	"propose":            {"procedures/propose.md", "documents/propose"},
 	"testing":            {"principles/testing.md", "principles/testing"},
 	"watchdog":           {"procedures/watchdog.md", "documents/watchdog"},
@@ -236,7 +240,7 @@ func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
 		return Packet{}, fmt.Errorf("unknown skill %q", name)
 	}
 	file, data := procedure(name, facts)
-	instructions, err := renderDocument(file, data)
+	instructions, err := render(file, data, facts.Principles)
 	if err != nil {
 		return Packet{}, err
 	}
@@ -248,7 +252,7 @@ func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
 	}
 	for _, composed := range included {
 		file, data := procedure(composed, facts)
-		rendered, err := renderDocument(file, data)
+		rendered, err := render(file, data, facts.Principles)
 		if err != nil {
 			return Packet{}, err
 		}
@@ -257,6 +261,11 @@ func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
 	resources, err := resourceNames(name)
 	if err != nil {
 		return Packet{}, err
+	}
+	if name == "principles" {
+		for _, principle := range facts.Principles {
+			resources = append(resources, principle.Name+".md")
+		}
 	}
 	return Packet{
 		Protocol:       InstructionProtocol,
@@ -268,10 +277,12 @@ func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
 	}, nil
 }
 
-// templateFuncs is the deliberately small helper set authored templates share.
+// templateFuncs is the deliberately small helper set authored templates
+// share. principles returns the project principles of the rendering.
 var templateFuncs = template.FuncMap{
-	"quote":    ShellQuote,
-	"evidence": evidenceBlock,
+	"quote":      ShellQuote,
+	"evidence":   evidenceBlock,
+	"principles": func() []ledger.Principle { return nil },
 }
 
 // evidenceBlock chooses a fence that cannot be closed by opaque Markdown data.
@@ -313,7 +324,13 @@ func RenderOutcome(kind string, facts any) (string, error) {
 // template set, so a file includes another by its path and shared blocks by
 // their defined name. A principle renders without its statement frontmatter.
 func renderDocument(file string, data any) (string, error) {
-	tmpl := template.New("").Option("missingkey=error").Funcs(templateFuncs)
+	return render(file, data, nil)
+}
+
+// render executes one authored prose file for a repository with principles.
+func render(file string, data any, principles []ledger.Principle) (string, error) {
+	tmpl := template.New("").Option("missingkey=error").Funcs(templateFuncs).
+		Funcs(template.FuncMap{"principles": func() []ledger.Principle { return principles }})
 	for _, kind := range []string{"procedures", "principles", "documents", "outcomes"} {
 		err := fs.WalkDir(embedded, path.Join(proseRoot, kind), func(source string, entry fs.DirEntry, err error) error {
 			if err != nil || entry.IsDir() {

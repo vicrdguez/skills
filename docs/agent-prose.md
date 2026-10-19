@@ -42,6 +42,15 @@ Authored prose lives under `prose/`, one directory per kind.
 
 Every file in `prose/procedures/`, `prose/principles/`, `prose/documents/` and `prose/outcomes/` parses into one template set, named by its path under `prose/`. A file includes another with `{{template "principles/audit.md" .}}`, and a shared block by its defined name. `catalog.go` maps each skill name to its definition and resource directory, lists the Craft and Procedures each Procedure composes, and selects the continuation file for an invocation.
 
+### Project principles
+
+A repository may keep its own principles at `.skl/principles/<name>.md`, in the form of a skl-owned principle: a `statement` in frontmatter, then the explanation. The engine checks only that each statement is present and at most 280 characters long, and refuses to render for a repository with a file that fails.
+
+- `prose/procedures/modules/principles.md` defines `project-principles`, the one block that lists each statement after its principle's name, in file-name order. Every Procedure rendered for a repository includes it once; it renders nothing when the repository has no principles. A template reads the list through the `principles` function, which Watchdog's review and the Audit step inside Implement also use to send the worker to a principle a Forbidden line cites.
+- `prose/procedures/principles.md` is the `principles` skill. It lists the statements, and its resources are the repository's principle files, so `.skl/principles/no-facade.md` is `skl skill --resource no-facade.md principles`.
+- `skl skill` renders for the repository containing the working directory, or `--repo`; Implement and Watchdog render for the principles of the Slice's Integration Target.
+- A Contract's Forbidden line may cite `principle:<name>`; acceptance refuses a citation the source repository has no file for.
+
 The report format that `implement-report.md` and `watchdog-report.md` follow is documented for maintainers in `docs/report-schema.md`. It is not agent-visible.
 
 ## Composition rules

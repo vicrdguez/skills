@@ -244,6 +244,27 @@ func RenderResource(name, resource string, assignments []string) ([]byte, error)
 	return []byte(rendered), nil
 }
 
+// RenderPrinciple returns the full file of the project principle a resource
+// of the principles skill names, from the principles of the repository in
+// use. Like every resource without inputs, it accepts none.
+func RenderPrinciple(principles []ledger.Principle, resource string, assignments []string) ([]byte, error) {
+	if err := (resourceSpec{}).parse("principles", resource, assignments); err != nil {
+		return nil, err
+	}
+	names := make([]string, len(principles))
+	for index, principle := range principles {
+		if principle.Name+".md" == resource {
+			return []byte(principle.File), nil
+		}
+		names[index] = principle.Name
+	}
+	present := "it has none"
+	if len(names) > 0 {
+		present = "its principles are " + strings.Join(names, ", ")
+	}
+	return nil, fmt.Errorf("unknown principle %q: the repository has no %s%s; %s", strings.TrimSuffix(resource, ".md"), ledger.PrinciplesDirectory, resource, present)
+}
+
 // DescribeResourceInputs reports the accepted inputs of one public named
 // resource without disclosing its procedure. It never touches the Workflow
 // Backend.

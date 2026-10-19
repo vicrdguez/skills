@@ -278,3 +278,48 @@ func TestAcceptRefusesAMalformedVerificationSkill(t *testing.T) {
 		})
 	}
 }
+
+// A Forbidden line may cite a project principle by name; acceptance resolves
+// the name to a file of the source repository's principles.
+func TestAcceptResolvesForbiddenPrincipleCitations(t *testing.T) {
+	cited := lintedContract()
+	cited["plan.md"] = strings.Replace(cited["plan.md"], "- A second representation.", "- No compatibility facade (principle:no-facade).", 1)
+	principles := func(names ...string) string {
+		root := sourceRepository(t, "acme", "widgets")
+		for _, name := range names {
+			writeFile(t, filepath.Join(root, ".skl", "principles", name+".md"), "---\nstatement: The "+name+" principle.\n---\n")
+		}
+		if len(names) > 0 {
+			runGit(t, root, "add", ".")
+			runGit(t, root, "commit", "-q", "-m", "principles")
+		}
+		return root
+	}
+	for _, testCase := range []struct {
+		name      string
+		root      string
+		fragments []string
+	}{
+		{"a missing principle", principles("one-representation"), []string{"foundation", "plan.md", "no-facade", ".skl/principles/no-facade.md"}},
+		{"no principles directory", principles(), []string{"foundation", "plan.md", "no-facade", ".skl/principles/ directory"}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			fixture := newLedgerFixture(t)
+			head := ledgerHead(t, fixture.clone)
+			outcome, text := newLedgerApp(t, newForgeServer(t)).run(t, []string{"skl", "proposal", "accept", "--repo", testCase.root, "--proposal-dir", writeProposal(t, "", lintSpec("cited", cited)), "--format", "json"})
+			if outcome.Status != "fix_required" {
+				t.Fatalf("acceptance was not refused: %s", text)
+			}
+			for _, fragment := range testCase.fragments {
+				if !strings.Contains(outcome.Reason, fragment) {
+					t.Fatalf("refusal lacks %q: %s", fragment, text)
+				}
+			}
+			requireLedgerUnchanged(t, fixture.clone, head)
+		})
+	}
+	newLedgerFixture(t)
+	if outcome := newLedgerApp(t, newForgeServer(t)).accept(t, principles("no-facade"), writeProposal(t, "", lintSpec("cited", cited))); outcome.Status != "accepted" {
+		t.Fatalf("accept citing an existing principle: %s", mustJSON(t, outcome))
+	}
+}
