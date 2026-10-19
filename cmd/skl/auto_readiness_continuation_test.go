@@ -42,9 +42,9 @@ func TestAutoReadinessRefusalContinuesIndependentSiblingWhileDependentWaits(t *t
 		t.Fatalf("refusal blocked independent review: %s", mustJSON(t, polled))
 	}
 	reason := polled.Merges[0].Reason
-	for _, required := range []string{"not an ancestor", "skl decision apply --route watchdog", "--project widgets", "--item " + deliveryTestItem, "--request-commit", "--request-path", "--answer"} {
+	for _, required := range []string{"not an ancestor", "skl decision apply --route watchdog", "--project widgets", "--slice " + deliveryTestItem, "--request-commit", "--request-path", "--answer"} {
 		if !strings.Contains(reason, required) {
-			t.Fatalf("reintegration guidance lacks %q: %s", required, reason)
+			t.Errorf("reintegration guidance lacks %q: %s", required, reason)
 		}
 	}
 	state := deliveryPersistedState(t, f.clone)
