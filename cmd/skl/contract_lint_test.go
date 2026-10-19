@@ -217,6 +217,11 @@ func TestAcceptLintsVerificationStrategyAgainstTheCatalog(t *testing.T) {
 
 	head := ledgerHead(t, fixture.clone)
 	undeclared := strategy("| B1, A1 | gate 17 | corpus |\n| B2 | new corpus-case 17 | tests |\n")
+	declaredExisting := func(name string) map[string]string {
+		files := strategy("| B1, B2, A1 | new " + name + " | tests |\n")
+		files["intent.md"] = strings.Replace(files["intent.md"], "## Manual", "- [ ] Add `"+name+"` (B1, B2).\n\n## Manual", 1)
+		return files
+	}
 	refused := []struct {
 		name      string
 		files     map[string]string
@@ -226,6 +231,8 @@ func TestAcceptLintsVerificationStrategyAgainstTheCatalog(t *testing.T) {
 		{"an unknown row", strategy("| B1 | corpus 17 | corpus |\n| B2, A1 | tests | tests |\n"), []string{"foundation", "plan.md", "B1", "corpus"}},
 		{"a generated row", strategy("| B1, B2, A1 | routes | tests |\n"), []string{"routes", "generated"}},
 		{"a human row", strategy("| B1, B2, A1 | review | build |\n"), []string{"review", "human"}},
+		{"a declared existing generated row", declaredExisting("routes"), []string{"routes", "generated"}},
+		{"a declared existing human row", declaredExisting("review"), []string{"review", "human"}},
 		{"an undeclared new row", undeclared, []string{"corpus-case", "Definition of Done"}},
 	}
 	for _, testCase := range refused {

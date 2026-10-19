@@ -378,6 +378,13 @@ func lintCitation(slice string, row strategyRow, verification *Verification, don
 	}
 	name, _, added := catalogCitation(row.check)
 	rule := row.rule()
+	cited := verification.Row(name)
+	if rule != "" && cited != nil && cited.Kind != ExecutedCheck && cited.Kind != JourneyCheck {
+		return refuse(
+			"slice "+slice+" cites the "+cited.Kind+" catalog row "+strconv.Quote(name)+" for "+rule+" in the plan.md Verification strategy, and only an executed or journey row can cover a B<n> rule",
+			"cite an executed or journey row of "+VerificationFile+" for "+rule+"; a "+cited.Kind+" row may still support A<n> rows",
+		)
+	}
 	if added {
 		named := regexp.MustCompile(`(^|[^A-Za-z0-9_.-])` + regexp.QuoteMeta(name) + `($|[^A-Za-z0-9_-])`)
 		for _, bullet := range done {
@@ -393,17 +400,10 @@ func lintCitation(slice string, row strategyRow, verification *Verification, don
 	if rule == "" {
 		return nil
 	}
-	cited := verification.Row(name)
 	if cited == nil {
 		return refuse(
 			"slice "+slice+" cites the catalog row "+strconv.Quote(name)+" for "+rule+" in the plan.md Verification strategy, and "+VerificationFile+" has no row of that name; its rows are "+verification.RowNames(),
 			"start the Check cell with the name of an executed or journey row of "+VerificationFile+", or declare a row this slice adds with new <name> and a Definition of Done bullet naming it",
-		)
-	}
-	if cited.Kind != ExecutedCheck && cited.Kind != JourneyCheck {
-		return refuse(
-			"slice "+slice+" cites the "+cited.Kind+" catalog row "+strconv.Quote(name)+" for "+rule+" in the plan.md Verification strategy, and only an executed or journey row can cover a B<n> rule",
-			"cite an executed or journey row of "+VerificationFile+" for "+rule+"; a "+cited.Kind+" row may still support A<n> rows",
 		)
 	}
 	return nil
