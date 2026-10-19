@@ -134,26 +134,34 @@ func parseVerification(read func(name string) ([]byte, error)) (*Verification, e
 		return nil, err
 	}
 	data = bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
-	frontmatter, body, err := splitFrontmatter(VerificationFile, data)
+	frontmatter, body, err := splitFrontmatter(VerificationFile+" line 1", data)
 	if err != nil {
 		return nil, err
 	}
 	verification := &Verification{Body: string(body)}
 	var declared struct {
-		Ranks []string `yaml:"ranks"`
+		Ranks yaml.Node `yaml:"ranks"`
 	}
 	if err := yaml.Unmarshal(frontmatter, &declared); err != nil {
-		return nil, refuse(VerificationFile+" frontmatter is malformed: "+err.Error(), "declare ranks in the YAML frontmatter as a list of rank names, strongest first")
+		return nil, verificationYAMLError(err)
 	}
-	if len(declared.Ranks) == 0 {
-		return nil, refuse(VerificationFile+" frontmatter declares no ranks", "add ranks to the frontmatter: a list of rank names, strongest first")
+	var ranks []string
+	if err := declared.Ranks.Decode(&ranks); err != nil {
+		return nil, verificationYAMLError(err)
 	}
-	for index, rank := range declared.Ranks {
-		if strings.TrimSpace(rank) == "" || slices.Contains(declared.Ranks[:index], rank) {
-			return nil, refuse(VerificationFile+" frontmatter declares the rank "+strconv.Quote(rank)+" empty or more than once", "give every rank of the ladder a distinct, nonempty name")
+	if len(ranks) == 0 {
+		return nil, refuse(VerificationFile+" line 2: frontmatter declares no ranks", "add ranks to the frontmatter: a list of rank names, strongest first")
+	}
+	for index, rank := range ranks {
+		if strings.TrimSpace(rank) == "" || slices.Contains(ranks[:index], rank) {
+			line := declared.Ranks.Line + 1
+			if declared.Ranks.Kind == yaml.SequenceNode {
+				line = declared.Ranks.Content[index].Line + 1
+			}
+			return nil, refuse(VerificationFile+" line "+strconv.Itoa(line)+": frontmatter declares the rank "+strconv.Quote(rank)+" empty or more than once", "give every rank of the ladder a distinct, nonempty name")
 		}
 	}
-	verification.Ladder = Ladder(declared.Ranks)
+	verification.Ladder = Ladder(ranks)
 
 	// Line numbers count from the top of the file, frontmatter included.
 	offset := bytes.Count(data[:len(data)-len(body)], []byte("\n"))
@@ -163,7 +171,7 @@ func parseVerification(read func(name string) ([]byte, error)) (*Verification, e
 	}
 	for _, heading := range verificationHeadings {
 		if start, end := section(lines, heading); start == 0 && end == 0 {
-			return nil, refuse(VerificationFile+" has no "+heading+" heading", "give "+VerificationFile+" the headings "+strings.Join(verificationHeadings, ", "))
+			return nil, refuse(VerificationFile+" line "+strconv.Itoa(bytes.Count(data, []byte("\n"))+1)+" (end of file): has no "+heading+" heading", "give "+VerificationFile+" the headings "+strings.Join(verificationHeadings, ", "))
 		}
 	}
 	start, end := section(lines, "Channels")
@@ -176,8 +184,15 @@ func parseVerification(read func(name string) ([]byte, error)) (*Verification, e
 	table, numbers := firstTable(lines, start, end)
 	header := []string{"Name", "Channel", "Kind", "Run", "Expectations", "Rank"}
 	if len(table) < 2 || !tableHeader(table[0], header...) || !tableDelimiter(table[1]) {
+		line := lines[start-1].number // The Catalog heading when the table is absent.
+		if len(numbers) > 0 {
+			line = numbers[0]
+			if len(table) > 1 && tableHeader(table[0], header...) {
+				line = numbers[1]
+			}
+		}
 		return nil, refuse(
-			VerificationFile+" has no catalog table under its Catalog heading",
+			VerificationFile+" line "+strconv.Itoa(line)+": has no catalog table under its Catalog heading",
 			"add a Markdown table under Catalog whose header is | "+strings.Join(header, " | ")+" |",
 		)
 	}
@@ -208,6 +223,20 @@ func parseVerification(read func(name string) ([]byte, error)) (*Verification, e
 		verification.Catalog = append(verification.Catalog, row)
 	}
 	return verification, nil
+}
+
+// verificationYAMLError translates YAML-relative locations to file locations:
+// the frontmatter starts after the opening delimiter on line 1.
+func verificationYAMLError(err error) error {
+	lineNumber := regexp.MustCompile(`line ([0-9]+)`)
+	message := lineNumber.ReplaceAllStringFunc(err.Error(), func(match string) string {
+		number, _ := strconv.Atoi(strings.TrimPrefix(match, "line "))
+		return "line " + strconv.Itoa(number+1)
+	})
+	if !lineNumber.MatchString(message) {
+		message = "line 2: " + message
+	}
+	return refuse(VerificationFile+" frontmatter is malformed: "+message, "declare ranks in the YAML frontmatter as a list of rank names, strongest first")
 }
 
 // journeyExists requires a journey row's Run cell to name a file under the

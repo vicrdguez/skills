@@ -132,11 +132,15 @@ func TestReadVerificationRefusesMalformedSkills(t *testing.T) {
 		{"a missing heading", replace("## Doctor", "## Health"),
 			nil, []string{".skl/verify.md", "Doctor"}},
 		{"a catalog without its table", replace("| Name | Channel |", "| Title | Channel |"),
-			nil, []string{".skl/verify.md", "Catalog"}},
+			nil, []string{".skl/verify.md", "line 22", "Catalog"}},
+		{"duplicate ranks", replace("ranks: [corpus, tests, build]", "ranks: [corpus, tests, tests]"),
+			nil, []string{".skl/verify.md", "line 2", "tests"}},
+		{"multiline duplicate ranks", replace("ranks: [corpus, tests, build]", "ranks:\n  - corpus\n  - tests\n  - tests"),
+			nil, []string{".skl/verify.md", "line 5", "tests"}},
 		{"no ranks", replace("ranks: [corpus, tests, build]", "ladder: [corpus]"),
-			nil, []string{".skl/verify.md", "ranks"}},
+			nil, []string{".skl/verify.md", "line 2", "ranks"}},
 		{"no frontmatter", strings.SplitN(verificationSkill, "---\n", 3)[2],
-			nil, []string{".skl/verify.md", "frontmatter"}},
+			nil, []string{".skl/verify.md", "line 1", "frontmatter"}},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
