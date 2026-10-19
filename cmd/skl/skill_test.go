@@ -39,7 +39,7 @@ func TestSkillRejectsInapplicableOptions(t *testing.T) {
 }
 
 func TestShapeIsUnavailableAndSurvivingStandaloneSkillsRemain(t *testing.T) {
-	want := []string{"audit", "brainstorm", "decision", "design", "domain", "explore", "implement", "propose", "testing", "verify", "verify-create", "verify-maintain", "walkthrough", "watchdog", "writing-for-agents"}
+	want := []string{"audit", "brainstorm", "decision", "domain", "explore", "implement", "modules", "propose", "testing", "verify", "verify-create", "verify-maintain", "walkthrough", "watchdog", "writing-for-agents"}
 	if got := skilldist.SkillNames(); !slices.Equal(got, want) {
 		t.Fatalf("skill catalog = %v, want %v", got, want)
 	}

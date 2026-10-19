@@ -1,6 +1,6 @@
 # Audit
 
-{{template "craft/audit.md" .}}## Pin the comparison
+{{template "principles/audit.md" .}}## Pin the comparison
 
 After the late target integration, the fixed point is `git merge-base <observed-target-sha> HEAD`.{{if and (eq .Procedure "rework") .PreviousReviewed}} When the previously reviewed revision `{{.PreviousReviewed}}` is an ancestor of `HEAD`, it is the fixed point instead, delimiting this round's delta; otherwise review the full comparison. Either way, keep every prior finding and the completed-review count.{{end}}{{template "audit-diff" .}}
 

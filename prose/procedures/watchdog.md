@@ -66,5 +66,5 @@ On `pass`, you may add Debt Markers for `NOTE` findings: short, self-contained c
 
 # Review method
 
-{{template "craft/review.md" .}}
-{{template "craft/audit/acceptance.md" .}}
+{{template "principles/review.md" .}}
+{{template "principles/audit/acceptance.md" .}}

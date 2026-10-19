@@ -1,3 +1,6 @@
+---
+statement: Design deep modules, with a lot of behaviour behind a small interface, placed at a clean seam and tested through that interface.
+---
 # Codebase Design
 
 Design **deep modules**: a lot of behaviour behind a small interface, placed at a clean seam, testable through that interface. Use this language and these principles wherever code is being designed or restructured. The aim is leverage for callers, locality for maintainers, and testability for everyone.
@@ -105,5 +108,5 @@ Good interfaces make testing natural:
 
 ## Going deeper
 
-- **Deepening a cluster given its dependencies** — see `skl skill --resource DEEPENING.md design`: dependency categories, seam discipline, and replace-don't-layer testing.
-- **Exploring alternative interfaces** — see `skl skill --resource DESIGN-IT-TWICE.md design`: spin up parallel sub-agents to design the interface several radically different ways, then compare on depth, locality, and seam placement.
+- **Deepening a cluster given its dependencies** — see `skl skill --resource DEEPENING.md modules`: dependency categories, seam discipline, and replace-don't-layer testing.
+- **Exploring alternative interfaces** — see `skl skill --resource DESIGN-IT-TWICE.md modules`: spin up parallel sub-agents to design the interface several radically different ways, then compare on depth, locality, and seam placement.

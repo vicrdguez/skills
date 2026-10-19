@@ -162,10 +162,14 @@ type Packet struct {
 	Instructions   string          `json:"instructions"`
 }
 
-// proseRoot holds the authored prose, organized by kind: procedures, craft,
-// documents, outcomes and adapters. Every procedure, craft, document and
-// outcome file is a template named by its path under this root.
+// proseRoot holds the authored prose, organized by kind: procedures,
+// principles, documents, outcomes and adapters. Every procedure, principle,
+// document and outcome file is a template named by its path under this root.
 const proseRoot = "prose"
+
+// principlesRoot holds the skl-owned principles, one <name>.md file each
+// with its resources under <name>/.
+const principlesRoot = proseRoot + "/principles"
 
 // skill is what `skl skill <name>` renders: its definition, and the directory
 // whose files are its public resources ("" when it has none).
@@ -175,24 +179,24 @@ type skill struct {
 }
 
 var skills = map[string]skill{
-	"audit":              {"procedures/audit.md", "craft/audit"},
+	"audit":              {"procedures/audit.md", "principles/audit"},
 	"brainstorm":         {"procedures/brainstorm.md", ""},
 	"decision":           {"procedures/decision.md", "procedures/decision"},
-	"design":             {"craft/design.md", "craft/design"},
-	"domain":             {"craft/domain.md", "craft/domain"},
+	"domain":             {"principles/domain.md", "principles/domain"},
 	"explore":            {"procedures/explore.md", ""},
 	"implement":          {"procedures/implement.md", "documents/implement"},
+	"modules":            {"principles/modules.md", "principles/modules"},
 	"propose":            {"procedures/propose.md", "documents/propose"},
-	"testing":            {"craft/testing.md", "craft/testing"},
+	"testing":            {"principles/testing.md", "principles/testing"},
 	"watchdog":           {"procedures/watchdog.md", "documents/watchdog"},
-	"verify":             {"procedures/verify.md", "craft/verify"},
+	"verify":             {"procedures/verify.md", "principles/verify"},
 	"verify-create":      {"procedures/verify-create.md", "documents/verify"},
 	"verify-maintain":    {"procedures/verify-maintain.md", ""},
 	"walkthrough":        {"procedures/walkthrough.md", ""},
-	"writing-for-agents": {"craft/writing-for-agents.md", "craft/writing-for-agents"},
+	"writing-for-agents": {"principles/writing-for-agents.md", "principles/writing-for-agents"},
 }
 
-// composition is the Craft and Procedures a Procedure inlines after its own
+// composition is the principles and Procedures a Procedure inlines after its own
 // text on every run.
 var composition = map[string][]string{
 	"explore":   {"domain"},
@@ -305,12 +309,12 @@ func RenderOutcome(kind string, facts any) (string, error) {
 }
 
 // renderDocument executes one authored prose file with ordinary typed data.
-// Every procedure, craft, document and outcome file parses into one template
-// set, so a file includes another by its path and shared blocks by their
-// defined name.
+// Every procedure, principle, document and outcome file parses into one
+// template set, so a file includes another by its path and shared blocks by
+// their defined name. A principle renders without its statement frontmatter.
 func renderDocument(file string, data any) (string, error) {
 	tmpl := template.New("").Option("missingkey=error").Funcs(templateFuncs)
-	for _, kind := range []string{"procedures", "craft", "documents", "outcomes"} {
+	for _, kind := range []string{"procedures", "principles", "documents", "outcomes"} {
 		err := fs.WalkDir(embedded, path.Join(proseRoot, kind), func(source string, entry fs.DirEntry, err error) error {
 			if err != nil || entry.IsDir() {
 				return err
@@ -318,6 +322,13 @@ func renderDocument(file string, data any) (string, error) {
 			contents, err := fs.ReadFile(embedded, source)
 			if err != nil {
 				return err
+			}
+			if path.Dir(source) == principlesRoot {
+				principle, err := ledger.ParsePrinciple(source, contents)
+				if err != nil {
+					return err
+				}
+				contents = []byte(principle.Body)
 			}
 			if _, err := tmpl.New(strings.TrimPrefix(source, proseRoot+"/")).Parse(string(contents)); err != nil {
 				return fmt.Errorf("%s: %w", source, err)

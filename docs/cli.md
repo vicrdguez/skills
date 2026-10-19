@@ -40,15 +40,15 @@ Before changing files, `skl install` previews each create, update and removal an
 ## Retrieving skills
 
 ```sh
-skl skill [--format markdown|json] <name>         # a Craft or user-invoked Procedure
+skl skill [--format markdown|json] <name>         # a principle or user-invoked Procedure
 skl skill [--repo <path>] verify                  # the repository's .skl/verify.md
-skl skill --resource DEEPENING.md design          # one named Skill Resource
+skl skill --resource DEEPENING.md modules         # one named Skill Resource
 skl skill --resource ledger-submission.md --describe-inputs implement
 skl skill --resource ledger-submission.md --input result_directory=/tmp/r --input procedure=initial --input review_count=0 implement
 skl skill --resource ledger-review.md --input result_directory=/tmp/r --input round=2 --input reviewed_head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --input rework_pauses=false watchdog
 ```
 
-Whole-skill retrieval defaults to Markdown; `--format json` returns the instruction packet. `--format` is inapplicable to resources and their input descriptions, which always return raw text. `--describe-inputs` cannot be combined with `--input`. Standalone skills are `audit`, `brainstorm`, `decision`, `design`, `domain`, `explore`, `propose`, `testing`, `verify`, `verify-create`, `verify-maintain`, `walkthrough` and `writing-for-agents`; `shape` is retired. Existing `.thinking/` artifacts remain untouched.
+Whole-skill retrieval defaults to Markdown; `--format json` returns the instruction packet. `--format` is inapplicable to resources and their input descriptions, which always return raw text. `--describe-inputs` cannot be combined with `--input`. Standalone skills are `audit`, `brainstorm`, `decision`, `domain`, `explore`, `modules`, `propose`, `testing`, `verify`, `verify-create`, `verify-maintain`, `walkthrough` and `writing-for-agents`; `shape` is retired, and `design` is now `modules`, whose installation retires the `design` stub. Existing `.thinking/` artifacts remain untouched.
 
 Resource names are exact and relative to the skill's resource directory. Parameterized resources take repeated `--input name=value`; `--describe-inputs` lists accepted names, types and choices without rendering. Plain `skl skill implement` and `skl skill watchdog` refuse, because those Procedures only make sense for a selected and claimed Slice; use `skl implement next` and `skl watchdog next`. `skl skill verify` renders the `.skl/verify.md` of the repository containing the working directory, or of `--repo`, after a one-line Procedure that names its ladder and one Skill Resource per channel its Channels section lists; a repository without the file is refused with `verify-create` as the repair. `verify-create` and `verify-maintain` are user-invoked Procedures that write and check that file. Invoke `walkthrough <proposal>` or `walkthrough <proposal>/<slice>` through its installed Skill Stub to tour recorded commitments, delivered code, findings and open Manual Verification one stop at a time. It uses read-only `skl browse`, `skl ledger show` and git inspections, and makes no changes.
 

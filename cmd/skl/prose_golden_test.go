@@ -499,7 +499,7 @@ func TestAgentProseGoldens(t *testing.T) {
 	resources := map[string][]string{
 		"audit":              {"acceptance.md", "smells.md"},
 		"decision":           {"triage.md"},
-		"design":             {"DEEPENING.md", "DESIGN-IT-TWICE.md"},
+		"modules":            {"DEEPENING.md", "DESIGN-IT-TWICE.md"},
 		"domain":             {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
 		"propose":            {"behavior.md", "intent.md", "plan.md", "tasks.md"},
 		"implement":          {"pull-presentation.md"},

@@ -293,7 +293,7 @@ func TestInstallSupportedSkillStubs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	wantSkills := []string{"audit", "brainstorm", "decision", "design", "domain", "explore", "propose", "testing", "verify", "verify-create", "verify-maintain", "walkthrough", "writing-for-agents"}
+	wantSkills := []string{"audit", "brainstorm", "decision", "domain", "explore", "modules", "propose", "testing", "verify", "verify-create", "verify-maintain", "walkthrough", "writing-for-agents"}
 	for _, harness := range []string{".pi/agent/skills", ".codex/skills", ".claude/skills", ".config/opencode/skills"} {
 		for _, name := range wantSkills {
 			path := filepath.Join(root, harness, name, "SKILL.md")
@@ -918,8 +918,8 @@ func TestContextFreeResourcesRetainOwnershipAndDefaults(t *testing.T) {
 	cases := []struct{ owner, resource string }{
 		{"audit", "acceptance.md"},
 		{"audit", "smells.md"},
-		{"design", "DEEPENING.md"},
-		{"design", "DESIGN-IT-TWICE.md"},
+		{"modules", "DEEPENING.md"},
+		{"modules", "DESIGN-IT-TWICE.md"},
 		{"domain", "ADR-FORMAT.md"},
 		{"domain", "CONTEXT-FORMAT.md"},
 		{"propose", "intent.md"},
@@ -1018,7 +1018,7 @@ func TestRetrieveOneNamedResource(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got, want := stdout.String(), readRepositoryFile(t, "prose/craft/testing/tests.md"); got != want {
+	if got, want := stdout.String(), readRepositoryFile(t, "prose/principles/testing/tests.md"); got != want {
 		t.Fatalf("stdout did not contain only the requested resource:\n%s", got)
 	}
 	stdout.Reset()
@@ -1117,7 +1117,7 @@ func TestBundleGuaranteedSupportingSkills(t *testing.T) {
 
 func TestIgnoreConsumerRepositoryOverrides(t *testing.T) {
 	repository := t.TempDir()
-	override := filepath.Join(repository, "prose/craft/testing.md")
+	override := filepath.Join(repository, "prose/principles/testing.md")
 	if err := os.MkdirAll(filepath.Dir(override), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1138,7 +1138,7 @@ func TestIgnoreConsumerRepositoryOverrides(t *testing.T) {
 	if err := app.Run([]string{"skl", "skill", "testing"}); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := stdout.String(), readRepositoryFile(t, "prose/craft/testing.md"); got != want {
+	if got, want := stdout.String(), readRepositoryFile(t, "testdata/prose/skill-testing.md"); got != want {
 		t.Fatalf("consumer repository overrode embedded definition:\n%s", got)
 	}
 }

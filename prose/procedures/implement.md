@@ -31,7 +31,7 @@ Check: inspection prints the source head.
 {{end}}
 {{if eq .Mode "team"}}Lead a team of implementer subagents. You keep the Claim and every workflow operation: commits, pushes, `skl` commands, the Audit and the handoff.{{with .Helper}} Run each implementer{{template "subagent-choice" .}}.{{end}} {{template "implement-judgment"}}
 
-{{template "craft/team.md" .}}{{else}}Build in any order, refactor whenever it helps, and run the typecheck and focused checks as you go. {{template "implement-judgment"}}
+{{template "principles/team.md" .}}{{else}}Build in any order, refactor whenever it helps, and run the typecheck and focused checks as you go. {{template "implement-judgment"}}
 {{end}}{{with .Checks}}
 Before Audit, add to `.skl/verify.md` each row this slice adds. Then run each check the Verification strategy cites, as the worktree's `.skl/verify.md` defines it, and record its result and rank in the report's Verification section:
 

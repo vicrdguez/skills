@@ -1,6 +1,6 @@
 # Audit
 
-{{template "craft/audit.md" .}}## Pin the comparison
+{{template "principles/audit.md" .}}## Pin the comparison
 
 Use the fixed point the user gave: a commit, branch, tag or merge-base. When none was given, ask for one. Resolve it with `git rev-parse <fixed-point>` before going further.{{template "audit-diff" .}}
 

@@ -1,3 +1,6 @@
+---
+statement: Tests establish observable behavior through public seams and fail when the behavior they protect breaks.
+---
 # Testing
 
 Tests show that the change keeps its Contract. This is the reference that makes those tests worth keeping: what a good test is, where tests go, the anti-patterns, and what counts as evidence.

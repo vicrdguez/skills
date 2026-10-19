@@ -2,10 +2,13 @@ package skills
 
 import (
 	"io/fs"
+	"path"
 	"regexp"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/vicrdguez/skills/ledger"
 )
 
 func TestAuditAppliesContractAcceptanceCriteria(t *testing.T) {
@@ -31,8 +34,8 @@ func TestProseTemplateSetIsUnambiguous(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if strings.HasPrefix(file, proseRoot+"/craft/") && strings.Contains(string(contents), "{{") {
-			t.Errorf("craft file %s contains a template action", file)
+		if strings.HasPrefix(file, principlesRoot+"/") && strings.Contains(string(contents), "{{") {
+			t.Errorf("principle file %s contains a template action", file)
 		}
 		for _, match := range regexp.MustCompile(`\{\{-?\s*define "([^"]+)"`).FindAllStringSubmatch(string(contents), -1) {
 			if previous, ok := defined[match[1]]; ok {
@@ -44,5 +47,41 @@ func TestProseTemplateSetIsUnambiguous(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Every skl-owned principle declares a statement of the project-principle
+// form, and its rendering leaves that frontmatter out.
+func TestEverySklPrincipleDeclaresAStatement(t *testing.T) {
+	entries, err := fs.ReadDir(embedded, principlesRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	principles := 0
+	for _, entry := range entries {
+		if entry.IsDir() || path.Ext(entry.Name()) != ".md" {
+			continue
+		}
+		principles++
+		file := path.Join(principlesRoot, entry.Name())
+		contents, err := fs.ReadFile(embedded, file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		principle, err := ledger.ParsePrinciple(file, contents)
+		if err != nil {
+			t.Errorf("%s: %v", file, err)
+			continue
+		}
+		rendered, err := renderDocument(strings.TrimPrefix(file, proseRoot+"/"), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(rendered, principle.Statement) || strings.HasPrefix(rendered, "---") {
+			t.Errorf("%s renders its statement frontmatter:\n%s", file, rendered)
+		}
+	}
+	if principles == 0 {
+		t.Fatalf("%s holds no principles", principlesRoot)
 	}
 }
