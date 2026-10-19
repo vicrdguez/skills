@@ -460,8 +460,8 @@ func deliverySourceInputs(e *ledger.Execution, phase string) (head, target, prev
 }
 
 // checkVerdictRank requires a pass to carry a rank, any verdict rank to be of
-// the ladder in force at the reviewed head and, for a pass, no stronger than the weakest catalog row the
-// plan cites for a B<n>.
+// the ladder in force at the reviewed head and, for a pass, no stronger than
+// the weakest catalog row the plan cites for a B<n>.
 func checkVerdictRank(root, reviewed string, plan []byte, outcome, rank string) error {
 	verification, err := ledger.ReadVerificationAt(root, reviewed)
 	if err != nil {
