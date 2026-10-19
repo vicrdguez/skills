@@ -137,6 +137,10 @@ func TestReadVerificationRefusesMalformedSkills(t *testing.T) {
 			nil, []string{".skl/verify.md", "line 2", "tests"}},
 		{"multiline duplicate ranks", replace("ranks: [corpus, tests, build]", "ranks:\n  - corpus\n  - tests\n  - tests"),
 			nil, []string{".skl/verify.md", "line 5", "tests"}},
+		{"an empty multiline rank", replace("ranks: [corpus, tests, build]", "ranks:\n  - corpus\n  - \"\""),
+			nil, []string{".skl/verify.md", "line 4", "rank"}},
+		{"ranks of the wrong type", replace("ranks: [corpus, tests, build]", "ranks: corpus"),
+			nil, []string{".skl/verify.md", "line 2", "frontmatter"}},
 		{"no ranks", replace("ranks: [corpus, tests, build]", "ladder: [corpus]"),
 			nil, []string{".skl/verify.md", "line 2", "ranks"}},
 		{"no frontmatter", strings.SplitN(verificationSkill, "---\n", 3)[2],
@@ -226,6 +230,22 @@ func TestRankBoundIsTheWeakestCitedRowCoveringARule(t *testing.T) {
 	}
 	if ledger.CitedChecks(plan, nil) != nil {
 		t.Fatal("a repository without a skill cited checks")
+	}
+}
+
+func TestCitedChecksRetainsMissingBehavioralRows(t *testing.T) {
+	verification, err := ledger.ReadVerification(writeSkill(t, verificationSkill))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := []byte("# Plan\n\n## Verification strategy\n\n| Covers | Check | Rank |\n| --- | --- | --- |\n" +
+		"| B1 | removed Case17 | tests |\n| A1 | inspect the parser | build |\n")
+	checks := ledger.CitedChecks(plan, verification)
+	if len(checks) != 1 || checks[0].Name != "removed" || checks[0].Case != "Case17" || !checks[0].Missing || checks[0].Added || checks[0].Rule != "B1" {
+		t.Fatalf("missing behavioral citation was dropped or changed: %#v", checks)
+	}
+	if got := ledger.CitedChecks(plan, nil); len(got) != 0 {
+		t.Fatalf("without a skill, free text became citations: %#v", got)
 	}
 }
 

@@ -158,7 +158,10 @@ func deliveryFacts(e *ledger.Execution, repository RepositoryContext, phase, ope
 	}
 	verification, err := deliveryVerification(repository, e.State, phase, worktree, f.RequiredHead)
 	if err != nil {
-		return nil, "", err
+		if phase != ledger.WatchdogPhase {
+			return nil, "", err
+		}
+		f.VerificationError = err.Error()
 	}
 	f.Checks = ledger.CitedChecks(e.ContractFile("plan.md"), verification)
 	q := skilldist.ShellQuote

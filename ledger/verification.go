@@ -282,9 +282,9 @@ type CitedCheck struct {
 }
 
 // CitedChecks joins the Verification strategy of plan with the catalog of
-// verification, in strategy order. A Check cell that names no catalog row and
-// declares none is free text and cites nothing. It returns nil without a
-// skill.
+// verification, in strategy order. Behavioral citations remain visible when
+// their rows disappear; A-only free text cites nothing. Without a skill,
+// every Check cell remains free text and this returns nil.
 func CitedChecks(plan []byte, verification *Verification) []CitedCheck {
 	if verification == nil {
 		return nil
@@ -294,7 +294,7 @@ func CitedChecks(plan []byte, verification *Verification) []CitedCheck {
 	for _, row := range rows {
 		name, identifier, added := catalogCitation(row.check)
 		catalog := verification.Row(name)
-		if catalog == nil && !added {
+		if catalog == nil && !added && row.rule() == "" {
 			continue
 		}
 		check := CitedCheck{Covers: row.covers, Rule: row.rule(), Name: name, Case: identifier, Added: added, Missing: catalog == nil, Rank: row.rank}

@@ -346,6 +346,9 @@ func TestAgentProseGoldens(t *testing.T) {
 	claim, result = proseMatch(t, proseClaimLine, directed), proseMatch(t, proseResultLine, directed)
 	g.run(worker, "implement", "prepare", "--repo", source, "--slice", proseItem, "--claim", claim, "--result-directory", result)
 	runGit(t, worktree, "reset", "-q", "--hard", target)
+	// The passing submission supplies the check its Contract declared new.
+	completedSkill := strings.Replace(proseFixture(t, "verify.md"), "| routes |", "| health-corpus | tests | executed | `make health-corpus` | unhealthy widgets are listed | tests |\n| routes |", 1)
+	writeFile(t, filepath.Join(worktree, ".skl", "verify.md"), "---\nranks: [live, tests, build]\n---\n\n"+completedSkill)
 	submit("", claim, proseCommit(t, worktree, "dashboard.txt", "every widget, retired ones kept\n"))
 	reviewClaim, reviewResult = review("")
 	g.capture("watchdog-inspect-full", worker, append([]string{"watchdog", "inspect"}, reviewIdentity(reviewClaim, reviewResult)...)...)

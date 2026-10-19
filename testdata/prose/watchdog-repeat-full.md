@@ -184,11 +184,11 @@ Keep retired widgets on the dashboard.
 
 ## Cited checks
 
-Run each check the Verification strategy cites, as `.skl/verify.md` defines it at the reviewed source, and record its result and rank in the report. A row this slice adds that the reviewed source lacks is a finding.
+Run each check the Verification strategy cites, as `.skl/verify.md` defines it at the reviewed source, and record its result and rank in the report. A cited row the reviewed source lacks is a finding.
 
 - `widget-tests` `TestUnhealthyWidgetListed`, for B1: run `go test ./...`; expect every test passes, the cited test among them; rank `tests`.
 - `dashboard`, for B1: perform the journey `.skl/journeys/dashboard.md`; expect the page shows what the cited rule expects; rank `live`.
-- `health-corpus` `unhealthy-widget`, for B1: a row this slice adds, missing from `.skl/verify.md` here.
+- `health-corpus` `unhealthy-widget`, for B1: run `make health-corpus`; expect unhealthy widgets are listed; rank `tests`.
 
 Check: every cited check has its result.
 

@@ -463,6 +463,12 @@ func deliverySourceInputs(e *ledger.Execution, phase string) (head, target, prev
 // the ladder in force at the reviewed head and, for a pass, no stronger than
 // the weakest catalog row the plan cites for a B<n>.
 func checkVerdictRank(root, reviewed string, plan []byte, outcome, rank string) error {
+	// Returning a verification defect for repair must not require fixing the
+	// immutable reviewed source. An unranked negative verdict makes no claim
+	// about its ladder or evidence.
+	if outcome != "pass" && rank == "" {
+		return nil
+	}
 	verification, err := ledger.ReadVerificationAt(root, reviewed)
 	if err != nil {
 		return err
@@ -474,7 +480,21 @@ func checkVerdictRank(root, reviewed string, plan []byte, outcome, rank string) 
 	if rank != "" && !ladder.Has(rank) {
 		return fmt.Errorf("--rank %s is not a rank of the ladder in force; its ranks are %s", rank, ladder)
 	}
-	bound, row := ledger.RankBound(ledger.CitedChecks(plan, verification), ladder)
+	checks := ledger.CitedChecks(plan, verification)
+	if outcome == "pass" {
+		for _, check := range checks {
+			if check.Rule == "" {
+				continue
+			}
+			if check.Missing {
+				return fmt.Errorf("catalog row %s cited for %s is missing from %s at the reviewed source; return the defect for rework before passing", check.Name, check.Rule, ledger.VerificationFile)
+			}
+			if check.Kind != ledger.ExecutedCheck && check.Kind != ledger.JourneyCheck {
+				return fmt.Errorf("catalog row %s cited for %s has kind %s at the reviewed source; only executed or journey rows can cover a B<n> rule", check.Name, check.Rule, check.Kind)
+			}
+		}
+	}
+	bound, row := ledger.RankBound(checks, ladder)
 	if outcome == "pass" && bound != "" && ladder.Stronger(rank, bound) {
 		return fmt.Errorf("--rank %s is stronger than %s, the rank of %s, the weakest catalog row the Verification strategy cites for a B<n>; submit --rank %s or a weaker rank of %s", rank, bound, row, bound, ladder)
 	}

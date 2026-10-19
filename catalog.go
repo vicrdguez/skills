@@ -54,6 +54,9 @@ type DeliveryFacts struct {
 	// Checks are the catalog rows the Contract's Verification strategy
 	// cites, read from the source this phase verifies.
 	Checks []ledger.CitedCheck `json:"checks,omitempty"`
+	// VerificationError is a reviewed-source defect to report, rather than
+	// a rendering failure that prevents the reviewer from handing it back.
+	VerificationError string `json:"verification_error,omitempty"`
 	// Mode, Helper and Reviewer are the Implement invocation's choices. The
 	// subagent choices are nil when no value was supplied.
 	Mode     string          `json:"mode,omitempty"`
