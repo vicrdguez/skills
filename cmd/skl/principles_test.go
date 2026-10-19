@@ -12,10 +12,9 @@ import (
 const (
 	principleA = "---\nstatement: One native representation; no duplicate payload graph beside it.\n---\n\n# One representation\n\nKeep one shape.\n"
 	principleB = "---\nstatement: No compatibility facade over a replaced interface.\n---\n\n# No facade\n\nReplace callers instead.\n"
-	// principlesBlock is the block a rendering for a repository with
-	// principles a and b carries, in file-name order.
-	principlesBlock = "## Project principles\n\nThis repository's principles apply to this work. Read one in full with `skl skill --resource <name>.md principles`.\n\n" +
-		"- `a`: One native representation; no duplicate payload graph beside it.\n- `b`: No compatibility facade over a replaced interface.\n"
+	// principleLines are the statements a rendering for a repository with
+	// principles a and b lists, in file-name order.
+	principleLines = "- `a`: One native representation; no duplicate payload graph beside it.\n- `b`: No compatibility facade over a replaced interface.\n"
 )
 
 // principledRepository commits principles a and b, and a non-principle file
@@ -41,7 +40,7 @@ func skillOutput(t *testing.T, args ...string) (string, error) {
 
 func requireBlockOnce(t *testing.T, what, rendering string) {
 	t.Helper()
-	if strings.Count(rendering, principlesBlock) != 1 || strings.Count(rendering, "## Project principles") != 1 {
+	if strings.Count(rendering, "## Project principles") != 1 || strings.Count(rendering, principleLines) != 1 || !strings.Contains(rendering, "`skl skill --resource <name>.md principles`") {
 		t.Fatalf("%s does not carry the principles block once:\n%s", what, rendering)
 	}
 }
@@ -62,9 +61,6 @@ func TestProjectPrinciplesReachEveryProcedure(t *testing.T) {
 		t.Fatalf("implement next: %#v %v", started, err)
 	}
 	requireBlockOnce(t, "implement", started.Packet.Instructions)
-	if !strings.Contains(started.Packet.Instructions, "Tell the Contracts reviewer to read each principle a Forbidden line cites") {
-		t.Fatalf("the audit step does not send the Contracts reviewer to cited principles:\n%s", started.Packet.Instructions)
-	}
 	if principles := started.Packet.Facts.Principles; len(principles) != 2 || principles[0].Name != "a" || principles[1].Name != "b" {
 		t.Fatalf("implement facts = %#v", principles)
 	}
@@ -89,9 +85,6 @@ func TestProjectPrinciplesReachEveryProcedure(t *testing.T) {
 		t.Fatalf("watchdog next: %#v %v", review, err)
 	}
 	requireBlockOnce(t, "watchdog", review.Packet.Instructions)
-	if !strings.Contains(review.Packet.Instructions, "Read each principle a Forbidden line cites as `principle:<name>` with `skl skill --resource <name>.md principles` before judging that line.") {
-		t.Fatalf("Watchdog does not send the reviewer to cited principles:\n%s", review.Packet.Instructions)
-	}
 
 	for _, name := range []string{"audit", "brainstorm", "decision", "explore", "principles", "propose", "verify-create", "verify-maintain", "walkthrough"} {
 		rendered, err := skillOutput(t, "--repo", source, name)

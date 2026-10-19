@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"strconv"
@@ -80,32 +79,6 @@ func ReadPrinciples(root string) ([]Principle, error) {
 	}
 	return parsePrinciples(names, func(name string) ([]byte, error) {
 		return os.ReadFile(filepath.Join(directory, name))
-	})
-}
-
-// ReadPrinciplesAt reads the project principles committed at revision of the
-// repository at root, in file-name order.
-func ReadPrinciplesAt(root, revision string) ([]Principle, error) {
-	arguments := []string{"ls-tree", "-z", revision, "--", PrinciplesDirectory}
-	listing, err := exec.Command("git", append([]string{"-C", root}, arguments...)...).Output()
-	if err != nil {
-		return nil, gitError(root, arguments, err)
-	}
-	var names []string
-	for _, entry := range strings.Split(string(listing), "\x00") {
-		// Each entry is "<mode> <type> <object>\t<path>".
-		fields, file, ok := strings.Cut(entry, "\t")
-		if ok && strings.Contains(fields, " blob ") && strings.HasSuffix(file, ".md") {
-			names = append(names, strings.TrimPrefix(file, PrinciplesDirectory))
-		}
-	}
-	return parsePrinciples(names, func(name string) ([]byte, error) {
-		object := revision + ":" + PrinciplesDirectory + name
-		contents, err := exec.Command("git", "-C", root, "cat-file", "blob", object).Output()
-		if err != nil {
-			return nil, gitError(root, []string{"cat-file", "blob", object}, err)
-		}
-		return contents, nil
 	})
 }
 

@@ -27,4 +27,4 @@ Check: every catalog row appears in the report with one of the three.
 Edit the file for each `changed` row, keeping the shape in `skl skill --resource verify.md verify-create`, then run each edited row again.
 
 Check: every edited row reports `clean`.
-{{template "project-principles"}}
+{{template "project-principles" -}}

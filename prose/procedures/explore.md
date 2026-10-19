@@ -44,4 +44,4 @@ Present one final recap that separates:
 Name the ADRs and other decisions that carry them. Ask the user to correct or confirm the recap. A correction updates the tree and the recap; ask again. Confirmation approves the meaning of the whole Proposal.
 
 After confirmation, stop. Suggest running the `propose` skill in this session, carrying the confirmed recap and its decisions forward. Leave running it to the user.
-{{template "project-principles"}}
+{{template "project-principles" -}}

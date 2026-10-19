@@ -48,7 +48,7 @@ A repository may keep its own principles at `.skl/principles/<name>.md`, in the 
 
 - `prose/procedures/modules/principles.md` defines `project-principles`, the one block that lists each statement after its principle's name, in file-name order. Every Procedure rendered for a repository includes it once; it renders nothing when the repository has no principles. A template reads the list through the `principles` function, which Watchdog's review and the Audit step inside Implement also use to send the worker to a principle a Forbidden line cites.
 - `prose/procedures/principles.md` is the `principles` skill. It lists the statements, and its resources are the repository's principle files, so `.skl/principles/no-facade.md` is `skl skill --resource no-facade.md principles`.
-- `skl skill` renders for the repository containing the working directory, or `--repo`; Implement and Watchdog render for the principles of the Slice's Integration Target.
+- `skl skill` renders for the repository containing the working directory, or `--repo`; Implement and Watchdog render for the checkout at the `--repo` root, where acceptance also resolves citations.
 - A Contract's Forbidden line may cite `principle:<name>`; acceptance refuses a citation the source repository has no file for.
 
 The report format that `implement-report.md` and `watchdog-report.md` follow is documented for maintainers in `docs/report-schema.md`. It is not agent-visible.

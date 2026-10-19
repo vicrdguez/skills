@@ -47,4 +47,4 @@ Check: `skl skill verify` renders the file.
 From a fresh shell, following only what the file says, run one `executed` row end to end, or perform one journey through its sanity predicate. Where the file fell short, correct it and run again.
 
 Check: the row passed with the file as your only guide. Report the row, its command and its result, then hand over.
-{{template "project-principles"}}
+{{template "project-principles" -}}

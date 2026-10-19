@@ -105,4 +105,4 @@ In an amendment, the slices this step covers are the added and changed Slices th
 5. Read each accepted or changed slice back with `skl slice show --repo <root> --slice <proposal>/<slice>`. Cite its ledger commit and path when you identify a document exactly.
 
 Check: the readback shows every accepted or changed slice's recorded documents.
-{{template "project-principles"}}
+{{template "project-principles" -}}

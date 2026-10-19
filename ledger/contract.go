@@ -256,8 +256,10 @@ func lintForbidden(slice string, lines []contractLine, sources ContractSources) 
 	for _, line := range lines[start:end] {
 		for _, match := range principleCitation.FindAllStringSubmatch(line.text, -1) {
 			file := PrinciplesDirectory + match[1] + ".md"
-			if info, err := os.Stat(filepath.Join(sources.Repository, filepath.FromSlash(file))); sources.Repository != "" && err == nil && info.Mode().IsRegular() {
-				continue
+			if sources.Repository != "" {
+				if info, err := os.Stat(filepath.Join(sources.Repository, filepath.FromSlash(file))); err == nil && info.Mode().IsRegular() {
+					continue
+				}
 			}
 			missing := "the repository has no " + file
 			if sources.Repository == "" || !exists(filepath.Join(sources.Repository, filepath.FromSlash(PrinciplesDirectory))) {

@@ -6,4 +6,4 @@ Preparation is done, and the worktree's changes, index and commits are intact. R
 `{{.InspectCommand}}`
 
 Continue this Claim with `{{.ResumeCommand}}`{{if .ReleaseCommand}}, or release it with `{{.ReleaseCommand}}`{{end}}.
-{{template "project-principles"}}
+{{template "project-principles" -}}

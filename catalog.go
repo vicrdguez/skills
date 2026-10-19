@@ -278,11 +278,10 @@ func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
 }
 
 // templateFuncs is the deliberately small helper set authored templates
-// share. principles returns the project principles of the rendering.
+// share. render adds principles, the project principles of the rendering.
 var templateFuncs = template.FuncMap{
-	"quote":      ShellQuote,
-	"evidence":   evidenceBlock,
-	"principles": func() []ledger.Principle { return nil },
+	"quote":    ShellQuote,
+	"evidence": evidenceBlock,
 }
 
 // evidenceBlock chooses a fence that cannot be closed by opaque Markdown data.

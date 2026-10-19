@@ -2,7 +2,6 @@ package ledger_test
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -36,8 +35,8 @@ func TestParsePrincipleRefusesAnInvalidStatement(t *testing.T) {
 	}
 }
 
-// The working tree and a committed revision read the same principles, in
-// file-name order, skipping files that are not principles.
+// A checkout's principles read in file-name order, skipping files that are
+// not principles.
 func TestReadPrinciplesInFileNameOrder(t *testing.T) {
 	root := t.TempDir()
 	if principles, err := ledger.ReadPrinciples(root); err != nil || len(principles) != 0 {
@@ -58,25 +57,11 @@ func TestReadPrinciplesInFileNameOrder(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, command := range [][]string{{"init", "-q"}, {"add", "."}, {"-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "principles"}} {
-		if output, err := exec.Command("git", append([]string{"-C", root}, command...)...).CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", command, err, output)
-		}
-	}
 	working, err := ledger.ReadPrinciples(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	committed, err := ledger.ReadPrinciplesAt(root, "HEAD")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, principles := range [][]ledger.Principle{working, committed} {
-		if len(principles) != 2 || principles[0].Name != "a" || principles[0].Statement != "First." || principles[0].File != "---\nstatement: First.\n---\n\nWhy.\n" || principles[1].Name != "b" {
-			t.Fatalf("principles = %#v", principles)
-		}
-	}
-	if _, err := ledger.ReadPrinciplesAt(root, "missing-revision"); err == nil {
-		t.Fatal("an unavailable revision read as a repository without principles")
+	if len(working) != 2 || working[0].Name != "a" || working[0].Statement != "First." || working[0].File != "---\nstatement: First.\n---\n\nWhy.\n" || working[1].Name != "b" {
+		t.Fatalf("principles = %#v", working)
 	}
 }
