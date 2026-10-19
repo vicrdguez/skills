@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -50,6 +51,12 @@ func TestAcceptRefusesContractsThatFailLint(t *testing.T) {
 			[]string{"foundation", "intent.md", "B4"}},
 		{"a range citing a missing rule", replace("intent.md", "(B1–B2, A1)", "(B1–B3, A1)"),
 			[]string{"foundation", "intent.md", "B3"}},
+		{"a fenced citation of a missing rule", replace("intent.md", "## Manual", "```\nCites B9.\n```\n\n## Manual"),
+			[]string{"foundation", "intent.md", "B9"}},
+		{"a wide range missing its interior rules", func(files map[string]string) {
+			replace("intent.md", "(B1–B2, A1)", "(B1–B1002, A1)")(files)
+			files["behavior.md"] += "\n## B1002: Far rule\n"
+		}, []string{"foundation", "intent.md", "B3"}},
 		{"a Definition of Done bullet citing nothing", replace("intent.md", "## Manual", "- [ ] Everything works.\n\n## Manual"),
 			[]string{"foundation", "intent.md", "Everything works."}},
 		{"a commitment defined in behavior.md", func(files map[string]string) { files["behavior.md"] += "\n## A1: Misplaced commitment\n" },
@@ -107,7 +114,15 @@ func TestAcceptRecordsConformingContractsUnchanged(t *testing.T) {
 		"behavior.md": "# Minimal behavior\n\n## B1: The rule\n\nIt holds.\n",
 		"plan.md":     "# Minimal plan\n\n## Verification strategy\n\n| Covers | Check | Rank |\n| :--- | --- | ---: |\n| B1 | A test | `tests` |\n\n## Delegated\n\n## Forbidden\n",
 	}
-	for name, files := range map[string]map[string]string{"sourced": sourced, "minimal": minimal} {
+	wide := lintedContract()
+	var rules strings.Builder
+	for number := 3; number <= 1002; number++ {
+		fmt.Fprintf(&rules, "\n## B%d: Rule %d\n", number, number)
+	}
+	wide["behavior.md"] += rules.String()
+	wide["intent.md"] = strings.Replace(wide["intent.md"], "(B1–B2, A1)", "(B1–B1002, A1)", 1)
+	wide["plan.md"] = strings.Replace(wide["plan.md"], "| B1, B2, A1 |", "| B1-B1002, A1 |", 1)
+	for name, files := range map[string]map[string]string{"sourced": sourced, "minimal": minimal, "wide": wide} {
 		if outcome := cli.accept(t, root, writeProposal(t, "", lintSpec(name, files))); outcome.Status != "accepted" {
 			t.Fatalf("accept %s: %s", name, mustJSON(t, outcome))
 		}

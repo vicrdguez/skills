@@ -126,12 +126,11 @@ func sectionEnd(lines []contractLine, index int) int {
 	return len(lines)
 }
 
-// maxRange bounds the labels one range citation expands to; a wider range
-// cites only its two ends, and its far end resolves to nothing.
-const maxRange = 1000
-
 // citations lists the labels a text cites, expanding ranges such as B1–B3.
-func citations(text string) []string {
+// A range expands only while its labels are defined: the list ends at the
+// first undefined one, so a range of any width costs at most one label more
+// than the slice defines.
+func citations(text string, defined map[string]bool) []string {
 	var labels []string
 	for _, match := range citedLabel.FindAllStringSubmatch(text, -1) {
 		kind := match[1]
@@ -141,12 +140,16 @@ func citations(text string) []string {
 			continue
 		}
 		last, _ := strconv.Atoi(match[4])
-		if (match[3] != "" && match[3] != kind) || last-first > maxRange {
+		if (match[3] != "" && match[3] != kind) || last < first {
 			labels = append(labels, cmp.Or(match[3], kind)+match[4])
 			continue
 		}
 		for number := first + 1; number <= last; number++ {
-			labels = append(labels, kind+strconv.Itoa(number))
+			label := kind + strconv.Itoa(number)
+			labels = append(labels, label)
+			if !defined[label] {
+				break
+			}
 		}
 	}
 	return labels
@@ -207,22 +210,21 @@ func lintContract(slice string, contract map[string][]byte, ladder Ladder, sourc
 			labels = append(labels, label)
 		}
 	}
+	// Citations count anywhere in the text, fenced code included.
 	for _, name := range contractDocuments {
-		for _, line := range documents[name] {
-			for _, label := range citations(line.text) {
-				if !defined[label] {
-					return refuse(
-						"slice "+slice+" cites "+label+" in "+name+", and no document of the slice defines it",
-						"define "+label+" in its own document, or correct the citation",
-					)
-				}
+		for _, label := range citations(string(contract[name]), defined) {
+			if !defined[label] {
+				return refuse(
+					"slice "+slice+" cites "+label+" in "+name+", and no document of the slice defines it",
+					"define "+label+" in its own document, or correct the citation",
+				)
 			}
 		}
 	}
 	if err := lintDefinitionOfDone(slice, documents["intent.md"]); err != nil {
 		return err
 	}
-	if err := lintVerificationStrategy(slice, documents["plan.md"], labels, ladder); err != nil {
+	if err := lintVerificationStrategy(slice, documents["plan.md"], labels, defined, ladder); err != nil {
 		return err
 	}
 	return lintSources(slice, documents["plan.md"], sources, proposal)
@@ -244,7 +246,7 @@ func lintDefinitionOfDone(slice string, lines []contractLine) error {
 			}
 			text += " " + strings.TrimSpace(line.text)
 		}
-		if len(citations(text)) == 0 {
+		if len(citations(text, nil)) == 0 {
 			return refuse(
 				"slice "+slice+" has a Definition of Done bullet in intent.md that cites no label: "+strconv.Quote(lines[index].item),
 				"cite the B<n>, A<n> or T<n> labels the bullet covers",
@@ -257,7 +259,7 @@ func lintDefinitionOfDone(slice string, lines []contractLine) error {
 // lintVerificationStrategy requires the first table under the Verification
 // strategy of plan.md to have Covers, Check and Rank columns, a known rank in
 // every row, and a row covering every B<n> and A<n> label.
-func lintVerificationStrategy(slice string, lines []contractLine, labels []string, ladder Ladder) error {
+func lintVerificationStrategy(slice string, lines []contractLine, labels []string, defined map[string]bool, ladder Ladder) error {
 	start, end := section(lines, "Verification strategy")
 	var table [][]string
 	for index := start; index < end; index++ {
@@ -287,7 +289,7 @@ func lintVerificationStrategy(slice string, lines []contractLine, labels []strin
 				"name one of "+ladder.String()+" in the Rank cell",
 			)
 		}
-		for _, label := range citations(cells[0]) {
+		for _, label := range citations(cells[0], defined) {
 			covered[label] = true
 		}
 	}
