@@ -126,7 +126,8 @@ func sectionEnd(lines []contractLine, index int) int {
 	return len(lines)
 }
 
-// citations lists the labels a text cites, expanding ranges such as B1–B3.
+// citations lists the labels a text cites, expanding ranges such as B1–B3;
+// a range across kinds or written high to low cites its two ends.
 // A range expands only while its labels are defined: the list ends at the
 // first undefined one, so a range of any width costs at most one label more
 // than the slice defines.
@@ -221,7 +222,7 @@ func lintContract(slice string, contract map[string][]byte, ladder Ladder, sourc
 			}
 		}
 	}
-	if err := lintDefinitionOfDone(slice, documents["intent.md"]); err != nil {
+	if err := lintDefinitionOfDone(slice, documents["intent.md"], defined); err != nil {
 		return err
 	}
 	if err := lintVerificationStrategy(slice, documents["plan.md"], labels, defined, ladder); err != nil {
@@ -232,7 +233,7 @@ func lintContract(slice string, contract map[string][]byte, ladder Ladder, sourc
 
 // lintDefinitionOfDone requires every checklist bullet under the Definition of
 // Done of intent.md, with its continuation lines, to cite at least one label.
-func lintDefinitionOfDone(slice string, lines []contractLine) error {
+func lintDefinitionOfDone(slice string, lines []contractLine, defined map[string]bool) error {
 	start, end := section(lines, "Definition of Done")
 	for index := start; index < end; index++ {
 		if !lines[index].checklist {
@@ -246,7 +247,7 @@ func lintDefinitionOfDone(slice string, lines []contractLine) error {
 			}
 			text += " " + strings.TrimSpace(line.text)
 		}
-		if len(citations(text, nil)) == 0 {
+		if len(citations(text, defined)) == 0 {
 			return refuse(
 				"slice "+slice+" has a Definition of Done bullet in intent.md that cites no label: "+strconv.Quote(lines[index].item),
 				"cite the B<n>, A<n> or T<n> labels the bullet covers",

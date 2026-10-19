@@ -57,6 +57,8 @@ func TestAcceptRefusesContractsThatFailLint(t *testing.T) {
 			replace("intent.md", "(B1–B2, A1)", "(B1–B1002, A1)")(files)
 			files["behavior.md"] += "\n## B1002: Far rule\n"
 		}, []string{"foundation", "intent.md", "B3"}},
+		{"a reversed range citing a missing rule", replace("intent.md", "(B1–B2, A1)", "(B2–B0, A1)"),
+			[]string{"foundation", "intent.md", "B0"}},
 		{"a Definition of Done bullet citing nothing", replace("intent.md", "## Manual", "- [ ] Everything works.\n\n## Manual"),
 			[]string{"foundation", "intent.md", "Everything works."}},
 		{"a commitment defined in behavior.md", func(files map[string]string) { files["behavior.md"] += "\n## A1: Misplaced commitment\n" },
@@ -122,6 +124,9 @@ func TestAcceptRecordsConformingContractsUnchanged(t *testing.T) {
 	wide["behavior.md"] += rules.String()
 	wide["intent.md"] = strings.Replace(wide["intent.md"], "(B1–B2, A1)", "(B1–B1002, A1)", 1)
 	wide["plan.md"] = strings.Replace(wide["plan.md"], "| B1, B2, A1 |", "| B1-B1002, A1 |", 1)
+	if !strings.Contains(wide["intent.md"], "B1–B1002") || !strings.Contains(wide["plan.md"], "B1-B1002") {
+		t.Fatal("the wide Contract cites no wide range")
+	}
 	for name, files := range map[string]map[string]string{"sourced": sourced, "minimal": minimal, "wide": wide} {
 		if outcome := cli.accept(t, root, writeProposal(t, "", lintSpec(name, files))); outcome.Status != "accepted" {
 			t.Fatalf("accept %s: %s", name, mustJSON(t, outcome))
