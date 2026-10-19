@@ -459,19 +459,19 @@ func deliverySourceInputs(e *ledger.Execution, phase string) (head, target, prev
 	return
 }
 
-// checkVerdictRank requires a verdict rank of the ladder in force at the
-// reviewed head and, for a pass, no stronger than the weakest catalog row the
+// checkVerdictRank requires a pass to carry a rank, any verdict rank to be of
+// the ladder in force at the reviewed head and, for a pass, no stronger than the weakest catalog row the
 // plan cites for a B<n>.
 func checkVerdictRank(root, reviewed string, plan []byte, outcome, rank string) error {
-	if rank == "" {
-		return nil
-	}
 	verification, err := ledger.ReadVerificationAt(root, reviewed)
 	if err != nil {
 		return err
 	}
 	ladder := verification.LadderInForce()
-	if !ladder.Has(rank) {
+	if rank == "" && outcome == "pass" {
+		return fmt.Errorf("watchdog submit --outcome pass requires --rank, one of the ladder's ranks: %s", ladder)
+	}
+	if rank != "" && !ladder.Has(rank) {
 		return fmt.Errorf("--rank %s is not a rank of the ladder in force; its ranks are %s", rank, ladder)
 	}
 	bound, row := ledger.RankBound(ledger.CitedChecks(plan, verification), ladder)
@@ -504,9 +504,6 @@ func submitDelivery(c *cli.Context, phase, operation string, repository setup.Re
 			return refusal(fmt.Errorf("watchdog submit requires --outcome pass or rework"))
 		}
 		rank = c.String("rank")
-		if rank == "" && outcome == "pass" {
-			return refusal(fmt.Errorf("watchdog submit --outcome pass requires --rank, one of the ranks of the ladder in force"))
-		}
 	}
 	e, activeErr := ledger.ResumeDelivery(store, repository.Repository, c.String("slice"), phase, c.String("claim"))
 	source := ledger.SourceRevisions{Head: c.String("head"), Target: c.String("target")}

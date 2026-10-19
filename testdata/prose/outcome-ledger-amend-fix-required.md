@@ -1,8 +1,8 @@
 Status: fix_required
 
-Refused: slice foundation declares the new catalog row "health-corpus" in the plan.md Verification strategy (Covers B1), and no Definition of Done bullet in intent.md names it
+Refused: slice widget-search/foundation was claimed before (it is awaiting_review), so its Contract, title and planned branch stay as recorded
 
-Repair: add a Definition of Done bullet to intent.md that names health-corpus and the labels it covers
+Repair: restore its recorded intent.md in the intake; carry new obligations in an added Slice
 
 Make the repair, then rerun:
 

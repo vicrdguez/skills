@@ -98,7 +98,7 @@ func NewVerifyFacts(root string, verification *ledger.Verification) (*VerifyFact
 	if err != nil {
 		return nil, err
 	}
-	facts := &VerifyFacts{Repository: root, Ranks: verification.Ladder, Body: verification.Body}
+	facts := &VerifyFacts{Repository: root, Ranks: verification.Ladder, Body: strings.TrimLeft(verification.Body, "\n")}
 	for _, channel := range verification.Channels {
 		if slices.Contains(resources, channel+".md") && !slices.Contains(facts.Channels, channel) {
 			facts.Channels = append(facts.Channels, channel)

@@ -1,7 +1,3 @@
----
-ranks: [live, tests, build]
----
-
 # Widgets verification
 
 ## Launch

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	skills "github.com/vicrdguez/skills"
@@ -89,5 +90,26 @@ func assertActions(t *testing.T, actions []skills.InstallAction, want map[string
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("actions = %v, want %v", got, want)
+	}
+}
+
+// Every harness gets the verify stubs beside the existing ones; the create
+// and maintain stubs are invoked by the user only.
+func TestInstallPlacesTheVerifyStubsOnEveryHarness(t *testing.T) {
+	home := t.TempDir()
+	if _, err := skills.Install(home); err != nil {
+		t.Fatal(err)
+	}
+	for _, directory := range []string{".pi/agent/skills", ".codex/skills", ".claude/skills", ".config/opencode/skills"} {
+		for name, userInvoked := range map[string]bool{"verify": false, "verify-create": true, "verify-maintain": true, "testing": false} {
+			stub, err := os.ReadFile(filepath.Join(home, directory, name, "SKILL.md"))
+			if err != nil {
+				t.Fatalf("%s holds no %s stub: %v", directory, name, err)
+			}
+			text := string(stub)
+			if !strings.Contains(text, "Run `skl skill "+name+"`.") || strings.Contains(text, "disable-model-invocation: true") != userInvoked {
+				t.Fatalf("%s/%s stub:\n%s", directory, name, text)
+			}
+		}
 	}
 }

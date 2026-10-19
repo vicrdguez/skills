@@ -198,7 +198,7 @@ func TestAgentProseGoldens(t *testing.T) {
 	source, _ := deliverySourceRepo(t)
 	// The source repository has a verification skill with a journey, so the
 	// Contract cites catalog rows and the delivery renderings bind them.
-	writeFile(t, filepath.Join(source, ".skl", "verify.md"), proseFixture(t, "verify.md"))
+	writeFile(t, filepath.Join(source, ".skl", "verify.md"), "---\nranks: [live, tests, build]\n---\n\n"+proseFixture(t, "verify.md"))
 	writeFile(t, filepath.Join(source, ".skl", "journeys", "dashboard.md"), proseFixture(t, "journey-dashboard.md"))
 	runGit(t, source, "add", ".skl")
 	runGit(t, source, "commit", "-q", "-m", "verification skill")
@@ -465,7 +465,7 @@ func TestAgentProseGoldens(t *testing.T) {
 	}
 	g.capture("outcome-ledger-amend-existing", proposer, "proposal", "amend", "--repo", source, "--proposal-dir", amendIntake("widget-share"))
 	submittedIntake := amendIntake("widget-search")
-	writeFile(t, filepath.Join(submittedIntake, "foundation", "intent.md"), "# Search intent, revised\n")
+	writeFile(t, filepath.Join(submittedIntake, "foundation", "intent.md"), strings.Replace(contract["intent.md"], "# Dashboard foundation", "# Search intent, revised", 1))
 	g.capture("outcome-ledger-amend-fix-required", proposer, "proposal", "amend", "--repo", source, "--proposal-dir", submittedIntake)
 	grown := amendIntake("widget-share")
 	addIntakeSlice(t, grown, "followup", "foundation")
@@ -487,8 +487,8 @@ func TestAgentProseGoldens(t *testing.T) {
 		case "implement", "watchdog":
 			g.capture("outcome-skill-"+name, worker, "skill", name)
 		case "verify":
-			g.capture("skill-verify", worker, "skill", "verify", "--repo", source)
-			g.capture("outcome-skill-verify-missing", worker, "skill", "verify", "--repo", fixture.clone)
+			g.capture("skill-verify", worker, "skill", "--repo", source, "verify")
+			g.capture("outcome-skill-verify-missing", worker, "skill", "--repo", fixture.clone, "verify")
 		default:
 			g.capture("skill-"+name, worker, "skill", name)
 		}
