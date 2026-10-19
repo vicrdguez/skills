@@ -125,7 +125,7 @@ Run each check the Verification strategy cites, as `.skl/verify.md` defines it a
 
 - `widget-tests` `TestUnhealthyWidgetListed`, for B1: run `go test ./...`; expect every test passes, the cited test among them; rank `tests`.
 - `dashboard`, for B1: perform the journey `.skl/journeys/dashboard.md`; expect the page shows what the cited rule expects; rank `live`.
-- `health-corpus` `unhealthy-widget`, for B1: a row this slice adds, which `.skl/verify.md` here does not hold yet.
+- `health-corpus` `unhealthy-widget`, for B1: a row this slice adds, missing from `.skl/verify.md` here.
 
 Check: every cited check has its result.
 

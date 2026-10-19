@@ -186,6 +186,9 @@ func TestReadVerificationAtReadsACommittedSkill(t *testing.T) {
 	if _, err := ledger.ReadVerificationAt(root, "HEAD"); err == nil || !strings.Contains(err.Error(), ".skl/journeys/checkout.md") {
 		t.Fatalf("a revision without the journey file was read: %v", err)
 	}
+	if _, err := ledger.ReadVerificationAt(root, strings.Repeat("0", 40)); err == nil {
+		t.Fatal("an unavailable revision read as a repository without a skill")
+	}
 	git("rm", "-q", "--cached", ".skl/verify.md")
 	git("commit", "-q", "-m", "drop the skill")
 	if verification, err := ledger.ReadVerificationAt(root, "HEAD"); err != nil || verification != nil {

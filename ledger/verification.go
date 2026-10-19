@@ -99,8 +99,12 @@ func ReadVerification(root string) (*Verification, error) {
 }
 
 // ReadVerificationAt reads the verification skill committed at revision of
-// the repository at root. It returns nil when that revision has none.
+// the repository at root. It returns nil when that revision has none, and
+// refuses a revision the repository lacks.
 func ReadVerificationAt(root, revision string) (*Verification, error) {
+	if !gitOK(root, "rev-parse", "--verify", "--quiet", revision+"^{commit}") {
+		return nil, refuse("revision "+revision+" is unavailable in "+root+", so its "+VerificationFile+" cannot be read", "fetch or restore that revision, then retry")
+	}
 	return parseVerification(func(name string) ([]byte, error) {
 		object := revision + ":" + name
 		if !gitOK(root, "cat-file", "-e", object) {

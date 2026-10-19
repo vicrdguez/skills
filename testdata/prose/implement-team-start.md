@@ -116,11 +116,11 @@ Check: every patch has reported.
 
 When every patch is in, make one pass that gets the combined change building and passing: format it, make it compile, fit the interfaces together, settle where the patches disagree, and run the focused checks. Send a failure that traces to one patch back to its implementer as a narrow repair task.
 
-Before Audit, add to `.skl/verify.md` each row this slice adds, then run each check the Verification strategy cites, as the worktree's `.skl/verify.md` defines it, and record its result and rank in the report's Verification section:
+Before Audit, add to `.skl/verify.md` each row this slice adds. Then run each check the Verification strategy cites, as the worktree's `.skl/verify.md` defines it, and record its result and rank in the report's Verification section:
 
 - `widget-tests` `TestUnhealthyWidgetListed`, for B1: run `go test ./...`; expect every test passes, the cited test among them; rank `tests`.
 - `dashboard`, for B1: perform the journey `.skl/journeys/dashboard.md`; expect the page shows what the cited rule expects; rank `live`.
-- `health-corpus` `unhealthy-widget`, for B1: a row this slice adds, which `.skl/verify.md` here does not hold yet.
+- `health-corpus` `unhealthy-widget`, for B1: a row this slice adds, missing from `.skl/verify.md` here.
 
 Check: every `B<n>`, `A<n>` and warranted `T<n>` has evidence, every cited check has its result, and the focused checks pass.
 

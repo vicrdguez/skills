@@ -48,6 +48,14 @@ func TestDeliveryBindsCitedChecksAndBoundsTheVerdict(t *testing.T) {
 	worktree := prepared.Source.Worktree
 	added := strings.Replace(lintSkill, "| every route | |\n", "| every route | |\n| corpus-case | oracle | executed | `make corpus CASE=18` | case 18 passes | corpus |\n", 1)
 	writeFile(t, filepath.Join(worktree, ".skl", "verify.md"), added)
+	// Once prepared, Implement reads the worktree, where the row now exists.
+	resumed, err := cli.deliveryJSON(t, "skl", "implement", "resume", "--repo", source, "--slice", item, "--claim", claim, "--format", "json")
+	if err != nil || resumed.Packet == nil {
+		t.Fatalf("implement resume: %#v %v", resumed, err)
+	}
+	if fragment := "- `corpus-case` `18`, for B2: run `make corpus CASE=18`"; !strings.Contains(resumed.Packet.Instructions, fragment) {
+		t.Fatalf("resumed instructions lack %q:\n%s", fragment, resumed.Packet.Instructions)
+	}
 	writeFile(t, filepath.Join(worktree, "feature.txt"), "second rule\n")
 	runGit(t, worktree, "add", "-A")
 	runGit(t, worktree, "commit", "-q", "-m", "add the corpus case")

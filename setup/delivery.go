@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -86,7 +85,8 @@ func IntegrationRef(repository RepositoryContext, state ledger.SliceState) strin
 // before preparation creates it, at the Integration Target it starts from.
 func deliveryVerification(repository RepositoryContext, state ledger.SliceState, phase, worktree, reviewed string) (*ledger.Verification, error) {
 	if phase == ledger.WatchdogPhase {
-		if reviewed == "" {
+		// A reviewed head that preparation has yet to fetch binds no checks.
+		if _, err := git(repository.Root, "rev-parse", "--verify", "--quiet", reviewed+"^{commit}"); reviewed == "" || err != nil {
 			return nil, nil
 		}
 		return ledger.ReadVerificationAt(repository.Root, reviewed)
@@ -96,7 +96,10 @@ func deliveryVerification(repository RepositoryContext, state ledger.SliceState,
 	}
 	// An absent Proposal Branch starts from main.
 	for _, ref := range []string{IntegrationRef(repository, state), "refs/remotes/" + repository.Remote + "/main"} {
-		if ref != "" && exec.Command("git", "-C", repository.Root, "rev-parse", "--verify", "--quiet", ref+"^{commit}").Run() == nil {
+		if ref == "" {
+			continue
+		}
+		if _, err := git(repository.Root, "rev-parse", "--verify", "--quiet", ref+"^{commit}"); err == nil {
 			return ledger.ReadVerificationAt(repository.Root, ref)
 		}
 	}

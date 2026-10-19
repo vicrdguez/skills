@@ -85,10 +85,10 @@ type InvocationFacts struct {
 // its ladder, its body after the frontmatter, and the channel resources its
 // Channels section names.
 type VerifyFacts struct {
-	Repository string   `json:"repository"`
-	Ranks      []string `json:"ranks"`
-	Channels   []string `json:"channels"`
-	Body       string   `json:"body"`
+	Repository string        `json:"repository"`
+	Ranks      ledger.Ladder `json:"ranks"`
+	Channels   []string      `json:"channels"`
+	Body       string        `json:"body"`
 }
 
 // NewVerifyFacts binds verification, the skill of the repository at root.

@@ -550,6 +550,8 @@ func submitDelivery(c *cli.Context, phase, operation string, repository setup.Re
 			if source.Head == "" {
 				source.Head = source.Reviewed
 			}
+			// A replay matches the recorded report, whose rank passed the bound
+			// when it was submitted; only the ladder is checked again.
 			if err := checkVerdictRank(repository.Root, source.Reviewed, nil, outcome, rank); err != nil {
 				return refusal(err)
 			}

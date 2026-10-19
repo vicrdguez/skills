@@ -20,7 +20,7 @@ Retrieve the craft of each channel and decide whether the repository has it:
 - `static`: `skl skill --resource static.md verify`
 - `human-observed`: `skl skill --resource human-observed.md verify`
 
-Note a way of observing the system that none of these names covers as its own Channels item, with what it observes, and catalog its checks as the nearest channel's craft suggests.
+Note a way of observing the system outside these seven as its own Channels item, with what it observes, and catalog its checks as the nearest channel's craft suggests.
 
 Check: each of the seven channels is present or absent, with the file or command that shows it.
 

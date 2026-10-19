@@ -91,11 +91,11 @@ This Claim already has work. Establish from the branch and the facts above what 
 
 Build in any order, refactor whenever it helps, and run the typecheck and focused checks as you go. For additions and extensions, establish agreement for consequences such as authority, coordination, blocking later work, persistence lifetime and recovery ownership. Inspect an inherited mechanism when your change relies on its effects; leave unrelated inherited code alone. Its prior existence, private placement, small size or passing checks do not settle new consequences. Choose details freely within accepted behavior, architecture and mandatory standards, and implement clearly implied cases. If a consequential choice remains open, finish unblocked work and use the human-decision pause below; if resolving it changes frozen obligations, seek renewed proposal. Repair a concrete violation against the accepted outcome, but treat a reviewer's suggested mechanism or disposition as evidence, not permission for a new protocol.
 
-Before Audit, add to `.skl/verify.md` each row this slice adds, then run each check the Verification strategy cites, as the worktree's `.skl/verify.md` defines it, and record its result and rank in the report's Verification section:
+Before Audit, add to `.skl/verify.md` each row this slice adds. Then run each check the Verification strategy cites, as the worktree's `.skl/verify.md` defines it, and record its result and rank in the report's Verification section:
 
 - `widget-tests` `TestUnhealthyWidgetListed`, for B1: run `go test ./...`; expect every test passes, the cited test among them; rank `tests`.
 - `dashboard`, for B1: perform the journey `.skl/journeys/dashboard.md`; expect the page shows what the cited rule expects; rank `live`.
-- `health-corpus` `unhealthy-widget`, for B1: a row this slice adds, which `.skl/verify.md` here does not hold yet.
+- `health-corpus` `unhealthy-widget`, for B1: a row this slice adds, missing from `.skl/verify.md` here.
 
 Check: every `B<n>`, `A<n>` and warranted `T<n>` has evidence, every cited check has its result, and the focused checks pass.
 
