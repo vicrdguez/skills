@@ -122,7 +122,7 @@ func LoadDeclaration(directory string, bodies map[string][]byte, parentBody []by
 			return nil, err
 		}
 		if !sources.recordedUnchanged(declaration.Proposal, slice.Name, contract) {
-			if err := lintContract(slice.Name, contract, BuiltinLadder, sources, declaration.Proposal); err != nil {
+			if err := lintContract(slice.Name, contract, sources, declaration.Proposal); err != nil {
 				return nil, err
 			}
 		}

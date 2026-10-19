@@ -195,7 +195,15 @@ func TestAgentProseGoldens(t *testing.T) {
 	g := newProseGoldens(t)
 	fixture := newLedgerFixture(t)
 	forge := newForgeServer(t)
-	source, target := deliverySourceRepo(t)
+	source, _ := deliverySourceRepo(t)
+	// The source repository has a verification skill with a journey, so the
+	// Contract cites catalog rows and the delivery renderings bind them.
+	writeFile(t, filepath.Join(source, ".skl", "verify.md"), proseFixture(t, "verify.md"))
+	writeFile(t, filepath.Join(source, ".skl", "journeys", "dashboard.md"), proseFixture(t, "journey-dashboard.md"))
+	runGit(t, source, "add", ".skl")
+	runGit(t, source, "commit", "-q", "-m", "verification skill")
+	target := deliveryTrimmed(t, source, "rev-parse", "HEAD")
+	runGit(t, source, "update-ref", "refs/remotes/origin/main", target)
 	temp := t.TempDir()
 	t.Setenv("TMPDIR", temp)
 	g.replace(source, "/work/widgets")
@@ -475,11 +483,15 @@ func TestAgentProseGoldens(t *testing.T) {
 	// Standalone Execution Skills, the refusals for the delivered ones, and
 	// every named resource a rendering tells the worker to retrieve.
 	for _, name := range skilldist.SkillNames() {
-		if name == "implement" || name == "watchdog" {
+		switch name {
+		case "implement", "watchdog":
 			g.capture("outcome-skill-"+name, worker, "skill", name)
-			continue
+		case "verify":
+			g.capture("skill-verify", worker, "skill", "verify", "--repo", source)
+			g.capture("outcome-skill-verify-missing", worker, "skill", "verify", "--repo", fixture.clone)
+		default:
+			g.capture("skill-"+name, worker, "skill", name)
 		}
-		g.capture("skill-"+name, worker, "skill", name)
 	}
 	resources := map[string][]string{
 		"audit":              {"acceptance.md", "smells.md"},
@@ -489,6 +501,8 @@ func TestAgentProseGoldens(t *testing.T) {
 		"propose":            {"behavior.md", "intent.md", "plan.md", "tasks.md"},
 		"implement":          {"pull-presentation.md"},
 		"testing":            {"mocking.md", "tests.md"},
+		"verify":             {"driven-surface.md", "human-observed.md", "introspection.md", "oracle.md", "process.md", "static.md", "tests.md"},
+		"verify-create":      {"journey.md", "verify.md"},
 		"watchdog":           {"pull-presentation.md"},
 		"writing-for-agents": {"SKILL-MECHANICS.md"},
 	}

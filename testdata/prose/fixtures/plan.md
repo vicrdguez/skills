@@ -12,4 +12,6 @@
 
 | Covers | Check | Rank |
 | --- | --- | --- |
-| B1 | Dashboard test listing a widget whose last check failed as unhealthy | tests |
+| B1 | widget-tests TestUnhealthyWidgetListed | tests |
+| B1 | dashboard | live |
+| B1 | new health-corpus unhealthy-widget | tests |

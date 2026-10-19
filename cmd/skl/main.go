@@ -2,11 +2,13 @@ package main
 
 import (
 	"bufio"
+	"cmp"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -14,6 +16,7 @@ import (
 	"github.com/urfave/cli/v2"
 	skilldist "github.com/vicrdguez/skills"
 	"github.com/vicrdguez/skills/github"
+	"github.com/vicrdguez/skills/ledger"
 	"github.com/vicrdguez/skills/setup"
 )
 
@@ -73,12 +76,16 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 			&cli.StringFlag{Name: "resource", Usage: "Retrieve one exact owner-relative resource as raw text"},
 			newInputFlag(),
 			&cli.BoolFlag{Name: "describe-inputs", Usage: "Describe the named resource's accepted inputs as raw text without rendering it; cannot combine with --input"},
+			&cli.PathFlag{Name: "repo", Usage: "Repository whose .skl/verify.md the verify skill renders (default: the repository containing the working directory)"},
 		},
 		Action: func(command *cli.Context) error {
 			if command.NArg() != 1 {
 				return fmt.Errorf("skill name is required")
 			}
 			name := command.Args().First()
+			if command.IsSet("repo") && (name != "verify" || command.IsSet("resource")) {
+				return fmt.Errorf("--repo applies only to whole-skill retrieval of verify")
+			}
 			resource := command.String("resource")
 			describe := command.Bool("describe-inputs")
 			inputs := inputValues(command)
@@ -122,7 +129,15 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 				_, err = stdout.Write(contents)
 				return err
 			}
-			packet, err := skilldist.BuildPacket(name, skilldist.InvocationFacts{})
+			var facts skilldist.InvocationFacts
+			if name == "verify" {
+				verify, err := verifyFacts(cmp.Or(command.Path("repo"), "."))
+				if err != nil {
+					return err
+				}
+				facts.Verify = verify
+			}
+			packet, err := skilldist.BuildPacket(name, facts)
 			if err != nil {
 				return err
 			}
@@ -234,4 +249,22 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+// verifyFacts binds the verify skill to the verification skill of the
+// repository containing directory.
+func verifyFacts(directory string) (*skilldist.VerifyFacts, error) {
+	output, err := exec.Command("git", "-C", directory, "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		return nil, fmt.Errorf("%s is not inside a Git repository; run skl skill verify inside the repository or pass --repo", directory)
+	}
+	root := strings.TrimSpace(string(output))
+	verification, err := ledger.ReadVerification(root)
+	if err != nil {
+		return nil, err
+	}
+	if verification == nil {
+		return nil, fmt.Errorf("%s has no %s; create it with the verify-create skill: skl skill verify-create", root, ledger.VerificationFile)
+	}
+	return skilldist.NewVerifyFacts(root, verification)
 }

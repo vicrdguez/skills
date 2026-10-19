@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -536,6 +537,17 @@ func (s *Store) requireReconciled() error {
 	}
 	if diverged {
 		return refuse("known competing ledger history requires reconciliation", "preserve local results and reconcile the ledger explicitly before granting more work")
+	}
+	return nil
+}
+
+// ContractFile returns the supplied Contract document called name, such as
+// plan.md, or nil when the Contract has none.
+func (e *Execution) ContractFile(name string) []byte {
+	for _, document := range e.Documents {
+		if path.Base(document.Path) == name {
+			return []byte(document.Contents)
+		}
 	}
 	return nil
 }

@@ -18,7 +18,14 @@ You judge the Contract: `intent.md`, `behavior.md`, and any `plan.md` or `tasks.
 {{evidence .Contents}}
 {{end}}{{else}}No document was supplied. Stop and report that the Contract and the implementation report are missing.
 {{end}}
-## Review
+{{with .Checks}}## Cited checks
+
+Run each check the Verification strategy cites, as `.skl/verify.md` defines it at the reviewed source, and record its result and rank in the report. A row this slice adds that the reviewed source lacks is a finding.
+
+{{template "cited-checks" .}}
+Check: every cited check has its result.
+
+{{end}}## Review
 
 1. Run the Full Gate yourself: the full suite, typecheck and lint. A green suite you did not run is not evidence.
 2. Check the report's completion table: every `B<n>`, `A<n>` and warranted `T<n>` is `complete` or `incomplete`, and a missing entry is `incomplete`. Is each `complete` true at this head? Leave the `M<n>` Manual Verification items to the human.

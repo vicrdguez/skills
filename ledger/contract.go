@@ -40,12 +40,20 @@ func (l Ladder) String() string { return strings.Join(l, ", ") }
 type ContractSources struct {
 	Repository string
 	Proposals  string
+	// Verification is the source repository's verification skill, or nil
+	// when it has none.
+	Verification *Verification
 }
 
 // ContractSources returns the lint sources of the repository's Project, whose
-// source checkout is at root.
-func (s *Store) ContractSources(root string, repository github.RepositoryID) ContractSources {
-	return ContractSources{Repository: root, Proposals: filepath.Join(s.Root, projectsRoot, repository.Name, "proposals")}
+// source checkout is at root, together with that checkout's verification
+// skill. A malformed skill is refused.
+func (s *Store) ContractSources(root string, repository github.RepositoryID) (ContractSources, error) {
+	verification, err := ReadVerification(root)
+	if err != nil {
+		return ContractSources{}, err
+	}
+	return ContractSources{Repository: root, Proposals: filepath.Join(s.Root, projectsRoot, repository.Name, "proposals"), Verification: verification}, nil
 }
 
 // definitionHomes says where each label kind is defined: its document, and
@@ -72,8 +80,10 @@ var (
 )
 
 // contractLine is one line of a Contract document outside fenced code, with
-// its heading level (0 when it is no heading) or checklist text.
+// its 1-based line number, its heading level (0 when it is no heading) or
+// checklist text.
 type contractLine struct {
+	number    int
 	text      string
 	level     int
 	heading   string
@@ -84,7 +94,7 @@ type contractLine struct {
 func readContractLines(contents []byte) []contractLine {
 	var lines []contractLine
 	fenced := false
-	for _, text := range strings.Split(strings.ReplaceAll(string(contents), "\r\n", "\n"), "\n") {
+	for index, text := range strings.Split(strings.ReplaceAll(string(contents), "\r\n", "\n"), "\n") {
 		if fenceLine.MatchString(text) {
 			fenced = !fenced
 			continue
@@ -92,7 +102,7 @@ func readContractLines(contents []byte) []contractLine {
 		if fenced {
 			continue
 		}
-		line := contractLine{text: text}
+		line := contractLine{number: index + 1, text: text}
 		if match := headingLine.FindStringSubmatch(text); match != nil {
 			line.level, line.heading = len(match[1]), match[2]
 		} else if match := checklistLine.FindStringSubmatch(text); match != nil {
@@ -159,7 +169,7 @@ func citations(text string, defined map[string]bool) []string {
 // lintContract checks one slice's Contract against the label grammar, the
 // Verification strategy and the sources its architectural commitments cite.
 // It returns the first refusal, naming the slice, the document and the label.
-func lintContract(slice string, contract map[string][]byte, ladder Ladder, sources ContractSources, proposal string) error {
+func lintContract(slice string, contract map[string][]byte, sources ContractSources, proposal string) error {
 	if _, ok := contract["plan.md"]; !ok {
 		return refuse(
 			"slice "+slice+" has no plan.md",
@@ -222,18 +232,25 @@ func lintContract(slice string, contract map[string][]byte, ladder Ladder, sourc
 			}
 		}
 	}
-	if err := lintDefinitionOfDone(slice, documents["intent.md"], defined); err != nil {
+	done := definitionOfDone(documents["intent.md"])
+	if err := lintDefinitionOfDone(slice, done, defined); err != nil {
 		return err
 	}
-	if err := lintVerificationStrategy(slice, documents["plan.md"], labels, defined, ladder); err != nil {
+	if err := lintVerificationStrategy(slice, documents["plan.md"], labels, defined, sources.Verification, done); err != nil {
 		return err
 	}
 	return lintSources(slice, documents["plan.md"], sources, proposal)
 }
 
-// lintDefinitionOfDone requires every checklist bullet under the Definition of
-// Done of intent.md, with its continuation lines, to cite at least one label.
-func lintDefinitionOfDone(slice string, lines []contractLine, defined map[string]bool) error {
+// doneBullet is one checklist bullet under the Definition of Done of
+// intent.md: its first line, and its text with the continuation lines.
+type doneBullet struct {
+	item string
+	text string
+}
+
+func definitionOfDone(lines []contractLine) []doneBullet {
+	var bullets []doneBullet
 	start, end := section(lines, "Definition of Done")
 	for index := start; index < end; index++ {
 		if !lines[index].checklist {
@@ -247,9 +264,18 @@ func lintDefinitionOfDone(slice string, lines []contractLine, defined map[string
 			}
 			text += " " + strings.TrimSpace(line.text)
 		}
-		if len(citations(text, defined)) == 0 {
+		bullets = append(bullets, doneBullet{item: lines[index].item, text: text})
+	}
+	return bullets
+}
+
+// lintDefinitionOfDone requires every Definition of Done bullet to cite at
+// least one label.
+func lintDefinitionOfDone(slice string, bullets []doneBullet, defined map[string]bool) error {
+	for _, bullet := range bullets {
+		if len(citations(bullet.text, defined)) == 0 {
 			return refuse(
-				"slice "+slice+" has a Definition of Done bullet in intent.md that cites no label: "+strconv.Quote(lines[index].item),
+				"slice "+slice+" has a Definition of Done bullet in intent.md that cites no label: "+strconv.Quote(bullet.item),
 				"cite the B<n>, A<n> or T<n> labels the bullet covers",
 			)
 		}
@@ -257,40 +283,79 @@ func lintDefinitionOfDone(slice string, lines []contractLine, defined map[string
 	return nil
 }
 
-// lintVerificationStrategy requires the first table under the Verification
-// strategy of plan.md to have Covers, Check and Rank columns, a known rank in
-// every row, and a row covering every B<n> and A<n> label.
-func lintVerificationStrategy(slice string, lines []contractLine, labels []string, defined map[string]bool, ladder Ladder) error {
-	start, end := section(lines, "Verification strategy")
-	var table [][]string
-	for index := start; index < end; index++ {
-		text := strings.TrimSpace(lines[index].text)
-		if !strings.HasPrefix(text, "|") {
-			if table != nil {
-				break
-			}
-			continue
+// strategyRow is one row of the plan.md Verification strategy, with the
+// labels its Covers cell cites.
+type strategyRow struct {
+	covers, check, rank string
+	labels              []string
+}
+
+// rule is the first B<n> label the row covers, or "" when it covers none.
+func (r strategyRow) rule() string {
+	for _, label := range r.labels {
+		if label[0] == 'B' {
+			return label
 		}
-		table = append(table, tableCells(text))
 	}
-	if len(table) < 2 || !tableHeader(table[0]) || !tableDelimiter(table[1]) {
+	return ""
+}
+
+// verificationStrategy reads the first table under the Verification strategy
+// of plan.md; ok is false when the table or its Covers, Check and Rank header
+// is missing.
+func verificationStrategy(lines []contractLine, defined map[string]bool) (rows []strategyRow, ok bool) {
+	start, end := section(lines, "Verification strategy")
+	table, _ := firstTable(lines, start, end)
+	if len(table) < 2 || !tableHeader(table[0], "Covers", "Check", "Rank") || !tableDelimiter(table[1]) {
+		return nil, false
+	}
+	for _, cells := range table[2:] {
+		// Pad a short row so its Covers and Rank cells read as empty.
+		cells = append(cells, "", "", "")
+		rows = append(rows, strategyRow{covers: cells[0], check: cells[1], rank: strings.Trim(cells[2], "` "), labels: citations(cells[0], defined)})
+	}
+	return rows, true
+}
+
+// catalogCitation reads the catalog row a Check cell names: its first word,
+// or the word after a leading new, which declares a row the slice adds. The
+// rest of the cell is the case identifier.
+func catalogCitation(check string) (name, identifier string, added bool) {
+	words := strings.Fields(check)
+	if len(words) > 1 && strings.Trim(words[0], "`") == "new" {
+		added, words = true, words[1:]
+	}
+	if len(words) == 0 {
+		return "", "", false
+	}
+	return strings.Trim(words[0], "`"), strings.Join(words[1:], " "), added
+}
+
+// lintVerificationStrategy requires the Verification strategy table, a rank of
+// the ladder in force in every row, and a row covering every B<n> and A<n>
+// label. With a catalog, a row covering a B<n> cites an executed or journey
+// row, and a row declared new is named by a Definition of Done bullet.
+func lintVerificationStrategy(slice string, lines []contractLine, labels []string, defined map[string]bool, verification *Verification, done []doneBullet) error {
+	rows, ok := verificationStrategy(lines, defined)
+	if !ok {
 		return refuse(
 			"slice "+slice+" has no Verification strategy table with Covers, Check and Rank columns in plan.md",
 			"add a Markdown table under ## Verification strategy in plan.md whose header is | Covers | Check | Rank |",
 		)
 	}
+	ladder := verification.LadderInForce()
 	covered := map[string]bool{}
-	for row, cells := range table[2:] {
-		// Pad a short row so its Covers and Rank cells read as empty.
-		cells = append(cells, "", "", "")
-		rank := strings.Trim(cells[2], "` ")
-		if !ladder.Has(rank) {
+	for index, row := range rows {
+		if !ladder.Has(row.rank) {
 			return refuse(
-				"slice "+slice+" names the unknown rank "+strconv.Quote(rank)+" in row "+strconv.Itoa(row+1)+" (Covers "+cells[0]+") of the plan.md Verification strategy; the ladder in force is "+ladder.String(),
+				"slice "+slice+" names the unknown rank "+strconv.Quote(row.rank)+" in row "+strconv.Itoa(index+1)+" (Covers "+row.covers+") of the plan.md Verification strategy; the ladder in force is "+ladder.String(),
 				"name one of "+ladder.String()+" in the Rank cell",
 			)
 		}
-		for _, label := range citations(cells[0], defined) {
+		if err := lintCitation(slice, row, verification, done); err != nil {
+			return err
+		}
+		for _, label := range row.labels {
 			covered[label] = true
 		}
 	}
@@ -303,6 +368,62 @@ func lintVerificationStrategy(slice string, lines []contractLine, labels []strin
 		}
 	}
 	return nil
+}
+
+// lintCitation checks the catalog row one Verification strategy row cites.
+// Without a catalog, every Check cell is free text.
+func lintCitation(slice string, row strategyRow, verification *Verification, done []doneBullet) error {
+	if verification == nil {
+		return nil
+	}
+	name, _, added := catalogCitation(row.check)
+	rule := row.rule()
+	if added {
+		named := regexp.MustCompile(`(^|[^A-Za-z0-9_.-])` + regexp.QuoteMeta(name) + `($|[^A-Za-z0-9_-])`)
+		for _, bullet := range done {
+			if named.MatchString(bullet.text) {
+				return nil
+			}
+		}
+		return refuse(
+			"slice "+slice+" declares the new catalog row "+strconv.Quote(name)+" in the plan.md Verification strategy (Covers "+row.covers+"), and no Definition of Done bullet in intent.md names it",
+			"add a Definition of Done bullet to intent.md that names "+name+" and the labels it covers",
+		)
+	}
+	if rule == "" {
+		return nil
+	}
+	cited := verification.Row(name)
+	if cited == nil {
+		return refuse(
+			"slice "+slice+" cites the catalog row "+strconv.Quote(name)+" for "+rule+" in the plan.md Verification strategy, and "+VerificationFile+" has no row of that name; its rows are "+verification.RowNames(),
+			"start the Check cell with the name of an executed or journey row of "+VerificationFile+", or declare a row this slice adds with new <name> and a Definition of Done bullet naming it",
+		)
+	}
+	if cited.Kind != ExecutedCheck && cited.Kind != JourneyCheck {
+		return refuse(
+			"slice "+slice+" cites the "+cited.Kind+" catalog row "+strconv.Quote(name)+" for "+rule+" in the plan.md Verification strategy, and only an executed or journey row can cover a B<n> rule",
+			"cite an executed or journey row of "+VerificationFile+" for "+rule+"; a "+cited.Kind+" row may still support A<n> rows",
+		)
+	}
+	return nil
+}
+
+// firstTable returns the rows of the first Markdown table between start and
+// end, split into cells, with the line number of each row.
+func firstTable(lines []contractLine, start, end int) (rows [][]string, numbers []int) {
+	for index := start; index < end; index++ {
+		text := strings.TrimSpace(lines[index].text)
+		if !strings.HasPrefix(text, "|") {
+			if rows != nil {
+				break
+			}
+			continue
+		}
+		rows = append(rows, tableCells(text))
+		numbers = append(numbers, lines[index].number)
+	}
+	return rows, numbers
 }
 
 // tableCells splits one Markdown table row on its unescaped pipes.
@@ -325,8 +446,18 @@ func tableCells(row string) []string {
 	return append(cells, strings.TrimSpace(cell.String()))
 }
 
-func tableHeader(cells []string) bool {
-	return len(cells) == 3 && strings.EqualFold(cells[0], "Covers") && strings.EqualFold(cells[1], "Check") && strings.EqualFold(cells[2], "Rank")
+// tableHeader reports whether cells are exactly the header names, in order,
+// ignoring case.
+func tableHeader(cells []string, names ...string) bool {
+	if len(cells) != len(names) {
+		return false
+	}
+	for index, name := range names {
+		if !strings.EqualFold(cells[index], name) {
+			return false
+		}
+	}
+	return true
 }
 
 var delimiterCell = regexp.MustCompile(`^:?-+:?$`)

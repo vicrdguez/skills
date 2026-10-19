@@ -32,8 +32,11 @@ Check: inspection prints the source head.
 {{if eq .Mode "team"}}Lead a team of implementer subagents. You keep the Claim and every workflow operation: commits, pushes, `skl` commands, the Audit and the handoff.{{with .Helper}} Run each implementer{{template "subagent-choice" .}}.{{end}} {{template "implement-judgment"}}
 
 {{template "craft/team.md" .}}{{else}}Build in any order, refactor whenever it helps, and run the typecheck and focused checks as you go. {{template "implement-judgment"}}
-{{end}}
-Check: {{if eq .Procedure "rework"}}every active finding has its resolving commit and distinguishing check{{else}}every `B<n>`, `A<n>` and warranted `T<n>` has evidence{{end}}, and the focused checks pass.
+{{end}}{{with .Checks}}
+Before Audit, add to `.skl/verify.md` each row this slice adds, then run each check the Verification strategy cites, as the worktree's `.skl/verify.md` defines it, and record its result and rank in the report's Verification section:
+
+{{template "cited-checks" .}}{{end}}
+Check: {{if eq .Procedure "rework"}}every active finding has its resolving commit and distinguishing check{{else}}every `B<n>`, `A<n>` and warranted `T<n>` has evidence{{end}}{{if .Checks}}, every cited check has its result{{end}}, and the focused checks pass.
 
 ## 3. Integrate the target
 

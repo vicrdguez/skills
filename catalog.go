@@ -51,6 +51,9 @@ type DeliveryFacts struct {
 	ReviewCount  uint64                    `json:"review_count"`
 	ReviewNumber uint64                    `json:"review_number"`
 	Documents    []ledger.ContractDocument `json:"documents"`
+	// Checks are the catalog rows the Contract's Verification strategy
+	// cites, read from the source this phase verifies.
+	Checks []ledger.CitedCheck `json:"checks,omitempty"`
 	// Mode, Helper and Reviewer are the Implement invocation's choices. The
 	// subagent choices are nil when no value was supplied.
 	Mode     string          `json:"mode,omitempty"`
@@ -75,6 +78,33 @@ type SubagentChoice struct {
 type InvocationFacts struct {
 	Delivery *DeliveryFacts `json:"delivery,omitempty"`
 	Decision *DecisionFacts `json:"decision,omitempty"`
+	Verify   *VerifyFacts   `json:"verify,omitempty"`
+}
+
+// VerifyFacts bind the verify skill to one repository's verification skill:
+// its ladder, its body after the frontmatter, and the channel resources its
+// Channels section names.
+type VerifyFacts struct {
+	Repository string   `json:"repository"`
+	Ranks      []string `json:"ranks"`
+	Channels   []string `json:"channels"`
+	Body       string   `json:"body"`
+}
+
+// NewVerifyFacts binds verification, the skill of the repository at root.
+// A channel without a resource of the verify skill is left to the body.
+func NewVerifyFacts(root string, verification *ledger.Verification) (*VerifyFacts, error) {
+	resources, err := resourceNames("verify")
+	if err != nil {
+		return nil, err
+	}
+	facts := &VerifyFacts{Repository: root, Ranks: verification.Ladder, Body: verification.Body}
+	for _, channel := range verification.Channels {
+		if slices.Contains(resources, channel+".md") && !slices.Contains(facts.Channels, channel) {
+			facts.Channels = append(facts.Channels, channel)
+		}
+	}
+	return facts, nil
 }
 
 // EvidenceSource is a canonical repository-bound identity for one observed or
@@ -152,6 +182,9 @@ var skills = map[string]skill{
 	"propose":            {"procedures/propose.md", "documents/propose"},
 	"testing":            {"craft/testing.md", "craft/testing"},
 	"watchdog":           {"procedures/watchdog.md", "documents/watchdog"},
+	"verify":             {"procedures/verify.md", "craft/verify"},
+	"verify-create":      {"procedures/verify-create.md", "documents/verify"},
+	"verify-maintain":    {"procedures/verify-maintain.md", ""},
 	"walkthrough":        {"procedures/walkthrough.md", ""},
 	"writing-for-agents": {"craft/writing-for-agents.md", "craft/writing-for-agents"},
 }
@@ -185,6 +218,8 @@ func procedure(name string, facts InvocationFacts) (string, any) {
 		return skills[name].definition, facts.Delivery
 	case facts.Decision != nil:
 		return "procedures/decision-inbox.md", facts.Decision
+	case facts.Verify != nil:
+		return skills[name].definition, facts.Verify
 	}
 	return skills[name].definition, nil
 }
