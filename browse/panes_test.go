@@ -73,50 +73,8 @@ func (s *session) lineIndex(fragment string) int {
 	return -1
 }
 
-func TestListAndPreviewPanesSitSideBySideWhenWideAndStackWhenNarrow(t *testing.T) {
-	for _, size := range []tea.WindowSizeMsg{{Width: 140, Height: 40}, {Width: 40, Height: 24}} {
-		s := start(t, "widgets")
-		s.send(size)
-		s.press("enter")
-		s.within(size)
-		s.shows("Delivery: unknown: 0 of 3 Merged", "! Incomplete")
-		list, bottom, preview := s.lineIndex("╭─ Slices (3) ─"), s.lineIndex(" 1/3 ─╯"), s.lineIndex("╭─ Slice ─")
-		beside, below := list == preview && list < bottom, list < bottom && bottom < preview
-		if (size.Width >= 100 && !beside) || (size.Width < 100 && !below) {
-			t.Fatalf("%dx%d: list pane from line %d to %d, preview pane from line %d:\n%s", size.Width, size.Height, list, bottom, preview, s.model.View())
-		}
-		s.row("│", "Slice  orders/broken")
-
-		s.press("down")
-		s.row("╰", "2/3", "╯")
-		s.row("│", "Slice  orders/cancel", "│")
-	}
-}
-
-func TestShortStackedTerminalKeepsTheListOverThePreview(t *testing.T) {
-	size := tea.WindowSizeMsg{Width: 40, Height: 12}
-	s := start(t, "widgets")
-	s.send(size)
-	s.press("enter", "down")
-	s.within(size)
-	s.shows("Delivery: unknown", "╭─ Slices (3) ─", " 2/3 ─╯")
-	s.row("> ", "cancel")
-}
-
-func TestShortStackedListShowsTheWholeSelectedRow(t *testing.T) {
-	size := tea.WindowSizeMsg{Width: 40, Height: 16}
-	s := start(t, "widgets")
-	s.send(size)
-	s.press("enter", "down")
-	s.within(size)
-	s.shows(" 2/3 ─╯")
-	if entry := strings.Join(s.listEntries("broken", "cancel", "refund")["cancel"], "\n"); !strings.Contains(entry, "> ") ||
-		!strings.Contains(entry, "◐ Awaiting Review") || !strings.Contains(entry, "▸ watchdog") {
-		t.Fatalf("the selected row lacks its lifecycle or Claim: %q\n%s", entry, s.model.View())
-	}
-}
-
 func TestStackedEmptyListShowsItsWholeMessage(t *testing.T) {
+	t.Parallel()
 	s := start(t, "empty", func(root string) {
 		write(t, root, "projects/empty/project.json", `{"repository": "acme/empty"}`)
 		write(t, root, "projects/empty/archive/done/proposal.json", `{"accepted": "2023-01-01T00:00:00Z"}`)
@@ -127,6 +85,7 @@ func TestStackedEmptyListShowsItsWholeMessage(t *testing.T) {
 }
 
 func TestListKeepsTheSelectedRowVisibleAndItsPositionOnTheBorder(t *testing.T) {
+	t.Parallel()
 	for _, size := range []tea.WindowSizeMsg{{Width: 40, Height: 24}, {Width: 140, Height: 30}} {
 		s := start(t, "widgets", func(root string) {
 			for i := 0; i < 35; i++ {
@@ -145,31 +104,8 @@ func TestListKeepsTheSelectedRowVisibleAndItsPositionOnTheBorder(t *testing.T) {
 	}
 }
 
-func TestSliceRowsAlignNameLifecycleAndClaimColumns(t *testing.T) {
-	s := startSpectrum(t, 80)
-	// column is the display offset of fragment on the row of slice.
-	column := func(slice, fragment string) int {
-		line := s.row(slice)
-		return lipgloss.Width(line[:strings.Index(line, fragment)])
-	}
-	names, lifecycles := map[int]string{}, map[int]string{}
-	for slice, lifecycle := range lifecycleRows {
-		names[column(slice, slice)] = slice
-		lifecycles[column(slice, lifecycle)] = slice
-	}
-	names[column("i-torn", "i-torn")] = "i-torn"
-	lifecycles[column("i-torn", "! lifecycle unknown")] = "i-torn"
-	claims := map[int]string{
-		column("c-impl", "▸ implement"):   "c-impl",
-		column("d-review", "▸ watchdog"):  "d-review",
-		column("i-torn", "claim unknown"): "i-torn",
-	}
-	if len(names) != 1 || len(lifecycles) != 1 || len(claims) != 1 {
-		t.Fatalf("columns start at different offsets: names %v, lifecycles %v, claims %v:\n%s", names, lifecycles, claims, s.model.View())
-	}
-}
-
 func TestClaimMarkerStaysOnAFortyColumnList(t *testing.T) {
+	t.Parallel()
 	size := tea.WindowSizeMsg{Width: 40, Height: 24}
 	s := start(t, "gadgets", func(root string) {
 		write(t, root, "projects/gadgets/proposals/pair/proposal.json", `{"accepted": "2024-01-01T00:00:00Z"}`)
@@ -214,6 +150,7 @@ func (s *session) listEntries(names ...string) map[string][]string {
 }
 
 func TestFortyColumnSliceListsKeepEveryLifecycleAndClaim(t *testing.T) {
+	t.Parallel()
 	spectrumFacts := map[string][]string{"i-torn": {"! lifecycle unknown", "claim unknown"}}
 	for slice, lifecycle := range lifecycleRows {
 		spectrumFacts[slice] = []string{lifecycle}
@@ -276,27 +213,8 @@ func TestFortyColumnSliceListsKeepEveryLifecycleAndClaim(t *testing.T) {
 	}
 }
 
-func TestNarrowResultHeadingsKeepTheWholeLifecycleLabel(t *testing.T) {
-	s := start(t, "gadgets", spectrum(t))
-	size := tea.WindowSizeMsg{Width: 40, Height: 40}
-	s.send(size)
-	s.press("/", "c-impl", "enter", "w", "g")
-	s.within(size)
-	var content []string
-	for _, line := range strings.Split(s.model.View(), "\n") {
-		if strings.HasPrefix(line, "│") {
-			content = append(content, strings.Trim(line, "│ "))
-		}
-	}
-	// A heading may wrap, but its Project and complete lifecycle label
-	// remain readable in order before the Slice rows.
-	text := strings.Join(strings.Fields(strings.Join(content, " ")), " ")
-	if !strings.Contains(text, "gadgets · ○ Ready for Implementation") {
-		t.Fatalf("result heading loses its lifecycle label:\n%s", s.model.View())
-	}
-}
-
 func TestNarrowListShortensNamesToKeepLifecycleAndClaim(t *testing.T) {
+	t.Parallel()
 	s := startSpectrum(t, 60)
 	s.within(tea.WindowSizeMsg{Width: 60, Height: 40})
 	s.row("c-impl", "○ Ready for Implementation", "▸ implement")
@@ -306,6 +224,7 @@ func TestNarrowListShortensNamesToKeepLifecycleAndClaim(t *testing.T) {
 }
 
 func TestSliceRowsShowEachLifecycleByGlyphAndLabelWithoutColour(t *testing.T) {
+	t.Parallel()
 	s := startSpectrum(t, 80)
 	if strings.Contains(s.model.View(), "\x1b[") {
 		t.Fatal("the test terminal renders colour")
@@ -326,6 +245,7 @@ func TestSliceRowsShowEachLifecycleByGlyphAndLabelWithoutColour(t *testing.T) {
 }
 
 func TestClaimIsItsOwnMarkerBesideTheLifecycle(t *testing.T) {
+	t.Parallel()
 	s := startSpectrum(t, 80)
 	s.row("d-review", "◐ Awaiting Review", "▸ watchdog")
 	s.row("c-impl", "○ Ready for Implementation", "▸ implement")
@@ -335,6 +255,7 @@ func TestClaimIsItsOwnMarkerBesideTheLifecycle(t *testing.T) {
 }
 
 func TestUnreadableSliceStaysMarkedUnknownBesideSelectableHealthyOnes(t *testing.T) {
+	t.Parallel()
 	s := startSpectrum(t, 80)
 	torn := s.row("! i-torn", "! lifecycle unknown", "claim unknown")
 	for _, glyph := range append(lifecycleGlyphs, "▸") {

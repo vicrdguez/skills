@@ -14,6 +14,7 @@ import (
 )
 
 func TestDocumentsRenderInTheStyleChosenAtStartup(t *testing.T) {
+	t.Parallel()
 	snapshot := fixtureLedger(t)
 	render := func(dark bool) string {
 		s := &session{t: t, model: browse.New(snapshot, browse.Options{Project: "widgets", DarkBackground: dark})}
@@ -41,6 +42,7 @@ func TestDocumentsRenderInTheStyleChosenAtStartup(t *testing.T) {
 }
 
 func TestDocumentReferencesKeepMetadataInWideAndStackedPanes(t *testing.T) {
+	t.Parallel()
 	for _, width := range []int{140, 40} {
 		s := start(t, "widgets")
 		size := tea.WindowSizeMsg{Width: width, Height: 60}
@@ -75,6 +77,7 @@ func TestDocumentReferencesKeepMetadataInWideAndStackedPanes(t *testing.T) {
 }
 
 func TestDocumentListLoadsOnlyTheDocumentSelectedForReading(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 120, Height: 80})
 	s.press("enter", "d")
@@ -102,6 +105,7 @@ func TestDocumentListLoadsOnlyTheDocumentSelectedForReading(t *testing.T) {
 }
 
 func TestOpeningCorruptProseVisiblyRefusesWithoutSubstitution(t *testing.T) {
+	t.Parallel()
 	const intentPath = "projects/widgets/proposals/orders/cancel/intent.md"
 	s := start(t, "widgets", func(root string) {
 		// Keep the corrupt checksum beyond Git's header-read prefix.
@@ -141,6 +145,7 @@ func TestOpeningCorruptProseVisiblyRefusesWithoutSubstitution(t *testing.T) {
 }
 
 func TestArchivedDocumentIsNewerOnlyWhenItsBytesChanged(t *testing.T) {
+	t.Parallel()
 	var root string
 	fixtureLedger(t, func(directory string) {
 		root = directory

@@ -11,6 +11,7 @@ import (
 )
 
 func TestReaderFollowsActiveReportVersionsAcrossProjectsAndReturnsThroughNestedReferences(t *testing.T) {
+	t.Parallel()
 	for _, width := range []int{40, 140} {
 		t.Run(fmt.Sprint(width), func(t *testing.T) {
 			s := start(t, "widgets", func(root string) {

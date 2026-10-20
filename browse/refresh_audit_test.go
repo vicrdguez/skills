@@ -9,6 +9,7 @@ import (
 )
 
 func TestRefreshUpdatesCurrentClaimReferences(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 120, Height: 35})
 	s.press("enter", "down", "enter", "r")

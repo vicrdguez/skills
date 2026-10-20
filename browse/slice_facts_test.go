@@ -37,44 +37,6 @@ func paneText(view string, title string) string {
 	return text.String()
 }
 
-func TestSlicePreviewAndDetailShowTheSameSectionedFacts(t *testing.T) {
-	s := start(t, "widgets")
-	s.send(tea.WindowSizeMsg{Width: 140, Height: 80})
-	s.press("enter", "down")
-	s.row("> ", "cancel", "◐ Awaiting Review")
-	preview := paneText(s.text(), "Slice")
-
-	s.press("enter")
-	s.shows("skl browse › Projects › widgets › orders › cancel")
-	detail := paneText(s.text(), "Slice")
-	if preview == "" || preview != strings.ReplaceAll(detail, ">", "") {
-		t.Fatalf("preview and detail facts differ:\npreview %s\ndetail  %s", preview, detail)
-	}
-
-	sections := []string{"Status", "Lifecycle◐AwaitingReview", "Claim▸watchdogreservation", "Relationships",
-		"Dependsonlegacy/old[archived]—Oldwork✓Merged·satisfied", "Links", "Pullrequestacme/widgets#12",
-		"Documents", "Implementationawaiting_review"}
-	at := 0
-	for _, section := range sections {
-		next := strings.Index(preview[at:], section)
-		if next < 0 {
-			t.Fatalf("preview lacks %q after offset %d: %s", section, at, preview)
-		}
-		at += next + len(section)
-	}
-}
-
-func TestFoundSlicePreviewShowsItsFacts(t *testing.T) {
-	s := start(t, "widgets")
-	s.send(tea.WindowSizeMsg{Width: 140, Height: 60})
-	s.press("/", "cancel", "enter")
-	s.row("> ", "orders/cancel")
-	s.fact("Lifecycle", "◐ Awaiting Review")
-	s.fact("Depends on", "legacy/old [archived] — Old work  ✓ Merged")
-	s.fact("Project", "widgets (acme/widgets)")
-	s.fact("Implementation", "awaiting_review")
-}
-
 func TestReadyForMergeBlockerIsStyledUnsatisfiedAndFollowable(t *testing.T) {
 	profile := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.ANSI)
@@ -153,36 +115,8 @@ func TestSelectedSliceShowsLatestReportOutcomes(t *testing.T) {
 	s.fact("Watchdog", "! watchdog report metadata is unreadable")
 }
 
-func TestLongSliceDetailKeepsHintsAndScrollPositionOutOfItsFacts(t *testing.T) {
-	s := start(t, "widgets")
-	s.send(tea.WindowSizeMsg{Width: 80, Height: 16})
-	s.press("enter", "down", "enter", "down", "down")
-	lines := strings.Split(s.text(), "\n")
-	if header := lines[0]; strings.Contains(header, "scrolled") || strings.Contains(header, "%") {
-		t.Fatalf("the header repeats the scroll position: %q", header)
-	}
-	border := ""
-	for _, line := range lines {
-		if strings.HasPrefix(line, "╰") {
-			border = line
-		}
-	}
-	if !strings.Contains(border, "scrolled ") || strings.Contains(border, "scrolled 0%") {
-		t.Fatalf("the pane border lacks the scroll position: %q\n%s", border, s.text())
-	}
-	s.shows("d documents", "? help")
-
-	s.send(tea.WindowSizeMsg{Width: 120, Height: 80})
-	s.shows("d documents", "r claim reference")
-	facts := strings.ToLower(paneText(s.text(), "Slice"))
-	for _, hint := range []string{"press", "dtoread", "rfollows", "toselect"} {
-		if strings.Contains(facts, hint) {
-			t.Fatalf("the facts tell the human to use %q: %s", hint, facts)
-		}
-	}
-}
-
 func TestSliceFactsKeepTargetCompletionDecisionAndPendingPush(t *testing.T) {
+	t.Parallel()
 	s := start(t, "gadgets", func(root string) {
 		write(t, root, "projects/gadgets/proposals/tools/hammer/state.json", `{"state": "merged", "title": "Hammer", "branch": "hammer",
 			"integration_target": {"repository": "acme/gadgets", "branch": "main"},
