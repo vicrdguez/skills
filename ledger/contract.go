@@ -245,9 +245,10 @@ func lintContract(slice string, contract map[string][]byte, sources ContractSour
 	return lintForbidden(slice, documents["plan.md"], sources)
 }
 
-// principleCitation is the one form the engine reads from Forbidden: a
-// project principle cited by name.
-var principleCitation = regexp.MustCompile(`principle:([A-Za-z0-9][A-Za-z0-9_-]*)`)
+// principleCitation reads a full filename-based name, not an ASCII slug.
+// Backticks preserve spaces and punctuation in a name; bare citations end
+// at whitespace or Markdown brackets.
+var principleCitation = regexp.MustCompile("`principle:([^`]+)`|principle:([^\\s\\p{Z}`()\\[\\]<>]+)")
 
 // lintForbidden resolves each principle the plan.md Forbidden section cites
 // to a file of the source repository's principles directory.
@@ -255,8 +256,12 @@ func lintForbidden(slice string, lines []contractLine, sources ContractSources) 
 	start, end := section(lines, "Forbidden")
 	for _, line := range lines[start:end] {
 		for _, match := range principleCitation.FindAllStringSubmatch(line.text, -1) {
-			file := PrinciplesDirectory + match[1] + ".md"
-			if sources.Repository != "" {
+			name := match[1]
+			if name == "" {
+				name = match[2]
+			}
+			file := PrinciplesDirectory + name + ".md"
+			if sources.Repository != "" && filepath.Base(name) == name {
 				if info, err := os.Stat(filepath.Join(sources.Repository, filepath.FromSlash(file))); err == nil && info.Mode().IsRegular() {
 					continue
 				}
@@ -266,7 +271,7 @@ func lintForbidden(slice string, lines []contractLine, sources ContractSources) 
 				missing = "the repository has no " + PrinciplesDirectory + " directory"
 			}
 			return refuse(
-				"slice "+slice+" cites principle:"+match[1]+" in the Forbidden section of plan.md, and "+missing,
+				"slice "+slice+" cites principle:"+name+" in the Forbidden section of plan.md, and "+missing,
 				"cite a principle the source repository keeps in "+PrinciplesDirectory+"<name>.md, or write "+file+" there first",
 			)
 		}

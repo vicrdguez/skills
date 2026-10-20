@@ -282,8 +282,6 @@ func TestAcceptRefusesAMalformedVerificationSkill(t *testing.T) {
 // A Forbidden line may cite a project principle by name; acceptance resolves
 // the name to a file of the source repository's principles.
 func TestAcceptResolvesForbiddenPrincipleCitations(t *testing.T) {
-	cited := lintedContract()
-	cited["plan.md"] = strings.Replace(cited["plan.md"], "- A second representation.", "- No compatibility facade (principle:no-facade).", 1)
 	principles := func(names ...string) string {
 		root := sourceRepository(t, "acme", "widgets")
 		for _, name := range names {
@@ -297,29 +295,54 @@ func TestAcceptResolvesForbiddenPrincipleCitations(t *testing.T) {
 	}
 	for _, testCase := range []struct {
 		name      string
+		citation  string
 		root      string
+		accepted  bool
 		fragments []string
 	}{
-		{"a missing principle", principles("one-representation"), []string{"foundation", "plan.md", "no-facade", ".skl/principles/no-facade.md"}},
-		{"no principles directory", principles(), []string{"foundation", "plan.md", "no-facade", ".skl/principles/ directory"}},
+		{"a missing principle", "no-facade", principles("one-representation"), false, []string{".skl/principles/no-facade.md"}},
+		{"no principles directory", "no-facade", principles(), false, []string{".skl/principles/ directory"}},
+		{"a hyphenated name", "no-facade", principles("no-facade"), true, nil},
+		{"a dotted name", "no.facade", principles("no.facade"), true, nil},
+		{"a prefix is not the cited name", "no.facade", principles("no"), false, []string{".skl/principles/no.facade.md"}},
+		{"a leading underscore without a directory", "_missing", principles(), false, []string{".skl/principles/ directory"}},
+		{"a Unicode name", "無-facade", principles("無-facade"), true, nil},
+		{"a missing Unicode name", "無-facade", principles(), false, []string{".skl/principles/ directory"}},
+		{"a leading underscore", "_facade", principles("_facade"), true, nil},
+		{"a name with spaces", "no facade", principles("no facade"), true, nil},
+		{"a name with brackets", "no(facade)", principles("no(facade)"), true, nil},
+		{"a quoted prefix is not the cited name", "no facade", principles("no"), false, []string{".skl/principles/no facade.md"}},
+		{"a citation cannot escape the directory", "../outside", principles("../outside"), false, nil},
+		{"a citation cannot name a nested file", "nested/facade", principles("nested/facade"), false, nil},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			fixture := newLedgerFixture(t)
 			head := ledgerHead(t, fixture.clone)
+			cited := lintedContract()
+			citation := "principle:" + testCase.citation
+			if strings.ContainsAny(testCase.citation, " ()[]<>") {
+				citation = "`" + citation + "`"
+			}
+			cited["plan.md"] = strings.Replace(cited["plan.md"], "- A second representation.", "- No compatibility facade ("+citation+").", 1)
 			outcome, text := newLedgerApp(t, newForgeServer(t)).run(t, []string{"skl", "proposal", "accept", "--repo", testCase.root, "--proposal-dir", writeProposal(t, "", lintSpec("cited", cited)), "--format", "json"})
+			if testCase.accepted {
+				if outcome.Status != "accepted" {
+					t.Fatalf("accept citing an existing principle: %s", text)
+				}
+				if rendered, err := skillOutput(t, "--repo", testCase.root, "--resource", testCase.citation+".md", "principles"); err != nil || !strings.Contains(rendered, "statement: The "+testCase.citation+" principle.") {
+					t.Fatalf("retrieve cited principle: %v\n%s", err, rendered)
+				}
+				return
+			}
 			if outcome.Status != "fix_required" {
 				t.Fatalf("acceptance was not refused: %s", text)
 			}
-			for _, fragment := range testCase.fragments {
+			for _, fragment := range append([]string{"foundation", "plan.md", "principle:" + testCase.citation}, testCase.fragments...) {
 				if !strings.Contains(outcome.Reason, fragment) {
 					t.Fatalf("refusal lacks %q: %s", fragment, text)
 				}
 			}
 			requireLedgerUnchanged(t, fixture.clone, head)
 		})
-	}
-	newLedgerFixture(t)
-	if outcome := newLedgerApp(t, newForgeServer(t)).accept(t, principles("no-facade"), writeProposal(t, "", lintSpec("cited", cited))); outcome.Status != "accepted" {
-		t.Fatalf("accept citing an existing principle: %s", mustJSON(t, outcome))
 	}
 }
