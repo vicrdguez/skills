@@ -174,7 +174,7 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 		},
 	}}
 	app.Commands = append(app.Commands, reconcileCommand(newBackend, stdout), ledgerCommands(newBackend, stdout), proposalCommands(newBackend, stdout), decisionCommands(stdout), browseCommand(stdin, stdout))
-	return &stageApp{app}
+	return &stageApp{App: app, settingsLookup: os.Getenv}
 }
 
 // inputFlag collects repeated --input occurrences verbatim. The resource

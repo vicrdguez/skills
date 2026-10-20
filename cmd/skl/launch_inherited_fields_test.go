@@ -7,11 +7,12 @@ import (
 )
 
 func TestMissingRoleFieldsStayInheritedUntilFreshRecovery(t *testing.T) {
-	f := newLedgerFixture(t)
+	t.Parallel()
+	f := newPrivateLedgerFixture(t)
 	f.misconfigure(t, fmt.Sprintf(`{"ledger":%q,"harnesses":{"pi":{"reviewer":{"model":"initial-review"},"helper":{"thinking":"initial-helper"}}}}`, f.clone))
 	source, _ := deliverySourceRepo(t)
-	deliveryAcceptFixture(t, newForgeServer(t), source)
-	cli := deliveryNoForgeApp(t)
+	f.acceptDelivery(t, newForgeServer(t), source)
+	cli := f.app(deliveryNoForgeApp(t))
 	session := cli.dispatchJSON(t, "skl implement next --repo "+source+" --harness pi --mode team").Packet.Facts.Delivery
 	if session.Reviewer.Model != "initial-review" || session.Reviewer.Thinking != "" || session.Helper.Model != "" || session.Helper.Thinking != "initial-helper" {
 		t.Fatalf("missing startup fields did not inherit: %#v / %#v", session.Reviewer, session.Helper)

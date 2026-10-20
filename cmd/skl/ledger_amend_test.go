@@ -123,10 +123,11 @@ func acceptSpec(t *testing.T, cli ledgerCLI, root string, spec proposalSpec, fla
 }
 
 func TestAmendUnchangedIntakeReportsExisting(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	forge := newForgeServer(t)
-	cli := newLedgerApp(t, forge)
+	cli := fixture.app(newLedgerApp(t, forge))
 	spec := cleanupSpec("steady", "alpha", "beta")
 	spec.depends["beta"] = []string{"alpha"}
 	acceptSpec(t, cli, root, spec)
@@ -150,13 +151,14 @@ func TestAmendUnchangedIntakeReportsExisting(t *testing.T) {
 }
 
 func TestAmendRefusesUnrecordedArchivedAndFinishedProposals(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	cli := newLedgerApp(t, newForgeServer(t))
+	cli := fixture.app(newLedgerApp(t, newForgeServer(t)))
 	acceptSpec(t, cli, root, cleanupSpec("done-work", "only"))
 	acceptSpec(t, cli, root, cleanupSpec("finished", "only"))
 	statusRecord(t, fixture.clone, "finished", "only", merged(""))
-	if outcome := runCleanup(t, offlineForge(t), root); len(archivedNames(outcome)) != 1 {
+	if outcome := runCleanup(t, fixture.app(offlineForge(t)), root); len(archivedNames(outcome)) != 1 {
 		t.Fatalf("setup did not archive finished: %s", mustJSON(t, outcome))
 	}
 	intake := exportedIntake(t, cli, root, "done-work")
@@ -170,10 +172,11 @@ func TestAmendRefusesUnrecordedArchivedAndFinishedProposals(t *testing.T) {
 }
 
 func TestAmendOneRefusedDifferenceStopsEverything(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	source, _ := deliverySourceRepo(t)
-	cli := newLedgerApp(t, newForgeServer(t))
-	worker := deliveryNoForgeApp(t)
+	cli := fixture.app(newLedgerApp(t, newForgeServer(t)))
+	worker := fixture.app(deliveryNoForgeApp(t))
 	acceptSpec(t, cli, source, cleanupSpec("pair", "first", "second"))
 	if claimed := decisionSelect(t, worker, source); claimed.Execution.Item != "pair/first" {
 		t.Fatalf("setup claimed %s, want pair/first", claimed.Execution.Item)
@@ -190,9 +193,10 @@ func TestAmendOneRefusedDifferenceStopsEverything(t *testing.T) {
 }
 
 func TestAmendReplacesNeverClaimedContract(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	cli := newLedgerApp(t, newForgeServer(t))
+	cli := fixture.app(newLedgerApp(t, newForgeServer(t)))
 	spec := cleanupSpec("draft", "base", "work")
 	spec.depends["work"] = []string{"base"}
 	spec.slices[1].files["plan.md"] = "# Work plan\n"
@@ -242,12 +246,13 @@ func TestAmendReplacesNeverClaimedContract(t *testing.T) {
 }
 
 func TestAmendReassignsBranchesWithinOneAmendment(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	cli := newLedgerApp(t, newForgeServer(t))
+	cli := fixture.app(newLedgerApp(t, newForgeServer(t)))
 	acceptSpec(t, cli, root, cleanupSpec("archived", "base"))
 	statusRecord(t, fixture.clone, "archived", "base", merged(""))
-	if outcome := runCleanup(t, offlineForge(t), root); len(archivedNames(outcome)) != 1 {
+	if outcome := runCleanup(t, fixture.app(offlineForge(t)), root); len(archivedNames(outcome)) != 1 {
 		t.Fatalf("archive setup: %s", mustJSON(t, outcome))
 	}
 	acceptSpec(t, cli, root, cleanupSpec("other", "work"))
@@ -281,10 +286,11 @@ func TestAmendReassignsBranchesWithinOneAmendment(t *testing.T) {
 }
 
 func TestAmendRefusesContractChangeOnceClaimed(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	source, _ := deliverySourceRepo(t)
-	cli := newLedgerApp(t, newForgeServer(t))
-	worker := deliveryNoForgeApp(t)
+	cli := fixture.app(newLedgerApp(t, newForgeServer(t)))
+	worker := fixture.app(deliveryNoForgeApp(t))
 	acceptSpec(t, cli, source, cleanupSpec("gate", "paused", "released"))
 	if item, _ := decisionPauseNext(t, worker, source); item != "gate/paused" {
 		t.Fatalf("setup paused %s, want gate/paused", item)
@@ -312,10 +318,11 @@ func TestAmendRefusesContractChangeOnceClaimed(t *testing.T) {
 }
 
 func TestAmendInsertsBlockerBeforePausedSlice(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	source, _ := deliverySourceRepo(t)
-	cli := newLedgerApp(t, newForgeServer(t))
-	worker := deliveryNoForgeApp(t)
+	cli := fixture.app(newLedgerApp(t, newForgeServer(t)))
+	worker := fixture.app(deliveryNoForgeApp(t))
 	acceptSpec(t, cli, source, cleanupSpec("checks", "check"))
 	decisionPauseNext(t, worker, source)
 
@@ -346,9 +353,10 @@ func TestAmendInsertsBlockerBeforePausedSlice(t *testing.T) {
 }
 
 func TestAmendChangesDependenciesOnUnclaimedSlicesOnly(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	cli := newLedgerApp(t, newForgeServer(t))
+	cli := fixture.app(newLedgerApp(t, newForgeServer(t)))
 	acceptSpec(t, cli, root, cleanupSpec("states", "base", "done", "merge", "paused", "review", "rework"))
 	for slice, state := range map[string]string{"rework": ledger.Rework, "paused": ledger.NeedsHuman, "review": ledger.AwaitingReview, "merge": ledger.ReadyForMerge} {
 		statusRecord(t, fixture.clone, "states", slice, lifecycle(state))
@@ -374,10 +382,11 @@ func TestAmendChangesDependenciesOnUnclaimedSlicesOnly(t *testing.T) {
 }
 
 func TestAmendAddsCleanupSliceBehindDeliveredSlice(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	forge := newForgeServer(t)
-	cli := newLedgerApp(t, forge)
+	cli := fixture.app(newLedgerApp(t, forge))
 	spec := cleanupSpec("minos", "check", "outputs")
 	spec.depends["outputs"] = []string{"check"}
 	parentBody := writeTemp(t, t, "Parent body\n")
@@ -439,9 +448,10 @@ func TestAmendAddsCleanupSliceBehindDeliveredSlice(t *testing.T) {
 }
 
 func TestAmendListsUntouchedDependents(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	cli := newLedgerApp(t, newForgeServer(t))
+	cli := fixture.app(newLedgerApp(t, newForgeServer(t)))
 	spec := cleanupSpec("deps", "a", "b", "c", "d")
 	spec.depends = map[string][]string{"b": {"a"}, "c": {"a"}, "d": {"a"}}
 	acceptSpec(t, cli, root, spec)
@@ -456,10 +466,11 @@ func TestAmendListsUntouchedDependents(t *testing.T) {
 }
 
 func TestAmendedSliceKeepsProposalPlaceInSelection(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	source, _ := deliverySourceRepo(t)
-	cli := newLedgerApp(t, newForgeServer(t))
-	worker := deliveryNoForgeApp(t)
+	cli := fixture.app(newLedgerApp(t, newForgeServer(t)))
+	worker := fixture.app(deliveryNoForgeApp(t))
 	acceptSpec(t, cli, source, cleanupSpec("older", "first"))
 	acceptSpec(t, cli, source, cleanupSpec("newer", "alpha"))
 	metaPath := "projects/widgets/proposals/older/proposal.json"
@@ -480,9 +491,10 @@ func TestAmendedSliceKeepsProposalPlaceInSelection(t *testing.T) {
 }
 
 func TestAmendMembershipChangesAreExplicit(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	cli := newLedgerApp(t, newForgeServer(t))
+	cli := fixture.app(newLedgerApp(t, newForgeServer(t)))
 	acceptSpec(t, cli, root, cleanupSpec("members", "keep", "drop", "old"))
 	statusRecord(t, fixture.clone, "members", "old", lifecycle(ledger.Superseded))
 	head := ledgerHead(t, fixture.clone)
@@ -502,9 +514,10 @@ func TestAmendMembershipChangesAreExplicit(t *testing.T) {
 }
 
 func TestAmendKeepsTheGraphConsistent(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	cli := newLedgerApp(t, newForgeServer(t))
+	cli := fixture.app(newLedgerApp(t, newForgeServer(t)))
 	spec := cleanupSpec("graph", "live", "old", "stale")
 	spec.depends["stale"] = []string{"old"}
 	acceptSpec(t, cli, root, spec)
@@ -537,11 +550,12 @@ func TestAmendKeepsTheGraphConsistent(t *testing.T) {
 }
 
 func TestAmendDescriptionWhileWorkIsClaimed(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	source, _ := deliverySourceRepo(t)
-	cli := newLedgerApp(t, newForgeServer(t))
+	cli := fixture.app(newLedgerApp(t, newForgeServer(t)))
 	acceptSpec(t, cli, source, cleanupSpec("described", "work"))
-	decisionSelect(t, deliveryNoForgeApp(t), source)
+	decisionSelect(t, fixture.app(deliveryNoForgeApp(t)), source)
 	statePath := "projects/widgets/proposals/described/work/state.json"
 	before := readLedgerFile(t, fixture.clone, statePath)
 
@@ -559,10 +573,11 @@ func TestAmendDescriptionWhileWorkIsClaimed(t *testing.T) {
 }
 
 func TestAmendGrowsSingleSliceProposal(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	forge := newForgeServer(t)
-	cli := newLedgerApp(t, forge)
+	cli := fixture.app(newLedgerApp(t, forge))
 	acceptSpec(t, cli, root, cleanupSpec("grow", "first"), issueFile(t, "first", "First body\n"))
 	first := amendState(t, fixture.clone, "grow", "first").Issue
 
@@ -584,9 +599,10 @@ func TestAmendGrowsSingleSliceProposal(t *testing.T) {
 }
 
 func TestAmendKeepsTheProposalBranch(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	cli := newLedgerApp(t, newForgeServer(t))
+	cli := fixture.app(newLedgerApp(t, newForgeServer(t)))
 	acceptSpec(t, cli, root, cleanupSpec("branched", "only"))
 	acceptSpec(t, cli, root, cleanupSpec("historical", "only"))
 	metaPath := "projects/widgets/proposals/historical/proposal.json"
@@ -629,10 +645,11 @@ func forbidForge(t *testing.T, forge *forgeServer) {
 }
 
 func TestAmendSupersedesUnclaimedSlicesInEveryLifecycle(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	forge := newForgeServer(t)
-	cli := newLedgerApp(t, forge)
+	cli := fixture.app(newLedgerApp(t, forge))
 	acceptSpec(t, cli, root, cleanupSpec("discard", "ready", "rework", "review", "merge", "kept"), issueFile(t, "merge", "Merge body\n"))
 	submission := &ledger.ForgeAttachment{Repository: "acme/widgets", Number: 21}
 	for slice, value := range map[string]string{"rework": ledger.Rework, "review": ledger.AwaitingReview, "merge": ledger.ReadyForMerge} {
@@ -687,9 +704,10 @@ func TestAmendSupersedesUnclaimedSlicesInEveryLifecycle(t *testing.T) {
 // The outcome's superseded branches render the superseded Slice and the
 // dependent left blocked in another Proposal.
 func TestAmendSupersessionOutcome(t *testing.T) {
-	newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	cli := newLedgerApp(t, newForgeServer(t))
+	cli := fixture.app(newLedgerApp(t, newForgeServer(t)))
 	acceptSpec(t, cli, root, cleanupSpec("shared", "a", "b"))
 	other := cleanupSpec("other", "x")
 	other.depends["x"] = []string{"proposals/shared/a"}
@@ -704,10 +722,11 @@ func TestAmendSupersessionOutcome(t *testing.T) {
 }
 
 func TestAmendRefusesSupersedingClaimedOrMergedSlices(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	source, _ := deliverySourceRepo(t)
-	cli := newLedgerApp(t, newForgeServer(t))
-	worker := deliveryNoForgeApp(t)
+	cli := fixture.app(newLedgerApp(t, newForgeServer(t)))
+	worker := fixture.app(deliveryNoForgeApp(t))
 	acceptSpec(t, cli, source, cleanupSpec("held", "claimed", "done"))
 	statusRecord(t, fixture.clone, "held", "done", merged(""))
 	claimed := decisionSelect(t, worker, source)
@@ -732,10 +751,11 @@ func TestAmendRefusesSupersedingClaimedOrMergedSlices(t *testing.T) {
 }
 
 func TestAmendSupersedingNeedsHumanSliceRemovesItsRequest(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	source, _ := deliverySourceRepo(t)
-	cli := newLedgerApp(t, newForgeServer(t))
-	worker := deliveryNoForgeApp(t)
+	cli := fixture.app(newLedgerApp(t, newForgeServer(t)))
+	worker := fixture.app(deliveryNoForgeApp(t))
 	acceptSpec(t, cli, source, cleanupSpec("asked", "paused", "waiting"))
 	if item, _ := decisionPauseNext(t, worker, source); item != "asked/paused" {
 		t.Fatalf("setup paused %s, want asked/paused", item)
@@ -762,9 +782,10 @@ func TestAmendSupersedingNeedsHumanSliceRemovesItsRequest(t *testing.T) {
 }
 
 func TestAmendSupersessionLeavesNoActiveSliceBehindIt(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	cli := newLedgerApp(t, newForgeServer(t))
+	cli := fixture.app(newLedgerApp(t, newForgeServer(t)))
 	spec := cleanupSpec("chain", "a", "b")
 	spec.depends["b"] = []string{"a"}
 	acceptSpec(t, cli, root, spec)
@@ -858,9 +879,10 @@ func TestAmendRefusesActiveSliceBehindArchivedSupersededSlice(t *testing.T) {
 // branch and Dependencies, so a supersession combined with another change
 // to the same Slice is refused.
 func TestAmendSupersessionKeepsTheSliceRecords(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	cli := newLedgerApp(t, newForgeServer(t))
+	cli := fixture.app(newLedgerApp(t, newForgeServer(t)))
 	acceptSpec(t, cli, root, cleanupSpec("discard", "old", "kept"))
 	head := ledgerHead(t, fixture.clone)
 
@@ -879,10 +901,11 @@ func TestAmendSupersessionKeepsTheSliceRecords(t *testing.T) {
 // body for it is refused, and a parent the amendment creates groups only
 // the live Slices' issues.
 func TestAmendLeavesSupersededIssuesAlone(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	forge := newForgeServer(t)
-	cli := newLedgerApp(t, forge)
+	cli := fixture.app(newLedgerApp(t, forge))
 	acceptSpec(t, cli, root, cleanupSpec("discard", "old", "kept"), issueFile(t, "old", "Old body\n"), issueFile(t, "kept", "Kept body\n"))
 	old, kept := amendState(t, fixture.clone, "discard", "old").Issue, amendState(t, fixture.clone, "discard", "kept").Issue
 	if old == nil || kept == nil {

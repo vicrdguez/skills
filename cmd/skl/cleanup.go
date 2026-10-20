@@ -48,7 +48,7 @@ func cleanupCommand(stdout io.Writer) *cli.Command {
 			if err != nil {
 				return err
 			}
-			store, failure, err := adoptedLedger(repository.Repository)
+			store, failure, err := adoptedLedger(command, repository.Repository)
 			if err != nil {
 				return err
 			}

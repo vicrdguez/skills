@@ -46,7 +46,7 @@ func proposalCommands(newBackend backendFactory, stdout io.Writer) *cli.Command 
 				if err != nil {
 					return refuse(err)
 				}
-				store, failure := openConfiguredLedger()
+				store, failure := openConfiguredLedger(command)
 				if failure != nil {
 					return refuse(failure)
 				}
@@ -100,7 +100,7 @@ func proposalCommands(newBackend backendFactory, stdout io.Writer) *cli.Command 
 				if err != nil {
 					return refuse(err)
 				}
-				store, failure := openConfiguredLedger()
+				store, failure := openConfiguredLedger(command)
 				if failure != nil {
 					return refuse(failure)
 				}
@@ -149,7 +149,7 @@ func proposalCommands(newBackend backendFactory, stdout io.Writer) *cli.Command 
 				if err != nil {
 					return renderLedgerOutcome(stdout, format, ledgerOutcome{Status: "fix_required", Reason: "repository or remote resolution failed: " + err.Error(), Repair: "run publication inside the source repository, or pass --repo and --remote explicitly", rerun: rerun})
 				}
-				store, failure := openConfiguredLedger()
+				store, failure := openConfiguredLedger(command)
 				if failure != nil {
 					return refuse(failure)
 				}
@@ -194,7 +194,7 @@ func proposalCommands(newBackend backendFactory, stdout io.Writer) *cli.Command 
 				if err != nil {
 					return refuse(err)
 				}
-				store, failure := openConfiguredLedger()
+				store, failure := openConfiguredLedger(command)
 				if failure != nil {
 					return refuse(failure)
 				}

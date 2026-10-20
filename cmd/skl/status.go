@@ -31,7 +31,7 @@ func reconcileCommand(newBackend backendFactory, stdout io.Writer) *cli.Command 
 			if err != nil {
 				return err
 			}
-			store, err := openConfiguredLedger()
+			store, err := openConfiguredLedger(c)
 			if err != nil {
 				return renderLedgerRefusal(stdout, format, err)
 			}

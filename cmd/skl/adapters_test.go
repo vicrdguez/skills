@@ -27,6 +27,7 @@ func installInto(t *testing.T, home string) {
 	t.Helper()
 	var output bytes.Buffer
 	app := newAppWithSkillHome(func(github.RepositoryID) (setup.Backend, error) { return &memoryBackend{}, nil }, strings.NewReader("yes\n"), &output, &output, home)
+	privateCLIHelp(app)
 	if err := app.Run([]string{"skl", "install"}); err != nil {
 		t.Fatal(err)
 	}

@@ -125,7 +125,7 @@ func ledgerCommands(newBackend backendFactory, stdout io.Writer) *cli.Command {
 				if commit == "" || path == "" {
 					return refuse(errors.New("ledger show requires an exact --commit with --path"))
 				}
-				store, failure := openConfiguredLedger()
+				store, failure := openConfiguredLedger(command)
 				if failure != nil {
 					return refuse(failure)
 				}
@@ -142,13 +142,13 @@ func ledgerCommands(newBackend backendFactory, stdout io.Writer) *cli.Command {
 // openConfiguredLedger resolves the machine configuration and opens the
 // configured ledger clone, translating every unusable shape into an
 // actionable refusal.
-func openConfiguredLedger() (*ledger.Store, error) {
-	store, _, err := openConfiguredLaunchSettings()
+func openConfiguredLedger(command *cli.Context) (*ledger.Store, error) {
+	store, _, err := openConfiguredLaunchSettings(settingsLookup(command))
 	return store, err
 }
 
-func openConfiguredLaunchSettings() (*ledger.Store, ledger.Config, error) {
-	store, config, path, exists, err := ledger.LoadSettings(os.Getenv)
+func openConfiguredLaunchSettings(getenv func(string) string) (*ledger.Store, ledger.Config, error) {
+	store, config, path, exists, err := ledger.LoadSettings(getenv)
 	if err != nil {
 		return nil, config, err
 	}
@@ -449,8 +449,8 @@ func safeFence(content string) string {
 // source repository, so callers resolve it exactly once. It returns the
 // rendered refusal, or gated=false when the legacy flow remains the
 // supported path.
-func gateUnsupportedDelivery(stdout io.Writer, format implementationFormatKind, repository github.RepositoryID, operation string) (bool, error) {
-	store, failure, err := adoptedLedger(repository)
+func gateUnsupportedDelivery(command *cli.Context, stdout io.Writer, format implementationFormatKind, repository github.RepositoryID, operation string) (bool, error) {
+	store, failure, err := adoptedLedger(command, repository)
 	if err != nil || (store == nil && failure == nil) {
 		return false, err
 	}
@@ -467,8 +467,8 @@ func gateUnsupportedDelivery(stdout io.Writer, format implementationFormatKind, 
 // adoptedLedger returns the configured ledger when this source repository has
 // adopted it. A nil store and failure mean the legacy flow remains supported;
 // an unusable configuration or record is a failure, never a forge fallback.
-func adoptedLedger(repository github.RepositoryID) (*ledger.Store, *ledgerOutcome, error) {
-	path, exists, err := ledger.SettingsLocation(os.Getenv)
+func adoptedLedger(command *cli.Context, repository github.RepositoryID) (*ledger.Store, *ledgerOutcome, error) {
+	path, exists, err := ledger.SettingsLocation(settingsLookup(command))
 	if err != nil || !exists {
 		// An unconfigured machine keeps the legacy flow; configuration is
 		// per machine and adoption is per project.

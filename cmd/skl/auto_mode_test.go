@@ -14,9 +14,10 @@ import (
 )
 
 func TestReconcileObservesHumanMergeIntoProposalBranch(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	if accepted := newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", singleSlice("branch-status"))); accepted.Status != "accepted" {
+	if accepted := fixture.app(newLedgerApp(t, newForgeServer(t))).accept(t, root, writeProposal(t, "", singleSlice("branch-status"))); accepted.Status != "accepted" {
 		t.Fatalf("accept: %s", mustJSON(t, accepted))
 	}
 	attachFixture(t, fixture.clone, "branch-status")
@@ -26,6 +27,8 @@ func TestReconcileObservesHumanMergeIntoProposalBranch(t *testing.T) {
 	app, output := completionStatusApp(t, func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = fmt.Fprint(w, fixturePull("closed", "true", "accepted-head", "merge-head", "acme/widgets", "acme/widgets", "proposal/branch-status"))
 	})
+	privateCLIHelp(app)
+	app.settingsLookup = fixture.lookup
 	observed := runCompletionStatus(t, app, output, root, "--slice", "branch-status/foundation")
 	if len(observed.Items) != 1 || observed.Items[0].State != ledger.Merged || observed.Items[0].Completion == nil || observed.Items[0].Completion.Target.Branch != "proposal/branch-status" {
 		t.Fatalf("branch merge observation = %+v", observed)
@@ -33,9 +36,10 @@ func TestReconcileObservesHumanMergeIntoProposalBranch(t *testing.T) {
 }
 
 func TestAutoDispatchWorkerResumesRecordedTargetAndContinuationKeepsAuto(t *testing.T) {
-	newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	source, _ := deliverySourceRepo(t)
-	app := newLedgerApp(t, newForgeServer(t))
+	app := fixture.app(newLedgerApp(t, newForgeServer(t)))
 	if accepted := app.accept(t, source, writeProposal(t, "", dualSlice(deliveryTestProposal))); accepted.Status != "accepted" {
 		t.Fatalf("accept: %s", mustJSON(t, accepted))
 	}
@@ -59,9 +63,10 @@ func TestAutoDispatchWorkerResumesRecordedTargetAndContinuationKeepsAuto(t *test
 }
 
 func TestImplementAutoFlagAppliesToNextAndDispatchOnly(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	source, _ := deliverySourceRepo(t)
-	app := newLedgerApp(t, newForgeServer(t))
+	app := fixture.app(newLedgerApp(t, newForgeServer(t)))
 	if accepted := app.accept(t, source, writeProposal(t, "", dualSlice(deliveryTestProposal))); accepted.Status != "accepted" {
 		t.Fatalf("accept: %s", mustJSON(t, accepted))
 	}

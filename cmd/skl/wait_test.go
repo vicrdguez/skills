@@ -130,9 +130,10 @@ func TestNextWaitHelp(t *testing.T) {
 }
 
 func TestDeliveryCLIWaitCancellation(t *testing.T) {
-	newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	cli := newLedgerApp(t, newForgeServer(t))
+	cli := fixture.app(newLedgerApp(t, newForgeServer(t)))
 	accepted := cli.accept(t, root, writeProposal(t, "", singleSlice("waiting")))
 	if accepted.Status != "accepted" {
 		t.Fatal(accepted)
@@ -162,10 +163,11 @@ func waitLedgerRun(t *testing.T, cli ledgerCLI, source string) (deliveryOutput, 
 
 // Work eligible at the first observation is claimed without sleeping.
 func TestDeliveryCLIWaitClaimsImmediatelyAvailableWork(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	source, _ := deliverySourceRepo(t)
-	deliveryAcceptFixture(t, newForgeServer(t), source)
-	cli := deliveryNoForgeApp(t)
+	fixture.acceptDelivery(t, newForgeServer(t), source)
+	cli := fixture.app(deliveryNoForgeApp(t))
 	synctest.Test(t, func(t *testing.T) {
 		out, elapsed := waitLedgerRun(t, cli, source)
 		if out.Status != ledger.WorkAvailable || out.Execution == nil || elapsed != 0 {
@@ -181,14 +183,15 @@ func TestDeliveryCLIWaitClaimsImmediatelyAvailableWork(t *testing.T) {
 // whose Dependency is unmerged are skipped until the Dependency merges during
 // the window, and the next poll then claims the dependent Slice.
 func TestDeliveryCLIWaitClaimsLateWorkWithCanonicalEligibility(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	source, _ := deliverySourceRepo(t)
 	spec := dualSlice(deliveryTestProposal)
 	spec.depends = map[string][]string{"feature": {"foundation"}}
-	if accepted := newLedgerApp(t, newForgeServer(t)).accept(t, source, writeProposal(t, "", spec)); accepted.Status != "accepted" {
+	if accepted := fixture.app(newLedgerApp(t, newForgeServer(t))).accept(t, source, writeProposal(t, "", spec)); accepted.Status != "accepted" {
 		t.Fatalf("accept: %s", mustJSON(t, accepted))
 	}
-	cli := deliveryNoForgeApp(t)
+	cli := fixture.app(deliveryNoForgeApp(t))
 	held, err := cli.deliveryJSON(t, "skl", "implement", "next", "--repo", source, "--format", "json")
 	if err != nil || held.Execution == nil || held.Execution.Item != deliveryTestItem {
 		t.Fatalf("claim foundation: %#v %v", held, err)

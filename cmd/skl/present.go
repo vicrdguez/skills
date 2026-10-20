@@ -50,7 +50,7 @@ func presentCommand(newBackend backendFactory, stdout io.Writer) *cli.Command {
 			if err != nil {
 				return refuse(err)
 			}
-			store, err := openConfiguredLedger()
+			store, err := openConfiguredLedger(command)
 			if err != nil {
 				return refuse(err)
 			}

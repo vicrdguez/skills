@@ -10,7 +10,7 @@ import (
 // A new CLI/adapter instance gets no earlier body or attempt state.
 func (f *autoMergeFixture) pollReadiness(t *testing.T) deliveryOutput {
 	t.Helper()
-	fresh := presentForgeApp(t, f.pulls)
+	fresh := f.ledger.app(presentForgeApp(t, f.pulls))
 	out, err := fresh.deliveryJSON(t, "skl", "watchdog", "next", "--auto", "--repo", f.source, "--format", "json")
 	if err != nil {
 		t.Fatal(err)
@@ -19,6 +19,7 @@ func (f *autoMergeFixture) pollReadiness(t *testing.T) deliveryOutput {
 }
 
 func TestAutoReadinessFreshPollRecoversDraftWithoutRepublishingProse(t *testing.T) {
+	t.Parallel()
 	f := newAutoMergeFixture(t, true)
 	passed := f.pass(t, false, false)
 	number := passed.Result.State.Submission.Number
@@ -62,6 +63,7 @@ func TestAutoReadinessFreshPollRecoversDraftWithoutRepublishingProse(t *testing.
 }
 
 func TestAutoReadinessMissingAssociationRequiresExplicitRecovery(t *testing.T) {
+	t.Parallel()
 	f := newAutoMergeFixture(t, true)
 	f.pass(t, false, false)
 	state := deliveryPersistedState(t, f.clone)
@@ -74,7 +76,7 @@ func TestAutoReadinessMissingAssociationRequiresExplicitRecovery(t *testing.T) {
 	if len(polled.Merges) != 1 || !strings.Contains(polled.Merges[0].Reason, "explicit PR recovery") || polled.Merges[0].Status != ledger.MergeRefused {
 		t.Fatalf("missing association = %s", mustJSON(t, polled))
 	}
-	offline, err := deliveryNoForgeApp(t).deliveryJSON(t, "skl", "watchdog", "next", "--auto", "--repo", f.source, "--format", "json")
+	offline, err := f.ledger.app(deliveryNoForgeApp(t)).deliveryJSON(t, "skl", "watchdog", "next", "--auto", "--repo", f.source, "--format", "json")
 	if err != nil || len(offline.Merges) != 1 || !strings.Contains(offline.Merges[0].Reason, "explicit PR recovery") || offline.Merges[0].Readiness == nil || offline.Merges[0].Review != "pass" {
 		t.Fatalf("offline missing association = %s, %v", mustJSON(t, offline), err)
 	}
@@ -86,6 +88,7 @@ func TestAutoReadinessMissingAssociationRequiresExplicitRecovery(t *testing.T) {
 }
 
 func TestAutoReadinessUncertainReadbackWaitsForALaterFreshPoll(t *testing.T) {
+	t.Parallel()
 	f := newAutoMergeFixture(t, true)
 	passed := f.pass(t, false, false)
 	f.pulls.mu.Lock()
@@ -108,6 +111,7 @@ func TestAutoReadinessUncertainReadbackWaitsForALaterFreshPoll(t *testing.T) {
 }
 
 func TestAutoReadinessRefusesRealSourceMovementDespiteExactAPIHead(t *testing.T) {
+	t.Parallel()
 	f := newAutoMergeFixture(t, true)
 	passed := f.pass(t, false, false)
 	approved := f.branchHead(t, deliveryTestBranch)
@@ -126,6 +130,7 @@ func TestAutoReadinessRefusesRealSourceMovementDespiteExactAPIHead(t *testing.T)
 }
 
 func TestAutoReadinessUsesFinalIntegrationHeadNotReviewedImplementation(t *testing.T) {
+	t.Parallel()
 	f := newAutoMergeFixture(t, true)
 	implementation := f.branchHead(t, deliveryTestBranch)
 	base := f.branchHead(t, autoMergeBranch)

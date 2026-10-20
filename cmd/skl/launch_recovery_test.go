@@ -7,20 +7,22 @@ import (
 )
 
 func TestDirectWorkerStartupAndRecoveryUseCurrentRoleDefaults(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ name, flags string }{
 		{"standard", "--harness pi --reviewer-thinking explicit-thinking"},
 		{"team", "--harness pi --mode team --helper-model explicit-helper --reviewer-thinking explicit-thinking"},
 		{"explicit only", "--reviewer-model explicit-review --reviewer-thinking explicit-thinking"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := newLedgerFixture(t)
+			t.Parallel()
+			f := newPrivateLedgerFixture(t)
 			configure := func(value string) {
 				f.misconfigure(t, fmt.Sprintf(`{"ledger":%q,"harnesses":{"pi":{"reviewer":{"model":%q,"thinking":"configured-thinking"},"helper":{"model":"configured-helper","thinking":%q}}}}`, f.clone, value, value))
 			}
 			configure("first")
 			source, _ := deliverySourceRepo(t)
-			deliveryAcceptFixture(t, newForgeServer(t), source)
-			cli := deliveryNoForgeApp(t)
+			f.acceptDelivery(t, newForgeServer(t), source)
+			cli := f.app(deliveryNoForgeApp(t))
 			first := cli.dispatchJSON(t, "skl implement next --repo "+source+" "+tc.flags).Packet.Facts.Delivery
 			wantModel := "first"
 			if tc.name == "explicit only" {
@@ -48,8 +50,9 @@ func TestDirectWorkerStartupAndRecoveryUseCurrentRoleDefaults(t *testing.T) {
 }
 
 func TestLaunchResolvedIsRejectedByTheParser(t *testing.T) {
-	f := newLedgerFixture(t)
-	cli := deliveryNoForgeApp(t)
+	t.Parallel()
+	f := newPrivateLedgerFixture(t)
+	cli := f.app(deliveryNoForgeApp(t))
 	before := ledgerSnapshot(t, f.clone)
 	for _, phase := range []string{"implement", "watchdog"} {
 		for _, operation := range []string{"next", "dispatch", "resume", "prepare", "inspect"} {

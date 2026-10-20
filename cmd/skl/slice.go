@@ -45,7 +45,7 @@ func sliceCommands(newBackend backendFactory, stdout io.Writer) *cli.Command {
 				if item == "" {
 					return refuse(errors.New("slice show requires --slice <proposal>/<slice>; use the identity and readback command the acceptance reported"))
 				}
-				store, failure := openConfiguredLedger()
+				store, failure := openConfiguredLedger(command)
 				if failure != nil {
 					return refuse(failure)
 				}

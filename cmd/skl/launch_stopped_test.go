@@ -6,10 +6,11 @@ import (
 )
 
 func TestStoppedDispatchPreservesHarnessAndExplicitSessionOverrides(t *testing.T) {
-	newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	source, _ := deliverySourceRepo(t)
-	deliveryAcceptFixture(t, newForgeServer(t), source)
-	cli := deliveryNoForgeApp(t)
+	fixture.acceptDelivery(t, newForgeServer(t), source)
+	cli := fixture.app(deliveryNoForgeApp(t))
 	d := cli.dispatched(t, "skl implement dispatch --repo "+source+" --harness pi --reviewer-model explicit-review")
 	stopped := cli.dispatchRun(t, d.Continue+" --format markdown")
 	for _, flag := range []string{"--harness 'pi'", "--reviewer-model 'explicit-review'"} {

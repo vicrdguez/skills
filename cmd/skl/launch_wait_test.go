@@ -10,6 +10,7 @@ import (
 )
 
 func TestWaitingDispatchRefreshesLaunchSettings(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, phase   string
 		explicit      bool
@@ -23,7 +24,8 @@ func TestWaitingDispatchRefreshesLaunchSettings(t *testing.T) {
 		{name: "changed ledger", phase: "implement", changedLedger: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			fixture := newLedgerFixture(t)
+			t.Parallel()
+			fixture := newPrivateLedgerFixture(t)
 			configure := func(value string) {
 				fixture.misconfigure(t, fmt.Sprintf(`{"ledger":%q,"harnesses":{"pi":{"implement":{"model":%q,"thinking":%q},"watchdog":{"model":%q,"thinking":%q},"reviewer":{"model":%q,"thinking":%q},"helper":{"model":%q,"thinking":%q}}}}`, fixture.clone, value, value, value, value, value, value, value, value))
 			}
@@ -31,10 +33,10 @@ func TestWaitingDispatchRefreshesLaunchSettings(t *testing.T) {
 			source, target := deliverySourceRepo(t)
 			spec := dualSlice(deliveryTestProposal)
 			spec.depends = map[string][]string{"feature": {"foundation"}}
-			if accepted := newLedgerApp(t, newForgeServer(t)).accept(t, source, writeProposal(t, "", spec)); accepted.Status != "accepted" {
+			if accepted := fixture.app(newLedgerApp(t, newForgeServer(t))).accept(t, source, writeProposal(t, "", spec)); accepted.Status != "accepted" {
 				t.Fatal(accepted)
 			}
-			cli := deliveryNoForgeApp(t)
+			cli := fixture.app(deliveryNoForgeApp(t))
 			held, err := cli.deliveryJSON(t, "skl", "implement", "next", "--repo", source, "--format", "json")
 			if err != nil || held.Execution == nil {
 				t.Fatalf("claim foundation: %#v %v", held, err)
@@ -64,7 +66,7 @@ func TestWaitingDispatchRefreshesLaunchSettings(t *testing.T) {
 				}
 				if tc.phase == "watchdog" {
 					// Use another CLI instance while the waiting supervisor owns cli.out.
-					dispatchImplementHandoff(t, deliveryNoForgeApp(t), source, target, held.Execution.Item, held.Execution.Claim.Commit)
+					dispatchImplementHandoff(t, fixture.app(deliveryNoForgeApp(t)), source, target, held.Execution.Item, held.Execution.Claim.Commit)
 				} else {
 					state := deliveryPersistedState(t, fixture.clone)
 					state.Claim, state.State = nil, ledger.Merged

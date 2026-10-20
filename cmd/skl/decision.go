@@ -77,7 +77,7 @@ func runDecisionInbox(command *cli.Context, stdout io.Writer) error {
 		return renderDecisionRefusal(stdout, format, "an explicit Project filter cannot be empty",
 			"supply --project <name>, or omit the flag to read the ledger-wide inbox")
 	}
-	store, failure := openConfiguredLedger()
+	store, failure := openConfiguredLedger(command)
 	if failure != nil {
 		return renderDecisionUnavailable(stdout, format, failure)
 	}
@@ -166,7 +166,7 @@ func runDecisionApply(command *cli.Context, stdout io.Writer) error {
 				"decision apply takes either one --input file or the single-request flags, not both",
 				"submit one explicitly scoped decision or one batch input file")
 		}
-		return applyDecisionBatch(stdout, format, inputPath, coupled)
+		return applyDecisionBatch(command, stdout, format, inputPath, coupled)
 	}
 	if coupled {
 		return renderDecisionRefusal(stdout, format,
@@ -191,7 +191,7 @@ func runDecisionApply(command *cli.Context, stdout io.Writer) error {
 			"human decision carries no answer",
 			"record the human's exact direction; a route alone is not an answer")
 	}
-	store, failure := openConfiguredLedger()
+	store, failure := openConfiguredLedger(command)
 	if failure != nil {
 		return renderDecisionUnavailable(stdout, format, failure)
 	}
@@ -205,7 +205,7 @@ func runDecisionApply(command *cli.Context, stdout io.Writer) error {
 	return renderDecisionResults(stdout, format, results)
 }
 
-func applyDecisionBatch(stdout io.Writer, format implementationFormatKind, inputPath string, coupled bool) error {
+func applyDecisionBatch(command *cli.Context, stdout io.Writer, format implementationFormatKind, inputPath string, coupled bool) error {
 	raw, err := os.ReadFile(inputPath)
 	if err != nil {
 		return renderDecisionRefusal(stdout, format,
@@ -223,7 +223,7 @@ func applyDecisionBatch(stdout io.Writer, format implementationFormatKind, input
 			"batch decision input holds no decisions",
 			"name at least one current request with its exact reference, answer, and route")
 	}
-	store, failure := openConfiguredLedger()
+	store, failure := openConfiguredLedger(command)
 	if failure != nil {
 		return renderDecisionUnavailable(stdout, format, failure)
 	}
@@ -250,7 +250,7 @@ func runDecisionRetire(command *cli.Context, newBackend backendFactory, stdout i
 			"proposal retire requires --project <name> and --proposal <name>",
 			"select the recorded Project and proposal whose every slice is terminal and unclaimed")
 	}
-	store, failure := openConfiguredLedger()
+	store, failure := openConfiguredLedger(command)
 	if failure != nil {
 		return renderDecisionUnavailable(stdout, format, failure)
 	}
