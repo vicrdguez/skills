@@ -8,6 +8,7 @@ import (
 )
 
 func TestAutoClaimOpensProposalAndLaterPlainClaimUsesIt(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "feature", "first", ledger.ReadyForImplementation, nil, deliveryInitial)
@@ -38,6 +39,7 @@ func TestAutoClaimOpensProposalAndLaterPlainClaimUsesIt(t *testing.T) {
 }
 
 func TestPlainClaimKeepsClosedProposalClosed(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "feature", "first", ledger.ReadyForImplementation, nil, deliveryInitial)
@@ -59,6 +61,7 @@ func TestPlainClaimKeepsClosedProposalClosed(t *testing.T) {
 }
 
 func TestDependenciesRequireBuildableCompletion(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "p", "blocker", ledger.Merged, nil, deliveryInitial)
@@ -86,6 +89,7 @@ func TestDependenciesRequireBuildableCompletion(t *testing.T) {
 }
 
 func TestSameProposalMergeUnblocksPlainClaim(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "feature", "blocker", ledger.Merged, nil, deliveryInitial)
@@ -100,6 +104,7 @@ func TestSameProposalMergeUnblocksPlainClaim(t *testing.T) {
 }
 
 func TestStartedSliceKeepsMainWhenProposalOpensLater(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "feature", "first", ledger.Rework, nil, deliveryInitial)
@@ -131,6 +136,7 @@ Earlier implementation.
 }
 
 func TestOpenBranchIsNotDeliveredOrAutomaticallyArchived(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "feature", "only", ledger.Merged, nil, deliveryInitial)

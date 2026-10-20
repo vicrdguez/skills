@@ -55,6 +55,10 @@ func newDeliveryLedger(t *testing.T) *deliveryLedger {
 		t.Fatal(err)
 	}
 	deliveryGit(t, root, "init", "-q", "-b", "main")
+	// Keep real Git maintenance inside command lifetimes, before TempDir cleanup.
+	// gc.autoDetach also covers Git versions predating maintenance.autoDetach.
+	deliveryGit(t, root, "config", "maintenance.autoDetach", "false")
+	deliveryGit(t, root, "config", "gc.autoDetach", "false")
 	deliveryGit(t, root, "config", "user.name", "Ledger")
 	deliveryGit(t, root, "config", "user.email", "ledger@example.com")
 	deliveryWrite(t, filepath.Join(root, "README.md"), "workflow ledger\n")
@@ -338,6 +342,7 @@ func deliveryWaitForPaths(t *testing.T, paths ...string) {
 // a Merged dependency stays eligible, and independent slices hold Claims
 // simultaneously.
 func TestDeliverySelectionIsProjectScopedAndLaneOrdered(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addProject("gadgets", "acme/gadgets")
@@ -382,6 +387,7 @@ func TestDeliverySelectionIsProjectScopedAndLaneOrdered(t *testing.T) {
 // Private accepted age replaces forge timestamps as the within-lane age.
 // Opposite lexical/age order and a tie expose age and stable-identity regressions.
 func TestDeliverySelectionOrdersEachLaneByAcceptedAge(t *testing.T) {
+	t.Parallel()
 	for _, state := range []string{ledger.ReadyForImplementation, ledger.Rework} {
 		t.Run(state, func(t *testing.T) {
 			l := newDeliveryLedger(t)
@@ -417,6 +423,7 @@ type deliveryHelperOutcome struct {
 // TestDeliveryConcurrentCallersAcquireAtMostOneClaim covers B1 and A2 with
 // actual concurrent subprocess callers released from a file barrier.
 func TestDeliveryConcurrentCallersAcquireAtMostOneClaim(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "delivery-race", "foundation", ledger.ReadyForImplementation, nil, deliveryInitial)
@@ -550,6 +557,7 @@ func deliveryWriteHelperOutcome(t *testing.T, outcome deliveryHelperOutcome) {
 // release reject a wrong or old commit, unrelated committed Project work does
 // not stale the selected Claim, and an explicit release ends the reservation.
 func TestDeliveryResumeAndReleaseRequireExactClaim(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "delivery-hold", "foundation", ledger.ReadyForImplementation, nil, deliveryInitial)
@@ -609,6 +617,7 @@ func TestDeliveryResumeAndReleaseRequireExactClaim(t *testing.T) {
 // an exact retry is recognized without a new commit or round, and a later
 // execution cannot be overwritten or released by the old one.
 func TestDeliveryHandoffIsAtomicAndReplaySafe(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "delivery-atomic", "foundation", ledger.ReadyForImplementation, nil, deliveryInitial)
@@ -740,6 +749,7 @@ func TestDeliveryHandoffIsAtomicAndReplaySafe(t *testing.T) {
 // two failed reviews require human direction before another implementation
 // Claim. The CLI delivery journey covers directed round 3 and its count.
 func TestDeliveryReviewCapRefusesUndirectedRework(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "delivery-flow", "foundation", ledger.ReadyForImplementation, nil, deliveryInitial)
@@ -795,6 +805,7 @@ func TestDeliveryReviewCapRefusesUndirectedRework(t *testing.T) {
 // TestDeliveryExplicitNeedsHumanCounts covers B7/A6: an explicit Needs Human
 // review is a completed round.
 func TestDeliveryExplicitNeedsHumanCounts(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "delivery-pause", "foundation", ledger.ReadyForImplementation, nil, deliveryInitial)
@@ -839,6 +850,7 @@ func deliveryRequeue(t *testing.T, l *deliveryLedger, project, item, state strin
 // schema refuses review without acquiring a Claim or losing state, and a
 // restored compatible report lets the same work proceed.
 func TestDeliveryRefusesIncompatibleReportSchema(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "delivery-schema", "foundation", ledger.ReadyForImplementation, nil, deliveryInitial)
@@ -878,6 +890,7 @@ func TestDeliveryRefusesIncompatibleReportSchema(t *testing.T) {
 // TestDeliveryRefusesDirtyRecord covers B9/A2: an interrupted or ambiguous
 // record refuses without discarding the ambiguous files.
 func TestDeliveryRefusesDirtyRecord(t *testing.T) {
+	t.Parallel()
 	t.Run("handoff preserves an interrupted report", func(t *testing.T) {
 		l := newDeliveryLedger(t)
 		l.addProject("widgets", "acme/widgets")
@@ -925,6 +938,7 @@ func TestDeliveryRefusesDirtyRecord(t *testing.T) {
 // TestDeliveryDivergentUpstreamBlocksWork covers B9/A2: known competing ledger
 // history refuses new work.
 func TestDeliveryDivergentUpstreamBlocksWork(t *testing.T) {
+	t.Parallel()
 	upstream := filepath.Join(t.TempDir(), "upstream.git")
 	deliveryGit(t, t.TempDir(), "init", "-q", "--bare", "-b", "main", upstream)
 	root := filepath.Join(t.TempDir(), "ledger")
@@ -970,6 +984,7 @@ func TestDeliveryDivergentUpstreamBlocksWork(t *testing.T) {
 // TestDeliveryUnavailableUpstreamStillDeliversLocally covers B9: an outage
 // with locally available records does not prevent local selection or handoff.
 func TestDeliveryUnavailableUpstreamStillDeliversLocally(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "delivery-outage", "foundation", ledger.ReadyForImplementation, nil, deliveryInitial)

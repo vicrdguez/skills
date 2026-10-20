@@ -24,6 +24,7 @@ func (f *recoveryForge) ReadyPull(_ context.Context, p ledger.PullReadiness) err
 }
 
 func TestReadinessRecoveryStopsObservableInvalidationBeforeMerge(t *testing.T) {
+	t.Parallel()
 	for _, scenario := range []string{"new result", "decision", "submission", "target", "source branch", "proposal spent", "remote moves", "uncertain"} {
 		t.Run(scenario, func(t *testing.T) {
 			l, source, store := mergeFixture(t)
@@ -79,6 +80,7 @@ func TestReadinessRecoveryStopsObservableInvalidationBeforeMerge(t *testing.T) {
 }
 
 func TestReadinessRecoveryRequiresKnownMatchingRepositoryAndVerifiableRemote(t *testing.T) {
+	t.Parallel()
 	for _, scenario := range []string{"no attachment", "foreign repository", "missing source", "unavailable remote"} {
 		t.Run(scenario, func(t *testing.T) {
 			l, source, store := mergeFixture(t)
@@ -115,6 +117,7 @@ func TestReadinessRecoveryRequiresKnownMatchingRepositoryAndVerifiableRemote(t *
 }
 
 func TestReadinessRecoveryRefusalLeavesHistoricalPassAndNoDurableAttempt(t *testing.T) {
+	t.Parallel()
 	l, source, store := mergeFixture(t)
 	before := l.head()
 	forge := &recoveryForge{onReady: func(ledger.PullReadiness) error { return errors.New("forge unavailable") }}

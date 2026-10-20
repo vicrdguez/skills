@@ -51,6 +51,10 @@ func newDeliverySource(t *testing.T) *deliverySource {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// Debt: this source and its bare remote still let Git auto-maintenance
+	// detach after commits and pushes, so a repack can outlive the command that
+	// triggered it and race TempDir cleanup. newDeliveryLedger shows the
+	// repository-local settings that keep maintenance in the foreground.
 	deliveryGit(t, root, "init", "-q", "-b", "main")
 	deliveryGit(t, root, "config", "user.name", "Worker")
 	deliveryGit(t, root, "config", "user.email", "worker@example.com")
@@ -263,6 +267,7 @@ func deliveryWaitPublished(t *testing.T, published <-chan struct{}) {
 // TestDeliveryPublicationAddsRecordedIssueFooter observes both normal and
 // explicit presentations, including a later review, through the forge seam.
 func TestDeliveryPublicationAddsRecordedIssueFooter(t *testing.T) {
+	t.Parallel()
 	l, source, store, implementation := deliveryPublicationFixtureWithIssue(t, &ledger.ForgeAttachment{Repository: "acme/widgets", Number: 110})
 	forge := &deliveryForgeStub{number: 42}
 	body := "Ready for review."
@@ -305,6 +310,7 @@ func TestDeliveryPublicationAddsRecordedIssueFooter(t *testing.T) {
 // A selection made before an issue was recorded cannot publish a body that
 // silently omits the issue's closing reference after that attachment arrives.
 func TestDeliveryPublicationRefreshesSelectionAfterIssueAttachment(t *testing.T) {
+	t.Parallel()
 	l, source, store, _ := deliveryPublicationFixture(t)
 	selected := deliverySelect(t, store)
 	state := l.committedState(deliveryPublicationProject, deliveryPublicationSlice, deliveryPublicationBranch)
@@ -329,6 +335,7 @@ func TestDeliveryPublicationRefreshesSelectionAfterIssueAttachment(t *testing.T)
 }
 
 func TestDeliveryPublicationDoesNotRewriteWorkerClosingReferences(t *testing.T) {
+	t.Parallel()
 	_, source, store, result := deliveryPublicationFixtureWithIssue(t, &ledger.ForgeAttachment{Repository: "acme/widgets", Number: 110})
 	forge := &deliveryForgeStub{number: 42}
 	body := "Summary.\n\nCloses #110"
@@ -340,6 +347,7 @@ func TestDeliveryPublicationDoesNotRewriteWorkerClosingReferences(t *testing.T) 
 }
 
 func TestDeliveryPublicationForgeFailureKeepsAttachedLocalHandoff(t *testing.T) {
+	t.Parallel()
 	l, source, store, result := deliveryPublicationFixtureWithIssue(t, &ledger.ForgeAttachment{Repository: "acme/widgets", Number: 110})
 	head := l.head()
 	forge := &deliveryForgeStub{err: errors.New("forge unavailable")}
@@ -360,6 +368,7 @@ func TestDeliveryPublicationForgeFailureKeepsAttachedLocalHandoff(t *testing.T) 
 // and no source push, forge call, private-prose fallback, or ledger write
 // happens, while the local report, lifecycle, and released Claim stay intact.
 func TestDeliveryPublicationWithoutPublicMaterialRemainsPending(t *testing.T) {
+	t.Parallel()
 	publicBody := "deliberately public body\n"
 
 	t.Run("no separately authored public body", func(t *testing.T) {
@@ -418,6 +427,7 @@ func deliveryAssertLocalHandoffPreserved(t *testing.T, l *deliveryLedger, head s
 // recorded source normally, presents exactly the chosen prose for the recorded
 // head/branch as draft, and records only the established association.
 func TestDeliveryPublicationPushesSourceAndPresentsOnlyPublicProse(t *testing.T) {
+	t.Parallel()
 	l, source, store, result := deliveryPublicationFixture(t)
 	handoff := l.head()
 	publicBody := "deliberately public delivery prose\n"
@@ -480,6 +490,7 @@ func TestDeliveryPublicationPushesSourceAndPresentsOnlyPublicProse(t *testing.T)
 // TestDeliveryPublicationPresentsApprovedReview: an approved review presents
 // its reviewed source with Approved set.
 func TestDeliveryPublicationPresentsApprovedReview(t *testing.T) {
+	t.Parallel()
 	l, source, store, _ := deliveryPublicationFixture(t)
 	result := deliveryReview(t, store, source.head, "pass", "review body\n")
 	if result.Status != ledger.ReadyForMerge {
@@ -504,6 +515,7 @@ func TestDeliveryPublicationPresentsApprovedReview(t *testing.T) {
 // is not asked to present or approve it, the remote is not forced, nothing is
 // persisted, and the local handoff is unchanged.
 func TestDeliveryPublicationRefusesNonFastForwardSourceWithoutForge(t *testing.T) {
+	t.Parallel()
 	l, source, store, result := deliveryPublicationFixture(t)
 	// Advance the remote branch beyond the reported head so the explicit push is
 	// refused as a non-fast-forward rewrite.
@@ -537,6 +549,7 @@ func TestDeliveryPublicationRefusesNonFastForwardSourceWithoutForge(t *testing.T
 // revision normally and presents the latest approved review. When the push is
 // unavailable, it reports the limitation without approval or local change.
 func TestDeliveryPublicationPublishesSourceLeftBehindByAnOutage(t *testing.T) {
+	t.Parallel()
 	t.Run("ordinary push succeeds", func(t *testing.T) {
 		l, source, store, _ := deliveryPublicationFixture(t)
 		// The remote branch holds only an ancestor of the recorded head.
@@ -615,6 +628,7 @@ func deliveryInterruptPresentation(t *testing.T, l *deliveryLedger, implementati
 // presenting the current view with review prose presents only the latest
 // review and leaves reports, review count, lifecycle, and Claims unchanged.
 func TestDeliveryPublicationPresentsLatestReviewAfterInterruptedImplementation(t *testing.T) {
+	t.Parallel()
 	t.Run("reservation still recorded", func(t *testing.T) {
 		l, source, store, implementation := deliveryPublicationFixture(t)
 		deliveryInterruptPresentation(t, l, implementation)
@@ -667,6 +681,7 @@ func TestDeliveryPublicationPresentsLatestReviewAfterInterruptedImplementation(t
 // of it then becomes current; a later Claim does not supersede it, while
 // recorded human direction or a missing result is reported, not presented.
 func TestDeliveryPublicationSelectsTheLatestResult(t *testing.T) {
+	t.Parallel()
 	l, source, store, _ := deliveryPublicationFixture(t)
 	if selected := deliverySelect(t, store); selected.Phase != ledger.ImplementPhase || selected.Outcome != "awaiting_review" || selected.Approved {
 		t.Fatalf("selected = %#v, want the implementation", selected)
@@ -710,6 +725,7 @@ func TestDeliveryPublicationSelectsTheLatestResult(t *testing.T) {
 // TestDeliveryPublicationPausedWithoutSourceIsPending: a paused result with
 // no source revision reports that limitation without any external effect.
 func TestDeliveryPublicationPausedWithoutSourceIsPending(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject(deliveryPublicationProject, "acme/widgets")
 	l.addSlice(deliveryPublicationProject, deliveryPublicationSlice, deliveryPublicationBranch, ledger.ReadyForImplementation, nil, deliveryInitial)
@@ -733,6 +749,7 @@ func TestDeliveryPublicationPausedWithoutSourceIsPending(t *testing.T) {
 // response loss: the uncertainty is reported as uncertain after one
 // presentation, with no durable attempt record, association, or local change.
 func TestDeliveryPublicationUncertainCreateIsReportedOnce(t *testing.T) {
+	t.Parallel()
 	l, source, store, _ := deliveryPublicationFixture(t)
 	head := l.head()
 	forge := &deliveryForgeStub{err: fmt.Errorf("%w: creation response lost", ledger.ErrPresentationUncertain)}
@@ -763,6 +780,7 @@ func TestDeliveryPublicationUncertainCreateIsReportedOnce(t *testing.T) {
 // superseded result stop; a Claim alone does not supersede it; and a
 // different concurrently recorded association is not reassigned.
 func TestDeliveryPublicationBookkeepingPreservesConcurrentLocalWork(t *testing.T) {
+	t.Parallel()
 	t.Run("later review handoff supersedes further updates", func(t *testing.T) {
 		l, source, store, result := deliveryPublicationFixture(t)
 		publicBody := "public body\n"

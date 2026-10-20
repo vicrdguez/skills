@@ -10,6 +10,7 @@ import (
 )
 
 func TestCurrentReportsShareCommittedIdentityAndIgnoreWorkingTree(t *testing.T) {
+	t.Parallel()
 	const item = "inspect-private-reports/readback"
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
@@ -75,6 +76,7 @@ func TestCurrentReportsShareCommittedIdentityAndIgnoreWorkingTree(t *testing.T) 
 }
 
 func TestCurrentReportAvailabilityAndShowReportAbsence(t *testing.T) {
+	t.Parallel()
 	const item = "inspect-private-reports/readback"
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")

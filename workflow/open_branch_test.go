@@ -7,6 +7,7 @@ import (
 )
 
 func TestPrepareOpensMissingProposalBranchAtFetchedMainAndReusesIt(t *testing.T) {
+	t.Parallel()
 	root := newGitRepository(t)
 	remote := newBareRemote(t, root)
 	main := gitOutput(t, root, "rev-parse", "HEAD")
@@ -42,6 +43,7 @@ func TestPrepareOpensMissingProposalBranchAtFetchedMainAndReusesIt(t *testing.T)
 }
 
 func TestPrepareRefusesToFabricateProposalBranchWhenMainUnavailable(t *testing.T) {
+	t.Parallel()
 	root := newGitRepository(t)
 	remote := filepath.Join(t.TempDir(), "empty.git")
 	runGit(t, root, "init", "--bare", remote)

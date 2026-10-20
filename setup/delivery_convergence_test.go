@@ -17,6 +17,7 @@ import (
 )
 
 func TestDeliveryPublicationConvergesOnExactHead(t *testing.T) {
+	t.Parallel()
 	for _, scenario := range []struct {
 		name       string
 		firstStale int
@@ -63,6 +64,7 @@ func TestDeliveryPublicationConvergesOnExactHead(t *testing.T) {
 }
 
 func TestDeliveryPublicationDoesNotRetryIdentityFailureAsHeadLag(t *testing.T) {
+	t.Parallel()
 	for _, stage := range []struct {
 		name       string
 		firstRead  int
@@ -115,6 +117,7 @@ func TestDeliveryPublicationDoesNotRetryIdentityFailureAsHeadLag(t *testing.T) {
 }
 
 func TestDeliveryPublicationBoundsPersistentHeadMismatch(t *testing.T) {
+	t.Parallel()
 	for _, firstRead := range []int{1, 2} {
 		t.Run(map[int]string{1: "lookup", 2: "preflight"}[firstRead], func(t *testing.T) {
 			forge := newDeliveryForge(t)
@@ -206,6 +209,7 @@ func TestDeliveryPublicationBoundsTransportDuringConvergence(t *testing.T) {
 }
 
 func TestDeliveryPublicationStopsSupersededConvergence(t *testing.T) {
+	t.Parallel()
 	for _, alreadyPresented := range []bool{false, true} {
 		t.Run(map[bool]string{false: "pending writes", true: "no writes needed"}[alreadyPresented], func(t *testing.T) {
 			forge := newDeliveryForge(t)

@@ -75,6 +75,7 @@ func claimsLedger(t *testing.T) *deliveryLedger {
 }
 
 func TestFindSlicesKeepsClaimIndependentOfLifecycle(t *testing.T) {
+	t.Parallel()
 	l := claimsLedger(t)
 	before := browseObservable(t, l)
 	snapshot := browseSnapshot(t, l)
@@ -112,6 +113,7 @@ func TestFindSlicesKeepsClaimIndependentOfLifecycle(t *testing.T) {
 }
 
 func TestFindSlicesCombinesTextWithStructuredCriteria(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addProject("gadgets", "acme/gadgets")
@@ -150,6 +152,7 @@ func TestFindSlicesCombinesTextWithStructuredCriteria(t *testing.T) {
 }
 
 func TestFindSlicesDisclosesUnknownFactsItCannotDecide(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "orders", "cancel", ledger.Merged, nil, deliveryInitial)
@@ -178,6 +181,7 @@ func TestFindSlicesDisclosesUnknownFactsItCannotDecide(t *testing.T) {
 }
 
 func TestFindSlicesDisclosesUnknownMembership(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "orders", "cancel", ledger.Merged, nil, deliveryInitial)
@@ -208,6 +212,7 @@ func TestFindSlicesDisclosesUnknownMembership(t *testing.T) {
 }
 
 func TestFindSlicesGroupsTheSameFacts(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addProject("gadgets", "acme/gadgets")
@@ -251,6 +256,7 @@ func TestFindSlicesGroupsTheSameFacts(t *testing.T) {
 }
 
 func TestFindSlicesDescribesOneRevisionAndRefusesUnknownSelections(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "orders", "cancel", ledger.NeedsHuman, nil, deliveryInitial)
