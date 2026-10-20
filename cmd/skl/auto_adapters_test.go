@@ -11,18 +11,20 @@ import (
 )
 
 func TestInstalledFamiliesDispatchWithRuntimeSettingsAndContinueSafely(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	installInto(t, home)
 	for _, harness := range []string{"pi", "opencode", "claude"} {
 		for _, operation := range []string{"implement-loop", "implement-team-loop", "watchdog-loop", "implement-auto", "implement-team-auto", "watchdog-auto"} {
 			t.Run(harness+"/"+operation, func(t *testing.T) {
-				f := newLedgerFixture(t)
+				t.Parallel()
+				f := newPrivateLedgerFixture(t)
 				f.misconfigure(t, fmt.Sprintf(`{"ledger":%q,"harnesses":{%q:{"implement":{"model":"configured-worker","thinking":"configured-thinking"},"watchdog":{"model":"configured-watchdog","thinking":"configured-watch-thinking"},"reviewer":{"model":"configured-reviewer","thinking":"configured-review-thinking"},"helper":{"model":"configured-helper","thinking":"configured-helper-thinking"}}}}`, f.clone, harness))
 				source, target := deliverySourceRepo(t)
-				routeSourcePushes(t)
+				routeSourcePushes(t, source)
 				runGit(t, source, "push", "-q", "origin", "main")
-				deliveryAcceptFixture(t, newForgeServer(t), source)
-				cli := deliveryNoForgeApp(t)
+				f.acceptDelivery(t, newForgeServer(t), source)
+				cli := f.app(deliveryNoForgeApp(t))
 				watchdog := strings.HasPrefix(operation, "watchdog")
 				if watchdog {
 					implemented := cli.dispatched(t, "skl implement dispatch --repo "+source)

@@ -8,6 +8,7 @@ import (
 )
 
 func TestAutoReadinessRefusalContinuesIndependentSiblingWhileDependentWaits(t *testing.T) {
+	t.Parallel()
 	spec := dualSlice(deliveryTestProposal)
 	spec.slices[1].name = "z-independent"
 	dependent := singleSlice("unused").slices[0]

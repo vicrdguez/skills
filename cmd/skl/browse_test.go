@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -248,7 +249,7 @@ func TestBrowseStartupSelection(t *testing.T) {
 
 	view := func(explicit string, explicitSet bool, location string) tea.Model {
 		t.Helper()
-		model, err := startBrowser(explicit, explicitSet, location)
+		model, err := startBrowser(os.Getenv, explicit, explicitSet, location)
 		if err != nil {
 			t.Fatalf("start browser at %s: %v", location, err)
 		}
@@ -276,7 +277,7 @@ func TestBrowseStartupSelection(t *testing.T) {
 	shows(view("", false, unregistered), "Projects (2)", "no Project records acme/other")
 	shows(view("", false, ambiguous), "Projects (2)", "identifies no single GitHub repository")
 
-	if _, err := startBrowser("nope", true, widgets); err == nil || !strings.Contains(err.Error(), `unknown Project "nope"`) {
+	if _, err := startBrowser(os.Getenv, "nope", true, widgets); err == nil || !strings.Contains(err.Error(), `unknown Project "nope"`) {
 		t.Fatalf("invalid explicit selection = %v", err)
 	}
 	app, output := browseApp(t)

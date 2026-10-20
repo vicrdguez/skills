@@ -135,10 +135,11 @@ func sameRendering(t *testing.T, got, want string) {
 // TestDispatchAnswersWithCommandsAndTheWorkerGetsNextsSkill covers B1-B3 for
 // both phases and every Procedure next chooses: initial, rework and review.
 func TestDispatchAnswersWithCommandsAndTheWorkerGetsNextsSkill(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	source, target := deliverySourceRepo(t)
-	deliveryAcceptFixture(t, newForgeServer(t), source)
-	cli := deliveryNoForgeApp(t)
+	fixture.acceptDelivery(t, newForgeServer(t), source)
+	cli := fixture.app(deliveryNoForgeApp(t))
 	root, err := filepath.EvalSymlinks(source)
 	if err != nil {
 		t.Fatal(err)
@@ -216,11 +217,12 @@ func (c ledgerCLI) continued(t *testing.T, command string) (string, string) {
 // TestDispatchContinuationFollowsTheNamedClaim covers B4 and B5: only the
 // named Claim's own ending decides, whatever the Slice's current state.
 func TestDispatchContinuationFollowsTheNamedClaim(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	forge := newForgeServer(t)
 	source, target := deliverySourceRepo(t)
-	deliveryAcceptFixture(t, forge, source)
-	cli := deliveryNoForgeApp(t)
+	fixture.acceptDelivery(t, forge, source)
+	cli := fixture.app(deliveryNoForgeApp(t))
 
 	// Watchdog advances the Slice to Ready for Merge before the Implement
 	// Supervisor continues after C1.
@@ -232,7 +234,7 @@ func TestDispatchContinuationFollowsTheNamedClaim(t *testing.T) {
 	}
 	spec := singleSlice("delivery-export")
 	spec.slices[0].branch = "export"
-	if accepted := newLedgerApp(t, forge).accept(t, source, writeProposal(t, "", spec)); accepted.Status != "accepted" {
+	if accepted := fixture.app(newLedgerApp(t, forge)).accept(t, source, writeProposal(t, "", spec)); accepted.Status != "accepted" {
 		t.Fatalf("accept second proposal: %s", mustJSON(t, accepted))
 	}
 	next := cli.dispatchJSON(t, c1.Continue)
@@ -274,10 +276,11 @@ func TestDispatchContinuationFollowsTheNamedClaim(t *testing.T) {
 // TestDispatchContinuesAfterEveryHandoff covers B4's handoff endings of both
 // phases: Implement's pause, and Watchdog's rework and pass reviews.
 func TestDispatchContinuesAfterEveryHandoff(t *testing.T) {
-	newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	source, target := deliverySourceRepo(t)
-	deliveryAcceptFixture(t, newForgeServer(t), source)
-	cli := deliveryNoForgeApp(t)
+	fixture.acceptDelivery(t, newForgeServer(t), source)
+	cli := fixture.app(deliveryNoForgeApp(t))
 
 	paused := cli.dispatched(t, "skl implement dispatch --repo "+source)
 	out := cli.dispatchJSON(t, "skl implement needs-human --repo "+source+" --slice "+deliveryTestItem+" --claim "+paused.Claim+" --body "+proseFixturePath("pause.md"))
@@ -319,10 +322,11 @@ func TestDispatchContinuesAfterEveryHandoff(t *testing.T) {
 // TestDispatchEarlierHandoffCannotAuthorizeALaterRound covers B4's later
 // round: C1's handoff says nothing about C2 on the same Slice.
 func TestDispatchEarlierHandoffCannotAuthorizeALaterRound(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	source, target := deliverySourceRepo(t)
-	deliveryAcceptFixture(t, newForgeServer(t), source)
-	cli := deliveryNoForgeApp(t)
+	fixture.acceptDelivery(t, newForgeServer(t), source)
+	cli := fixture.app(deliveryNoForgeApp(t))
 
 	c1 := cli.dispatched(t, "skl implement dispatch --repo "+source)
 	dispatchImplementHandoff(t, cli, source, target, deliveryTestItem, c1.Claim)
@@ -344,25 +348,26 @@ func TestDispatchEarlierHandoffCannotAuthorizeALaterRound(t *testing.T) {
 // TestDispatchRefusesInvalidContinuationBeforeAnyEffect covers B6: each
 // refusal stops the Supervisor at once, without waiting or claiming.
 func TestDispatchRefusesInvalidContinuationBeforeAnyEffect(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	forge := newForgeServer(t)
 	source, target := deliverySourceRepo(t)
-	deliveryAcceptFixture(t, forge, source)
-	cli := deliveryNoForgeApp(t)
+	fixture.acceptDelivery(t, forge, source)
+	cli := fixture.app(deliveryNoForgeApp(t))
 
 	// A watchdog Claim, and a Claim of another Project.
 	implemented := cli.dispatched(t, "skl implement dispatch --repo "+source)
 	dispatchImplementHandoff(t, cli, source, target, deliveryTestItem, implemented.Claim)
 	watchdogClaim := cli.dispatched(t, "skl watchdog dispatch --repo "+source).Claim
 	gadgets := sourceRepository(t, "acme", "gadgets")
-	if accepted := newLedgerApp(t, forge).accept(t, gadgets, writeProposal(t, "", singleSlice("gadget"))); accepted.Status != "accepted" {
+	if accepted := fixture.app(newLedgerApp(t, forge)).accept(t, gadgets, writeProposal(t, "", singleSlice("gadget"))); accepted.Status != "accepted" {
 		t.Fatalf("accept gadgets: %s", mustJSON(t, accepted))
 	}
 	gadgetClaim := cli.dispatched(t, "skl implement dispatch --repo "+gadgets).Claim
 	// A fresh eligible Slice would be claimed by any continuation that passed.
 	spec := singleSlice("delivery-export")
 	spec.slices[0].branch = "export"
-	if accepted := newLedgerApp(t, forge).accept(t, source, writeProposal(t, "", spec)); accepted.Status != "accepted" {
+	if accepted := fixture.app(newLedgerApp(t, forge)).accept(t, source, writeProposal(t, "", spec)); accepted.Status != "accepted" {
 		t.Fatalf("accept second proposal: %s", mustJSON(t, accepted))
 	}
 	acceptance := deliveryTrimmed(t, fixture.clone, "rev-parse", "HEAD")
@@ -400,10 +405,11 @@ func TestDispatchRefusesInvalidContinuationBeforeAnyEffect(t *testing.T) {
 // TestDispatchOptionsRequireDispatch keeps worker values and continuation
 // references off ordinary next, before any effect.
 func TestDispatchOptionsRequireDispatch(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	source, _ := deliverySourceRepo(t)
-	deliveryAcceptFixture(t, newForgeServer(t), source)
-	cli := deliveryNoForgeApp(t)
+	fixture.acceptDelivery(t, newForgeServer(t), source)
+	cli := fixture.app(deliveryNoForgeApp(t))
 	for _, args := range []string{" --after " + strings.Repeat("a", 40), " --worker-model m", " --worker-thinking high"} {
 		before := ledgerSnapshot(t, fixture.clone)
 		if _, err := cli.deliveryRun(t, "skl", "implement", "next", "--repo", source, strings.Fields(args)[0], strings.Fields(args)[1]); err == nil || !strings.Contains(err.Error(), "flag provided but not defined") {
@@ -419,10 +425,11 @@ func TestDispatchOptionsRequireDispatch(t *testing.T) {
 // stops the lane as queue-local inactivity, and an interrupted wait names
 // what to inspect.
 func TestDispatchWaitingKeepsTheWaitContract(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	source, _ := deliverySourceRepo(t)
-	deliveryAcceptFixture(t, newForgeServer(t), source)
-	cli := deliveryNoForgeApp(t)
+	fixture.acceptDelivery(t, newForgeServer(t), source)
+	cli := fixture.app(deliveryNoForgeApp(t))
 
 	before := ledgerSnapshot(t, fixture.clone)
 	idle := cli.dispatchJSON(t, "skl watchdog dispatch --repo "+source+" --wait 20ms --poll 5ms")

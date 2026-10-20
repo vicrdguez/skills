@@ -29,12 +29,12 @@ type integrationJourney struct {
 
 func newIntegrationJourney(t *testing.T) integrationJourney {
 	t.Helper()
-	fixture := newLedgerFixture(t)
+	fixture := newPrivateLedgerFixture(t)
 	source := sourceRepository(t, "acme", "widgets")
-	bare := routeSourcePushes(t)
+	bare := routeSourcePushes(t, source)
 	runGit(t, source, "push", "-q", "origin", "main")
-	cli := deliveryNoForgeApp(t)
-	if accepted := newLedgerApp(t, newForgeServer(t)).accept(t, source, writeProposal(t, "", singleSlice(deliveryTestProposal))); accepted.Status != "accepted" {
+	cli := fixture.app(deliveryNoForgeApp(t))
+	if accepted := fixture.app(newLedgerApp(t, newForgeServer(t))).accept(t, source, writeProposal(t, "", singleSlice(deliveryTestProposal))); accepted.Status != "accepted" {
 		t.Fatalf("accept: %s", mustJSON(t, accepted))
 	}
 	started, err := cli.deliveryJSON(t, "skl", "implement", "next", "--auto", "--repo", source, "--format", "json")
@@ -93,6 +93,7 @@ func (j integrationJourney) claimReview(t *testing.T) string {
 }
 
 func TestWatchdogReviewsTheIntegrationMergeOfAMovedProposalBranch(t *testing.T) {
+	t.Parallel()
 	j := newIntegrationJourney(t)
 	moved := j.advance(t, "other.txt", "another slice\n")
 	claim := j.claimReview(t)
@@ -131,6 +132,7 @@ func TestWatchdogReviewsTheIntegrationMergeOfAMovedProposalBranch(t *testing.T) 
 }
 
 func TestWatchdogIntegrationConflictEndsReviewInRework(t *testing.T) {
+	t.Parallel()
 	j := newIntegrationJourney(t)
 	j.advance(t, "other.txt", "another slice\n")
 	claim := j.claimReview(t)
@@ -173,6 +175,7 @@ func TestWatchdogIntegrationConflictEndsReviewInRework(t *testing.T) {
 }
 
 func TestHumanRouteToWatchdogRunsTheIntegrationMergeAgain(t *testing.T) {
+	t.Parallel()
 	j := newIntegrationJourney(t)
 	claim := j.claimReview(t)
 	if prepared, err := j.review(t, "prepare", claim); err != nil || prepared.Source == nil || prepared.Source.Head != j.reviewed {
