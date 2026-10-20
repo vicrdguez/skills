@@ -18,9 +18,10 @@ func proposalBranchRecord(t *testing.T, clone, name string) map[string]any {
 }
 
 func TestAcceptRecordsAndFreezesProposalBranch(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	cli := newLedgerApp(t, newForgeServer(t))
+	cli := fixture.app(newLedgerApp(t, newForgeServer(t)))
 
 	declared := singleSlice("named-proposal")
 	declared.branch = "proposal/custom"
@@ -61,9 +62,10 @@ func TestAcceptRecordsAndFreezesProposalBranch(t *testing.T) {
 }
 
 func TestAcceptRefusesInvalidAndOwnedProposalBranchesBeforeWriting(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	cli := newLedgerApp(t, newForgeServer(t))
+	cli := fixture.app(newLedgerApp(t, newForgeServer(t)))
 	seed := singleSlice("first")
 	seed.branch = "proposal/first"
 	seed.slices[0].branch = "slice/first"
@@ -113,9 +115,10 @@ func TestAcceptRefusesInvalidAndOwnedProposalBranchesBeforeWriting(t *testing.T)
 }
 
 func TestReacceptLegacyProposalLeavesBranchAbsent(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	cli := newLedgerApp(t, newForgeServer(t))
+	cli := fixture.app(newLedgerApp(t, newForgeServer(t)))
 	spec := singleSlice("legacy")
 	if got := cli.accept(t, root, writeProposal(t, "", spec)); got.Status != "accepted" {
 		t.Fatalf("seed: %+v", got)

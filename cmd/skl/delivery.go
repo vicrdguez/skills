@@ -155,7 +155,7 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 	if err != nil {
 		return refusal(err)
 	}
-	store, config, err := openConfiguredLaunchSettings()
+	store, config, err := openConfiguredLaunchSettings(settingsLookup(c))
 	if err != nil {
 		return refusal(err)
 	}
@@ -225,7 +225,7 @@ func runDelivery(c *cli.Context, phase, operation string, newBackend backendFact
 			}
 			// Resolve launch defaults at this acquisition attempt, not before
 			// the idle wait. Keep the ledger that validated any continuation.
-			refreshedStore, config, err := openConfiguredLaunchSettings()
+			refreshedStore, config, err := openConfiguredLaunchSettings(settingsLookup(c))
 			if err != nil {
 				return ledger.Selection{}, err
 			}

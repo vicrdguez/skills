@@ -50,7 +50,6 @@ func deliveryTrimmed(t *testing.T, directory string, args ...string) string {
 // failing local command so no test touches a real remote.
 func deliverySourceRepo(t *testing.T) (root, target string) {
 	t.Helper()
-	t.Setenv("GIT_SSH_COMMAND", "false")
 	root = sourceRepository(t, "acme", "widgets")
 	target = deliveryTrimmed(t, root, "rev-parse", "HEAD")
 	// The recorded Integration Target is available locally without a fetch.
@@ -192,10 +191,11 @@ func deliveryAcceptFixture(t *testing.T, forge *forgeServer, source string) {
 // acceptance through independent review, rework, human direction, and pass,
 // with offline publication throughout.
 func TestDeliveryCLIEndToEnd(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	forge := newForgeServer(t)
 	source, target := deliverySourceRepo(t)
-	deliveryAcceptFixture(t, forge, source)
+	fixture.acceptDelivery(t, forge, source)
 
 	contractDirectory := filepath.Join(fixture.clone, filepath.FromSlash(deliveryItemDirectory()))
 	contractBefore := map[string]string{}
@@ -203,7 +203,7 @@ func TestDeliveryCLIEndToEnd(t *testing.T) {
 		contractBefore[name] = readFileString(t, filepath.Join(contractDirectory, name))
 	}
 
-	cli := deliveryNoForgeApp(t)
+	cli := fixture.app(deliveryNoForgeApp(t))
 
 	// Rule B1/B2: selection returns one exact Claim and no source branch yet.
 	started, err := cli.deliveryJSON(t, "skl", "implement", "next", "--repo", source, "--format", "json")
@@ -391,6 +391,8 @@ func TestDeliveryCLIEndToEnd(t *testing.T) {
 	// Rule B5: an interrupted acknowledgement leaves the committed handoff and
 	// the same-command retry recognizes it without recording a second round.
 	interrupted := newApp(deliveryForgeFactory(forge), bytes.NewReader(nil), deliveryInterruptedWriter{}, deliveryInterruptedWriter{})
+	privateCLIHelp(interrupted)
+	interrupted.settingsLookup = fixture.lookup
 	if runErr := interrupted.Run(watchdogArguments); runErr == nil {
 		t.Fatal("interrupted output write did not fail the CLI invocation")
 	}
@@ -559,11 +561,12 @@ func TestDeliveryCLIEndToEnd(t *testing.T) {
 // outcomes across Markdown and JSON, and that an unknown transport acquires
 // nothing.
 func TestDeliveryCLINoWorkAndFormats(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	forge := newForgeServer(t)
 	source, _ := deliverySourceRepo(t)
-	deliveryAcceptFixture(t, forge, source)
-	cli := deliveryNoForgeApp(t)
+	fixture.acceptDelivery(t, forge, source)
+	cli := fixture.app(deliveryNoForgeApp(t))
 
 	noWork, err := cli.deliveryJSON(t, "skl", "watchdog", "next", "--repo", source, "--format", "json")
 	if err != nil {
@@ -613,14 +616,15 @@ func TestDeliveryCLINoWorkAndFormats(t *testing.T) {
 // TestDeliveryCLIDeliversSlashedPlannedBranch proves a planned branch that
 // acceptance admits, such as feat/<slice>, is claimable and preparable.
 func TestDeliveryCLIDeliversSlashedPlannedBranch(t *testing.T) {
-	newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	source, target := deliverySourceRepo(t)
 	spec := singleSlice(deliveryTestProposal)
 	spec.slices[0].branch = "feat/foundation"
-	if accepted := newLedgerApp(t, newForgeServer(t)).accept(t, source, writeProposal(t, "", spec)); accepted.Status != "accepted" {
+	if accepted := fixture.app(newLedgerApp(t, newForgeServer(t))).accept(t, source, writeProposal(t, "", spec)); accepted.Status != "accepted" {
 		t.Fatalf("accept slashed branch: %s", mustJSON(t, accepted))
 	}
-	cli := deliveryNoForgeApp(t)
+	cli := fixture.app(deliveryNoForgeApp(t))
 
 	started, err := cli.deliveryJSON(t, "skl", "implement", "next", "--repo", source, "--format", "json")
 	if err != nil || started.Status != "work_available" || started.Execution == nil {
@@ -644,11 +648,12 @@ func TestDeliveryCLIDeliversSlashedPlannedBranch(t *testing.T) {
 // TestDeliveryCLIClaimBoundaries proves a released or foreign Claim cannot
 // resume, release, or overwrite a later reservation.
 func TestDeliveryCLIClaimBoundaries(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	forge := newForgeServer(t)
 	source, _ := deliverySourceRepo(t)
-	deliveryAcceptFixture(t, forge, source)
-	cli := deliveryNoForgeApp(t)
+	fixture.acceptDelivery(t, forge, source)
+	cli := fixture.app(deliveryNoForgeApp(t))
 
 	first, err := cli.deliveryJSON(t, "skl", "implement", "next", "--repo", source, "--format", "json")
 	if err != nil {
@@ -704,11 +709,12 @@ func TestDeliveryCLIClaimBoundaries(t *testing.T) {
 // Integration Target refuses the handoff while retaining the Claim and
 // progress, and that the repaired inputs then succeed.
 func TestDeliveryCLIRefusalsPreserveClaim(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	forge := newForgeServer(t)
 	source, target := deliverySourceRepo(t)
-	deliveryAcceptFixture(t, forge, source)
-	cli := deliveryNoForgeApp(t)
+	fixture.acceptDelivery(t, forge, source)
+	cli := fixture.app(deliveryNoForgeApp(t))
 
 	started, err := cli.deliveryJSON(t, "skl", "implement", "next", "--repo", source, "--format", "json")
 	if err != nil {
@@ -794,11 +800,12 @@ func TestDeliveryCLIRefusalsPreserveClaim(t *testing.T) {
 // TestDeliveryCLIRejectsUnknownSchema proves an incompatible required report
 // refuses before any replacement Claim is acquired.
 func TestDeliveryCLIRejectsUnknownSchema(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	forge := newForgeServer(t)
 	source, target := deliverySourceRepo(t)
-	deliveryAcceptFixture(t, forge, source)
-	cli := deliveryNoForgeApp(t)
+	fixture.acceptDelivery(t, forge, source)
+	cli := fixture.app(deliveryNoForgeApp(t))
 
 	state := deliveryPersistedState(t, fixture.clone)
 	state.State = ledger.AwaitingReview

@@ -12,10 +12,11 @@ import (
 // An unresolved merge is a reason to ask the human, not a completed source
 // handoff. Pausing preserves the unmerged index and makes the request visible.
 func TestDeliveryCLIConflictCanPauseWithoutResolvingSource(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	source, _ := deliverySourceRepo(t)
-	deliveryAcceptFixture(t, newForgeServer(t), source)
-	cli := deliveryNoForgeApp(t)
+	fixture.acceptDelivery(t, newForgeServer(t), source)
+	cli := fixture.app(deliveryNoForgeApp(t))
 	started, err := cli.deliveryJSON(t, "skl", "implement", "next", "--repo", source, "--format", "json")
 	if err != nil || started.Execution == nil {
 		t.Fatalf("start: %#v %v", started, err)
@@ -74,16 +75,18 @@ func TestDeliveryCLIConflictCanPauseWithoutResolvingSource(t *testing.T) {
 }
 
 func TestDeliveryCLIPauseSourceBoundary(t *testing.T) {
+	t.Parallel()
 	for _, prepared := range []bool{false, true} {
 		name := "before preparation"
 		if prepared {
 			name = "with source progress"
 		}
 		t.Run(name, func(t *testing.T) {
-			fixture := newLedgerFixture(t)
+			t.Parallel()
+			fixture := newPrivateLedgerFixture(t)
 			source, target := deliverySourceRepo(t)
-			deliveryAcceptFixture(t, newForgeServer(t), source)
-			cli := deliveryNoForgeApp(t)
+			fixture.acceptDelivery(t, newForgeServer(t), source)
+			cli := fixture.app(deliveryNoForgeApp(t))
 			start, err := cli.deliveryJSON(t, "skl", "implement", "next", "--repo", source, "--format", "json")
 			if err != nil || start.Execution == nil {
 				t.Fatalf("start: %#v %v", start, err)

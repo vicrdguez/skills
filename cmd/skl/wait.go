@@ -11,7 +11,18 @@ import (
 	"github.com/vicrdguez/skills/ledger"
 )
 
-type stageApp struct{ *cli.App }
+type stageApp struct {
+	*cli.App
+	// Selection stays live at each operation's existing read points. The
+	// production adapter is os.Getenv; no path, config or store is cached.
+	settingsLookup func(string) string
+}
+
+type settingsLookupKey struct{}
+
+func settingsLookup(command *cli.Context) func(string) string {
+	return command.Context.Value(settingsLookupKey{}).(func(string) string)
+}
 
 func (app *stageApp) Run(args []string) error {
 	return app.RunContext(context.Background(), args)
@@ -65,7 +76,7 @@ func (app *stageApp) RunContext(ctx context.Context, args []string) error {
 			}
 		}
 	}
-	return app.App.RunContext(ctx, args)
+	return app.App.RunContext(context.WithValue(ctx, settingsLookupKey{}, app.settingsLookup), args)
 }
 
 func waitFlags() []cli.Flag {

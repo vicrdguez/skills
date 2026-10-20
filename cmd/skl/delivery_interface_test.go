@@ -55,10 +55,11 @@ func TestDeliveryHelpExposesCanonicalOperationsAndRelevantFlags(t *testing.T) {
 }
 
 func TestWatchdogSubmitNeedsHumanIsRefusedWithoutAHandoff(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	source, target := deliverySourceRepo(t)
-	cli := deliveryNoForgeApp(t)
-	deliveryAcceptFixture(t, newForgeServer(t), source)
+	cli := fixture.app(deliveryNoForgeApp(t))
+	fixture.acceptDelivery(t, newForgeServer(t), source)
 	started := cli.dispatchJSON(t, "skl implement next --repo "+source)
 	dispatchImplementHandoff(t, cli, source, target, deliveryTestItem, started.Execution.Claim.Commit)
 	review := cli.dispatched(t, "skl watchdog dispatch --repo "+source)

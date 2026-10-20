@@ -9,6 +9,7 @@ import (
 )
 
 func TestHarnessLaunchChoicesReachTheirRoles(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ name, flags, model, thinking, reviewer, helper string }{
 		{"configured Pi", "--harness pi", "pi-worker", "deep", "pi-review", ""},
 		{"field overrides", "--harness pi --worker-model explicit --reviewer-thinking explicit-review", "explicit", "deep", "pi-review", ""},
@@ -20,11 +21,12 @@ func TestHarnessLaunchChoicesReachTheirRoles(t *testing.T) {
 		{"unselected", "--worker-thinking explicit-thinking", "", "explicit-thinking", "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := newLedgerFixture(t)
+			t.Parallel()
+			f := newPrivateLedgerFixture(t)
 			f.misconfigure(t, fmt.Sprintf(`{"ledger":%q,"harnesses":{"pi":{"implement":{"model":"pi-worker","thinking":"deep"},"reviewer":{"model":"pi-review","thinking":"review-deep"},"helper":{"model":"pi-helper","thinking":"helper-deep"}},"claude":{},"opencode":{"implement":{"model":"oc-worker"}},"codex":{"implement":{"model":"cx-worker"}}}}`, f.clone))
 			source, _ := deliverySourceRepo(t)
-			deliveryAcceptFixture(t, newForgeServer(t), source)
-			cli := deliveryNoForgeApp(t)
+			f.acceptDelivery(t, newForgeServer(t), source)
+			cli := f.app(deliveryNoForgeApp(t))
 			d := cli.dispatched(t, "skl implement dispatch --repo "+source+" "+tc.flags)
 			if d.WorkerModel != tc.model || d.WorkerThinking != tc.thinking {
 				t.Fatalf("launch = %q/%q, want %q/%q", d.WorkerModel, d.WorkerThinking, tc.model, tc.thinking)
@@ -54,16 +56,18 @@ func TestHarnessLaunchChoicesReachTheirRoles(t *testing.T) {
 }
 
 func TestStartupAndRecoveryRefreshDefaultsWithoutChangingRunningGuidance(t *testing.T) {
+	t.Parallel()
 	for _, explicit := range []bool{false, true} {
 		t.Run(fmt.Sprint(explicit), func(t *testing.T) {
-			f := newLedgerFixture(t)
+			t.Parallel()
+			f := newPrivateLedgerFixture(t)
 			configure := func(suffix string) {
 				f.misconfigure(t, fmt.Sprintf(`{"ledger":%q,"harnesses":{"pi":{"implement":{"model":"worker-%s","thinking":"thinking-%s"},"watchdog":{"model":"watch-%s","thinking":"watch-thinking"},"reviewer":{"model":"review-%s"},"helper":{"thinking":"helper-%s"}}}}`, f.clone, suffix, suffix, suffix, suffix, suffix))
 			}
 			configure("first")
 			source, target := deliverySourceRepo(t)
-			deliveryAcceptFixture(t, newForgeServer(t), source)
-			cli := deliveryNoForgeApp(t)
+			f.acceptDelivery(t, newForgeServer(t), source)
+			cli := f.app(deliveryNoForgeApp(t))
 			flags := " --harness pi --mode team"
 			if explicit {
 				flags += " --worker-model explicit-worker --reviewer-model explicit-review --helper-thinking explicit-helper"
@@ -139,11 +143,12 @@ func TestStartupAndRecoveryRefreshDefaultsWithoutChangingRunningGuidance(t *test
 }
 
 func TestEmptySessionChoicesStayInheritedAfterConfigurationEdit(t *testing.T) {
-	f := newLedgerFixture(t)
+	t.Parallel()
+	f := newPrivateLedgerFixture(t)
 	f.misconfigure(t, fmt.Sprintf(`{"ledger":%q,"harnesses":{"pi":{"implement":{},"watchdog":{},"helper":{},"reviewer":{}},"opencode":{},"claude":{},"codex":{}}}`, f.clone))
 	source, _ := deliverySourceRepo(t)
-	deliveryAcceptFixture(t, newForgeServer(t), source)
-	cli := deliveryNoForgeApp(t)
+	f.acceptDelivery(t, newForgeServer(t), source)
+	cli := f.app(deliveryNoForgeApp(t))
 	d := cli.dispatched(t, "skl implement dispatch --repo "+source+" --harness pi --mode team")
 	session := cli.dispatchJSON(t, d.Worker)
 	facts := session.Packet.Facts.Delivery
@@ -165,24 +170,26 @@ func TestEmptySessionChoicesStayInheritedAfterConfigurationEdit(t *testing.T) {
 }
 
 func TestLaunchConfigurationRefusalsDoNotClaimWork(t *testing.T) {
+	t.Parallel()
 	for _, config := range []string{
 		`{"pi":{"unknown":{}}}`, `{"other":{}}`, `{"pi":{"implement":{"extra":"x"}}}`, `{"pi":{"implement":{"model":3}}}`,
 	} {
 		t.Run(config, func(t *testing.T) {
-			f := newLedgerFixture(t)
+			t.Parallel()
+			f := newPrivateLedgerFixture(t)
 			f.misconfigure(t, fmt.Sprintf(`{"ledger":%q,"harnesses":%s}`, f.clone, config))
 			source, _ := deliverySourceRepo(t)
 			before := ledgerSnapshot(t, f.clone)
-			out := deliveryNoForgeApp(t).dispatchJSON(t, "skl implement dispatch --repo "+source+" --harness pi")
+			out := f.app(deliveryNoForgeApp(t)).dispatchJSON(t, "skl implement dispatch --repo "+source+" --harness pi")
 			if out.Status != "fix_required" || ledgerSnapshot(t, f.clone) != before {
 				t.Fatalf("invalid configuration claimed: %#v", out)
 			}
 		})
 	}
-	f := newLedgerFixture(t)
+	f := newPrivateLedgerFixture(t)
 	source, _ := deliverySourceRepo(t)
 	before := ledgerSnapshot(t, f.clone)
-	out := deliveryNoForgeApp(t).dispatchJSON(t, "skl implement dispatch --repo "+source+" --harness unknown")
+	out := f.app(deliveryNoForgeApp(t)).dispatchJSON(t, "skl implement dispatch --repo "+source+" --harness unknown")
 	if out.Status != "fix_required" || ledgerSnapshot(t, f.clone) != before {
 		t.Fatal("unknown selector did not refuse before claim")
 	}

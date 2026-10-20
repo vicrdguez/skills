@@ -363,7 +363,7 @@ func TestAgentProseGoldens(t *testing.T) {
 	if outcome := proposer.accept(t, source, intake(integrationProposal, contract), issue); outcome.Status != "accepted" {
 		t.Fatalf("accept %s: %s", integrationProposal, mustJSON(t, outcome))
 	}
-	bare := routeSourcePushes(t)
+	bare := routeSourcePushes(t, source)
 	runGit(t, source, "push", "-q", "origin", "main")
 	pusher := filepath.Join(t.TempDir(), "pusher")
 	integrationWorktree := filepath.Join(source, ".worktrees", integrationProposal)
@@ -406,7 +406,7 @@ func TestAgentProseGoldens(t *testing.T) {
 	integrationClaim, integrationResult = review("")
 	g.capture("outcome-watchdog-prepare-conflict", worker, "watchdog", "prepare", "--repo", source, "--remote", "origin", "--slice", integrationItem, "--claim", integrationClaim, "--result-directory", integrationResult)
 	// Later steps expect source pushes to fail, as before the shim.
-	t.Setenv("GIT_SSH_COMMAND", "false")
+	runGit(t, source, "config", "core.sshCommand", "false")
 
 	// A Supervisor's Dispatches: claimed, stopped on a held Claim, continued
 	// after a handoff into an idle window, an interrupted wait and a new
@@ -525,6 +525,6 @@ func TestAgentProseGoldens(t *testing.T) {
 	recovery := newAutoMergeFixture(t, true)
 	recovery.pass(t, false, false)
 	g.replace(recovery.source, "<recovery-source>")
-	g.capture("outcome-watchdog-auto-readiness", presentForgeApp(t, recovery.pulls), "watchdog", "next", "--auto", "--repo", recovery.source)
+	g.capture("outcome-watchdog-auto-readiness", recovery.ledger.app(presentForgeApp(t, recovery.pulls)), "watchdog", "next", "--auto", "--repo", recovery.source)
 	g.finish()
 }

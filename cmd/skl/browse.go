@@ -55,7 +55,7 @@ func browseCommand(stdin io.Reader, stdout io.Writer) *cli.Command {
 			if command.NArg() != 0 {
 				return fmt.Errorf("unknown browse query %q; run `skl browse --help` for the queries", command.Args().First())
 			}
-			model, err := startBrowser(command.String("project"), command.IsSet("project"), ".")
+			model, err := startBrowser(settingsLookup(command), command.String("project"), command.IsSet("project"), ".")
 			if err != nil {
 				return err
 			}
@@ -215,8 +215,8 @@ func browseCommand(stdin io.Reader, stdout io.Writer) *cli.Command {
 // An explicit selection wins and must name a recorded Project. Otherwise the
 // checkout at location selects the Project recording its repository when
 // exactly one does; every other case starts at the overview and says why.
-func startBrowser(explicit string, explicitSet bool, location string) (browse.Model, error) {
-	store, err := openConfiguredLedger()
+func startBrowser(getenv func(string) string, explicit string, explicitSet bool, location string) (browse.Model, error) {
+	store, _, err := openConfiguredLaunchSettings(getenv)
 	if err != nil {
 		return browse.Model{}, err
 	}
@@ -280,7 +280,7 @@ func runBrowseQuery(command *cli.Context, stdout io.Writer, query func(*ledger.S
 	if command.NArg() != 0 {
 		return fmt.Errorf("browse %s takes flags, not positional arguments", command.Command.Name)
 	}
-	store, err := openConfiguredLedger()
+	store, err := openConfiguredLedger(command)
 	if err != nil {
 		return renderBrowse(stdout, format, refusedBrowse(err))
 	}

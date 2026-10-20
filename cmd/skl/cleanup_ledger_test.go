@@ -275,12 +275,13 @@ func archivedNames(outcome cleanupOutcome) map[string]bool {
 }
 
 func TestCleanupArchivesWholeTerminalProposals(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	// Issue publication fails: archival needs no public forge state.
 	unavailable := newForgeServer(t)
 	unavailable.fail = func(string, string) int { return http.StatusServiceUnavailable }
-	accepting := newLedgerApp(t, unavailable)
+	accepting := fixture.app(newLedgerApp(t, unavailable))
 	accept := func(spec proposalSpec) {
 		t.Helper()
 		if outcome := accepting.accept(t, root, writeProposal(t, "", spec)); outcome.Status != "accepted" {
@@ -349,7 +350,7 @@ func TestCleanupArchivesWholeTerminalProposals(t *testing.T) {
 	runGit(t, fixture.clone, "remote", "set-url", "origin", filepath.Join(t.TempDir(), "missing"))
 	sourceBefore := ledgerSnapshot(t, root)
 
-	cli := offlineForge(t)
+	cli := fixture.app(offlineForge(t))
 	first := runCleanup(t, cli, root)
 	if first.Status != "completed" || len(first.Archive.Archived) != 2 || !archivedNames(first)["widget"] || archivedNames(first)["mixed"] {
 		t.Fatalf("expected widget fully delivered and mixed retired: %s", mustJSON(t, first))
@@ -455,9 +456,10 @@ func exists(t *testing.T, root, path string) bool {
 }
 
 func TestCleanupArchiveFailuresKeepOneCompleteProposal(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	accepting := newLedgerApp(t, newForgeServer(t))
+	accepting := fixture.app(newLedgerApp(t, newForgeServer(t)))
 	names := []string{"collide", "hooked", "interrupted", "partial", "moded", "dirty", "staged", "renamed", "matching"}
 	for _, name := range names {
 		if outcome := accepting.accept(t, root, writeProposal(t, "", cleanupSpec(name, "only"))); outcome.Status != "accepted" {
@@ -519,7 +521,7 @@ func TestCleanupArchiveFailuresKeepOneCompleteProposal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cli := offlineForge(t)
+	cli := fixture.app(offlineForge(t))
 	failed := runCleanup(t, cli, root)
 	repairs := map[string]string{}
 	for _, repair := range failed.Archive.Repairs {
@@ -595,9 +597,10 @@ func cleanupWorktree(t *testing.T, root, branch string) string {
 }
 
 func TestLedgerCleanupRemovesOnlySafeMergedSourceWork(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	accepting := newLedgerApp(t, newForgeServer(t))
+	accepting := fixture.app(newLedgerApp(t, newForgeServer(t)))
 	slices := []string{"clean", "squashed", "dirty", "moved", "unknown", "contradicted", "dropped", "claimed", "locked"}
 	for _, spec := range []proposalSpec{cleanupSpec("done", slices...), cleanupSpec("active", "safe", "pending")} {
 		if outcome := accepting.accept(t, root, writeProposal(t, "", spec)); outcome.Status != "accepted" {
@@ -646,7 +649,7 @@ func TestLedgerCleanupRemovesOnlySafeMergedSourceWork(t *testing.T) {
 	statusRecord(t, fixture.clone, "active", "pending", lifecycle(ledger.ReadyForMerge))
 	remoteRefs := runGitOutput(t, root, "for-each-ref", "refs/remotes")
 
-	cli := offlineForge(t)
+	cli := fixture.app(offlineForge(t))
 	first := runCleanup(t, cli, root)
 	if len(first.Archive.Archived) != 0 {
 		t.Fatalf("a claimed proposal was archived: %s", mustJSON(t, first))
@@ -725,9 +728,10 @@ func TestLedgerCleanupRemovesOnlySafeMergedSourceWork(t *testing.T) {
 }
 
 func TestLedgerCleanupPreservesLocalCommitsAfterAcceptedHead(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	if outcome := newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", cleanupSpec("done", "core"))); outcome.Status != "accepted" {
+	if outcome := fixture.app(newLedgerApp(t, newForgeServer(t))).accept(t, root, writeProposal(t, "", cleanupSpec("done", "core"))); outcome.Status != "accepted" {
 		t.Fatalf("accept: %s", mustJSON(t, outcome))
 	}
 	accepted := cleanupWorktree(t, root, "done-core")
@@ -738,7 +742,7 @@ func TestLedgerCleanupPreservesLocalCommitsAfterAcceptedHead(t *testing.T) {
 	local := strings.TrimSpace(runGitOutput(t, path, "rev-parse", "HEAD"))
 	statusRecord(t, fixture.clone, "done", "core", merged(accepted))
 
-	outcome := runCleanup(t, offlineForge(t), root)
+	outcome := runCleanup(t, fixture.app(offlineForge(t)), root)
 	if !archivedNames(outcome)["done"] || outcome.Source == nil || len(outcome.Source.Removed) != 0 || len(outcome.Source.Preserved) != 1 || outcome.Source.Preserved[0].Branch != "done-core" {
 		t.Fatalf("archival and local work preservation were not independent: %s", mustJSON(t, outcome))
 	}
@@ -748,16 +752,17 @@ func TestLedgerCleanupPreservesLocalCommitsAfterAcceptedHead(t *testing.T) {
 }
 
 func TestLedgerCleanupRemovesMergedSlashedBranch(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	spec := cleanupSpec("done", "core")
 	spec.slices[0].branch = "feat/done-core"
-	if outcome := newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", spec)); outcome.Status != "accepted" {
+	if outcome := fixture.app(newLedgerApp(t, newForgeServer(t))).accept(t, root, writeProposal(t, "", spec)); outcome.Status != "accepted" {
 		t.Fatalf("accept: %s", mustJSON(t, outcome))
 	}
 	statusRecord(t, fixture.clone, "done", "core", merged(cleanupWorktree(t, root, "feat/done-core")))
 
-	outcome := runCleanup(t, offlineForge(t), root)
+	outcome := runCleanup(t, fixture.app(offlineForge(t)), root)
 	if strings.Join(outcome.Source.Removed, " ") != "feat/done-core" {
 		t.Fatalf("slashed merged branch not removed: %s", mustJSON(t, outcome))
 	}
@@ -783,9 +788,10 @@ func TestCompletionObservationDoesNotArchive(t *testing.T) {
 }
 
 func TestCleanupDoesNotArchiveFromAStaleSnapshot(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", cleanupSpec("raced", "only")))
+	fixture.app(newLedgerApp(t, newForgeServer(t))).accept(t, root, writeProposal(t, "", cleanupSpec("raced", "only")))
 	statusRecord(t, fixture.clone, "raced", "only", merged(""))
 	// Hold the ledger mutation lock so cleanup must wait for it, then record a
 	// Claim a stale pre-lock read could not have seen.
@@ -798,7 +804,7 @@ func TestCleanupDoesNotArchiveFromAStaleSnapshot(t *testing.T) {
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
 		t.Fatal(err)
 	}
-	cli := offlineForge(t)
+	cli := fixture.app(offlineForge(t))
 	done := make(chan error, 1)
 	go func() { done <- cli.app.Run([]string{"skl", "cleanup", "--repo", root, "--format", "json"}) }()
 	time.Sleep(500 * time.Millisecond)
@@ -827,6 +833,7 @@ func TestCleanupDoesNotArchiveFromAStaleSnapshot(t *testing.T) {
 }
 
 func TestUnreadableRecordWithholdsSourceDeletion(t *testing.T) {
+	t.Parallel()
 	// A damaged record's owner is unknowable, so it could own safe-only.
 	for _, damage := range []struct {
 		kind  string
@@ -842,9 +849,10 @@ func TestUnreadableRecordWithholdsSourceDeletion(t *testing.T) {
 		}},
 	} {
 		t.Run(damage.kind, func(t *testing.T) {
-			fixture := newLedgerFixture(t)
+			t.Parallel()
+			fixture := newPrivateLedgerFixture(t)
 			root := sourceRepository(t, "acme", "widgets")
-			accepting := newLedgerApp(t, newForgeServer(t))
+			accepting := fixture.app(newLedgerApp(t, newForgeServer(t)))
 			for _, proposal := range []string{"safe", "damaged"} {
 				accepting.accept(t, root, writeProposal(t, "", cleanupSpec(proposal, "only")))
 			}
@@ -856,7 +864,7 @@ func TestUnreadableRecordWithholdsSourceDeletion(t *testing.T) {
 			statusRecord(t, fixture.clone, "safe", "only", merged(head))
 			damage.apply(t, fixture.clone, "projects/widgets/proposals/damaged/only/state.json")
 
-			outcome := runCleanup(t, offlineForge(t), root)
+			outcome := runCleanup(t, fixture.app(offlineForge(t)), root)
 			if outcome.Source == nil || len(outcome.Source.Removed) != 0 || len(outcome.Source.Preserved) != 1 || !strings.Contains(outcome.Source.Preserved[0].Reason, "damaged/only") {
 				t.Fatalf("damaged state did not withhold deletion: %s", mustJSON(t, outcome))
 			}

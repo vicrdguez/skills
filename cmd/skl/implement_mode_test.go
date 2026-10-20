@@ -14,10 +14,11 @@ import (
 )
 
 func TestImplementNextRefusesAnInvalidModeBeforeClaiming(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	source, _ := deliverySourceRepo(t)
-	deliveryAcceptFixture(t, newForgeServer(t), source)
-	cli := deliveryNoForgeApp(t)
+	fixture.acceptDelivery(t, newForgeServer(t), source)
+	cli := fixture.app(deliveryNoForgeApp(t))
 	before := deliveryTrimmed(t, fixture.clone, "rev-parse", "HEAD")
 
 	for _, invalid := range []string{"--mode swarm", "--helper-model openai-codex/gpt-6-luna", "--mode standard --helper-thinking xhigh"} {
@@ -35,10 +36,11 @@ func TestImplementNextRefusesAnInvalidModeBeforeClaiming(t *testing.T) {
 }
 
 func TestImplementChoicesRenderWhereTheyApplyAndCarryThroughResume(t *testing.T) {
-	newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	source, _ := deliverySourceRepo(t)
-	deliveryAcceptFixture(t, newForgeServer(t), source)
-	cli := deliveryNoForgeApp(t)
+	fixture.acceptDelivery(t, newForgeServer(t), source)
+	cli := fixture.app(deliveryNoForgeApp(t))
 	delivery := func(out deliveryOutput) *skilldist.DeliveryFacts {
 		t.Helper()
 		if out.Packet == nil || out.Packet.Facts.Delivery == nil {

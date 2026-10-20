@@ -18,6 +18,7 @@ import (
 const autoMergeBranch = "proposal/" + deliveryTestProposal
 
 type autoMergeFixture struct {
+	ledger              *ledgerFixture
 	clone, source, bare string
 	pulls               *pullServer
 	cli                 ledgerCLI
@@ -32,16 +33,16 @@ func newAutoMergeFixture(t *testing.T, autoImplement bool) *autoMergeFixture {
 
 func newAutoMergeProposalFixture(t *testing.T, autoImplement bool, spec proposalSpec) *autoMergeFixture {
 	t.Helper()
-	ledgerFixture := newLedgerFixture(t)
+	ledgerFixture := newPrivateLedgerFixture(t)
 	source, _ := deliverySourceRepo(t)
-	bare := routeSourcePushes(t)
+	bare := routeSourcePushes(t, source)
 	runGit(t, source, "push", "-q", "origin", "main")
-	accepted := newLedgerApp(t, newForgeServer(t)).accept(t, source, writeProposal(t, "", spec))
+	accepted := ledgerFixture.app(newLedgerApp(t, newForgeServer(t))).accept(t, source, writeProposal(t, "", spec))
 	if accepted.Status != "accepted" {
 		t.Fatalf("acceptance = %s", mustJSON(t, accepted))
 	}
 	pulls := newPullServer(t, bare)
-	f := &autoMergeFixture{clone: ledgerFixture.clone, source: source, bare: bare, pulls: pulls, cli: presentForgeApp(t, pulls)}
+	f := &autoMergeFixture{ledger: ledgerFixture, clone: ledgerFixture.clone, source: source, bare: bare, pulls: pulls, cli: ledgerFixture.app(presentForgeApp(t, pulls))}
 	next := []string{"skl", "implement", "next", "--repo", source, "--format", "json"}
 	if autoImplement {
 		next = append(next, "--auto")
@@ -128,6 +129,7 @@ func (f *autoMergeFixture) observe(t *testing.T) ledgerStatusOutcome {
 }
 
 func TestAutoWatchdogPassSquashMergesTheReviewedTreeIntoTheProposalBranch(t *testing.T) {
+	t.Parallel()
 	f := newAutoMergeFixture(t, true)
 	before := f.branchHead(t, autoMergeBranch)
 	final := f.branchHead(t, deliveryTestBranch)
@@ -160,6 +162,7 @@ func TestAutoWatchdogPassSquashMergesTheReviewedTreeIntoTheProposalBranch(t *tes
 }
 
 func TestAutoWatchdogRefusedMergeKeepsTheLaneAndRetriesEachPoll(t *testing.T) {
+	t.Parallel()
 	f := newAutoMergeFixture(t, true)
 	// The Proposal Branch moves past the reviewed base after preparation.
 	base := f.branchHead(t, autoMergeBranch)
@@ -201,6 +204,7 @@ func TestAutoWatchdogRefusedMergeKeepsTheLaneAndRetriesEachPoll(t *testing.T) {
 }
 
 func TestAutoPollMergesASlicePassedWithoutTheFlag(t *testing.T) {
+	t.Parallel()
 	f := newAutoMergeFixture(t, true)
 	passed := f.pass(t, false, true)
 	if passed.Merge != nil || f.mergeRequests() != 0 {
@@ -221,6 +225,7 @@ func TestAutoPollMergesASlicePassedWithoutTheFlag(t *testing.T) {
 }
 
 func TestAutoPassRefusalsAreReportedWithoutFailingTheHandoff(t *testing.T) {
+	t.Parallel()
 	t.Run("forge refusal", func(t *testing.T) {
 		f := newAutoMergeFixture(t, true)
 		f.pulls.mergeRefusal = "Repository rule violations found: required status check"
@@ -255,6 +260,7 @@ func TestAutoPassRefusalsAreReportedWithoutFailingTheHandoff(t *testing.T) {
 // An Auto Mode poll that claims work reports its retried merges before the
 // Execution Skill.
 func TestAutoPollReportsMergesBeforeTheExecutionSkill(t *testing.T) {
+	t.Parallel()
 	var output bytes.Buffer
 	out := deliveryOutput{Status: ledger.WorkAvailable, Packet: &skilldist.Packet{Instructions: "# Watchdog Review\n"},
 		Merges: []ledger.MergeAttempt{ledger.RefusedMerge("p/s", "branch protection")}}

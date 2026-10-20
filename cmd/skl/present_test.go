@@ -82,10 +82,11 @@ func TestRemovedLedgerPresentProcess(t *testing.T) {
 }
 
 func TestSlicePublishPreservesStructuredRefusals(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	source, target := deliverySourceRepo(t)
-	deliveryAcceptFixture(t, newForgeServer(t), source)
-	offline := deliveryNoForgeApp(t)
+	fixture.acceptDelivery(t, newForgeServer(t), source)
+	offline := fixture.app(deliveryNoForgeApp(t))
 	before := ledgerSnapshot(t, fixture.clone)
 	for _, args := range [][]string{
 		{"--slice", deliveryTestItem},
@@ -245,7 +246,7 @@ func (p *pullServer) serve(w http.ResponseWriter, r *http.Request) {
 // routeSourcePushes sends the GitHub-shaped source remote's Git transport to
 // a local bare repository, so ordinary non-force pushes are real while the
 // remote keeps its GitHub identity.
-func routeSourcePushes(t *testing.T) string {
+func routeSourcePushes(t *testing.T, source string) string {
 	t.Helper()
 	bare := filepath.Join(t.TempDir(), "widgets.git")
 	runGit(t, t.TempDir(), "init", "-q", "--bare", "-b", "main", bare)
@@ -254,7 +255,7 @@ func routeSourcePushes(t *testing.T) string {
 	if err := os.Chmod(shim, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("GIT_SSH_COMMAND", shim)
+	runGit(t, source, "config", "core.sshCommand", shim)
 	return bare
 }
 
@@ -332,10 +333,11 @@ func presentHandoff(t *testing.T, cli ledgerCLI, source, phase string, arguments
 // guidance rather than the missed updates, then presents freshly authored
 // prose for only that result; the private reports never reach the forge.
 func TestSlicePublishReauthorsTheCurrentResultAfterMissedPhases(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	source, target := deliverySourceRepo(t)
-	deliveryAcceptFixture(t, newForgeServer(t), source)
-	offline := deliveryNoForgeApp(t)
+	fixture.acceptDelivery(t, newForgeServer(t), source)
+	offline := fixture.app(deliveryNoForgeApp(t))
 
 	presentHandoff(t, offline, source, ledger.ImplementPhase, "--target", target)
 	_, rejected, _ := presentHandoff(t, offline, source, ledger.WatchdogPhase, "--outcome", "rework")
@@ -403,7 +405,7 @@ func TestSlicePublishReauthorsTheCurrentResultAfterMissedPhases(t *testing.T) {
 
 	// While source cannot be published, both transports report the concrete
 	// limitation with the same guidance, and nothing is presented or recorded.
-	unreachable := presentForgeApp(t, newPullServer(t, ""))
+	unreachable := fixture.app(presentForgeApp(t, newPullServer(t, "")))
 	pending := unreachable.ledgerJSON(t, "skl", "slice", "publish", "--repo", source, "--slice", deliveryTestItem, "--public-body", prose, "--format", "json")
 	if pending.Status != ledger.IssuePending || pending.Presentation == nil || !strings.Contains(pending.Presentation.Publication.Detail, "source push unavailable") || pending.Guidance == nil {
 		t.Fatalf("present without source publication = %s", mustJSON(t, pending))
@@ -423,9 +425,9 @@ func TestSlicePublishReauthorsTheCurrentResultAfterMissedPhases(t *testing.T) {
 
 	// Fresh prose presents only the current approved result: the reviewed
 	// revision is pushed normally, created as draft, then marked ready.
-	bare := routeSourcePushes(t)
+	bare := routeSourcePushes(t, source)
 	pulls := newPullServer(t, bare)
-	online := presentForgeApp(t, pulls)
+	online := fixture.app(presentForgeApp(t, pulls))
 	continuation := strings.Replace(pending.Guidance.Continue, "<fresh-public-prose.md>", "'"+prose+"'", 1)
 	presented := online.ledgerJSON(t, append(shellWords(t, continuation), "--format", "json")...)
 	if presented.Status != ledger.PullPresented || presented.Presentation == nil || presented.Guidance != nil {
@@ -572,10 +574,11 @@ func TestPresentationAuthoringCarriesTheCompletedReviewCount(t *testing.T) {
 // new round, yet explicit presentation's evidence still reaches it through
 // the consumed reports, beside the Contract's human-owned check.
 func TestPresentationEvidenceReachesADecisionThroughRework(t *testing.T) {
-	newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	source, target := deliverySourceRepo(t)
-	deliveryAcceptFixture(t, newForgeServer(t), source)
-	offline := deliveryNoForgeApp(t)
+	fixture.acceptDelivery(t, newForgeServer(t), source)
+	offline := fixture.app(deliveryNoForgeApp(t))
 
 	start, err := offline.deliveryJSON(t, "skl", "implement", "next", "--repo", source, "--format", "json")
 	if err != nil || start.Execution == nil {

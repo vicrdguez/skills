@@ -27,6 +27,7 @@ import (
 // configuration; tests that need a ledger install their own configuration
 // with t.Setenv.
 func TestMain(m *testing.M) {
+	prepareCLIIsolation()
 	if os.Getenv("XDG_CONFIG_HOME") == "" {
 		temp, err := os.MkdirTemp("", "skl-test-config")
 		if err != nil {
@@ -52,6 +53,15 @@ type ledgerFixture struct {
 // configuration selecting it.
 func newLedgerFixture(t *testing.T) *ledgerFixture {
 	t.Helper()
+	fixture := newPrivateLedgerFixture(t)
+	fixture.selectWithXDG(t)
+	return fixture
+}
+
+// newPrivateLedgerFixture owns configuration selection without changing the
+// process environment. Bind each CLI instance used by the scenario with app.
+func newPrivateLedgerFixture(t *testing.T) *ledgerFixture {
+	t.Helper()
 	upstream := t.TempDir()
 	runGit(t, upstream, "init", "-q", "-b", "main", "--bare")
 	clone := filepath.Join(t.TempDir(), "ledger")
@@ -63,8 +73,35 @@ func newLedgerFixture(t *testing.T) *ledgerFixture {
 	runGit(t, clone, "commit", "-q", "-m", "seed")
 	runGit(t, clone, "push", "-q", "-u", "origin", "main")
 	fixture := &ledgerFixture{upstream: upstream, clone: clone, config: t.TempDir(), home: t.TempDir()}
-	fixture.selectWithXDG(t)
+	fixture.misconfigure(t, `{"ledger": "`+fixture.clone+`"}`+"\n")
 	return fixture
+}
+
+// app binds only selection: operations still read and validate real files at
+// their normal read points, including subsequent invocations and wait retries.
+func (f *ledgerFixture) app(cli ledgerCLI) ledgerCLI {
+	privateCLIHelp(cli.app)
+	cli.app.settingsLookup = f.lookup
+	return cli
+}
+
+func (f *ledgerFixture) lookup(key string) string {
+	switch key {
+	case "XDG_CONFIG_HOME":
+		return f.config
+	case "HOME":
+		return f.home
+	default:
+		return ""
+	}
+}
+
+func (f *ledgerFixture) acceptDelivery(t *testing.T, forge *forgeServer, source string) {
+	t.Helper()
+	accepted := f.app(newLedgerApp(t, forge)).accept(t, source, writeProposal(t, "", singleSlice(deliveryTestProposal)))
+	if accepted.Status != "accepted" {
+		t.Fatalf("acceptance status = %q, want accepted: %s", accepted.Status, mustJSON(t, accepted))
+	}
 }
 
 func (f *ledgerFixture) selectWithXDG(t *testing.T) {
@@ -378,6 +415,12 @@ func sourceRepository(t *testing.T, owner, name string) string {
 	runGit(t, root, "init", "-q", "-b", "main")
 	runGit(t, root, "config", "user.name", "Test")
 	runGit(t, root, "config", "user.email", "test@example.com")
+	// Worktrees share this configuration. Block network transports while
+	// retaining real file remotes and the explicitly installed local SSH shim.
+	runGit(t, root, "config", "protocol.allow", "never")
+	runGit(t, root, "config", "protocol.file.allow", "always")
+	runGit(t, root, "config", "protocol.ssh.allow", "always")
+	runGit(t, root, "config", "core.sshCommand", "false")
 	runGit(t, root, "remote", "add", "origin", "git@github.com:"+owner+"/"+name+".git")
 	writeFile(t, filepath.Join(root, "README.md"), "widget\n")
 	runGit(t, root, "add", "README.md")
@@ -552,9 +595,10 @@ func mustJSON(t *testing.T, value any) string {
 // --- Rule B2: project identity belongs to the source repository ---
 
 func TestProjectIdentityFollowsRepositoryAcrossCheckouts(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	forge := newForgeServer(t)
-	cli := newLedgerApp(t, forge)
+	cli := fixture.app(newLedgerApp(t, forge))
 
 	first := sourceRepository(t, "acme", "widgets")
 	if outcome := cli.accept(t, first, writeProposal(t, "", singleSlice("first-proposal"))); outcome.Status != "accepted" {
@@ -599,9 +643,10 @@ func TestProjectIdentityFollowsRepositoryAcrossCheckouts(t *testing.T) {
 }
 
 func TestProjectNameCollisionRefused(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	forge := newForgeServer(t)
-	cli := newLedgerApp(t, forge)
+	cli := fixture.app(newLedgerApp(t, forge))
 
 	widgets := sourceRepository(t, "acme", "widgets")
 	if outcome := cli.accept(t, widgets, writeProposal(t, "", singleSlice("acme-work"))); outcome.Status != "accepted" {
@@ -611,7 +656,7 @@ func TestProjectNameCollisionRefused(t *testing.T) {
 	issuesBefore := forge.createdCount()
 
 	other := sourceRepository(t, "other", "widgets")
-	collide := newLedgerApp(t, forge)
+	collide := fixture.app(newLedgerApp(t, forge))
 	outcome := collide.accept(t, other, writeProposal(t, "", singleSlice("other-work")))
 	if outcome.Status != "fix_required" || !strings.Contains(outcome.Reason, "acme/widgets") || !strings.Contains(outcome.Reason, "other/widgets") {
 		t.Fatalf("collision not identified: %s", mustJSON(t, outcome))
@@ -631,11 +676,12 @@ func TestProjectNameCollisionRefused(t *testing.T) {
 // --- Rule B3: acceptance freezes a complete proposal locally ---
 
 func TestAcceptSingleSliceFreezesExactLayout(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	before := ledgerSnapshot(t, root)
 	forge := newForgeServer(t)
-	cli := newLedgerApp(t, forge)
+	cli := fixture.app(newLedgerApp(t, forge))
 
 	spec := singleSlice("record-foundation")
 	spec.slices[0].branch = "add-foundation"
@@ -705,10 +751,11 @@ func equalStrings(got, want []string) bool {
 // --- Rule B3: invalid declarations and repeated acceptance ---
 
 func TestAcceptRefusesInvalidDeclarations(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	forge := newForgeServer(t)
-	cli := newLedgerApp(t, forge)
+	cli := fixture.app(newLedgerApp(t, forge))
 	before := ledgerSnapshot(t, fixture.clone)
 
 	// A valid existing ledger Work Item to reference.
@@ -781,10 +828,11 @@ func TestAcceptRefusesInvalidDeclarations(t *testing.T) {
 }
 
 func TestAcceptRefusesMalformedDeclarations(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	forge := newForgeServer(t)
-	cli := newLedgerApp(t, forge)
+	cli := fixture.app(newLedgerApp(t, forge))
 	directory := filepath.Join(t.TempDir(), "malformed")
 	writeFile(t, filepath.Join(directory, "proposal.md"), "description\n")
 	writeFile(t, filepath.Join(directory, "foundation", "intent.md"), "i\n")
@@ -815,10 +863,11 @@ func TestAcceptRefusesMalformedDeclarations(t *testing.T) {
 }
 
 func TestRepeatAcceptanceIsIdempotentAndRefusesChanges(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	forge := newForgeServer(t)
-	cli := newLedgerApp(t, forge)
+	cli := fixture.app(newLedgerApp(t, forge))
 
 	spec := singleSlice("stable-proposal")
 	if outcome := cli.accept(t, root, writeProposal(t, "", spec)); outcome.Status != "accepted" {
@@ -856,10 +905,11 @@ func TestRepeatAcceptanceIsIdempotentAndRefusesChanges(t *testing.T) {
 }
 
 func TestAcceptMultiSliceWithDependencies(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	forge := newForgeServer(t)
-	cli := newLedgerApp(t, forge)
+	cli := fixture.app(newLedgerApp(t, forge))
 
 	// An existing ledger Work Item recorded by an earlier proposal.
 	if outcome := cli.accept(t, root, writeProposal(t, "", singleSlice("earlier-work"))); outcome.Status != "accepted" {
@@ -921,10 +971,11 @@ func writeTemp(t *testing.T, tb testing.TB, contents string) string {
 // --- Rule B4: readback supplies exact contracts without discovery work ---
 
 func TestLedgerShowReturnsExactAcceptedContent(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	forge := newForgeServer(t)
-	cli := newLedgerApp(t, forge)
+	cli := fixture.app(newLedgerApp(t, forge))
 
 	spec := singleSlice("readback-work")
 	manual := "- [ ] Confirm the refund in the Stripe dashboard.\n"
@@ -1003,10 +1054,11 @@ func TestLedgerShowReturnsExactAcceptedContent(t *testing.T) {
 }
 
 func TestLedgerShowRefusesMissingReferencesWithoutSubstitution(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	forge := newForgeServer(t)
-	cli := newLedgerApp(t, forge)
+	cli := fixture.app(newLedgerApp(t, forge))
 
 	spec := singleSlice("reference-work")
 	if outcome := cli.accept(t, root, writeProposal(t, "", spec)); outcome.Status != "accepted" {
@@ -1052,10 +1104,11 @@ func TestLedgerShowRefusesMissingReferencesWithoutSubstitution(t *testing.T) {
 // --- Rules B5-B6: publication follows local acceptance ---
 
 func TestPublicationSucceedsWithoutPersistingBodies(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	forge := newForgeServer(t)
-	cli := newLedgerApp(t, forge)
+	cli := fixture.app(newLedgerApp(t, forge))
 
 	spec := dualSlice("published-work")
 	directory := writeProposal(t, "", spec)
@@ -1156,10 +1209,11 @@ func TestPublicationSucceedsWithoutPersistingBodies(t *testing.T) {
 }
 
 func TestPublicationFailuresAreReportedWithoutPublicationState(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	forge := newForgeServer(t)
-	cli := newLedgerApp(t, forge)
+	cli := fixture.app(newLedgerApp(t, forge))
 
 	spec := dualSlice("partial-publication")
 	directory := writeProposal(t, "", spec)
@@ -1251,12 +1305,14 @@ func TestPublicationFailuresAreReportedWithoutPublicationState(t *testing.T) {
 }
 
 func TestUncertainIssueCreationIsReportedWithoutRetry(t *testing.T) {
+	t.Parallel()
 	for _, loss := range []string{"dropped connection", "truncated success"} {
 		t.Run(loss, func(t *testing.T) {
-			fixture := newLedgerFixture(t)
+			t.Parallel()
+			fixture := newPrivateLedgerFixture(t)
 			root := sourceRepository(t, "acme", "widgets")
 			forge := newForgeServer(t)
-			cli := newLedgerApp(t, forge)
+			cli := fixture.app(newLedgerApp(t, forge))
 			directory := writeProposal(t, "", singleSlice("uncertain-work"))
 			// The forge creates the issue, but the caller never receives a
 			// usable response.

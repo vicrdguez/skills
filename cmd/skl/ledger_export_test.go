@@ -68,9 +68,10 @@ func requireLedgerUnchanged(t *testing.T, clone, head string) {
 }
 
 func TestExportedProposalReacceptsUnchanged(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	cli := newLedgerApp(t, newForgeServer(t))
+	cli := fixture.app(newLedgerApp(t, newForgeServer(t)))
 	if outcome := cli.accept(t, root, writeProposal(t, "", singleSlice("earlier-work"))); outcome.Status != "accepted" {
 		t.Fatalf("setup acceptance failed: %s", mustJSON(t, outcome))
 	}
@@ -129,9 +130,10 @@ func TestExportedProposalReacceptsUnchanged(t *testing.T) {
 }
 
 func TestExportOmitsAnUnrecordedProposalBranch(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	cli := newLedgerApp(t, newForgeServer(t))
+	cli := fixture.app(newLedgerApp(t, newForgeServer(t)))
 	if outcome := cli.accept(t, root, writeProposal(t, "", singleSlice("historical"))); outcome.Status != "accepted" {
 		t.Fatalf("acceptance failed: %s", mustJSON(t, outcome))
 	}
@@ -157,9 +159,10 @@ func TestExportOmitsAnUnrecordedProposalBranch(t *testing.T) {
 }
 
 func TestExportCarriesMergedAndSupersededSlices(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	cli := newLedgerApp(t, newForgeServer(t))
+	cli := fixture.app(newLedgerApp(t, newForgeServer(t)))
 	spec := cleanupSpec("mixed", "done", "old", "next")
 	if outcome := cli.accept(t, root, writeProposal(t, "", spec)); outcome.Status != "accepted" {
 		t.Fatalf("acceptance failed: %s", mustJSON(t, outcome))
@@ -198,9 +201,10 @@ func TestExportCarriesMergedAndSupersededSlices(t *testing.T) {
 }
 
 func TestNewAcceptanceRefusesDeclaredSupersession(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	cli := newLedgerApp(t, newForgeServer(t))
+	cli := fixture.app(newLedgerApp(t, newForgeServer(t)))
 	head := ledgerHead(t, fixture.clone)
 	spec := cleanupSpec("fresh", "keep", "drop")
 	spec.slices[1].superseded = true
@@ -215,16 +219,17 @@ func TestNewAcceptanceRefusesDeclaredSupersession(t *testing.T) {
 }
 
 func TestExportRefusalsWriteNothing(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	cli := newLedgerApp(t, newForgeServer(t))
+	cli := fixture.app(newLedgerApp(t, newForgeServer(t)))
 	for _, name := range []string{"active", "finished"} {
 		if outcome := cli.accept(t, root, writeProposal(t, "", cleanupSpec(name, "only"))); outcome.Status != "accepted" {
 			t.Fatalf("acceptance failed: %s", mustJSON(t, outcome))
 		}
 	}
 	statusRecord(t, fixture.clone, "finished", "only", merged(""))
-	if outcome := runCleanup(t, offlineForge(t), root); len(archivedNames(outcome)) != 1 {
+	if outcome := runCleanup(t, fixture.app(offlineForge(t)), root); len(archivedNames(outcome)) != 1 {
 		t.Fatalf("setup did not archive finished: %s", mustJSON(t, outcome))
 	}
 	head := ledgerHead(t, fixture.clone)

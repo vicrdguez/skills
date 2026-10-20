@@ -12,16 +12,18 @@ import (
 // A Project's planned branch belongs to one Work Item, even when the other
 // proposal has not yet acquired a Claim or created a source checkout.
 func TestDeliveryRefusesCrossProposalSourceOwnership(t *testing.T) {
+	t.Parallel()
 	for _, explicit := range []bool{false, true} {
 		name := "default branch"
 		if explicit {
 			name = "explicit shared branch"
 		}
 		t.Run(name, func(t *testing.T) {
-			fixture := newLedgerFixture(t)
+			t.Parallel()
+			fixture := newPrivateLedgerFixture(t)
 			source, _ := deliverySourceRepo(t)
 			forge := newForgeServer(t)
-			accept := newLedgerApp(t, forge)
+			accept := fixture.app(newLedgerApp(t, forge))
 			first := singleSlice("collision-one")
 			if explicit {
 				first.slices[0].branch = "shared-work"
@@ -29,7 +31,7 @@ func TestDeliveryRefusesCrossProposalSourceOwnership(t *testing.T) {
 			if got := accept.accept(t, source, writeProposal(t, "", first)); got.Status != "accepted" {
 				t.Fatalf("first acceptance: %#v", got)
 			}
-			cli := deliveryNoForgeApp(t)
+			cli := fixture.app(deliveryNoForgeApp(t))
 			claimed, err := cli.deliveryJSON(t, "skl", "implement", "next", "--repo", source, "--format", "json")
 			if err != nil || claimed.Execution == nil {
 				t.Fatalf("first Claim: %#v %v", claimed, err)
