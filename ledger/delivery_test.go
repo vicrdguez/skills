@@ -55,6 +55,10 @@ func newDeliveryLedger(t *testing.T) *deliveryLedger {
 		t.Fatal(err)
 	}
 	deliveryGit(t, root, "init", "-q", "-b", "main")
+	// Keep real Git maintenance inside command lifetimes, before TempDir cleanup.
+	// gc.autoDetach also covers Git versions predating maintenance.autoDetach.
+	deliveryGit(t, root, "config", "maintenance.autoDetach", "false")
+	deliveryGit(t, root, "config", "gc.autoDetach", "false")
 	deliveryGit(t, root, "config", "user.name", "Ledger")
 	deliveryGit(t, root, "config", "user.email", "ledger@example.com")
 	deliveryWrite(t, filepath.Join(root, "README.md"), "workflow ledger\n")
