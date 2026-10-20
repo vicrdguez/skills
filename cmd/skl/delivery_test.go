@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -222,6 +223,17 @@ func TestDeliveryCLIEndToEnd(t *testing.T) {
 	}
 	if started.Packet == nil {
 		t.Fatal("implement next returned no execution packet")
+	}
+	if want := []string{"testing", "audit"}; !slices.Equal(started.Packet.IncludedSkills, want) {
+		t.Fatalf("included_skills = %v, want %v", started.Packet.IncludedSkills, want)
+	}
+	if want := []string{"ledger-submission.md", "pull-presentation.md"}; !slices.Equal(started.Packet.Resources, want) {
+		t.Fatalf("implementation resources = %v, want %v", started.Packet.Resources, want)
+	}
+	for _, resource := range started.Packet.Resources {
+		if strings.HasPrefix(resource, "modules/") {
+			t.Errorf("private module %s is listed as a public resource", resource)
+		}
 	}
 	startInstructions := started.Packet.Instructions
 	if !strings.Contains(startInstructions, "--claim '"+claim+"'") {

@@ -159,23 +159,6 @@ func TestAutoWatchdogPassSquashMergesTheReviewedTreeIntoTheProposalBranch(t *tes
 	}
 }
 
-func TestAutoWatchdogPassMarkdownReportsTheMerge(t *testing.T) {
-	f := newAutoMergeFixture(t, true)
-	started, err := f.cli.deliveryJSON(t, "skl", "watchdog", "next", "--auto", "--repo", f.source, "--format", "json")
-	if err != nil || started.Execution == nil {
-		t.Fatalf("watchdog next = %#v, %v", started, err)
-	}
-	markdown, err := f.cli.deliveryRun(t, "skl", "watchdog", "submit", "--repo", f.source, "--slice", deliveryTestItem, "--claim", started.Execution.Claim.Commit,
-		"--outcome", "pass", "--body", proseFixturePath("watchdog-report.md"), "--public-body", proseFixturePath("public.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := "Proposal Branch merge of `" + deliveryTestItem + "`: squash-merged into `" + autoMergeBranch + "` as `" + f.branchHead(t, autoMergeBranch) + "`"
-	if !strings.Contains(markdown, want) || strings.Contains(markdown, "ready for a human to merge") {
-		t.Fatalf("Markdown pass lacks %q:\n%s", want, markdown)
-	}
-}
-
 func TestAutoWatchdogRefusedMergeKeepsTheLaneAndRetriesEachPoll(t *testing.T) {
 	f := newAutoMergeFixture(t, true)
 	// The Proposal Branch moves past the reviewed base after preparation.

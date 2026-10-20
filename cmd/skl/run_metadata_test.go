@@ -137,11 +137,12 @@ func TestRunMetadataIsRecordedWithBothPhaseReports(t *testing.T) {
 	_, cli, notices, source, target := runMetadataSlice(t)
 	withBuildInfo(t, &debug.BuildInfo{Main: debug.Module{Version: "(devel)"}, Settings: []debug.BuildSetting{{Key: "vcs.revision", Value: runTestRevision}}})
 
-	// Questionable values, a partial child list and an unfamiliar key are
-	// observations, so they are kept as supplied.
+	// Questionable values, a partial child list, merge-looking keys and exact
+	// numbers are observations, so they survive the real CLI handoff/readback.
 	implementRun := `{"harness":{"name":"pi","version":"1.0.3"},"mode":"standard","elapsed_ms":420000,` +
 		`"worker":{"provider":"example-provider","model":"example-model","reasoning":"high"},` +
-		`"usage":{"coverage":"worker_only","input_tokens":-3,"output_tokens":"many","input_tokens_include_cache":true,"tool_calls":42},` +
+		`"usage":{"coverage":"worker_only","input_tokens":-3,"output_tokens":"many","input_tokens_include_cache":true,"tool_calls":42,"<<":{"input_tokens":1}},` +
+		`"<<":"x","exact":{"usage":{"input_tokens":9223372036854775809,"output_tokens":-9223372036854775809},"tiny":1e-400,"ratio":0.1},` +
 		`"children":[{"role":"standards-review","elapsed_ms":1200}],"unfamiliar":[1.5,null]}`
 	claim, head := startRunImplementation(t, cli, source)
 	body := writeTemp(t, t, "# Implementation\n")
@@ -152,7 +153,8 @@ func TestRunMetadataIsRecordedWithBothPhaseReports(t *testing.T) {
 	}
 	want := decodeRun(t, `{"skl":{"revision":"`+runTestRevision+`"},"harness":{"name":"pi","version":"1.0.3"},"mode":"standard","elapsed_ms":420000,`+
 		`"worker":{"provider":"example-provider","model":"example-model","reasoning":"high"},`+
-		`"usage":{"coverage":"worker_only","input_tokens":-3,"output_tokens":"many","input_tokens_include_cache":true,"tool_calls":42},`+
+		`"usage":{"coverage":"worker_only","input_tokens":-3,"output_tokens":"many","input_tokens_include_cache":true,"tool_calls":42,"<<":{"input_tokens":1}},`+
+		`"<<":"x","exact":{"usage":{"input_tokens":9223372036854775809,"output_tokens":"-9223372036854775809"},"tiny":"1e-400","ratio":0.1},`+
 		`"children":[{"role":"standards-review","elapsed_ms":1200}],"unfamiliar":[1.5,null]}`)
 	if got := recordedRun(t, cli, ledger.ImplementPhase); !reflect.DeepEqual(got, want) {
 		t.Fatalf("recorded implement Run Metadata = %#v, want %#v", got, want)
@@ -201,18 +203,6 @@ func TestRunMetadataProblemsNeverBlockTheHandoff(t *testing.T) {
 			name:    "several JSON values",
 			run:     func(t *testing.T) string { return runFile(t, `{"mode":"team"} {"mode":"standard"}`) },
 			noticed: true,
-		},
-		{
-			name: "a YAML merge key stays an ordinary key",
-			run:  func(t *testing.T) string { return runFile(t, `{"<<":"x","usage":{"<<":{"input_tokens":1}}}`) },
-			want: `{"<<":"x","usage":{"<<":{"input_tokens":1}}}`,
-		},
-		{
-			name: "numbers keep their exact supplied value",
-			run: func(t *testing.T) string {
-				return runFile(t, `{"usage":{"input_tokens":9223372036854775809,"output_tokens":-9223372036854775809},"tiny":1e-400,"ratio":0.1}`)
-			},
-			want: `{"usage":{"input_tokens":9223372036854775809,"output_tokens":"-9223372036854775809"},"tiny":"1e-400","ratio":0.1}`,
 		},
 		{
 			name: "a non-object keeps its value without identity",
