@@ -51,6 +51,10 @@ func newDeliverySource(t *testing.T) *deliverySource {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// Debt: this source and its bare remote still let Git auto-maintenance
+	// detach after commits and pushes, so a repack can outlive the command that
+	// triggered it and race TempDir cleanup. newDeliveryLedger shows the
+	// repository-local settings that keep maintenance in the foreground.
 	deliveryGit(t, root, "init", "-q", "-b", "main")
 	deliveryGit(t, root, "config", "user.name", "Worker")
 	deliveryGit(t, root, "config", "user.email", "worker@example.com")
