@@ -3,6 +3,10 @@ package browse_test
 // Interaction tests drive the browser through key and resize messages and
 // observe its rendered view and external-browser requests over a real
 // committed ledger fixture.
+//
+// Tests that change Lipgloss's process-global color profile stay serial.
+// All other top-level tests call t.Parallel: Go's barrier holds them until
+// every serial test (including its profile-restoring cleanup) has finished.
 
 import (
 	"fmt"
@@ -135,9 +139,19 @@ type session struct {
 }
 
 func start(t *testing.T, project string, extras ...func(string)) *session {
+	var root string
+	extras = append(extras, func(path string) { root = path })
+	s := startSnapshot(t, project, fixtureLedger(t, extras...))
+	s.root = root
+	return s
+}
+
+// startSnapshot borrows committed, read-only data but owns a fresh model and
+// external-browser callback. Only start exposes a writable fixture root.
+func startSnapshot(t *testing.T, project string, snapshot *ledger.Snapshot) *session {
+	t.Helper()
 	s := &session{t: t}
-	extras = append(extras, func(root string) { s.root = root })
-	s.model = browse.New(fixtureLedger(t, extras...), browse.Options{Project: project, Open: func(url string) error {
+	s.model = browse.New(snapshot, browse.Options{Project: project, Open: func(url string) error {
 		s.opened = append(s.opened, url)
 		return nil
 	}})
@@ -281,6 +295,7 @@ func (s *session) footerOmits(helps ...string) {
 }
 
 func TestBrowserNavigatesProjectsProposalsAndSliceFacts(t *testing.T) {
+	t.Parallel()
 	s := start(t, "")
 	s.send(tea.WindowSizeMsg{Width: 120, Height: 40})
 	s.shows("Projects (2)")
@@ -327,6 +342,7 @@ func TestBrowserNavigatesProjectsProposalsAndSliceFacts(t *testing.T) {
 }
 
 func TestBrowserStartsAtExplicitProjectAndSwitches(t *testing.T) {
+	t.Parallel()
 	s := start(t, "gadgets")
 	s.shows("skl browse › Projects › gadgets", "tools")
 	s.press("s", "down", "enter")
@@ -334,6 +350,7 @@ func TestBrowserStartsAtExplicitProjectAndSwitches(t *testing.T) {
 }
 
 func TestBrowserHeaderIsOneLineAndMentionsArchivesOnlyWhenShown(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 120, Height: 40})
 	revision := gitOutput(t, s.root, "rev-parse", "HEAD")[:12]
@@ -363,6 +380,7 @@ func TestBrowserHeaderIsOneLineAndMentionsArchivesOnlyWhenShown(t *testing.T) {
 }
 
 func TestBrowserReadsReportsFollowsExactHistoricalReferencesAndPreservesScroll(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 140, Height: 120})
 	s.press("enter", "down", "enter", "d", "down", "down", "enter")
@@ -403,6 +421,7 @@ func TestBrowserReadsReportsFollowsExactHistoricalReferencesAndPreservesScroll(t
 }
 
 func TestBrowserKeepsHistoricalDocumentIdentityAndScrollInView(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 80, Height: 10})
 	s.press("enter", "down", "enter", "a", "d", "down", "down", "enter", "r", "enter", "pgdown")
@@ -436,6 +455,7 @@ func TestBrowserKeepsHistoricalDocumentIdentityAndScrollInView(t *testing.T) {
 }
 
 func TestBrowserSelectsEarlierReportVersionAndReturnsToCurrentContext(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets", func(root string) {
 		write(t, root, "projects/widgets/proposals/orders/cancel/implement-report.md", "---\nschema: 88\n---\nOlder recorded reasoning.\n")
 	})
@@ -463,6 +483,7 @@ func TestBrowserSelectsEarlierReportVersionAndReturnsToCurrentContext(t *testing
 }
 
 func TestBrowserFindsReportHistoryWhenLatestReportWasRemoved(t *testing.T) {
+	t.Parallel()
 	var root string
 	fixtureLedger(t, func(directory string) {
 		root = directory
@@ -501,6 +522,7 @@ func snapshotAfterChange(t *testing.T, root string) *ledger.Snapshot {
 }
 
 func TestBrowserKeepsArchivedReportIdentityAfterOpeningAnEarlierVersion(t *testing.T) {
+	t.Parallel()
 	var root string
 	fixtureLedger(t, func(directory string) {
 		root = directory
@@ -529,6 +551,7 @@ func TestBrowserKeepsArchivedReportIdentityAfterOpeningAnEarlierVersion(t *testi
 }
 
 func TestBrowserBrowsesActiveReportInProjectNamedArchive(t *testing.T) {
+	t.Parallel()
 	var root string
 	fixtureLedger(t, func(directory string) { root = directory })
 	git(t, root, "mv", "projects/widgets", "projects/archive")
@@ -541,6 +564,7 @@ func TestBrowserBrowsesActiveReportInProjectNamedArchive(t *testing.T) {
 }
 
 func TestBrowserFollowsAnArchivedReportReferenceWithoutUsingTheCurrentSliceLocation(t *testing.T) {
+	t.Parallel()
 	var root string
 	fixtureLedger(t, func(directory string) {
 		root = directory
@@ -602,6 +626,7 @@ func TestBrowserFollowsAnArchivedReportReferenceWithoutUsingTheCurrentSliceLocat
 }
 
 func TestBrowserReturnsFromNestedVersionsToTheDocumentList(t *testing.T) {
+	t.Parallel()
 	var root string
 	fixtureLedger(t, func(directory string) { root = directory })
 	if err := os.Remove(filepath.Join(root, "projects/widgets/proposals/orders/cancel/implement-report.md")); err != nil {
@@ -623,6 +648,7 @@ func TestBrowserReturnsFromNestedVersionsToTheDocumentList(t *testing.T) {
 }
 
 func TestBrowserFollowsDecisionAndClaimReferencesWithoutChangingSliceContext(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 140, Height: 120})
 	s.press("enter", "down", "enter", "d", "down", "down", "down", "down", "enter")
@@ -642,6 +668,7 @@ func TestBrowserFollowsDecisionAndClaimReferencesWithoutChangingSliceContext(t *
 }
 
 func TestBrowserFollowsClaimInputsWithoutRewindingCurrentSlice(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 120, Height: 80})
 	s.press("enter", "down", "enter", "r", "enter")
@@ -666,6 +693,7 @@ func TestBrowserFollowsClaimInputsWithoutRewindingCurrentSlice(t *testing.T) {
 }
 
 func TestBrowserReturnsFromNestedEmptyReferencesToTheOriginatingClaimReference(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 100, Height: 40})
 	s.press("enter", "down", "enter", "d", "down", "down", "enter", "r", "enter")
@@ -684,6 +712,7 @@ func TestBrowserReturnsFromNestedEmptyReferencesToTheOriginatingClaimReference(t
 }
 
 func TestBrowserKeepsHealthyDocumentsVisibleAndDiagnosticsScrollable(t *testing.T) {
+	t.Parallel()
 	for _, size := range []tea.WindowSizeMsg{{Width: 40, Height: 14}, {Width: 140, Height: 30}} {
 		s := start(t, "widgets", func(root string) {
 			for i := 0; i < 35; i++ {
@@ -712,6 +741,7 @@ func TestBrowserKeepsHealthyDocumentsVisibleAndDiagnosticsScrollable(t *testing.
 }
 
 func TestBrowserRestoresSliceReadingPositionAfterDocumentDiagnostics(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 80, Height: 14})
 	s.press("enter", "down", "enter", "tab")
@@ -729,6 +759,7 @@ func TestBrowserRestoresSliceReadingPositionAfterDocumentDiagnostics(t *testing.
 }
 
 func TestBrowserFooterListsOnlyKeysThatActOnTheScreen(t *testing.T) {
+	t.Parallel()
 	// Wide enough that the footer lists every key that acts, untrimmed.
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 400, Height: 40})
@@ -767,6 +798,7 @@ func TestBrowserFooterListsOnlyKeysThatActOnTheScreen(t *testing.T) {
 }
 
 func TestBrowserNarrowFooterKeepsHelpAndHelpShowsEveryBinding(t *testing.T) {
+	t.Parallel()
 	size := tea.WindowSizeMsg{Width: 40, Height: 14}
 	s := start(t, "widgets")
 	s.send(size)
@@ -784,6 +816,7 @@ func TestBrowserNarrowFooterKeepsHelpAndHelpShowsEveryBinding(t *testing.T) {
 }
 
 func TestBrowserKeyListYieldsTheBodyToAStatusNotice(t *testing.T) {
+	t.Parallel()
 	size := tea.WindowSizeMsg{Width: 40, Height: 15}
 	s := start(t, "widgets")
 	s.send(size)
@@ -797,6 +830,7 @@ func TestBrowserKeyListYieldsTheBodyToAStatusNotice(t *testing.T) {
 }
 
 func TestBrowserPreservesRelationScrollAndFindingContextAcrossNestedReferences(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 80, Height: 14})
 	s.press("enter", "down", "enter", "tab")
@@ -815,6 +849,7 @@ func TestBrowserPreservesRelationScrollAndFindingContextAcrossNestedReferences(t
 }
 
 func TestBrowserUsesOptionalDocumentAvailabilityWithoutInventingAbsence(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 140, Height: 60})
 	s.press(append([]string{"enter", "down", "enter", "d"}, downs(3)...)...)
@@ -834,6 +869,7 @@ func TestBrowserUsesOptionalDocumentAvailabilityWithoutInventingAbsence(t *testi
 }
 
 func TestBrowserReadsArchivedDocumentsAndNamesAbsentOptionalRecords(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.press("a", "down", "enter", "d")
 	s.row("╭─ ▶ Proposal legacy · archived")
@@ -851,6 +887,7 @@ func TestBrowserReadsArchivedDocumentsAndNamesAbsentOptionalRecords(t *testing.T
 }
 
 func TestBrowserOpensRecordedAttachmentsOnlyOnExplicitAction(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.press("enter")
 	s.press("i")
@@ -904,6 +941,7 @@ func (s *session) within(size tea.WindowSizeMsg) {
 }
 
 func TestBrowserFitsNarrowAndWideTerminals(t *testing.T) {
+	t.Parallel()
 	for _, s := range fits(t, [][]string{nil, {"enter"}, {"down", "enter"}}) {
 		s.shows("Slice  orders/cancel")
 	}
@@ -918,6 +956,7 @@ func repeat(key string, count int) []string {
 }
 
 func TestBrowserNavigatesFromClaimFactToSlices(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})
 	s.press("f")
@@ -949,6 +988,7 @@ func TestBrowserNavigatesFromClaimFactToSlices(t *testing.T) {
 }
 
 func TestBrowserCombinesNameSearchWithFactsScopeAndGrouping(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})
 	s.press("/", "q", "u", "i", "t")
@@ -980,6 +1020,7 @@ func TestBrowserCombinesNameSearchWithFactsScopeAndGrouping(t *testing.T) {
 }
 
 func TestBrowserTellsEmptyResultsFromUnknownOnes(t *testing.T) {
+	t.Parallel()
 	s := start(t, "gadgets")
 	s.press("/", "zzz", "enter")
 	s.shows("No Slice matches this selection.")
@@ -993,12 +1034,14 @@ func TestBrowserTellsEmptyResultsFromUnknownOnes(t *testing.T) {
 }
 
 func TestBrowserFitsFindingScreens(t *testing.T) {
+	t.Parallel()
 	for _, s := range fits(t, [][]string{{"f"}, {"enter"}, {"w", "g"}, {"/", "orders"}, {"enter"}}) {
 		s.shows("Find slices", "Finding:", "> ")
 	}
 }
 
 func TestBrowserReturnsToOriginalSliceAfterFindingFromDetail(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})
 	s.press("enter", "down", "enter")
@@ -1016,6 +1059,7 @@ func TestBrowserReturnsToOriginalSliceAfterFindingFromDetail(t *testing.T) {
 }
 
 func TestBrowserKeepsHealthyResultsVisibleWithManyMembershipDiagnostics(t *testing.T) {
+	t.Parallel()
 	for _, size := range []tea.WindowSizeMsg{{Width: 40, Height: 14}, {Width: 140, Height: 30}} {
 		s := start(t, "widgets", func(root string) {
 			for i := 0; i < 30; i++ {
@@ -1040,6 +1084,7 @@ func TestBrowserKeepsHealthyResultsVisibleWithManyMembershipDiagnostics(t *testi
 }
 
 func TestBrowserOpensTheSelectedArchivedSliceWhenNamesCollide(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets", func(root string) {
 		write(t, root, "projects/widgets/archive/orders/proposal.json", `{"accepted": "2023-01-01T00:00:00Z"}`)
 		write(t, root, "projects/widgets/archive/orders/cancel/state.json", `{"state": "merged", "title": "Archived cancellation", "branch": "old-cancel"}`)
@@ -1070,6 +1115,7 @@ func TestBrowserOpensTheSelectedArchivedSliceWhenNamesCollide(t *testing.T) {
 }
 
 func TestBrowserKeepsItsContextAfterOpeningAResultElsewhere(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})
 	s.press("enter", "/", "hammer", "enter")
@@ -1088,6 +1134,7 @@ func TestBrowserKeepsItsContextAfterOpeningAResultElsewhere(t *testing.T) {
 }
 
 func TestBrowserKeepsArchiveVisibilityWhenLeavingFinding(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})
 	s.press("/", "old", "enter", "a", "enter")
@@ -1098,6 +1145,7 @@ func TestBrowserKeepsArchiveVisibilityWhenLeavingFinding(t *testing.T) {
 }
 
 func TestBrowserFindsFromRelatedSliceAndRestoresBothHistories(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})
 	s.press("enter", "down", "enter", "enter")
@@ -1126,6 +1174,7 @@ func TestBrowserFindsFromRelatedSliceAndRestoresBothHistories(t *testing.T) {
 }
 
 func TestBrowserFollowsArchivedRelationshipsFromResultsWhenNamesCollide(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets", func(root string) {
 		write(t, root, "projects/widgets/archive/orders/proposal.json", `{"accepted": "2023-01-01T00:00:00Z"}`)
 		write(t, root, "projects/widgets/archive/orders/refund/state.json", `{"state": "merged", "title": "Archived refund", "branch": "old-refund", "dependencies": ["proposals/legacy/old"]}`)
@@ -1149,6 +1198,7 @@ func TestBrowserFollowsArchivedRelationshipsFromResultsWhenNamesCollide(t *testi
 }
 
 func TestBrowserReopensFactsFromRelatedResultWithoutKeepingItsHistory(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 140, Height: 40})
 	s.press("/", "cancel", "enter", "enter", "enter", "f")
@@ -1162,6 +1212,7 @@ func TestBrowserReopensFactsFromRelatedResultWithoutKeepingItsHistory(t *testing
 }
 
 func TestBrowserFollowsRelationshipsAndRestoresContext(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 120, Height: 40})
 	s.press("enter", "down", "enter")

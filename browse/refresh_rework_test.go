@@ -10,6 +10,7 @@ import (
 )
 
 func TestOverlappingRefreshesCannotPublishAnOlderCommittedRevision(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 120, Height: 35})
 	s.press("enter", "down", "enter")
@@ -29,6 +30,7 @@ func TestOverlappingRefreshesCannotPublishAnOlderCommittedRevision(t *testing.T)
 }
 
 func TestRemovedSliceDocumentReturnsToUnavailableFactsThenHealthyParent(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 120, Height: 80})
 	s.press("enter", "down", "enter", "d", "down", "down", "enter")
@@ -47,6 +49,7 @@ func TestRemovedSliceDocumentReturnsToUnavailableFactsThenHealthyParent(t *testi
 }
 
 func TestRemovedProposalDocumentReturnsThroughUnavailableContext(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 120, Height: 80})
 	s.press("enter", "d", "enter")
@@ -64,6 +67,7 @@ func TestRemovedProposalDocumentReturnsThroughUnavailableContext(t *testing.T) {
 }
 
 func TestRemovedSelectedDocumentHasAnExplicitSafeReturnList(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 120, Height: 80})
 	s.press("enter", "down", "enter", "d", "down", "down", "down", "down", "enter")
@@ -83,6 +87,7 @@ func TestRemovedSelectedDocumentHasAnExplicitSafeReturnList(t *testing.T) {
 }
 
 func TestDocumentDiagnosticsStayDiagnosticsWhenFactsAdvance(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 120, Height: 80})
 	s.press("enter", "down", "enter", "d", "d")
@@ -96,6 +101,7 @@ func TestDocumentDiagnosticsStayDiagnosticsWhenFactsAdvance(t *testing.T) {
 }
 
 func TestCurrentClaimReferencesStayCurrentWhenLeavingExactDocument(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 120, Height: 80})
 	s.press("enter", "down", "enter", "r", "enter")
@@ -118,6 +124,7 @@ func TestCurrentClaimReferencesStayCurrentWhenLeavingExactDocument(t *testing.T)
 }
 
 func TestDocumentReturnKeepsMissingFilteredSliceIdentity(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 120, Height: 80})
 	s.press("f", "down", "down", "enter", "enter", "d", "down", "down", "enter")
@@ -134,6 +141,7 @@ func TestDocumentReturnKeepsMissingFilteredSliceIdentity(t *testing.T) {
 }
 
 func TestSearchAcceptsCapitalRefreshKeyAsText(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 120, Height: 80})
 	s.press("/", "R", "efund", "enter")

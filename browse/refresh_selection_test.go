@@ -7,6 +7,7 @@ import (
 )
 
 func TestRefreshDoesNotReplaceAnOpenedFilteredSliceWhenItStopsMatching(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 140, Height: 35})
 	s.press("f", "down", "down", "enter", "enter")
