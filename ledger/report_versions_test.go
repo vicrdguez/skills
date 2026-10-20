@@ -10,6 +10,7 @@ import (
 )
 
 func TestReportVersionsTrackContentAcrossArchiveWithoutRewindingCurrentFacts(t *testing.T) {
+	t.Parallel()
 	const item = "records/reader"
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
@@ -67,6 +68,7 @@ func TestReportVersionsTrackContentAcrossArchiveWithoutRewindingCurrentFacts(t *
 }
 
 func TestReportVersionsDiscloseShallowHistoryAndKeepSameNameRecordsSeparate(t *testing.T) {
+	t.Parallel()
 	const item = "records/reader"
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
@@ -112,6 +114,7 @@ func TestReportVersionsDiscloseShallowHistoryAndKeepSameNameRecordsSeparate(t *t
 }
 
 func TestReportVersionsPreserveMetadataChangesAndDiagnoseMissingObjects(t *testing.T) {
+	t.Parallel()
 	const item = "records/reader"
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
@@ -145,6 +148,7 @@ func TestReportVersionsPreserveMetadataChangesAndDiagnoseMissingObjects(t *testi
 }
 
 func TestReportVersionsKeepLabelsForMergedChangesAcrossAnUnchangedArchiveMove(t *testing.T) {
+	t.Parallel()
 	const item = "records/reader"
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
@@ -196,6 +200,7 @@ func TestReportVersionsKeepLabelsForMergedChangesAcrossAnUnchangedArchiveMove(t 
 }
 
 func TestReportVersionsDiscloseAnUnreadableHistoricalTreeAndKeepNewerVersions(t *testing.T) {
+	t.Parallel()
 	const item = "records/reader"
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")

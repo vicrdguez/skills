@@ -12,6 +12,7 @@ import (
 )
 
 func TestReadinessOnlyPreservesProseAndConvergesOnExactAttachment(t *testing.T) {
+	t.Parallel()
 	for _, draft := range []bool{true, false} {
 		t.Run(map[bool]string{true: "draft", false: "already ready"}[draft], func(t *testing.T) {
 			forge := newDeliveryForge(t)
@@ -50,6 +51,7 @@ func TestReadinessOnlyPreservesProseAndConvergesOnExactAttachment(t *testing.T) 
 }
 
 func TestReadinessOnlyRefusesWrongClosedOrUnconvergedAttachments(t *testing.T) {
+	t.Parallel()
 	for _, scenario := range []struct {
 		name   string
 		change func(*deliveryPull)

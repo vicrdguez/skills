@@ -29,6 +29,7 @@ func browseObservable(t *testing.T, l *deliveryLedger) string {
 }
 
 func TestBrowseKeepsLifecycleAndWatchdogClaimIndependent(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "orders", "base", ledger.Merged, nil, deliveryInitial)
@@ -92,6 +93,7 @@ func TestBrowseKeepsLifecycleAndWatchdogClaimIndependent(t *testing.T) {
 }
 
 func TestBrowseViewDescribesOneCommittedRevision(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "orders", "base", ledger.ReadyForImplementation, nil, deliveryInitial)
@@ -133,6 +135,7 @@ func TestBrowseViewDescribesOneCommittedRevision(t *testing.T) {
 }
 
 func TestBrowseIsolatesUnreadableRecords(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "orders", "healthy", ledger.Merged, nil, deliveryInitial)
@@ -204,6 +207,7 @@ func TestBrowseIsolatesUnreadableRecords(t *testing.T) {
 }
 
 func TestBrowseArchivedProposalsOnExplicitSelection(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "orders", "cancel", ledger.ReadyForImplementation, []string{"legacy/shipped"}, deliveryInitial)
@@ -247,6 +251,7 @@ func TestBrowseArchivedProposalsOnExplicitSelection(t *testing.T) {
 }
 
 func TestBrowseRefusesUnknownSelectionsAndUnreadableLedger(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "orders", "cancel", ledger.ReadyForImplementation, nil, deliveryInitial)
@@ -273,6 +278,7 @@ func TestBrowseRefusesUnknownSelectionsAndUnreadableLedger(t *testing.T) {
 }
 
 func TestBrowseCountsInvalidRecordNamesAsUnknown(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "orders", "shipped", ledger.Merged, nil, deliveryInitial)
@@ -305,6 +311,7 @@ func related(item string, archived bool, lifecycle string) ledger.RelatedSlice {
 }
 
 func TestBrowseRelatesDependenciesInBothDirectionsAcrossProposals(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "orders", "base", ledger.ReadyForMerge, nil, deliveryInitial)
@@ -369,6 +376,7 @@ func TestBrowseRelatesDependenciesInBothDirectionsAcrossProposals(t *testing.T) 
 }
 
 func TestBrowseDisclosesUnresolvedAndIncompleteRelationships(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "orders", "base", ledger.Merged, nil, deliveryInitial)

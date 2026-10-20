@@ -8,6 +8,7 @@ import (
 )
 
 func TestPresentationUsesRecordedProposalBranchAsBaseAndAttachment(t *testing.T) {
+	t.Parallel()
 	l, source, store, _ := deliveryPublicationFixture(t)
 	state := l.committedState(deliveryPublicationProject, deliveryPublicationSlice, deliveryPublicationBranch)
 	state.Target = &ledger.IntegrationTarget{Repository: "acme/widgets", Branch: "proposal/delivery-public"}

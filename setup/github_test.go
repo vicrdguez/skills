@@ -172,6 +172,7 @@ func TestGitHubIssuePublicationRetriesOnlyRepeatableRequests(t *testing.T) {
 }
 
 func TestGitHubIssuePublicationBoundsUnansweredRequests(t *testing.T) {
+	t.Parallel()
 	release := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {

@@ -10,6 +10,7 @@ import (
 )
 
 func TestSnapshotDocumentsResolveCurrentAndHistoricalReportReferences(t *testing.T) {
+	t.Parallel()
 	const item = "browse-records/readback"
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
@@ -102,6 +103,7 @@ func TestSnapshotDocumentsResolveCurrentAndHistoricalReportReferences(t *testing
 }
 
 func TestSnapshotClaimInputsRemainNavigableAtTheirRecordedRevision(t *testing.T) {
+	t.Parallel()
 	const item = "browse-records/readback"
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
@@ -147,6 +149,7 @@ func TestSnapshotClaimInputsRemainNavigableAtTheirRecordedRevision(t *testing.T)
 }
 
 func TestSnapshotDocumentsResolveArchivedProposalAndHistoricalPath(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "legacy-proposal", "finished", ledger.Merged, nil, deliveryInitial)
@@ -196,6 +199,7 @@ func TestSnapshotDocumentsResolveArchivedProposalAndHistoricalPath(t *testing.T)
 }
 
 func TestSnapshotDocumentsSelectActiveOrArchivedSameName(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "orders", "cancel", ledger.ReadyForImplementation, nil, deliveryInitial)
@@ -283,6 +287,7 @@ func TestSnapshotDocumentsSelectActiveOrArchivedSameName(t *testing.T) {
 }
 
 func TestSnapshotDocumentsPreserveMalformedMetadataAndIsolateMissingContent(t *testing.T) {
+	t.Parallel()
 	const item = "browse-records/readback"
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
@@ -354,6 +359,7 @@ func TestSnapshotDocumentsPreserveMalformedMetadataAndIsolateMissingContent(t *t
 }
 
 func TestSnapshotExactDocumentMissIsNotSubstitutedAndReadsAreReadOnly(t *testing.T) {
+	t.Parallel()
 	const item = "browse-records/readback"
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
@@ -393,6 +399,7 @@ func TestSnapshotExactDocumentMissIsNotSubstitutedAndReadsAreReadOnly(t *testing
 }
 
 func TestSnapshotDocumentsMarkFailedOptionalReadsUnavailable(t *testing.T) {
+	t.Parallel()
 	const item = "browse-records/readback"
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
@@ -434,6 +441,7 @@ func TestSnapshotDocumentsMarkFailedOptionalReadsUnavailable(t *testing.T) {
 }
 
 func TestSnapshotDocumentsMarkDecisionUnknownWhenStateIsMissing(t *testing.T) {
+	t.Parallel()
 	const item = "browse-records/readback"
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
@@ -461,6 +469,7 @@ func TestSnapshotDocumentsMarkDecisionUnknownWhenStateIsMissing(t *testing.T) {
 }
 
 func TestProposalDocumentsCarryInvalidMemberDiagnostics(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "browse-records", "readback", ledger.ReadyForImplementation, nil, deliveryInitial)
