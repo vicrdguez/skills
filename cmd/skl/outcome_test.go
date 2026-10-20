@@ -37,6 +37,26 @@ func TestHandoffOutcomeRendersIdenticallyEveryTime(t *testing.T) {
 	}
 }
 
+func TestWatchdogMergedHandoffMarkdownBindsTheMerge(t *testing.T) {
+	result := &ledger.DeliveryResult{
+		Status: ledger.ReadyForMerge, Item: "widget/foundation",
+		Publication: &ledger.PublicationNote{Status: ledger.PullPresented},
+	}
+	merge := &ledger.MergeAttempt{
+		Item: "widget/foundation", Status: ledger.MergeMerged,
+		Branch: "proposal/widget", Commit: "0123456789abcdef0123456789abcdef01234567",
+	}
+	out := handoffOutput(ledger.WatchdogPhase, setup.RepositoryContext{Root: "/work/widgets", Remote: "origin"}, result, merge)
+	var rendered bytes.Buffer
+	if err := renderDelivery(&rendered, formatMarkdown, ledger.WatchdogPhase, "submit", out); err != nil {
+		t.Fatal(err)
+	}
+	want := "Proposal Branch merge of `widget/foundation`: squash-merged into `proposal/widget` as `0123456789abcdef0123456789abcdef01234567`"
+	if !strings.Contains(rendered.String(), want) || strings.Contains(rendered.String(), "ready for a human to merge") {
+		t.Fatalf("Markdown pass lacks %q or retains obsolete human-merge guidance:\n%s", want, rendered.String())
+	}
+}
+
 // Outcome branches the golden journey does not reach render their bound
 // commands and branch markers.
 func TestUnreachedOutcomeBranchesRender(t *testing.T) {
