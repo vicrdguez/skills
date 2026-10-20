@@ -48,6 +48,7 @@ func mergeProposal(l *deliveryLedger, facts string) {
 }
 
 func TestMergeReadyMergesAtTheFinalHeadWithoutWritingState(t *testing.T) {
+	t.Parallel()
 	l, source, store := mergeFixture(t)
 	if pending, err := ledger.PendingMerges(store, deliveryWidgets()); err != nil || len(pending) != 1 || pending[0] != deliveryPublicationItem {
 		t.Fatalf("pending merges = %v, %v", pending, err)
@@ -73,6 +74,7 @@ func TestMergeReadyMergesAtTheFinalHeadWithoutWritingState(t *testing.T) {
 }
 
 func TestMergeReadyRefusesWithoutAnOpenProposalBranch(t *testing.T) {
+	t.Parallel()
 	for name, edit := range map[string]func(*deliveryLedger){
 		"completed Proposal": func(l *deliveryLedger) {
 			mergeProposal(l, `,"integration_target":{"repository":"acme/widgets","branch":"`+mergeProposalBranch+`"},"completion":{"target":{"repository":"acme/widgets","branch":"main"}}`)
@@ -98,6 +100,7 @@ func TestMergeReadyRefusesWithoutAnOpenProposalBranch(t *testing.T) {
 }
 
 func TestAReadyForMergeProposalBranchSliceReturnsToReviewByHumanDecision(t *testing.T) {
+	t.Parallel()
 	decide := func(l *deliveryLedger, store *ledger.Store, route string) *ledger.DecisionResult {
 		t.Helper()
 		result, err := ledger.ApplyDecision(store, ledger.DecisionInput{

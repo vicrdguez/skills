@@ -7,6 +7,7 @@ import (
 )
 
 func TestRefreshSelectsOnlyCommittedCoherentFactsAndKeepsDamagedRecordsLocal(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "orders", "base", ledger.ReadyForImplementation, nil, deliveryInitial)

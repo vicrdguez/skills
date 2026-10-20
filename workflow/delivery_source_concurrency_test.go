@@ -21,6 +21,8 @@ type deliveryPrepared struct {
 // caller must still observe the identity of the ref it selected; the wrapper
 // only schedules real Git invocations and never fabricates output or objects.
 func TestDeliverySourceConcurrentPrepareKeepsSelectedIdentities(t *testing.T) {
+	// Keep this parent and its children serial: synchronizedGitPath changes
+	// process-wide PATH. Child cleanup restores it before parallel tests resume.
 	t.Run("main identity", func(t *testing.T) {
 		root := newGitRepository(t)
 		newBareRemote(t, root)

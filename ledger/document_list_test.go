@@ -16,6 +16,7 @@ import (
 // Missing objects and malformed metadata have the same diagnostics as the
 // full documents query. Prose body corruption is diagnosed only on open.
 func TestDocumentListsMatchTheDocumentsQueryAcrossDamagedRecords(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	for _, slice := range []string{"readback", "damaged", "lost", "nostate"} {
@@ -146,6 +147,7 @@ func TestDocumentListsMatchTheDocumentsQueryAcrossDamagedRecords(t *testing.T) {
 // Prose headers remain listable when their bodies are corrupt. Only an exact
 // read discovers that corruption, without substituting another document.
 func TestDocumentListDefersProseBodyCorruptionUntilOpen(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "records", "readback", ledger.NeedsHuman, nil, deliveryInitial)
@@ -220,6 +222,8 @@ func sameAsDocuments(t *testing.T, list *ledger.DocumentList, set *ledger.Docume
 // When Git cannot confirm which prose documents exist, the list still offers
 // them, each with a diagnostic, and reads no prose text to find out.
 func TestDocumentListReadsNoProseWhenItsExistenceCheckFails(t *testing.T) {
+	// Keep this serial: the Git shim changes PATH for the whole process.
+	// Go restores its t.Setenv values before queued parallel tests resume.
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "records", "readback", ledger.NeedsHuman, nil, deliveryInitial)

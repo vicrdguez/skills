@@ -38,6 +38,7 @@ func decisionInbox(t *testing.T, store *ledger.Store, filter string) *ledger.Inb
 // TestDecisionRefusesActiveClaim covers the active-Claim refusal without
 // changing the authoritative record.
 func TestDecisionRefusesActiveClaim(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "decision-claim", "foundation", ledger.ReadyForImplementation, nil, deliveryInitial)
@@ -71,6 +72,7 @@ func TestDecisionRefusesActiveClaim(t *testing.T) {
 // the authoritative commit leaves neither decision.md nor its route state, and
 // the same operation succeeds after the fault clears.
 func TestDecisionPrecommitFaultLeavesNoPartialState(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "decision-fault", "foundation", ledger.ReadyForImplementation, nil, deliveryInitial)
@@ -126,6 +128,7 @@ func TestDecisionPrecommitFaultLeavesNoPartialState(t *testing.T) {
 // after a finding-driven pause. The CLI continuation journeys protect the
 // Watchdog route and the unchanged-code review count.
 func TestDecisionFindingDrivenImplementResumesRework(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "decision-review", "foundation", ledger.ReadyForImplementation, nil, deliveryInitial)
@@ -164,6 +167,7 @@ func TestDecisionFindingDrivenImplementResumesRework(t *testing.T) {
 // continuation is refused when the implementation report has no fixed source
 // revisions, and the paused record is unchanged.
 func TestDecisionWatchdogRouteRequiresImplementationInputs(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "decision-inputs", "foundation", ledger.ReadyForImplementation, nil, deliveryInitial)
@@ -194,6 +198,7 @@ func TestDecisionWatchdogRouteRequiresImplementationInputs(t *testing.T) {
 // TestDecisionCoupledGroupRefusesRatherThanSplitting covers B7/A2: independent
 // members may individually fail, while a coupled set is refused whole.
 func TestDecisionCoupledGroupRefusesRatherThanSplitting(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addProject("gadgets", "acme/gadgets")
@@ -237,6 +242,7 @@ func TestDecisionCoupledGroupRefusesRatherThanSplitting(t *testing.T) {
 // merged history, retirement succeeds only for terminal unclaimed children,
 // reports partial delivery, and refuses active or claimed work.
 func TestRetireProposalGuardsTerminalChildren(t *testing.T) {
+	t.Parallel()
 	l := newDeliveryLedger(t)
 	l.addProject("widgets", "acme/widgets")
 	l.addSlice("widgets", "legacy", "delivered", ledger.Merged, nil, "2021-01-01T00:00:00Z")

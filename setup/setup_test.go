@@ -11,6 +11,7 @@ import (
 )
 
 func TestSetupRefusesMalformedAgentsOwnershipMarkers(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"missing":   "<!-- dev-pipeline:start -->\n",
 		"nested":    "<!-- dev-pipeline:start -->\n<!-- dev-pipeline:start -->\n<!-- dev-pipeline:end -->\n<!-- dev-pipeline:end -->\n",
@@ -36,6 +37,7 @@ func TestSetupRefusesMalformedAgentsOwnershipMarkers(t *testing.T) {
 }
 
 func TestSetupRefusesOwnedFileSymlinksBeforeMutation(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"AGENTS.md", ".gitignore"} {
 		t.Run(name, func(t *testing.T) {
 			root := newRepository(t)
@@ -58,6 +60,7 @@ func TestSetupRefusesOwnedFileSymlinksBeforeMutation(t *testing.T) {
 }
 
 func TestSetupOffersSafeClaudeSymlinkMigration(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name     string
 		existing *string
@@ -104,6 +107,7 @@ func TestSetupOffersSafeClaudeSymlinkMigration(t *testing.T) {
 }
 
 func TestSetupRetiresLegacySetupArtifacts(t *testing.T) {
+	t.Parallel()
 	root := newRepository(t)
 	gitignore := filepath.Join(root, ".gitignore")
 	if err := os.WriteFile(gitignore, []byte("dist/\n.worktrees/\n*.log\n.worktrees/\n"), 0o644); err != nil {
@@ -130,6 +134,7 @@ func TestSetupRetiresLegacySetupArtifacts(t *testing.T) {
 }
 
 func TestSetupBoundPreparationRepeatsWithoutDrift(t *testing.T) {
+	t.Parallel()
 	root := newRepository(t)
 	before, after := "# User guidance\r\nKeep this spacing.  \n\n", "\nUser footer\twithout final newline"
 	for name, contents := range map[string]string{
