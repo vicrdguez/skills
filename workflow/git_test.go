@@ -10,6 +10,11 @@ import (
 func newGitRepository(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
+	// Debt: workflow fixtures and the bare remotes they push to still let Git
+	// auto-maintenance detach after commits, fetches and pushes, so a repack
+	// can outlive the command that triggered it and race TempDir cleanup.
+	// Repository-local maintenance.autoDetach=false and gc.autoDetach=false
+	// keep it in the foreground.
 	runGit(t, root, "init", "-b", "main")
 	runGit(t, root, "config", "user.name", "Test")
 	runGit(t, root, "config", "user.email", "test@example.com")

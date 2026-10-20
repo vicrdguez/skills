@@ -9,6 +9,7 @@ import (
 )
 
 func TestDeliverySourceRefusesUnsupportedSchemaObjectFormat(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	runGit(t, root, "init", "-q", "-b", "main", "--object-format=sha256")
 	runGit(t, root, "config", "user.name", "Worker")
@@ -28,6 +29,7 @@ func TestDeliverySourceRefusesUnsupportedSchemaObjectFormat(t *testing.T) {
 }
 
 func TestDeliverySourcePrepareCreatesInitialBranch(t *testing.T) {
+	t.Parallel()
 	root := newGitRepository(t)
 	newBareRemote(t, root)
 	target := gitOutput(t, root, "rev-parse", "HEAD")
@@ -63,6 +65,7 @@ func TestDeliverySourcePrepareCreatesInitialBranch(t *testing.T) {
 }
 
 func TestDeliverySourcePreparePreservesProgress(t *testing.T) {
+	t.Parallel()
 	root := newGitRepository(t)
 	newBareRemote(t, root)
 	base := gitOutput(t, root, "rev-parse", "HEAD")
@@ -96,6 +99,7 @@ func TestDeliverySourcePreparePreservesProgress(t *testing.T) {
 }
 
 func TestDeliverySourcePrepareUsesAvailableLocalInputsOffline(t *testing.T) {
+	t.Parallel()
 	root := newGitRepository(t)
 	runGit(t, root, "remote", "add", "upstream", filepath.Join(t.TempDir(), "absent"))
 	head := gitOutput(t, root, "rev-parse", "HEAD")
@@ -117,6 +121,7 @@ func TestDeliverySourcePrepareUsesAvailableLocalInputsOffline(t *testing.T) {
 }
 
 func TestDeliverySourcePrepareRetainsFetchedTargetForOfflineUse(t *testing.T) {
+	t.Parallel()
 	root := newGitRepository(t)
 	remote := newBareRemote(t, root)
 	publisher := t.TempDir()
@@ -145,6 +150,7 @@ func TestDeliverySourcePrepareRetainsFetchedTargetForOfflineUse(t *testing.T) {
 }
 
 func TestDeliverySourcePreparePreservesRecordedTargetAfterFetch(t *testing.T) {
+	t.Parallel()
 	root := newGitRepository(t)
 	newBareRemote(t, root)
 	target := gitOutput(t, root, "rev-parse", "HEAD")
@@ -160,6 +166,7 @@ func TestDeliverySourcePreparePreservesRecordedTargetAfterFetch(t *testing.T) {
 }
 
 func TestDeliverySourcePrepareRefusesMissingInputs(t *testing.T) {
+	t.Parallel()
 	t.Run("missing required revision", func(t *testing.T) {
 		root := newGitRepository(t)
 		runGit(t, root, "remote", "add", "upstream", filepath.Join(t.TempDir(), "absent"))
@@ -186,6 +193,7 @@ func TestDeliverySourcePrepareRefusesMissingInputs(t *testing.T) {
 }
 
 func TestDeliverySourceInspectRefusesUncleanOrWrongHead(t *testing.T) {
+	t.Parallel()
 	root := newGitRepository(t)
 	newBareRemote(t, root)
 	source, err := PrepareDeliverySource(root, "upstream", "feature-inspect", "", "")
@@ -207,6 +215,7 @@ func TestDeliverySourceInspectRefusesUncleanOrWrongHead(t *testing.T) {
 }
 
 func TestDeliverySourceValidateChecksHeadAndTarget(t *testing.T) {
+	t.Parallel()
 	root := newGitRepository(t)
 	newBareRemote(t, root)
 	source, err := PrepareDeliverySource(root, "upstream", "feature-validate", "", "")
@@ -236,6 +245,7 @@ func TestDeliverySourceValidateChecksHeadAndTarget(t *testing.T) {
 }
 
 func TestDeliverySourceValidateReviewedDistinction(t *testing.T) {
+	t.Parallel()
 	root := newGitRepository(t)
 	newBareRemote(t, root)
 	source, err := PrepareDeliverySource(root, "upstream", "feature-review", "", "")
@@ -267,6 +277,7 @@ func TestDeliverySourceValidateReviewedDistinction(t *testing.T) {
 }
 
 func TestDeliverySourceInspectReviewScope(t *testing.T) {
+	t.Parallel()
 	root := newGitRepository(t)
 	newBareRemote(t, root)
 	source, err := PrepareDeliverySource(root, "upstream", "feature-scope", "", "")

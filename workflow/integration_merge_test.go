@@ -50,6 +50,7 @@ func (f integrationFixture) prepare(t *testing.T) (DeliverySource, error) {
 const integrationRef = "refs/remotes/upstream/proposal/feature"
 
 func TestReviewPreparationMergesMovedProposalBranch(t *testing.T) {
+	t.Parallel()
 	f := newIntegrationFixture(t)
 	moved := f.advance(t, "other.txt", "other slice\n")
 
@@ -85,6 +86,7 @@ func TestReviewPreparationMergesMovedProposalBranch(t *testing.T) {
 }
 
 func TestReviewPreparationLeavesIntegratedBranchAlone(t *testing.T) {
+	t.Parallel()
 	f := newIntegrationFixture(t)
 	for range 2 {
 		prepared, err := f.prepare(t)
@@ -95,6 +97,7 @@ func TestReviewPreparationLeavesIntegratedBranchAlone(t *testing.T) {
 }
 
 func TestReviewPreparationRefusesConflictWithCleanWorktree(t *testing.T) {
+	t.Parallel()
 	f := newIntegrationFixture(t)
 	moved := f.advance(t, "slice.txt", "a different slice\n")
 
@@ -119,6 +122,7 @@ func TestReviewPreparationRefusesConflictWithCleanWorktree(t *testing.T) {
 }
 
 func TestReviewPreparationRefusesConflictDespiteRecordedResolution(t *testing.T) {
+	t.Parallel()
 	f := newIntegrationFixture(t)
 	moved := f.advance(t, "slice.txt", "a different slice\n")
 	worktree := deliveryExpectedWorktree(t, f.root, f.branch)
@@ -146,6 +150,7 @@ func TestReviewPreparationRefusesConflictDespiteRecordedResolution(t *testing.T)
 }
 
 func TestMainTargetedReviewPreparationMergesNothing(t *testing.T) {
+	t.Parallel()
 	root := newGitRepository(t)
 	newBareRemote(t, root)
 	target := gitOutput(t, root, "rev-parse", "HEAD")
@@ -165,6 +170,7 @@ func TestMainTargetedReviewPreparationMergesNothing(t *testing.T) {
 }
 
 func TestValidationAcceptsOnlyTheIntegrationMerge(t *testing.T) {
+	t.Parallel()
 	f := newIntegrationFixture(t)
 	f.advance(t, "other.txt", "other slice\n")
 	prepared, err := f.prepare(t)

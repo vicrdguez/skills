@@ -491,6 +491,7 @@ func TestDeliveryPublicationCompletesPaginatedListing(t *testing.T) {
 }
 
 func TestDeliveryPublicationRefusesWrongSourceForReadiness(t *testing.T) {
+	t.Parallel()
 	cases := map[string]struct {
 		number       int
 		pull         deliveryPull
