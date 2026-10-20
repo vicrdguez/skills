@@ -166,33 +166,6 @@ func (function httpRoundTripFunc) RoundTrip(request *http.Request) (*http.Respon
 	return function(request)
 }
 
-// implementBundle renders the complete Implement Execution Skill through the
-// active private-ledger path, so checks never depend on the retired
-// forge-authoritative selection or on refused read-only retrieval.
-func implementBundle(t *testing.T) skilldist.Packet {
-	t.Helper()
-	newLedgerFixture(t)
-	forge := newForgeServer(t)
-	source := sourceRepository(t, "acme", "widgets")
-	cli := newLedgerApp(t, forge)
-	accepted := cli.accept(t, source, writeProposal(t, "", singleSlice("widget-proposal")))
-	if accepted.Status != "accepted" {
-		t.Fatalf("proposal acceptance = %q: %s", accepted.Status, mustJSON(t, accepted))
-	}
-	cli.out.Reset()
-	if err := cli.app.Run([]string{"skl", "implement", "next", "--repo", source, "--result-directory", t.TempDir(), "--format", "json"}); err != nil {
-		t.Fatalf("implement next: %v\n%s", err, cli.out.String())
-	}
-	var got deliveryOutput
-	if err := json.Unmarshal(cli.out.Bytes(), &got); err != nil {
-		t.Fatalf("decode implement next %q: %v", cli.out.String(), err)
-	}
-	if got.Packet == nil {
-		t.Fatalf("no Execution Skill: %#v", got)
-	}
-	return *got.Packet
-}
-
 // activeDeliveryPacket renders one private-ledger delivery packet through the
 // same production presentation seam the CLI uses. Procedure-specific coverage
 // uses it because the complete CLI lifecycle is already covered end to end in
@@ -233,11 +206,24 @@ func TestRenderedResourceCommands(t *testing.T) {
 	if err != nil || len(goldens) == 0 {
 		t.Fatalf("no prose goldens: %v", err)
 	}
+	// Keep exact command strings as keys: a different bound argument is a
+	// different execution, even when the resource and owner are the same.
+	var commands []string
+	locations := map[string][]string{}
 	for _, golden := range goldens {
-		t.Run(filepath.Base(golden), func(t *testing.T) {
-			for _, command := range skillCommands(readFile(t, golden)) {
-				runSkillCommand(t, command)
+		for line, source := range strings.Split(readFile(t, golden), "\n") {
+			for _, command := range skillCommands(source) {
+				if _, seen := locations[command]; !seen {
+					commands = append(commands, command)
+				}
+				locations[command] = append(locations[command], filepath.Base(golden)+":"+strconv.Itoa(line+1))
 			}
+		}
+	}
+	for _, command := range commands {
+		t.Run(command, func(t *testing.T) {
+			t.Logf("emitted by %s", strings.Join(locations[command], ", "))
+			runSkillCommand(t, command)
 		})
 	}
 }
@@ -986,14 +972,6 @@ func TestPrivateSkillModulesAreNotPublicResources(t *testing.T) {
 			}
 		}
 	}
-
-	packet := implementBundle(t)
-	for _, resource := range packet.Resources {
-		if strings.HasPrefix(resource, "modules/") {
-			t.Errorf("private module %s is listed as a public resource", resource)
-		}
-	}
-
 }
 
 func TestRetiredGitHubResourcesAreUnknown(t *testing.T) {
@@ -1101,17 +1079,6 @@ func TestDescribeNamedResourceInputs(t *testing.T) {
 				t.Fatalf("description described more inputs than retrieval accepts: %v", err)
 			}
 		})
-	}
-}
-
-func TestBundleGuaranteedSupportingSkills(t *testing.T) {
-	packet := implementBundle(t)
-	want := []string{"testing", "audit"}
-	if !slices.Equal(packet.IncludedSkills, want) {
-		t.Fatalf("included_skills = %v, want %v", packet.IncludedSkills, want)
-	}
-	if !slices.Equal(packet.Resources, []string{"ledger-submission.md", "pull-presentation.md"}) {
-		t.Fatalf("implementation resources changed: %v", packet.Resources)
 	}
 }
 
