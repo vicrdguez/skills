@@ -23,12 +23,12 @@ import (
 	"github.com/vicrdguez/skills/setup"
 )
 
-// TestMain isolates every test in this package from any real machine
-// configuration; tests that need a ledger install their own configuration
-// with t.Setenv.
+// TestMain isolates the ordinary package run from real machine configuration.
+// Only existing helper processes that exercise a selected ledger inherit it;
+// serial environment-adapter tests install their own selection with t.Setenv.
 func TestMain(m *testing.M) {
 	prepareCLIIsolation()
-	if os.Getenv("XDG_CONFIG_HOME") == "" {
+	if os.Getenv("SKL_CONCURRENT_ACCEPT_HELPER") != "1" && os.Getenv("SKL_SIGNAL_PROCESS") != "1" {
 		temp, err := os.MkdirTemp("", "skl-test-config")
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
