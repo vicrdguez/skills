@@ -16,7 +16,7 @@ Check: the relevant hunks have a source revision and defensible Slice attributio
 
 ## Tour
 
-Open with the Proposal's intent as context. In one pass over the delivered state, stop in this order across the included Slices:
+Open with the Proposal's intent as context, and each Slice's latest Watchdog verdict beside the `rank` its report records. In one pass over the delivered state, stop in this order across the included Slices:
 
 1. Each `A<n>`: quote the architectural commitment, explain how the code meets it, show the relevant hunks and their Slice attribution.
 2. Each `B<n>`: quote the behavior rule, explain how the code meets it, show the relevant hunks and their Slice attribution.
@@ -26,3 +26,4 @@ Open with the Proposal's intent as context. In one pass over the delivered state
 Identify the Slice with each item so repeated labels remain distinguishable. Pause after **each** stop for the user's questions or permission to continue. Answer from the same Contract, reports and diff. When asked why a choice was made and the record gives no reason, say the record is silent and offer to note it for a follow-up. Treat a requested change as a follow-up Proposal, rather than applying it during this tour. This tour writes no files, commits, ledger records, forge comments or decisions; use read-only `skl browse`, `skl ledger show` and git inspections throughout.
 
 Check: every stop was covered in order, with one pause per stop, and nothing was written.
+{{template "project-principles" -}}

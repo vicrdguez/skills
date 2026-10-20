@@ -15,3 +15,4 @@ Use only a title and simple speaker labels. Preserve sequence, dead ends, revisi
 Never enumerate `.thinking/` or read existing artifacts. If the destination exists, ask before replacing it. Report the exact output path.
 
 In a Git repository, add `/.thinking/` to the repository-local exclude returned by `git rev-parse --git-path info/exclude` before writing, if absent. Keep tracked ignore files untouched.
+{{template "project-principles" -}}

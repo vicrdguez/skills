@@ -340,7 +340,7 @@ func TestSlicePublishReauthorsTheCurrentResultAfterMissedPhases(t *testing.T) {
 	presentHandoff(t, offline, source, ledger.ImplementPhase, "--target", target)
 	_, rejected, _ := presentHandoff(t, offline, source, ledger.WatchdogPhase, "--outcome", "rework")
 	_, reworked, final := presentHandoff(t, offline, source, ledger.ImplementPhase, "--target", target)
-	_, passed, _ := presentHandoff(t, offline, source, ledger.WatchdogPhase, "--outcome", "pass")
+	_, passed, _ := presentHandoff(t, offline, source, ledger.WatchdogPhase, "--outcome", "pass", "--rank", "tests")
 	before := deliveryPersistedState(t, fixture.clone)
 	ledgerHead := deliveryTrimmed(t, fixture.clone, "rev-parse", "HEAD")
 

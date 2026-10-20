@@ -17,12 +17,27 @@ You judge the Contract: `intent.md`, `behavior.md`, and any `plan.md` or `tasks.
 
 {{evidence .Contents}}
 {{end}}{{else}}No document was supplied. Stop and report that the Contract and the implementation report are missing.
-{{end}}
-## Review
+{{end}}{{template "project-principles"}}
+{{with .VerificationError}}## Verification defect
+
+Record this reviewed-source defect as a finding and submit `rework`, or use `needs-human` for a human decision, with the commands below; omit `--rank` for either handoff.
+
+{{.}}
+
+Check: the report names this defect.
+
+{{end}}{{with .Checks}}## Cited checks
+
+Run each check the Verification strategy cites, as `.skl/verify.md` defines it at the reviewed source, and record its result and rank in the report. A cited row the reviewed source lacks is a finding.
+
+{{template "cited-checks" .}}
+Check: every cited check has its result.
+
+{{end}}## Review
 
 1. Run the Full Gate yourself: the full suite, typecheck and lint. A green suite you did not run is not evidence.
 2. Check the report's completion table: every `B<n>`, `A<n>` and warranted `T<n>` is `complete` or `incomplete`, and a missing entry is `incomplete`. Is each `complete` true at this head? Leave the `M<n>` Manual Verification items to the human.
-3. Verify every Audit `F<n>` disposition: is each `fixed` true, each `declined` defensible and really a `JUDGEMENT`? A declined `HARD` is a `BLOCK`. Do not rerun Audit.
+3. Verify every Audit `F<n>` disposition: is each `fixed` true, each `declined` defensible and really a `JUDGEMENT`? A declined `HARD` is a `BLOCK`. A decision the plan's Forbidden section rules out is a `BLOCK` citing that line, and so is a declined finding about one.{{if principles}} Read each principle a Forbidden line cites as `principle:<name>` with `skl skill --resource <name>.md principles` before judging that line.{{end}} Do not rerun Audit.
 4. {{if eq .ReviewScope "incremental"}}Review {{template "watchdog-incremental" .}}.{{else if or (eq .ReviewScope "full") (not .PreviousReviewed)}}Review {{template "watchdog-full" .}}.{{else}}Review the scope inspection reports:
    - `incremental`: {{template "watchdog-incremental" .}}.
    - `full`: {{template "watchdog-full" .}}.
@@ -41,7 +56,7 @@ A finding keeps its Work-Item-local `W<n>` across rounds: list resolved ones as 
 
 ## Verdict
 
-Write the report as `{{.ResultResourceCommand}}` instructs, then submit with `{{.SubmitCommand}}`:
+Write the report as `{{.ResultResourceCommand}}` instructs, then submit with `{{.SubmitCommand}}`. For `<rank>`, take the weakest rank reached among the Verification strategy rows that cover a `B<n>`; with no such row, take the weakest rank your evidence reached. Choose the outcome:
 
 - `pass` only when no `BLOCK` or `HUMAN` finding is active;
 - `rework` when a `BLOCK` finding is active;
@@ -51,5 +66,5 @@ On `pass`, you may add Debt Markers for `NOTE` findings: short, self-contained c
 
 # Review method
 
-{{template "craft/review.md" .}}
-{{template "craft/audit/acceptance.md" .}}
+{{template "principles/review.md" .}}
+{{template "principles/audit/acceptance.md" .}}

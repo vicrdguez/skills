@@ -26,7 +26,7 @@ Authored prose lives under `prose/`, one directory per kind.
 | Kind | What it is | Where it lives |
 | --- | --- | --- |
 | Procedures | One script per workflow operation or user-invoked activity. | `prose/procedures/` |
-| Craft | Judgment guidance composed into the Procedures that need it. | `prose/craft/` |
+| Principles | Judgment guidance (Craft) composed into the Procedures that need it. | `prose/principles/` |
 | Outcomes | Outcome Instructions in Workflow Engine responses: what happened and the worker's next step. | `prose/outcomes/`, refusal reasons in the engine packages, and the Decision Inbox templates |
 | Documents | Templates and instructions for the documents a worker writes: Contract files, phase reports, public prose. | `prose/documents/` |
 | Adapters | Harness Adapters: the installed stubs and harness-specific entry points. | `prose/adapters/` |
@@ -35,12 +35,21 @@ Authored prose lives under `prose/`, one directory per kind.
 
 - `prose/procedures/<name>.md` is a Procedure. Delivery continuations are Procedures of their own: `implement-prepare.md`, `implement-inspect.md`, `watchdog-prepare.md` and `watchdog-inspect.md`. `audit-step.md` is the Audit step inside Implement; `audit.md` is standalone Audit. `decision-inbox.md` renders the Decision Inbox and its results; `decision.md` is the standalone retrieval.
 - `prose/procedures/modules/` holds `define` blocks that several Procedures or resources share, such as the source facts every Implement rendering starts with.
-- `prose/craft/<name>.md` is a Craft file. `prose/craft/audit.md` holds the two review axes that both Audit Procedures include. `prose/craft/review.md` is the adversarial review method that Watchdog includes, together with Audit's acceptance criteria. `prose/craft/team.md` is the team strategy that Implement's delegation step includes in team mode.
+- `prose/principles/<name>.md` is a skl-owned principle, the Craft of the model above. It opens with YAML frontmatter holding `statement`, one line of at most 280 characters that sums it up, which rendering strips. `prose/principles/audit.md` holds the two review axes that both Audit Procedures include. `prose/principles/review.md` is the adversarial review method that Watchdog includes, together with Audit's acceptance criteria. `prose/principles/team.md` is the team strategy that Implement's delegation step includes in team mode. `prose/principles/modules.md` is the deep-module vocabulary, formerly `design`.
 - `prose/outcomes/<kind>.md` is the Outcome Instruction of one outcome kind, such as `refused.md` or `submitted.md`; `prose/outcomes/modules/` holds the blocks they share. Command code chooses the kind and supplies its facts: the status, bound commands, the refusal's invariant and repair, the Claim state and publication notes. Its only worker-directed text is refusal strings, passed through as data.
-- `prose/<kind>/<name>/` holds the Skill Resources of the skill `<name>`. A resource's name is its path in that directory, so `prose/craft/testing/tests.md` is `skl skill --resource tests.md testing`.
+- `prose/<kind>/<name>/` holds the Skill Resources of the skill `<name>`. A resource's name is its path in that directory, so `prose/principles/testing/tests.md` is `skl skill --resource tests.md testing`. `prose/principles/verify/` holds the channel craft of `verify`, and `prose/documents/verify/` the Document Templates `verify-create` serves for `.skl/verify.md` and its journeys.
 - `prose/adapters/stub.md` is the stub template, and `prose/adapters/stubs/<name>.md` is each skill's discovery frontmatter. `prose/adapters/entry.md` is the Harness Adapter template for `implement`, `implement-team` and `watchdog`, plus the Pi, OpenCode and Claude Code `implement-loop`, `implement-team-loop` and `watchdog-loop` entry points and their corresponding `*-auto` entries. `skl install` renders it into each harness's native entry point: a pi prompt template, a Claude Code skill only the user invokes, and an OpenCode command. Each gets the frontmatter keys its harness recognizes, and passes model and thinking arguments in the harness's placeholder syntax. Loops start dispatch and follow Outcome Instructions; Codex has no entry point that takes arguments, so it keeps the direct stubs.
 
-Every file in `prose/procedures/`, `prose/craft/`, `prose/documents/` and `prose/outcomes/` parses into one template set, named by its path under `prose/`. A file includes another with `{{template "craft/audit.md" .}}`, and a shared block by its defined name. `catalog.go` maps each skill name to its definition and resource directory, lists the Craft and Procedures each Procedure composes, and selects the continuation file for an invocation.
+Every file in `prose/procedures/`, `prose/principles/`, `prose/documents/` and `prose/outcomes/` parses into one template set, named by its path under `prose/`. A file includes another with `{{template "principles/audit.md" .}}`, and a shared block by its defined name. `catalog.go` maps each skill name to its definition and resource directory, lists the Craft and Procedures each Procedure composes, and selects the continuation file for an invocation.
+
+### Project principles
+
+A repository may keep its own principles at `.skl/principles/<name>.md`, in the form of a skl-owned principle: a `statement` in frontmatter, then the explanation. The engine checks only that each statement is present and at most 280 characters long, and refuses to render for a repository with a file that fails.
+
+- `prose/procedures/modules/principles.md` defines `project-principles`, the one block that lists each statement after its principle's name, in file-name order. Every Procedure rendered for a repository includes it once; it renders nothing when the repository has no principles. A template reads the list through the `principles` function, which Watchdog's review and the Audit step inside Implement also use to send the worker to a principle a Forbidden line cites.
+- `prose/procedures/principles.md` is the `principles` skill. It lists the statements, and its resources are the repository's principle files, so `.skl/principles/no-facade.md` is `skl skill --resource no-facade.md principles`.
+- `skl skill` renders for the repository containing the working directory, or `--repo`; Implement and Watchdog render for the checkout at the `--repo` root, where acceptance also resolves citations.
+- A Contract's Forbidden line may cite `principle:<name>`; acceptance refuses a citation the source repository has no file for.
 
 The report format that `implement-report.md` and `watchdog-report.md` follow is documented for maintainers in `docs/report-schema.md`. It is not agent-visible.
 

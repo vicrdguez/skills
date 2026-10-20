@@ -195,7 +195,15 @@ func TestAgentProseGoldens(t *testing.T) {
 	g := newProseGoldens(t)
 	fixture := newLedgerFixture(t)
 	forge := newForgeServer(t)
-	source, target := deliverySourceRepo(t)
+	source, _ := deliverySourceRepo(t)
+	// The source repository has a verification skill with a journey, so the
+	// Contract cites catalog rows and the delivery renderings bind them.
+	writeFile(t, filepath.Join(source, ".skl", "verify.md"), "---\nranks: [live, tests, build]\n---\n\n"+proseFixture(t, "verify.md"))
+	writeFile(t, filepath.Join(source, ".skl", "journeys", "dashboard.md"), proseFixture(t, "journey-dashboard.md"))
+	runGit(t, source, "add", ".skl")
+	runGit(t, source, "commit", "-q", "-m", "verification skill")
+	target := deliveryTrimmed(t, source, "rev-parse", "HEAD")
+	runGit(t, source, "update-ref", "refs/remotes/origin/main", target)
 	temp := t.TempDir()
 	t.Setenv("TMPDIR", temp)
 	g.replace(source, "/work/widgets")
@@ -212,7 +220,7 @@ func TestAgentProseGoldens(t *testing.T) {
 		spec := proposalSpec{name: name, description: proseFixture(t, "proposal.md"), slices: []proposalSliceSpec{{name: "foundation", title: "Dashboard foundation", branch: name, files: files}}}
 		return writeProposal(t, "", spec)
 	}
-	contract := map[string]string{"intent.md": proseFixture(t, "intent.md"), "behavior.md": proseFixture(t, "behavior.md")}
+	contract := map[string]string{"intent.md": proseFixture(t, "intent.md"), "behavior.md": proseFixture(t, "behavior.md"), "plan.md": proseFixture(t, "plan.md")}
 
 	// Propose: acceptance, readback, publication and cleanup.
 	g.capture("outcome-ledger-accept-fix-required", proposer, "proposal", "accept", "--repo", source, "--proposal-dir", intake(proseProposal, map[string]string{"intent.md": contract["intent.md"]}), issue)
@@ -270,8 +278,12 @@ func TestAgentProseGoldens(t *testing.T) {
 	}
 	verdict := func(name, claim, outcome, status string) {
 		t.Helper()
-		output := g.run(worker, "watchdog", "submit", "--repo", source, "--slice", proseItem, "--claim", claim, "--outcome", outcome,
-			"--body", proseFixturePath("watchdog-report.md"), "--public-body", public)
+		arguments := []string{"watchdog", "submit", "--repo", source, "--slice", proseItem, "--claim", claim, "--outcome", outcome,
+			"--body", proseFixturePath("watchdog-report.md"), "--public-body", public}
+		if outcome == "pass" {
+			arguments = append(arguments, "--rank", "tests")
+		}
+		output := g.run(worker, arguments...)
 		if !strings.Contains(output, "Status: "+status) {
 			t.Fatalf("watchdog submit %s:\n%s", outcome, output)
 		}
@@ -334,18 +346,29 @@ func TestAgentProseGoldens(t *testing.T) {
 	claim, result = proseMatch(t, proseClaimLine, directed), proseMatch(t, proseResultLine, directed)
 	g.run(worker, "implement", "prepare", "--repo", source, "--slice", proseItem, "--claim", claim, "--result-directory", result)
 	runGit(t, worktree, "reset", "-q", "--hard", target)
+	// The passing submission supplies the check its Contract declared new.
+	completedSkill := strings.Replace(proseFixture(t, "verify.md"), "| routes |", "| health-corpus | tests | executed | `make health-corpus` | unhealthy widgets are listed | tests |\n| routes |", 1)
+	writeFile(t, filepath.Join(worktree, ".skl", "verify.md"), "---\nranks: [live, tests, build]\n---\n\n"+completedSkill)
 	submit("", claim, proseCommit(t, worktree, "dashboard.txt", "every widget, retired ones kept\n"))
 	reviewClaim, reviewResult = review("")
 	g.capture("watchdog-inspect-full", worker, append([]string{"watchdog", "inspect"}, reviewIdentity(reviewClaim, reviewResult)...)...)
 	scoped("watchdog-repeat-full", reviewIdentity(reviewClaim, reviewResult), "full")
 	verdict("outcome-watchdog-submit-pass", reviewClaim, "pass", ledger.ReadyForMerge)
 
-	// A pause before any source progress, then no remaining work.
+	// The source repository gains project principles, which every later
+	// rendering for it lists. A pause before any source progress, then no
+	// remaining work.
+	for _, name := range []string{"no-facade", "one-representation"} {
+		writeFile(t, filepath.Join(source, ".skl", "principles", name+".md"), proseFixture(t, filepath.Join("principles", name+".md")))
+	}
+	runGit(t, source, "add", ".skl")
+	runGit(t, source, "commit", "-q", "-m", "project principles")
+	runGit(t, source, "update-ref", "refs/remotes/origin/main", deliveryTrimmed(t, source, "rev-parse", "HEAD"))
 	pausedProposal := "widget-export"
 	if outcome := proposer.accept(t, source, intake(pausedProposal, contract), issue); outcome.Status != "accepted" {
 		t.Fatalf("accept %s: %s", pausedProposal, mustJSON(t, outcome))
 	}
-	paused := proseMatch(t, proseClaimLine, g.run(worker, "implement", "next", "--repo", source))
+	paused := proseMatch(t, proseClaimLine, g.capture("implement-start-principles", worker, "implement", "next", "--repo", source))
 	g.capture("outcome-implement-needs-human", worker, "implement", "needs-human", "--repo", source, "--slice", pausedProposal+"/foundation", "--claim", paused,
 		"--body", proseFixturePath("pause.md"), "--public-body", public)
 	g.capture("outcome-implement-next-no-work", worker, "implement", "next", "--repo", source)
@@ -453,7 +476,7 @@ func TestAgentProseGoldens(t *testing.T) {
 	}
 	g.capture("outcome-ledger-amend-existing", proposer, "proposal", "amend", "--repo", source, "--proposal-dir", amendIntake("widget-share"))
 	submittedIntake := amendIntake("widget-search")
-	writeFile(t, filepath.Join(submittedIntake, "foundation", "intent.md"), "# Search intent, revised\n")
+	writeFile(t, filepath.Join(submittedIntake, "foundation", "intent.md"), strings.Replace(contract["intent.md"], "# Dashboard foundation", "# Search intent, revised", 1))
 	g.capture("outcome-ledger-amend-fix-required", proposer, "proposal", "amend", "--repo", source, "--proposal-dir", submittedIntake)
 	grown := amendIntake("widget-share")
 	addIntakeSlice(t, grown, "followup", "foundation")
@@ -462,7 +485,7 @@ func TestAgentProseGoldens(t *testing.T) {
 		t.Fatalf("proposal amend widget-share:\n%s", output)
 	}
 	replaced := amendIntake("widget-share")
-	writeFile(t, filepath.Join(replaced, "foundation", "behavior.md"), "# Share behavior, revised\n")
+	writeFile(t, filepath.Join(replaced, "foundation", "behavior.md"), strings.Replace(contract["behavior.md"], "# Dashboard foundation behavior", "# Share behavior, revised", 1))
 	g.capture("outcome-ledger-amend-amended", proposer, "proposal", "amend", "--repo", source, "--proposal-dir", replaced)
 
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
@@ -471,20 +494,30 @@ func TestAgentProseGoldens(t *testing.T) {
 	// Standalone Execution Skills, the refusals for the delivered ones, and
 	// every named resource a rendering tells the worker to retrieve.
 	for _, name := range skilldist.SkillNames() {
-		if name == "implement" || name == "watchdog" {
+		switch name {
+		case "implement", "watchdog":
 			g.capture("outcome-skill-"+name, worker, "skill", name)
-			continue
+		case "verify":
+			g.capture("skill-verify", worker, "skill", "--repo", source, "verify")
+			g.capture("outcome-skill-verify-missing", worker, "skill", "--repo", fixture.clone, "verify")
+		case "principles":
+			g.capture("skill-principles", worker, "skill", "--repo", source, "principles")
+			g.capture("skill-principles-none", worker, "skill", "--repo", fixture.clone, "principles")
+			g.capture("resource-principles-no-facade", worker, "skill", "--repo", source, "--resource", "no-facade.md", "principles")
+		default:
+			g.capture("skill-"+name, worker, "skill", name)
 		}
-		g.capture("skill-"+name, worker, "skill", name)
 	}
 	resources := map[string][]string{
 		"audit":              {"acceptance.md", "smells.md"},
 		"decision":           {"triage.md"},
-		"design":             {"DEEPENING.md", "DESIGN-IT-TWICE.md"},
+		"modules":            {"DEEPENING.md", "DESIGN-IT-TWICE.md"},
 		"domain":             {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
 		"propose":            {"behavior.md", "intent.md", "plan.md", "tasks.md"},
 		"implement":          {"pull-presentation.md"},
 		"testing":            {"mocking.md", "tests.md"},
+		"verify":             {"driven-surface.md", "human-observed.md", "introspection.md", "oracle.md", "process.md", "static.md", "tests.md"},
+		"verify-create":      {"journey.md", "verify.md"},
 		"watchdog":           {"pull-presentation.md"},
 		"writing-for-agents": {"SKILL-MECHANICS.md"},
 	}

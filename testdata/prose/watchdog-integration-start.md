@@ -53,17 +53,40 @@ Show every widget's health on one dashboard page.
 ## Definition of Done
 
 - [ ] The dashboard lists every widget with its health (B1).
+- [ ] The `health-corpus` catalog row holds the unhealthy-widget case (B1).
 
 ## Manual verification
 
 - [ ] M1: Open the dashboard and confirm each widget's health by hand.
 
 ```
+`0000000000000000000000000000000000000004:projects/widgets/proposals/widget-alerts/foundation/plan.md`
+
+```
+# Dashboard foundation plan
+
+## Delegated
+
+- The dashboard's layout and styling.
+
+## Forbidden
+
+- A second source of widget health beside the recorded checks.
+
+## Verification strategy
+
+| Covers | Check | Rank |
+| --- | --- | --- |
+| B1 | widget-tests TestUnhealthyWidgetListed | tests |
+| B1 | dashboard | live |
+| B1 | new health-corpus unhealthy-widget | tests |
+
+```
 `0000000000000000000000000000000000000004:projects/widgets/proposals/widget-alerts/foundation/implement-report.md`
 
 ```
 ---
-schema: 2
+schema: 3
 outcome: awaiting_review
 source:
   head: 0000000000000000000000000000000000000002
@@ -77,6 +100,8 @@ ledger:
       path: projects/widgets/proposals/widget-alerts/foundation/behavior.md
     - commit: 0000000000000000000000000000000000000006
       path: projects/widgets/proposals/widget-alerts/foundation/intent.md
+    - commit: 0000000000000000000000000000000000000006
+      path: projects/widgets/proposals/widget-alerts/foundation/plan.md
 ---
 # Implementation result
 
@@ -93,11 +118,28 @@ No findings.
 
 ```
 
+## Project principles
+
+This repository's principles apply to this work. Read one in full with `skl skill --resource <name>.md principles`.
+
+- `no-facade`: Replace an interface outright; no compatibility facade keeps the old one alive beside it.
+- `one-representation`: One native representation; no duplicate payload graph, attribute map or replay log beside it.
+
+## Cited checks
+
+Run each check the Verification strategy cites, as `.skl/verify.md` defines it at the reviewed source, and record its result and rank in the report. A cited row the reviewed source lacks is a finding.
+
+- `widget-tests` `TestUnhealthyWidgetListed`, for B1: run `go test ./...`; expect every test passes, the cited test among them; rank `tests`.
+- `dashboard`, for B1: perform the journey `.skl/journeys/dashboard.md`; expect the page shows what the cited rule expects; rank `live`.
+- `health-corpus` `unhealthy-widget`, for B1: a row this slice adds, missing from `.skl/verify.md` here.
+
+Check: every cited check has its result.
+
 ## Review
 
 1. Run the Full Gate yourself: the full suite, typecheck and lint. A green suite you did not run is not evidence.
 2. Check the report's completion table: every `B<n>`, `A<n>` and warranted `T<n>` is `complete` or `incomplete`, and a missing entry is `incomplete`. Is each `complete` true at this head? Leave the `M<n>` Manual Verification items to the human.
-3. Verify every Audit `F<n>` disposition: is each `fixed` true, each `declined` defensible and really a `JUDGEMENT`? A declined `HARD` is a `BLOCK`. Do not rerun Audit.
+3. Verify every Audit `F<n>` disposition: is each `fixed` true, each `declined` defensible and really a `JUDGEMENT`? A declined `HARD` is a `BLOCK`. A decision the plan's Forbidden section rules out is a `BLOCK` citing that line, and so is a declined finding about one. Read each principle a Forbidden line cites as `principle:<name>` with `skl skill --resource <name>.md principles` before judging that line. Do not rerun Audit.
 4. Review the complete change, `git diff 0000000000000000000000000000000000000003...HEAD`, against every Contract item. Apply the method and criteria below.
 5. Preparation merged the current head of `proposal/widget-alerts` into this branch when it was missing; inspection names it as the merged head. Judge that merge and its effects as part of this change, together with the implementation's merges and conflict resolutions; code inherited unchanged from `proposal/widget-alerts` is outside the review.
 
@@ -113,7 +155,7 @@ A finding keeps its Work-Item-local `W<n>` across rounds: list resolved ones as 
 
 ## Verdict
 
-Write the report as `skl skill --resource ledger-review.md --input result_directory='/tmp/skl-watchdog-result' --input round=1 --input reviewed_head='0000000000000000000000000000000000000002' --input rework_pauses=false watchdog` instructs, then submit with `skl watchdog submit --repo '/work/widgets' --remote 'origin' --slice 'widget-alerts/foundation' --claim '0000000000000000000000000000000000000001' --body '/tmp/skl-watchdog-result/watchdog-report.md' --public-body '/tmp/skl-watchdog-result/public.md' --run-metadata '/tmp/skl-watchdog-result/run.json' --outcome <pass|rework> --head <prepared-source-sha>`:
+Write the report as `skl skill --resource ledger-review.md --input result_directory='/tmp/skl-watchdog-result' --input round=1 --input reviewed_head='0000000000000000000000000000000000000002' --input rework_pauses=false watchdog` instructs, then submit with `skl watchdog submit --repo '/work/widgets' --remote 'origin' --slice 'widget-alerts/foundation' --claim '0000000000000000000000000000000000000001' --body '/tmp/skl-watchdog-result/watchdog-report.md' --public-body '/tmp/skl-watchdog-result/public.md' --run-metadata '/tmp/skl-watchdog-result/run.json' --outcome <pass|rework> --rank <rank> --head <prepared-source-sha>`. For `<rank>`, take the weakest rank reached among the Verification strategy rows that cover a `B<n>`; with no such row, take the weakest rank your evidence reached. Choose the outcome:
 
 - `pass` only when no `BLOCK` or `HUMAN` finding is active;
 - `rework` when a `BLOCK` finding is active;

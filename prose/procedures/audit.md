@@ -1,6 +1,6 @@
 # Audit
 
-{{template "craft/audit.md" .}}## Pin the comparison
+{{template "principles/audit.md" .}}## Pin the comparison
 
 Use the fixed point the user gave: a commit, branch, tag or merge-base. When none was given, ask for one. Resolve it with `git rev-parse <fixed-point>` before going further.{{template "audit-diff" .}}
 
@@ -13,5 +13,5 @@ When the branch belongs to a ledger Work Item, read its Contract with `skl slice
 Run the project's full test, typecheck and lint suite once and record the commands, head and results.
 
 Check: you hold the diff command, the commit list, the gate result and the Contract, or the note that there is none.
-
+{{template "project-principles"}}
 {{template "audit-dispatch"}}

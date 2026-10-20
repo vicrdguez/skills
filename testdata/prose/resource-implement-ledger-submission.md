@@ -9,7 +9,7 @@ What the change delivers.
 ## Verification
 
 - The completion table for the whole change at the final head: every `B<n>`, `A<n>` and warranted `T<n>`, declared `complete` or `incomplete`. A missing row counts as `incomplete`.
-- The evidence beside the rows it supports: tests, commands or inspection, with their results and limitations. One check can support several rows.
+- The evidence beside the rows it supports: tests, commands or inspection, with their results, the rank each achieved and limitations. One check can support several rows.
 - The `M<n>` checks, listed separately and left to the human.
 - The source head, the integrated target (marked local-only when the fetch failed), the Full Gate result over the final state, and any material limitations.
 

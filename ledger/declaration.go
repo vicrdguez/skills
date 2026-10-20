@@ -12,8 +12,8 @@ import (
 )
 
 // contractFiles are the only file names a slice directory may freeze.
-// intent.md and behavior.md are required; plan.md and tasks.md are copied
-// only when the author supplied them.
+// intent.md and behavior.md are always required, and lint requires plan.md;
+// tasks.md is copied only when the author supplied it.
 var contractFiles = map[string]bool{"intent.md": true, "behavior.md": true, "plan.md": true, "tasks.md": true}
 
 // SliceDeclaration is one declared slice of a proposal intake.
@@ -43,8 +43,9 @@ type ProposalDeclaration struct {
 // directory before anything is accepted. bodies supplies the temporary
 // descriptive issue bodies keyed by slice name, plus the optional parent
 // body; missing bodies are not declaration errors — that publication
-// surface is reported as missing input.
-func LoadDeclaration(directory string, bodies map[string][]byte, parentBody []byte) (*ProposalDeclaration, error) {
+// surface is reported as missing input. Every supplied Contract is linted
+// against sources, except one the ledger already records unchanged.
+func LoadDeclaration(directory string, bodies map[string][]byte, parentBody []byte, sources ContractSources) (*ProposalDeclaration, error) {
 	raw, err := os.ReadFile(filepath.Join(directory, "proposal.json"))
 	if err != nil {
 		return nil, refuse("proposal declaration "+filepath.Join(directory, "proposal.json")+" is unavailable", "author the intake declaration with a proposal name, slice list, and optional dependencies, then retry")
@@ -119,6 +120,11 @@ func LoadDeclaration(directory string, bodies map[string][]byte, parentBody []by
 		contract, err := loadContract(filepath.Join(directory, slice.Name))
 		if err != nil {
 			return nil, err
+		}
+		if !sources.recordedUnchanged(declaration.Proposal, slice.Name, contract) {
+			if err := lintContract(slice.Name, contract, sources, declaration.Proposal); err != nil {
+				return nil, err
+			}
 		}
 		slice.contract = contract
 	}
@@ -220,10 +226,10 @@ func loadContract(directory string) (map[string][]byte, error) {
 	contract := make(map[string][]byte)
 	for _, entry := range entries {
 		if entry.IsDir() {
-			return nil, refuse("slice directory "+directory+" contains the nested directory "+entry.Name(), "keep the slice directory flat: only intent.md, behavior.md, and warranted plan.md/tasks.md belong in it")
+			return nil, refuse("slice directory "+directory+" contains the nested directory "+entry.Name(), "keep the slice directory flat: only intent.md, behavior.md, plan.md, and warranted tasks.md belong in it")
 		}
 		if !contractFiles[entry.Name()] {
-			return nil, refuse("slice directory "+directory+" contains the unexpected file "+entry.Name(), "keep only contract files in the slice directory: intent.md, behavior.md, and warranted plan.md/tasks.md")
+			return nil, refuse("slice directory "+directory+" contains the unexpected file "+entry.Name(), "keep only contract files in the slice directory: intent.md, behavior.md, plan.md, and warranted tasks.md")
 		}
 		contents, err := os.ReadFile(filepath.Join(directory, entry.Name()))
 		if err != nil {
@@ -233,7 +239,7 @@ func loadContract(directory string) (map[string][]byte, error) {
 	}
 	for _, required := range []string{"intent.md", "behavior.md"} {
 		if _, ok := contract[required]; !ok {
-			return nil, refuse("slice directory "+directory+" misses "+required, "supply at least intent.md and behavior.md; add plan.md and tasks.md only when warranted")
+			return nil, refuse("slice directory "+directory+" misses "+required, "supply intent.md, behavior.md, and plan.md; add tasks.md only when warranted")
 		}
 	}
 	return contract, nil

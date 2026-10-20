@@ -58,10 +58,35 @@ Show every widget's health on one dashboard page.
 ## Definition of Done
 
 - [ ] The dashboard lists every widget with its health (B1).
+- [ ] The `health-corpus` catalog row holds the unhealthy-widget case (B1).
 
 ## Manual verification
 
 - [ ] M1: Open the dashboard and confirm each widget's health by hand.
+
+```
+#### `projects/widgets/proposals/widget-dashboard/foundation/plan.md`
+
+Reference: `0000000000000000000000000000000000000001:projects/widgets/proposals/widget-dashboard/foundation/plan.md`
+
+```
+# Dashboard foundation plan
+
+## Delegated
+
+- The dashboard's layout and styling.
+
+## Forbidden
+
+- A second source of widget health beside the recorded checks.
+
+## Verification strategy
+
+| Covers | Check | Rank |
+| --- | --- | --- |
+| B1 | widget-tests TestUnhealthyWidgetListed | tests |
+| B1 | dashboard | live |
+| B1 | new health-corpus unhealthy-widget | tests |
 
 ```
 #### `projects/widgets/proposals/widget-dashboard/foundation/watchdog-report.md`
@@ -70,7 +95,7 @@ Reference: `0000000000000000000000000000000000000001:projects/widgets/proposals/
 
 ```
 ---
-schema: 2
+schema: 3
 outcome: rework
 source:
   head: 0000000000000000000000000000000000000002
@@ -85,6 +110,8 @@ ledger:
       path: projects/widgets/proposals/widget-dashboard/foundation/behavior.md
     - commit: 0000000000000000000000000000000000000005
       path: projects/widgets/proposals/widget-dashboard/foundation/intent.md
+    - commit: 0000000000000000000000000000000000000005
+      path: projects/widgets/proposals/widget-dashboard/foundation/plan.md
   implement:
     commit: 0000000000000000000000000000000000000005
     path: projects/widgets/proposals/widget-dashboard/foundation/implement-report.md

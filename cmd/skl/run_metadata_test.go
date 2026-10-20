@@ -123,8 +123,8 @@ func recordedRun(t *testing.T, cli ledgerCLI, phase string) any {
 			if document.Report == nil {
 				t.Fatalf("%s report has no readable metadata: %s", phase, text)
 			}
-			if document.Report.Schema != 2 {
-				t.Fatalf("%s report schema = %d, want 2", phase, document.Report.Schema)
+			if document.Report.Schema != 3 {
+				t.Fatalf("%s report schema = %d, want 3", phase, document.Report.Schema)
 			}
 			return document.Report.Run
 		}

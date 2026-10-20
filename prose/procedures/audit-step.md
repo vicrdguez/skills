@@ -1,6 +1,6 @@
 # Audit
 
-{{template "craft/audit.md" .}}## Pin the comparison
+{{template "principles/audit.md" .}}## Pin the comparison
 
 After the late target integration, the fixed point is `git merge-base <observed-target-sha> HEAD`.{{if and (eq .Procedure "rework") .PreviousReviewed}} When the previously reviewed revision `{{.PreviousReviewed}}` is an ancestor of `HEAD`, it is the fixed point instead, delimiting this round's delta; otherwise review the full comparison. Either way, keep every prior finding and the completed-review count.{{end}}{{template "audit-diff" .}}
 
@@ -11,4 +11,6 @@ After the late target integration, the fixed point is `git merge-base <observed-
 
 Check: you hold the Contract documents supplied above, the diff command, the commit list, the gate result and the input-inspection result.
 
-{{template "audit-dispatch" .Reviewer}}
+{{if principles}}Tell the Contracts reviewer to read each principle a Forbidden line cites as `principle:<name>`, with `skl skill --resource <name>.md principles`, before judging that line.
+
+{{end}}{{template "audit-dispatch" .Reviewer}}

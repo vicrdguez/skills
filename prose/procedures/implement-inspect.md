@@ -7,4 +7,4 @@ These are the prepared source facts. Re-read them with `{{.InspectCommand}}` aft
 {{if .SubmitCommand}}- Submit settled work with `{{.SubmitCommand}}`.
 {{end}}{{if .PauseCommand}}- Pause for a human decision with `{{.PauseCommand}}`.
 {{end}}{{if .ReleaseCommand}}- Release the Claim with `{{.ReleaseCommand}}`.
-{{end}}
+{{end}}{{template "project-principles"}}

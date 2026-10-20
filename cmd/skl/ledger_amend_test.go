@@ -43,6 +43,7 @@ func addIntakeSlice(t *testing.T, directory, name string, depends ...string) {
 	t.Helper()
 	writeFile(t, filepath.Join(directory, name, "intent.md"), "# "+name+" intent\n")
 	writeFile(t, filepath.Join(directory, name, "behavior.md"), "# "+name+" behavior\n")
+	writeFile(t, filepath.Join(directory, name, "plan.md"), minimalPlan)
 	proposal := filepath.Base(directory)
 	editIntake(t, directory, func(declaration map[string]any) {
 		if declaration["parent_title"] == nil {
@@ -195,7 +196,7 @@ func TestAmendReplacesNeverClaimedContract(t *testing.T) {
 	cli := newLedgerApp(t, newForgeServer(t))
 	spec := cleanupSpec("draft", "base", "work")
 	spec.depends["work"] = []string{"base"}
-	spec.slices[1].files["plan.md"] = "# Work plan\n"
+	spec.slices[1].files["tasks.md"] = "# Work tasks\n"
 	acceptSpec(t, cli, root, spec)
 	head := ledgerHead(t, fixture.clone)
 
@@ -206,7 +207,7 @@ func TestAmendReplacesNeverClaimedContract(t *testing.T) {
 
 	intake := exportedIntake(t, cli, root, "draft")
 	writeFile(t, filepath.Join(intake, "work", "behavior.md"), "# Work behavior, revised\n")
-	if err := os.Remove(filepath.Join(intake, "work", "plan.md")); err != nil {
+	if err := os.Remove(filepath.Join(intake, "work", "tasks.md")); err != nil {
 		t.Fatal(err)
 	}
 	editIntake(t, intake, func(declaration map[string]any) {
@@ -215,15 +216,15 @@ func TestAmendReplacesNeverClaimedContract(t *testing.T) {
 	})
 	amendment := requireAmended(t, cli.amend(t, root, intake))
 	change := amendedSlice(t, amendment, "work")
-	if !equalStrings(change.Contract, []string{"behavior.md", "plan.md"}) || !change.Title || !change.Branch || change.Dependencies || len(amendment.Amended) != 1 {
+	if !equalStrings(change.Contract, []string{"behavior.md", "tasks.md"}) || !change.Title || !change.Branch || change.Dependencies || len(amendment.Amended) != 1 {
 		t.Fatalf("amendment reported the wrong changes: %s", mustJSON(t, amendment))
 	}
 	directory := "projects/widgets/proposals/draft/work/"
 	if got := readLedgerFile(t, fixture.clone, directory+"behavior.md"); got != "# Work behavior, revised\n" {
 		t.Fatalf("recorded behavior.md = %q", got)
 	}
-	if slices.Contains(ledgerPaths(t, fixture.clone), directory+"plan.md") {
-		t.Fatal("the omitted plan.md is still recorded")
+	if slices.Contains(ledgerPaths(t, fixture.clone), directory+"tasks.md") {
+		t.Fatal("the omitted tasks.md is still recorded")
 	}
 	state := amendState(t, fixture.clone, "draft", "work")
 	if state.State != ledger.ReadyForImplementation || state.Title != "Revised work" || state.Branch != "draft-work-revised" || !equalStrings(state.Dependencies, []string{"proposals/draft/base"}) {

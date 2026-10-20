@@ -112,7 +112,7 @@ func dispatchReview(t *testing.T, cli ledgerCLI, source, outcome string) {
 func dispatchVerdict(t *testing.T, cli ledgerCLI, source, claim, outcome string) {
 	t.Helper()
 	reviewed, err := cli.deliveryJSON(t, "skl", "watchdog", "submit", "--repo", source, "--slice", deliveryTestItem, "--claim", claim,
-		"--outcome", outcome, "--body", proseFixturePath("watchdog-report.md"), "--public-body", proseFixturePath("public.md"), "--format", "json")
+		"--outcome", outcome, "--rank", "tests", "--body", proseFixturePath("watchdog-report.md"), "--public-body", proseFixturePath("public.md"), "--format", "json")
 	if err != nil || reviewed.Result == nil {
 		t.Fatalf("watchdog submit %s: %#v %v", outcome, reviewed, err)
 	}

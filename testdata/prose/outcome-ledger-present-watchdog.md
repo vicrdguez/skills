@@ -14,6 +14,7 @@ To present the current result, read the private evidence:
 - `skl ledger show --commit '0000000000000000000000000000000000000001' --path 'projects/widgets/proposals/widget-dashboard/foundation/watchdog-report.md'`
 - `skl ledger show --commit '0000000000000000000000000000000000000004' --path 'projects/widgets/proposals/widget-dashboard/foundation/behavior.md'`
 - `skl ledger show --commit '0000000000000000000000000000000000000004' --path 'projects/widgets/proposals/widget-dashboard/foundation/intent.md'`
+- `skl ledger show --commit '0000000000000000000000000000000000000004' --path 'projects/widgets/proposals/widget-dashboard/foundation/plan.md'`
 - `skl ledger show --commit '0000000000000000000000000000000000000004' --path 'projects/widgets/proposals/widget-dashboard/foundation/implement-report.md'`
 
 Write fresh public prose following `skl skill --resource pull-presentation.md watchdog`, then run:

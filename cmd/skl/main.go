@@ -2,11 +2,13 @@ package main
 
 import (
 	"bufio"
+	"cmp"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -14,6 +16,7 @@ import (
 	"github.com/urfave/cli/v2"
 	skilldist "github.com/vicrdguez/skills"
 	"github.com/vicrdguez/skills/github"
+	"github.com/vicrdguez/skills/ledger"
 	"github.com/vicrdguez/skills/setup"
 )
 
@@ -73,12 +76,17 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 			&cli.StringFlag{Name: "resource", Usage: "Retrieve one exact owner-relative resource as raw text"},
 			newInputFlag(),
 			&cli.BoolFlag{Name: "describe-inputs", Usage: "Describe the named resource's accepted inputs as raw text without rendering it; cannot combine with --input"},
+			&cli.PathFlag{Name: "repo", Usage: "Repository the skill renders for: its .skl/principles/, and the .skl/verify.md of verify (default: the repository containing the working directory)"},
 		},
 		Action: func(command *cli.Context) error {
 			if command.NArg() != 1 {
 				return fmt.Errorf("skill name is required")
 			}
 			name := command.Args().First()
+			if command.IsSet("repo") && command.IsSet("resource") && name != "principles" {
+				return fmt.Errorf("--repo applies to whole-skill retrieval and to resources of principles")
+			}
+			directory := cmp.Or(command.Path("repo"), ".")
 			resource := command.String("resource")
 			describe := command.Bool("describe-inputs")
 			inputs := inputValues(command)
@@ -106,6 +114,28 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 				}
 				return errors.New(strings.TrimRight(refusal, "\n"))
 			}
+			if resource != "" && name == "principles" {
+				root, err := repositoryRoot(directory, name)
+				if err != nil {
+					return err
+				}
+				principles, err := ledger.ReadPrinciples(root)
+				if err != nil {
+					return err
+				}
+				if describe {
+					inputs = nil
+				}
+				contents, err := skilldist.RenderPrinciple(principles, resource, inputs)
+				if err != nil {
+					return err
+				}
+				if describe {
+					contents = []byte(resource + " accepts no inputs.\n")
+				}
+				_, err = stdout.Write(contents)
+				return err
+			}
 			if resource != "" {
 				if describe {
 					description, err := skilldist.DescribeResourceInputs(name, resource)
@@ -122,7 +152,26 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 				_, err = stdout.Write(contents)
 				return err
 			}
-			packet, err := skilldist.BuildPacket(name, skilldist.InvocationFacts{})
+			// A skill renders for the repository it runs in, when there is one;
+			// verify and principles need one.
+			var facts skilldist.InvocationFacts
+			root, err := repositoryRoot(directory, name)
+			if err == nil {
+				facts.Principles, err = ledger.ReadPrinciples(root)
+				if err != nil {
+					return err
+				}
+			} else if name == "verify" || name == "principles" || command.IsSet("repo") {
+				return err
+			}
+			if name == "verify" {
+				verify, err := verifyFacts(root)
+				if err != nil {
+					return err
+				}
+				facts.Verify = verify
+			}
+			packet, err := skilldist.BuildPacket(name, facts)
 			if err != nil {
 				return err
 			}
@@ -234,4 +283,27 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+// repositoryRoot is the root of the Git repository containing directory, for
+// which skill renders.
+func repositoryRoot(directory, skill string) (string, error) {
+	output, err := exec.Command("git", "-C", directory, "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		return "", fmt.Errorf("%s is not inside a Git repository; run skl skill %s inside the repository or pass --repo", directory, skill)
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+// verifyFacts binds the verify skill to the verification skill of the
+// repository at root.
+func verifyFacts(root string) (*skilldist.VerifyFacts, error) {
+	verification, err := ledger.ReadVerification(root)
+	if err != nil {
+		return nil, err
+	}
+	if verification == nil {
+		return nil, fmt.Errorf("%s has no %s; create it with the verify-create skill: skl skill verify-create", root, ledger.VerificationFile)
+	}
+	return skilldist.NewVerifyFacts(root, verification)
 }

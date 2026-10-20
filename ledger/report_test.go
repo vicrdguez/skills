@@ -58,6 +58,7 @@ func validWatchdogReport() ledger.Report {
 			Contract:  contractReferences(),
 			Implement: &ledger.Reference{Commit: commitImplement, Path: implementPath},
 		},
+		Rank:  "tests",
 		Round: 2,
 	}
 }
@@ -107,7 +108,7 @@ func TestReportFormatRoundTripsImplementReports(t *testing.T) {
 			if !strings.HasPrefix(string(data), "---\n") {
 				t.Fatalf("persisted report does not open with frontmatter: %q", data)
 			}
-			for _, marker := range []string{"schema: 2\n", "outcome: " + testCase.report.Outcome + "\n", "ledger:\n"} {
+			for _, marker := range []string{"schema: 3\n", "outcome: " + testCase.report.Outcome + "\n", "ledger:\n"} {
 				if !strings.Contains(string(data), marker) {
 					t.Errorf("persisted frontmatter lacks %q: %q", marker, data)
 				}
@@ -143,6 +144,7 @@ func TestReportFormatRoundTripsWatchdogReports(t *testing.T) {
 				Schema:  ledger.ReportSchema,
 				Outcome: "pass",
 				Source:  ledger.SourceRevisions{Head: commitHead, Target: commitTarget, Reviewed: commitReviewed},
+				Rank:    "inspection",
 				Ledger:  ledger.ReportInputs{Claim: claimReference(), Contract: contractReferences(), Implement: implement},
 				Round:   3,
 			},
@@ -283,6 +285,19 @@ func TestReportParsesIndependentSchemaOneDocuments(t *testing.T) {
 	}
 }
 
+// A schema-2 pass predates the evidence rank and stays readable without one.
+func TestReportReadsSchemaTwoPassWithoutRank(t *testing.T) {
+	report := validWatchdogReport()
+	report.Schema, report.Rank = 2, ""
+	data, err := ledger.FormatReport(ledger.WatchdogPhase, report, "body\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed, _, err := ledger.ParseReport(ledger.WatchdogPhase, data); err != nil || !reflect.DeepEqual(parsed, report) {
+		t.Fatalf("schema-2 pass = %#v, %v", parsed, err)
+	}
+}
+
 func TestReportPreservesOpaqueBodyByteForByte(t *testing.T) {
 	report := validImplementReport()
 	for _, testCase := range []struct {
@@ -389,7 +404,7 @@ func TestReportRefusesIncompatibleMetadata(t *testing.T) {
 		{
 			name:  "unknown schema",
 			phase: implement,
-			data:  document(strings.Replace(implementFrontmatter(), "schema: 1", "schema: 3", 1)),
+			data:  document(strings.Replace(implementFrontmatter(), "schema: 1", "schema: 4", 1)),
 		},
 		{
 			name:  "absent schema",
@@ -552,6 +567,24 @@ func TestReportRefusesIncompatibleMetadata(t *testing.T) {
 			data:  document(strings.Replace(watchdogFrontmatter(), "  reviewed: "+commitReviewed+"\n", "", 1)),
 			want:  "requires source head, target, and reviewed",
 		},
+		{
+			name:  "schema-3 pass without a rank",
+			phase: watchdog,
+			data:  document(strings.Replace(watchdogFrontmatter(), "schema: 1", "schema: 3", 1)),
+			want:  "no evidence rank",
+		},
+		{
+			name:  "rank before schema 3",
+			phase: watchdog,
+			data:  document(strings.Replace(watchdogFrontmatter(), "schema: 1", "schema: 2", 1) + "rank: tests\n"),
+			want:  "schema-2 watchdog report records evidence rank",
+		},
+		{
+			name:  "rank in an implement report",
+			phase: implement,
+			data:  document(strings.Replace(implementFrontmatter(), "schema: 1", "schema: 3", 1) + "rank: tests\n"),
+			want:  "implement report records evidence rank",
+		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			_, _, err := ledger.ParseReport(testCase.phase, testCase.data)
@@ -610,7 +643,7 @@ func TestReportFormatRefusesIncompatibleMetadata(t *testing.T) {
 			phase: ledger.ImplementPhase,
 			report: func() ledger.Report {
 				report := validImplementReport()
-				report.Schema = 3
+				report.Schema = 4
 				return report
 			}(),
 		},
@@ -712,8 +745,8 @@ func TestReportRecordsRunMetadataAsSupplied(t *testing.T) {
 		if err != nil {
 			t.Fatalf("FormatReport %s with Run Metadata: %v", phase, err)
 		}
-		if !strings.HasPrefix(string(data), "---\nschema: 2\n") {
-			t.Fatalf("%s report is not written as schema 2: %q", phase, data)
+		if !strings.HasPrefix(string(data), "---\nschema: 3\n") {
+			t.Fatalf("%s report is not written as schema 3: %q", phase, data)
 		}
 		parsed, body, err := ledger.ParseReport(phase, data)
 		if err != nil {

@@ -30,7 +30,7 @@ func ownedMarker(protocol string) []byte {
 	return []byte("<!-- skl-owned: " + protocol + " -->")
 }
 
-//go:embed prose/procedures prose/craft prose/documents prose/outcomes prose/adapters/stub.md prose/adapters/entry.md prose/adapters/stubs
+//go:embed prose/procedures prose/principles prose/documents prose/outcomes prose/adapters/stub.md prose/adapters/entry.md prose/adapters/stubs
 var embedded embed.FS
 
 // adapter is one Harness Adapter: the command it runs and the flags whose
@@ -188,7 +188,7 @@ func install(home string, preview bool) (installer, error) {
 	}
 	outcome := installer{preview: preview}
 	for _, target := range harnesses {
-		for _, name := range []string{"tdd", "shape"} {
+		for _, name := range []string{"tdd", "shape", "design"} {
 			if err := outcome.retireStub(filepath.Join(home, target.skills, name, "SKILL.md")); err != nil {
 				return outcome, err
 			}

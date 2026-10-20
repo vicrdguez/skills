@@ -58,7 +58,13 @@ func PresentDelivery(e *ledger.Execution, repository RepositoryContext, phase, o
 	if err != nil {
 		return skilldist.Packet{}, err
 	}
-	return skilldist.BuildPacket(phase, skilldist.InvocationFacts{Delivery: f})
+	// Delivery renders for the checkout at the repository root, as lint and
+	// user-invoked skills do.
+	principles, err := ledger.ReadPrinciples(repository.Root)
+	if err != nil {
+		return skilldist.Packet{}, err
+	}
+	return skilldist.BuildPacket(phase, skilldist.InvocationFacts{Delivery: f, Principles: principles})
 }
 
 // ReviewRework binds what a review that ends in rework at the prepared head
@@ -78,6 +84,32 @@ func IntegrationRef(repository RepositoryContext, state ledger.SliceState) strin
 		return ""
 	}
 	return workflow.IntegrationRef(repository.Remote, state.Target.Branch)
+}
+
+// deliveryVerification reads the verification skill a rendering binds:
+// Watchdog's at the reviewed head; Implement's in the prepared worktree, or,
+// before preparation creates it, at the Integration Target it starts from.
+func deliveryVerification(repository RepositoryContext, state ledger.SliceState, phase, worktree, reviewed string) (*ledger.Verification, error) {
+	if phase == ledger.WatchdogPhase {
+		// A reviewed head that preparation has yet to fetch binds no checks.
+		if _, err := git(repository.Root, "rev-parse", "--verify", "--quiet", reviewed+"^{commit}"); reviewed == "" || err != nil {
+			return nil, nil
+		}
+		return ledger.ReadVerificationAt(repository.Root, reviewed)
+	}
+	if info, err := os.Stat(worktree); err == nil && info.IsDir() {
+		return ledger.ReadVerification(worktree)
+	}
+	// An absent Proposal Branch starts from main.
+	for _, ref := range []string{IntegrationRef(repository, state), "refs/remotes/" + repository.Remote + "/main"} {
+		if ref == "" {
+			continue
+		}
+		if _, err := git(repository.Root, "rev-parse", "--verify", "--quiet", ref+"^{commit}"); err == nil {
+			return ledger.ReadVerificationAt(repository.Root, ref)
+		}
+	}
+	return nil, nil
 }
 
 // deliveryFacts binds one rendering's facts, and the submit command before
@@ -130,6 +162,14 @@ func deliveryFacts(e *ledger.Execution, repository RepositoryContext, phase, ope
 			f.Merged = workflow.IntegrationMerged(repository.Root, e.State.Branch, f.RequiredHead, integration)
 		}
 	}
+	verification, err := deliveryVerification(repository, e.State, phase, worktree, f.RequiredHead)
+	if err != nil {
+		if phase != ledger.WatchdogPhase {
+			return nil, "", err
+		}
+		f.VerificationError = err.Error()
+	}
+	f.Checks = ledger.CitedChecks(e.ContractFile("plan.md"), verification)
 	q := skilldist.ShellQuote
 	identity := fmt.Sprintf(" --repo %s --remote %s --slice %s --claim %s", q(repository.Root), q(repository.Remote), q(e.Item), q(e.Claim.Commit))
 	command := func(operation string) string { return "skl " + phase + " " + operation + identity }
@@ -168,7 +208,7 @@ func deliveryFacts(e *ledger.Execution, repository RepositoryContext, phase, ope
 		f.PauseCommand += " --head <branch-head> --target <observed-target-sha>"
 		f.ResultResourceCommand = fmt.Sprintf("skl skill --resource ledger-submission.md --input result_directory=%s --input procedure=%s --input review_count=%d --input mode=%s implement", q(directory), f.Procedure, f.ReviewCount, f.Mode)
 	} else {
-		f.SubmitCommand += " --outcome <pass|rework>"
+		f.SubmitCommand += " --outcome <pass|rework> --rank <rank>"
 		if f.Integrates {
 			// The prepared head may carry the Integration Merge.
 			head := " --head <prepared-source-sha>"

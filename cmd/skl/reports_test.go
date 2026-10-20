@@ -377,7 +377,7 @@ func submitReportWatchdog(t *testing.T, cli ledgerCLI, source, outcome, body str
 	}
 	bodyPath := writeTemp(t, t, body)
 	submitted, err := cli.deliveryJSON(t, "skl", "watchdog", "submit", "--repo", source, "--slice", deliveryTestItem,
-		"--claim", started.Execution.Claim.Commit, "--outcome", outcome, "--body", bodyPath, "--format", "json")
+		"--claim", started.Execution.Claim.Commit, "--outcome", outcome, "--rank", "tests", "--body", bodyPath, "--format", "json")
 	if err != nil || submitted.Result == nil {
 		t.Fatalf("watchdog submit %s = %#v, err=%v", outcome, submitted, err)
 	}

@@ -58,7 +58,7 @@ Write each slice's Contract documents. Acceptance records their exact bytes. A C
 | --- | --- | --- |
 | `intent.md` | Always: the result, scope, exclusions, Definition of Done and Manual Verification. | `skl skill --resource intent.md propose` |
 | `behavior.md` | Always: the binding rules and the scenarios that discriminate them. Load the `testing` skill to choose observable seams and credible evidence. | `skl skill --resource behavior.md propose` |
-| `plan.md` | When the approved design pins architecture. | `skl skill --resource plan.md propose` |
+| `plan.md` | Always: at least the Verification strategy, Delegated and Forbidden, and the other sections when the approved design pins architecture. | `skl skill --resource plan.md propose` |
 | `tasks.md` | When sequencing, Dependencies or coordination need explicit tracking. | `skl skill --resource tasks.md propose` |
 
 Keep the set compact: carry the approved responsibilities, architectural consequences, accepted limitations and bounds of delegation where they matter to an implementer absent from the conversation. A stronger guarantee with new coordination or recovery duties changes the agreement, even when the slice boundary stays the same. Give each section a descriptive, unique heading.
@@ -71,7 +71,7 @@ In an amendment, edit the exported intake: write Contracts for added and replace
 
 If writing the Contracts changes a slice boundary or Dependency, explain the discovery and return to step 3 with the revised breakdown. Faithful elaboration needs no renewed approval; a changed obligation needs human agreement even within an unchanged slice.
 
-Check: every slice has `intent.md`, `behavior.md` and each warranted document, and in an amendment every added or replaced Slice has them.
+Check: every slice has `intent.md`, `behavior.md`, `plan.md` and each warranted document, and in an amendment every added or replaced Slice has them.
 
 ## 5. Review fidelity
 
@@ -105,3 +105,4 @@ In an amendment, the slices this step covers are the added and changed Slices th
 5. Read each accepted or changed slice back with `skl slice show --repo <root> --slice <proposal>/<slice>`. Cite its ledger commit and path when you identify a document exactly.
 
 Check: the readback shows every accepted or changed slice's recorded documents.
+{{template "project-principles" -}}

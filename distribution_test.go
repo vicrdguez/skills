@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	skills "github.com/vicrdguez/skills"
@@ -17,7 +18,7 @@ func TestInstallationPlansAndResultsRetainOwnershipAndLegacyCleanup(t *testing.T
 	create := filepath.Join(home, ".codex/skills/audit/SKILL.md")
 	update := filepath.Join(home, ".claude/skills/testing/SKILL.md")
 	legacy := filepath.Join(home, ".config/opencode/skills/tdd/SKILL.md")
-	collision := filepath.Join(home, ".pi/agent/skills/design/SKILL.md")
+	collision := filepath.Join(home, ".pi/agent/skills/modules/SKILL.md")
 	retiredCollision := filepath.Join(home, ".codex/skills/tdd/SKILL.md")
 	if err := os.Remove(create); err != nil {
 		t.Fatal(err)
@@ -25,7 +26,7 @@ func TestInstallationPlansAndResultsRetainOwnershipAndLegacyCleanup(t *testing.T
 	files := map[string]string{
 		update:           "<!-- skl-owned: skl.stub/v1 -->\nstale",
 		legacy:           "<!-- skl-owned: skl.stub/v1 -->\nlegacy",
-		collision:        "user design",
+		collision:        "user modules",
 		retiredCollision: "user tdd",
 	}
 	for path, contents := range files {
@@ -89,5 +90,58 @@ func assertActions(t *testing.T, actions []skills.InstallAction, want map[string
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("actions = %v, want %v", got, want)
+	}
+}
+
+// Every harness gets the verify stubs beside the existing ones; the create
+// and maintain stubs are invoked by the user only.
+func TestInstallPlacesTheVerifyStubsOnEveryHarness(t *testing.T) {
+	home := t.TempDir()
+	if _, err := skills.Install(home); err != nil {
+		t.Fatal(err)
+	}
+	for _, directory := range []string{".pi/agent/skills", ".codex/skills", ".claude/skills", ".config/opencode/skills"} {
+		for name, userInvoked := range map[string]bool{"verify": false, "verify-create": true, "verify-maintain": true, "testing": false} {
+			stub, err := os.ReadFile(filepath.Join(home, directory, name, "SKILL.md"))
+			if err != nil {
+				t.Fatalf("%s holds no %s stub: %v", directory, name, err)
+			}
+			text := string(stub)
+			if !strings.Contains(text, "Run `skl skill "+name+"`.") || strings.Contains(text, "disable-model-invocation: true") != userInvoked {
+				t.Fatalf("%s/%s stub:\n%s", directory, name, text)
+			}
+		}
+	}
+}
+
+// The deep-module principle is installed as modules; an owned design stub
+// from an earlier installation is retired with its directory, and a user's
+// own design skill is kept.
+func TestInstallRetiresTheDesignStub(t *testing.T) {
+	home := t.TempDir()
+	owned := filepath.Join(home, ".claude/skills/design/SKILL.md")
+	user := filepath.Join(home, ".codex/skills/design/SKILL.md")
+	for path, contents := range map[string]string{owned: "<!-- skl-owned: skl.stub/v1 -->\nRun `skl skill design`.", user: "user design"} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := skills.Install(home); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Dir(owned)); !os.IsNotExist(err) {
+		t.Fatalf("owned design stub directory remains: %v", err)
+	}
+	if got, err := os.ReadFile(user); err != nil || string(got) != "user design" {
+		t.Fatalf("user design skill changed: %q: %v", got, err)
+	}
+	for _, directory := range []string{".pi/agent/skills", ".codex/skills", ".claude/skills", ".config/opencode/skills"} {
+		stub, err := os.ReadFile(filepath.Join(home, directory, "modules", "SKILL.md"))
+		if err != nil || !strings.Contains(string(stub), "Run `skl skill modules`.") {
+			t.Fatalf("%s modules stub: %q: %v", directory, stub, err)
+		}
 	}
 }

@@ -51,6 +51,12 @@ type DeliveryFacts struct {
 	ReviewCount  uint64                    `json:"review_count"`
 	ReviewNumber uint64                    `json:"review_number"`
 	Documents    []ledger.ContractDocument `json:"documents"`
+	// Checks are the catalog rows the Contract's Verification strategy
+	// cites, read from the source this phase verifies.
+	Checks []ledger.CitedCheck `json:"checks,omitempty"`
+	// VerificationError is a reviewed-source defect to report, rather than
+	// a rendering failure that prevents the reviewer from handing it back.
+	VerificationError string `json:"verification_error,omitempty"`
 	// Mode, Helper and Reviewer are the Implement invocation's choices. The
 	// subagent choices are nil when no value was supplied.
 	Mode     string          `json:"mode,omitempty"`
@@ -75,6 +81,36 @@ type SubagentChoice struct {
 type InvocationFacts struct {
 	Delivery *DeliveryFacts `json:"delivery,omitempty"`
 	Decision *DecisionFacts `json:"decision,omitempty"`
+	Verify   *VerifyFacts   `json:"verify,omitempty"`
+	// Principles are the project principles of the repository a Procedure
+	// renders for, which its shared block lists.
+	Principles []ledger.Principle `json:"principles,omitempty"`
+}
+
+// VerifyFacts bind the verify skill to one repository's verification skill:
+// its ladder, its body after the frontmatter, and the channel resources its
+// Channels section names.
+type VerifyFacts struct {
+	Repository string        `json:"repository"`
+	Ranks      ledger.Ladder `json:"ranks"`
+	Channels   []string      `json:"channels"`
+	Body       string        `json:"body"`
+}
+
+// NewVerifyFacts binds verification, the skill of the repository at root.
+// A channel without a resource of the verify skill is left to the body.
+func NewVerifyFacts(root string, verification *ledger.Verification) (*VerifyFacts, error) {
+	resources, err := resourceNames("verify")
+	if err != nil {
+		return nil, err
+	}
+	facts := &VerifyFacts{Repository: root, Ranks: verification.Ladder, Body: strings.TrimLeft(verification.Body, "\n")}
+	for _, channel := range verification.Channels {
+		if slices.Contains(resources, channel+".md") && !slices.Contains(facts.Channels, channel) {
+			facts.Channels = append(facts.Channels, channel)
+		}
+	}
+	return facts, nil
 }
 
 // EvidenceSource is a canonical repository-bound identity for one observed or
@@ -129,10 +165,14 @@ type Packet struct {
 	Instructions   string          `json:"instructions"`
 }
 
-// proseRoot holds the authored prose, organized by kind: procedures, craft,
-// documents, outcomes and adapters. Every procedure, craft, document and
-// outcome file is a template named by its path under this root.
+// proseRoot holds the authored prose, organized by kind: procedures,
+// principles, documents, outcomes and adapters. Every procedure, principle,
+// document and outcome file is a template named by its path under this root.
 const proseRoot = "prose"
+
+// principlesRoot holds the skl-owned principles, one <name>.md file each
+// with its resources under <name>/.
+const principlesRoot = proseRoot + "/principles"
 
 // skill is what `skl skill <name>` renders: its definition, and the directory
 // whose files are its public resources ("" when it has none).
@@ -142,21 +182,25 @@ type skill struct {
 }
 
 var skills = map[string]skill{
-	"audit":              {"procedures/audit.md", "craft/audit"},
+	"audit":              {"procedures/audit.md", "principles/audit"},
 	"brainstorm":         {"procedures/brainstorm.md", ""},
 	"decision":           {"procedures/decision.md", "procedures/decision"},
-	"design":             {"craft/design.md", "craft/design"},
-	"domain":             {"craft/domain.md", "craft/domain"},
+	"domain":             {"principles/domain.md", "principles/domain"},
 	"explore":            {"procedures/explore.md", ""},
 	"implement":          {"procedures/implement.md", "documents/implement"},
+	"modules":            {"principles/modules.md", "principles/modules"},
+	"principles":         {"procedures/principles.md", ""},
 	"propose":            {"procedures/propose.md", "documents/propose"},
-	"testing":            {"craft/testing.md", "craft/testing"},
+	"testing":            {"principles/testing.md", "principles/testing"},
 	"watchdog":           {"procedures/watchdog.md", "documents/watchdog"},
+	"verify":             {"procedures/verify.md", "principles/verify"},
+	"verify-create":      {"procedures/verify-create.md", "documents/verify"},
+	"verify-maintain":    {"procedures/verify-maintain.md", ""},
 	"walkthrough":        {"procedures/walkthrough.md", ""},
-	"writing-for-agents": {"craft/writing-for-agents.md", "craft/writing-for-agents"},
+	"writing-for-agents": {"principles/writing-for-agents.md", "principles/writing-for-agents"},
 }
 
-// composition is the Craft and Procedures a Procedure inlines after its own
+// composition is the principles and Procedures a Procedure inlines after its own
 // text on every run.
 var composition = map[string][]string{
 	"explore":   {"domain"},
@@ -185,6 +229,8 @@ func procedure(name string, facts InvocationFacts) (string, any) {
 		return skills[name].definition, facts.Delivery
 	case facts.Decision != nil:
 		return "procedures/decision-inbox.md", facts.Decision
+	case facts.Verify != nil:
+		return skills[name].definition, facts.Verify
 	}
 	return skills[name].definition, nil
 }
@@ -194,7 +240,7 @@ func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
 		return Packet{}, fmt.Errorf("unknown skill %q", name)
 	}
 	file, data := procedure(name, facts)
-	instructions, err := renderDocument(file, data)
+	instructions, err := render(file, data, facts.Principles)
 	if err != nil {
 		return Packet{}, err
 	}
@@ -206,7 +252,7 @@ func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
 	}
 	for _, composed := range included {
 		file, data := procedure(composed, facts)
-		rendered, err := renderDocument(file, data)
+		rendered, err := render(file, data, facts.Principles)
 		if err != nil {
 			return Packet{}, err
 		}
@@ -215,6 +261,11 @@ func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
 	resources, err := resourceNames(name)
 	if err != nil {
 		return Packet{}, err
+	}
+	if name == "principles" {
+		for _, principle := range facts.Principles {
+			resources = append(resources, principle.Name+".md")
+		}
 	}
 	return Packet{
 		Protocol:       InstructionProtocol,
@@ -226,7 +277,8 @@ func BuildPacket(name string, facts InvocationFacts) (Packet, error) {
 	}, nil
 }
 
-// templateFuncs is the deliberately small helper set authored templates share.
+// templateFuncs is the deliberately small helper set authored templates
+// share. render adds principles, the project principles of the rendering.
 var templateFuncs = template.FuncMap{
 	"quote":    ShellQuote,
 	"evidence": evidenceBlock,
@@ -267,12 +319,18 @@ func RenderOutcome(kind string, facts any) (string, error) {
 }
 
 // renderDocument executes one authored prose file with ordinary typed data.
-// Every procedure, craft, document and outcome file parses into one template
-// set, so a file includes another by its path and shared blocks by their
-// defined name.
+// Every procedure, principle, document and outcome file parses into one
+// template set, so a file includes another by its path and shared blocks by
+// their defined name. A principle renders without its statement frontmatter.
 func renderDocument(file string, data any) (string, error) {
-	tmpl := template.New("").Option("missingkey=error").Funcs(templateFuncs)
-	for _, kind := range []string{"procedures", "craft", "documents", "outcomes"} {
+	return render(file, data, nil)
+}
+
+// render executes one authored prose file for a repository with principles.
+func render(file string, data any, principles []ledger.Principle) (string, error) {
+	tmpl := template.New("").Option("missingkey=error").Funcs(templateFuncs).
+		Funcs(template.FuncMap{"principles": func() []ledger.Principle { return principles }})
+	for _, kind := range []string{"procedures", "principles", "documents", "outcomes"} {
 		err := fs.WalkDir(embedded, path.Join(proseRoot, kind), func(source string, entry fs.DirEntry, err error) error {
 			if err != nil || entry.IsDir() {
 				return err
@@ -280,6 +338,13 @@ func renderDocument(file string, data any) (string, error) {
 			contents, err := fs.ReadFile(embedded, source)
 			if err != nil {
 				return err
+			}
+			if path.Dir(source) == principlesRoot {
+				principle, err := ledger.ParsePrinciple(source, contents)
+				if err != nil {
+					return err
+				}
+				contents = []byte(principle.Body)
 			}
 			if _, err := tmpl.New(strings.TrimPrefix(source, proseRoot+"/")).Parse(string(contents)); err != nil {
 				return fmt.Errorf("%s: %w", source, err)
