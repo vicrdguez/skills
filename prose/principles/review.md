@@ -1,3 +1,6 @@
+---
+statement: Assume the implementation is wrong until it proves otherwise, and judge each test by whether it would fail if the behavior broke.
+---
 Assume the implementation is **wrong until it proves otherwise**. A passing suite is necessary, not sufficient: weak tests pass too.
 
 - **Judge test strength, not presence.** For each test, ask: *would this test fail if the behavior broke?* Mentally (or actually) break the behavior and check the test catches it. A green test that asserts nothing meaningful (tautological, over-mocked, asserting a constant) cannot prove the behavior it claims, and that can block.

@@ -22,3 +22,10 @@ These are the prepared source facts. Re-read them with `skl watchdog inspect --r
 - Hand a decision to a human with `skl watchdog needs-human --repo '/work/widgets' --remote 'origin' --slice 'widget-alerts/foundation' --claim '0000000000000000000000000000000000000001' --body '/tmp/skl-watchdog-result/watchdog-report.md' --public-body '/tmp/skl-watchdog-result/public.md' --run-metadata '/tmp/skl-watchdog-result/run.json' --head '0000000000000000000000000000000000000004'`.
 - Release the Claim with `skl watchdog release --repo '/work/widgets' --remote 'origin' --slice 'widget-alerts/foundation' --claim '0000000000000000000000000000000000000001'`.
 
+## Project principles
+
+This repository's principles apply to this work. Read one in full with `skl skill --resource <name>.md principles`.
+
+- `no-facade`: Replace an interface outright; no compatibility facade keeps the old one alive beside it.
+- `one-representation`: One native representation; no duplicate payload graph, attribute map or replay log beside it.
+

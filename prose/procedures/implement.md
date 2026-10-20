@@ -16,7 +16,7 @@ The Contract is `intent.md`, `behavior.md`, and any `plan.md` or `tasks.md`: del
 - History is append-only: add commits, and leave existing ones as they are.
 - Leave behavior outside the Contract for a later change.
 - Keep this startup's helper and reviewer choices, including omitted fields, throughout this session. Use the resume command for a fresh recovery session.
-
+{{template "project-principles"}}
 ## 1. Prepare
 
 Run `{{.PrepareCommand}}`. It creates the worktree, or reuses it with its changes, index and commits intact. Then run the inspection command it prints, and work only in `{{.Worktree}}`. Continue this Claim later with `{{.ResumeCommand}}`; release it with `{{.ReleaseCommand}}` only to abandon the work.
@@ -31,7 +31,7 @@ Check: inspection prints the source head.
 {{end}}
 {{if eq .Mode "team"}}Lead a team of implementer subagents. You keep the Claim and every workflow operation: commits, pushes, `skl` commands, the Audit and the handoff.{{with .Helper}} Run each implementer{{template "subagent-choice" .}}.{{end}} {{template "implement-judgment"}}
 
-{{template "craft/team.md" .}}{{else}}Build in any order, refactor whenever it helps, and run the typecheck and focused checks as you go. {{template "implement-judgment"}}
+{{template "principles/team.md" .}}{{else}}Build in any order, refactor whenever it helps, and run the typecheck and focused checks as you go. {{template "implement-judgment"}}
 {{end}}{{with .Checks}}
 Before Audit, add to `.skl/verify.md` each row this slice adds. Then run each check the Verification strategy cites, as the worktree's `.skl/verify.md` defines it, and record its result and rank in the report's Verification section:
 

@@ -239,7 +239,44 @@ func lintContract(slice string, contract map[string][]byte, sources ContractSour
 	if err := lintVerificationStrategy(slice, documents["plan.md"], labels, defined, sources.Verification, done); err != nil {
 		return err
 	}
-	return lintSources(slice, documents["plan.md"], sources, proposal)
+	if err := lintSources(slice, documents["plan.md"], sources, proposal); err != nil {
+		return err
+	}
+	return lintForbidden(slice, documents["plan.md"], sources)
+}
+
+// principleCitation reads a full filename-based name, not an ASCII slug.
+// Backticks preserve spaces and punctuation in a name; bare citations end
+// at whitespace or Markdown brackets.
+var principleCitation = regexp.MustCompile("`principle:([^`]+)`|principle:([^\\s\\p{Z}`()\\[\\]<>]+)")
+
+// lintForbidden resolves each principle the plan.md Forbidden section cites
+// to a file of the source repository's principles directory.
+func lintForbidden(slice string, lines []contractLine, sources ContractSources) error {
+	start, end := section(lines, "Forbidden")
+	for _, line := range lines[start:end] {
+		for _, match := range principleCitation.FindAllStringSubmatch(line.text, -1) {
+			name := match[1]
+			if name == "" {
+				name = match[2]
+			}
+			file := PrinciplesDirectory + name + ".md"
+			if sources.Repository != "" && filepath.Base(name) == name {
+				if info, err := os.Stat(filepath.Join(sources.Repository, filepath.FromSlash(file))); err == nil && info.Mode().IsRegular() {
+					continue
+				}
+			}
+			missing := "the repository has no " + file
+			if sources.Repository == "" || !exists(filepath.Join(sources.Repository, filepath.FromSlash(PrinciplesDirectory))) {
+				missing = "the repository has no " + PrinciplesDirectory + " directory"
+			}
+			return refuse(
+				"slice "+slice+" cites principle:"+name+" in the Forbidden section of plan.md, and "+missing,
+				"cite a principle the source repository keeps in "+PrinciplesDirectory+"<name>.md, or write "+file+" there first",
+			)
+		}
+	}
+	return nil
 }
 
 // doneBullet is one checklist bullet under the Definition of Done of

@@ -136,7 +136,7 @@ func TestReleasePublishesCompleteTaggedArtifacts(t *testing.T) {
 	}
 	state := readState(t, f.state)
 	assertPublished(t, state, f.commit)
-	embeddedProse, err := os.ReadFile("../prose/craft/testing.md")
+	embeddedProse, err := os.ReadFile("../prose/principles/testing.md")
 	if err != nil {
 		t.Fatal(err)
 	}

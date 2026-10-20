@@ -8,4 +8,4 @@ These are the prepared source facts. Re-read them with `{{.InspectCommand}}` bef
 {{if .SubmitCommand}}- Submit the review with `{{.SubmitCommand}}`.
 {{end}}{{if .PauseCommand}}- Hand a decision to a human with `{{.PauseCommand}}`.
 {{end}}{{if .ReleaseCommand}}- Release the Claim with `{{.ReleaseCommand}}`.
-{{end}}
+{{end}}{{template "project-principles"}}

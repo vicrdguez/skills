@@ -58,7 +58,13 @@ func PresentDelivery(e *ledger.Execution, repository RepositoryContext, phase, o
 	if err != nil {
 		return skilldist.Packet{}, err
 	}
-	return skilldist.BuildPacket(phase, skilldist.InvocationFacts{Delivery: f})
+	// Delivery renders for the checkout at the repository root, as lint and
+	// user-invoked skills do.
+	principles, err := ledger.ReadPrinciples(repository.Root)
+	if err != nil {
+		return skilldist.Packet{}, err
+	}
+	return skilldist.BuildPacket(phase, skilldist.InvocationFacts{Delivery: f, Principles: principles})
 }
 
 // ReviewRework binds what a review that ends in rework at the prepared head

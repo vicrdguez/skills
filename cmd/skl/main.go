@@ -76,16 +76,17 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 			&cli.StringFlag{Name: "resource", Usage: "Retrieve one exact owner-relative resource as raw text"},
 			newInputFlag(),
 			&cli.BoolFlag{Name: "describe-inputs", Usage: "Describe the named resource's accepted inputs as raw text without rendering it; cannot combine with --input"},
-			&cli.PathFlag{Name: "repo", Usage: "Repository whose .skl/verify.md the verify skill renders (default: the repository containing the working directory)"},
+			&cli.PathFlag{Name: "repo", Usage: "Repository the skill renders for: its .skl/principles/, and the .skl/verify.md of verify (default: the repository containing the working directory)"},
 		},
 		Action: func(command *cli.Context) error {
 			if command.NArg() != 1 {
 				return fmt.Errorf("skill name is required")
 			}
 			name := command.Args().First()
-			if command.IsSet("repo") && (name != "verify" || command.IsSet("resource")) {
-				return fmt.Errorf("--repo applies only to whole-skill retrieval of verify")
+			if command.IsSet("repo") && command.IsSet("resource") && name != "principles" {
+				return fmt.Errorf("--repo applies to whole-skill retrieval and to resources of principles")
 			}
+			directory := cmp.Or(command.Path("repo"), ".")
 			resource := command.String("resource")
 			describe := command.Bool("describe-inputs")
 			inputs := inputValues(command)
@@ -113,6 +114,28 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 				}
 				return errors.New(strings.TrimRight(refusal, "\n"))
 			}
+			if resource != "" && name == "principles" {
+				root, err := repositoryRoot(directory, name)
+				if err != nil {
+					return err
+				}
+				principles, err := ledger.ReadPrinciples(root)
+				if err != nil {
+					return err
+				}
+				if describe {
+					inputs = nil
+				}
+				contents, err := skilldist.RenderPrinciple(principles, resource, inputs)
+				if err != nil {
+					return err
+				}
+				if describe {
+					contents = []byte(resource + " accepts no inputs.\n")
+				}
+				_, err = stdout.Write(contents)
+				return err
+			}
 			if resource != "" {
 				if describe {
 					description, err := skilldist.DescribeResourceInputs(name, resource)
@@ -129,9 +152,20 @@ func newAppWithSkillHome(newBackend backendFactory, stdin io.Reader, stdout, std
 				_, err = stdout.Write(contents)
 				return err
 			}
+			// A skill renders for the repository it runs in, when there is one;
+			// verify and principles need one.
 			var facts skilldist.InvocationFacts
+			root, err := repositoryRoot(directory, name)
+			if err == nil {
+				facts.Principles, err = ledger.ReadPrinciples(root)
+				if err != nil {
+					return err
+				}
+			} else if name == "verify" || name == "principles" || command.IsSet("repo") {
+				return err
+			}
 			if name == "verify" {
-				verify, err := verifyFacts(cmp.Or(command.Path("repo"), "."))
+				verify, err := verifyFacts(root)
 				if err != nil {
 					return err
 				}
@@ -251,14 +285,19 @@ func main() {
 	}
 }
 
-// verifyFacts binds the verify skill to the verification skill of the
-// repository containing directory.
-func verifyFacts(directory string) (*skilldist.VerifyFacts, error) {
+// repositoryRoot is the root of the Git repository containing directory, for
+// which skill renders.
+func repositoryRoot(directory, skill string) (string, error) {
 	output, err := exec.Command("git", "-C", directory, "rev-parse", "--show-toplevel").Output()
 	if err != nil {
-		return nil, fmt.Errorf("%s is not inside a Git repository; run skl skill verify inside the repository or pass --repo", directory)
+		return "", fmt.Errorf("%s is not inside a Git repository; run skl skill %s inside the repository or pass --repo", directory, skill)
 	}
-	root := strings.TrimSpace(string(output))
+	return strings.TrimSpace(string(output)), nil
+}
+
+// verifyFacts binds the verify skill to the verification skill of the
+// repository at root.
+func verifyFacts(root string) (*skilldist.VerifyFacts, error) {
 	verification, err := ledger.ReadVerification(root)
 	if err != nil {
 		return nil, err

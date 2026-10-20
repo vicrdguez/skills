@@ -1,3 +1,6 @@
+---
+statement: Review a change along two independent axes, Standards and Contracts, each by its own reviewer, so neither axis masks the other.
+---
 Review the change along two independent axes, each by its own reviewer:
 
 - **Standards**: does the code follow this repository's documented standards, required tooling, project quality skills and the smell baseline?

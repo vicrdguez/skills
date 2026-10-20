@@ -1,3 +1,6 @@
+---
+statement: Split the work into cohesive patches with named ownership, run disjoint patches in parallel, and reconcile the combined change once.
+---
 ### Split the work
 
 Read the whole Contract and the architecture it touches first. Then cut the work into cohesive patches, each with the files or modules it owns and the patches it depends on.

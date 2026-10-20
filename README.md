@@ -20,7 +20,7 @@ Two projects shaped this and deserve the credit.
 
 [OpenSpec](https://github.com/Fission-AI/OpenSpec) gave the staging: explore a change, freeze a proposal, implement against it. I customized my OpenSpec setup until it stopped being OpenSpec.
 
-[Matt Pocock's skills](https://github.com/mattpocock/skills) gave most of the judgment guidance. `writing-for-agents` came from his repo nearly verbatim. `explore` descends from his `grill-with-docs`: interview relentlessly, map a design tree, write durable ADRs and a glossary as you go. `design`, `domain` and `testing` follow the shape and reference material of his skills. All of them have since been rewritten once to fit this workflow ([ADR 0008](docs/adr/0008-compose-execution-skills-from-procedures-and-craft.md)), so they are adapted, not copied.
+[Matt Pocock's skills](https://github.com/mattpocock/skills) gave most of the judgment guidance. `writing-for-agents` came from his repo nearly verbatim. `explore` descends from his `grill-with-docs`: interview relentlessly, map a design tree, write durable ADRs and a glossary as you go. `modules` (formerly `design`), `domain` and `testing` follow the shape and reference material of his skills. All of them have since been rewritten once to fit this workflow ([ADR 0008](docs/adr/0008-compose-execution-skills-from-procedures-and-craft.md)), so they are adapted, not copied.
 
 What is mine is the rest: the engine, the private ledger, Claims, Watchdog Review as a separate fresh-context phase, Audit, the Decision Inbox, Supervisors and Dispatch, the harness adapters, Outcome Instructions, and the `brainstorm` thinking tool.
 
@@ -48,7 +48,7 @@ Each stage is a skill, entered cold and left behind at handoff. `propose` is the
 
 `brainstorm` is an optional thinking tool outside the pipeline. It preserves an open conversation under `.thinking/`, which stays out of Git.
 
-Supporting Craft is available on its own: `design` (deep modules and seams), `domain` (glossary and ADRs), `testing` (behavioral evidence), `audit` (independent Standards and Contracts review) and `writing-for-agents`.
+Supporting principles are available on their own: `modules` (deep modules and seams), `domain` (glossary and ADRs), `testing` (behavioral evidence), `audit` (independent Standards and Contracts review) and `writing-for-agents`.
 
 ## The private ledger
 
