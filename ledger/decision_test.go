@@ -25,16 +25,6 @@ func decisionPauseImplement(t *testing.T, l *deliveryLedger, store *ledger.Store
 	return ledger.Reference{Commit: l.head(), Path: deliveryReportPath(repository.Name, item, ledger.ImplementPhase)}
 }
 
-// decisionInbox reads the inbox and fails on refusal.
-func decisionInbox(t *testing.T, store *ledger.Store, filter string) *ledger.Inbox {
-	t.Helper()
-	inbox, err := ledger.ReadDecisionInbox(store, ledger.InboxFilter{Project: filter})
-	if err != nil {
-		t.Fatalf("read decision inbox (filter %q): %v", filter, err)
-	}
-	return inbox
-}
-
 // TestDecisionRefusesActiveClaim covers the active-Claim refusal without
 // changing the authoritative record.
 func TestDecisionRefusesActiveClaim(t *testing.T) {
