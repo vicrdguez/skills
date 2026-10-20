@@ -54,6 +54,7 @@ func reviewed(t *testing.T) (*session, []string) {
 }
 
 func TestReaderShowsTheNavigatorBesideTheSelectedDocument(t *testing.T) {
+	t.Parallel()
 	s, _ := reviewed(t)
 	size := tea.WindowSizeMsg{Width: 140, Height: 40}
 	s.send(size)
@@ -113,6 +114,7 @@ func TestReaderNestsEarlierReportVersionsUnderTheLatestByOutcomeAndRound(t *test
 }
 
 func TestReaderExpandsAProposalsReportVersionsOnRequest(t *testing.T) {
+	t.Parallel()
 	s, commits := reviewed(t)
 	s.send(tea.WindowSizeMsg{Width: 180, Height: 60})
 	s.press("enter", "d")
@@ -133,6 +135,7 @@ func TestReaderExpandsAProposalsReportVersionsOnRequest(t *testing.T) {
 }
 
 func TestReaderCursorSelectsAndFocusMovesBetweenPanes(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 120, Height: 14})
 	s.press("enter", "down", "enter", "tab")
@@ -157,6 +160,7 @@ func TestReaderCursorSelectsAndFocusMovesBetweenPanes(t *testing.T) {
 }
 
 func TestReaderShowsOnePaneAtATimeWhenNarrow(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	wide, narrow := tea.WindowSizeMsg{Width: 140, Height: 30}, tea.WindowSizeMsg{Width: 40, Height: 30}
 	s.send(wide)
@@ -185,6 +189,7 @@ func TestReaderShowsOnePaneAtATimeWhenNarrow(t *testing.T) {
 }
 
 func TestReaderPinsTheDisplayedDocumentWhenANewReviewLands(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	padding := strings.Repeat("Reviewed line.\n\n", 30)
 	first := review(t, s.root, "rework", 1, "Review 1 of cancellation.\n\n"+padding)
@@ -223,6 +228,7 @@ func TestReaderPinsTheDisplayedDocumentWhenANewReviewLands(t *testing.T) {
 }
 
 func TestReaderFollowsAConsumedContractReferenceAndReturns(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	review(t, s.root, "pass", 1, "Reviewed cancellation.\n\n"+strings.Repeat("Reviewed line.\n\n", 30))
 	s.model = browse.New(snapshotAfterChange(t, s.root), browse.Options{Project: "widgets"})
@@ -248,6 +254,7 @@ func TestReaderFollowsAConsumedContractReferenceAndReturns(t *testing.T) {
 }
 
 func TestReaderMarksAnUnreadableContractBesideReadableDocuments(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	blob := gitOutput(t, s.root, "rev-parse", "HEAD:"+cancelPath+"behavior.md")
 	if err := os.Remove(filepath.Join(s.root, ".git", "objects", blob[:2], blob[2:])); err != nil {
@@ -267,6 +274,7 @@ func TestReaderMarksAnUnreadableContractBesideReadableDocuments(t *testing.T) {
 }
 
 func TestReaderDisclosesIncompleteLocalHistory(t *testing.T) {
+	t.Parallel()
 	var root string
 	fixtureLedger(t, func(directory string) { root = directory })
 	clone := filepath.Join(t.TempDir(), "shallow")
@@ -282,12 +290,14 @@ func TestReaderDisclosesIncompleteLocalHistory(t *testing.T) {
 }
 
 func TestReaderFitsNarrowAndWideTerminals(t *testing.T) {
+	t.Parallel()
 	for _, s := range fits(t, [][]string{{"enter", "down", "enter", "d"}, {"down", "down"}, {"enter", "pgdown"}, {"r"}, {"enter"}, {"esc", "esc"}, {"d"}}) {
 		s.shows("! slice widgets/orders/cancel")
 	}
 }
 
 func TestReaderLooksForAnAbsentProposalReportsHistoryOnRequest(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 180, Height: 60})
 	s.press("enter", "d")

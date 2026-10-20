@@ -42,6 +42,7 @@ func documentPane(text string) string {
 }
 
 func TestReaderDocumentPaneStartsOnTheAuthoredFirstLine(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	review(t, s.root, "pass", 1, "## Review findings\n\nThe cancellation is sound.\n")
 	s.model = browse.New(snapshotAfterChange(t, s.root), browse.Options{Project: "widgets"})
@@ -102,6 +103,7 @@ func TestReaderTitleShowsWhatAReaderNeedsAtAGlance(t *testing.T) {
 }
 
 func TestReaderNarrowTitleKeepsEveryFactOnFurtherLines(t *testing.T) {
+	t.Parallel()
 	s, commits := reviewed(t)
 	narrow := tea.WindowSizeMsg{Width: 40, Height: 14}
 	s.send(narrow)
@@ -128,6 +130,7 @@ func TestReaderNarrowTitleKeepsEveryFactOnFurtherLines(t *testing.T) {
 }
 
 func TestReaderTitleMarksADiagnosticOnReadableMetadata(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets", func(root string) {
 		write(t, root, cancelPath+"state.json", `{"state": "ready_for_implementation", "title": "Cancel orders", "branch": "feat/cancel",
 			"claim": {"phase": "implement", "basis": "3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c", "inputs": {"contract": [{"commit": "3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c", "path": "notes/elsewhere.md"}], "implement": {"commit": "3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c", "path": "notes/other.md"}}}}`)
@@ -147,6 +150,7 @@ func TestReaderTitleMarksADiagnosticOnReadableMetadata(t *testing.T) {
 }
 
 func TestReaderDetailsPanelShowsTheRemainingMetadataAndKeepsThePlace(t *testing.T) {
+	t.Parallel()
 	s, commits := reviewed(t)
 	base := gitOutput(t, s.root, "rev-list", "--max-parents=0", "HEAD")
 	s.send(tea.WindowSizeMsg{Width: 140, Height: 50})
@@ -188,6 +192,7 @@ func TestReaderDetailsPanelShowsTheRemainingMetadataAndKeepsThePlace(t *testing.
 }
 
 func TestReaderDetailsShowADecisionsAndAClaimsRecordedMetadata(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	base := gitOutput(t, s.root, "rev-list", "--max-parents=0", "HEAD")
 	s.send(tea.WindowSizeMsg{Width: 140, Height: 50})
@@ -242,6 +247,7 @@ func TestReaderNavigatorTitleFollowsRefreshWhileTheDocumentStaysPinned(t *testin
 }
 
 func TestReaderShowsUnreadableMetadataAsItsRecordedText(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 90, Height: 40})
 	s.press("enter", "down", "enter", "d", "down", "down", "down", "enter")
@@ -264,6 +270,7 @@ func TestReaderShowsUnreadableMetadataAsItsRecordedText(t *testing.T) {
 }
 
 func TestReaderNarrowUnreadableDocumentAndDetailsStayReadable(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	narrow := tea.WindowSizeMsg{Width: 40, Height: 14}
 	s.send(narrow)

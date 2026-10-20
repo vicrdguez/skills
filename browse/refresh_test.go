@@ -29,6 +29,7 @@ func changeFixture(t *testing.T, root, relative, before, after string) {
 }
 
 func TestRefreshKeepsFilteredReportAndReadingPositionWhileFactsAdvance(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	// Narrow enough that the focused document is shown alone.
 	s.send(tea.WindowSizeMsg{Width: 99, Height: 17})
@@ -64,6 +65,7 @@ func TestRefreshKeepsFilteredReportAndReadingPositionWhileFactsAdvance(t *testin
 }
 
 func TestAutomaticRefreshIgnoresUncommittedEditsAndLateOldResults(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 120, Height: 30})
 	s.press("enter", "down", "enter")
@@ -98,6 +100,7 @@ func TestAutomaticRefreshIgnoresUncommittedEditsAndLateOldResults(t *testing.T) 
 }
 
 func TestFailedRefreshStaysLoudUntilARefreshSucceeds(t *testing.T) {
+	t.Parallel()
 	for _, size := range []tea.WindowSizeMsg{{Width: 40, Height: 14}, {Width: 140, Height: 35}} {
 		s := start(t, "widgets")
 		s.send(size)
@@ -136,6 +139,7 @@ func TestFailedRefreshStaysLoudUntilARefreshSucceeds(t *testing.T) {
 }
 
 func TestFailedRefreshPrioritizesWarningOverDocumentContextAtNarrowWidths(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 80, Height: 14})
 	s.press("enter", "down", "enter", "a", "d", "down", "down", "enter", "r", "enter", "pgdown")
@@ -176,6 +180,7 @@ func TestFailedRefreshPrioritizesWarningOverDocumentContextAtNarrowWidths(t *tes
 }
 
 func TestRefreshDoesNotSilentlySelectAnotherResultWhenSelectedSliceDisappears(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 140, Height: 35})
 	s.press("/", "orders", "enter", "down")

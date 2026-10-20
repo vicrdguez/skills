@@ -9,6 +9,7 @@ import (
 )
 
 func TestUnrelatedCommitDoesNotClaimAReportHasAChangedVersion(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 120, Height: 80})
 	s.press("enter", "down", "enter", "d", "down", "down", "enter")
@@ -22,6 +23,7 @@ func TestUnrelatedCommitDoesNotClaimAReportHasAChangedVersion(t *testing.T) {
 }
 
 func TestOpenedDocumentSurvivesRemovalWithoutPresentingOldDocumentsAsCurrent(t *testing.T) {
+	t.Parallel()
 	s := start(t, "widgets")
 	s.send(tea.WindowSizeMsg{Width: 120, Height: 80})
 	s.press("enter", "down", "enter", "d", "down", "down", "enter")
