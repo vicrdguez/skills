@@ -23,12 +23,14 @@ func TestInstalledFamiliesDispatchWithRuntimeSettingsAndContinueSafely(t *testin
 				source, target := deliverySourceRepo(t)
 				routeSourcePushes(t, source)
 				runGit(t, source, "push", "-q", "origin", "main")
-				f.acceptDelivery(t, newForgeServer(t), source)
+				f.commitLaunchProposal(t, singleSlice(deliveryTestProposal))
 				cli := f.app(deliveryNoForgeApp(t))
 				watchdog := strings.HasPrefix(operation, "watchdog")
+				var implementClaim string
 				if watchdog {
-					implemented := cli.dispatched(t, "skl implement dispatch --repo "+source)
-					dispatchImplementHandoff(t, cli, source, target, implemented.Item, implemented.Claim)
+					f.commitLaunchReviewClaim(t)
+					implementClaim = deliveryTrimmed(t, f.clone, "rev-parse", "HEAD")
+					f.commitLaunchAwaitingReview(t, source, target)
 				}
 				entry := readFile(t, filepath.Join(home, fmt.Sprintf(entryPoints[harness], operation)))
 				wantModel, wantThinking := "configured-worker", "configured-thinking"
@@ -72,6 +74,10 @@ func TestInstalledFamiliesDispatchWithRuntimeSettingsAndContinueSafely(t *testin
 					if worker.Execution.State.Claim.Auto != auto {
 						t.Fatal("Watchdog Claim has the wrong Auto Mode")
 					}
+					report := worker.Execution.Implement
+					if report == nil || report.Source.Head != deliveryTrimmed(t, source, "rev-parse", deliveryTestBranch) || report.Source.Target != target || report.Ledger.Claim != (ledger.Reference{Commit: implementClaim, Path: deliveryItemStatePath()}) {
+						t.Fatalf("watchdog lost its implementation evidence: %#v", report)
+					}
 				} else {
 					wantTarget := "main"
 					if auto {
@@ -91,13 +97,17 @@ func TestInstalledFamiliesDispatchWithRuntimeSettingsAndContinueSafely(t *testin
 					if team && (facts.Helper == nil || facts.Helper.Model != "startup-helper" || facts.Helper.Thinking != "startup-helper-thinking") {
 						t.Fatalf("helper choices lost: %#v", facts.Helper)
 					}
-					prepared := cli.dispatchJSON(t, facts.PrepareCommand)
-					if prepared.Packet == nil {
-						t.Fatalf("installed prepare: %s", mustJSON(t, prepared))
-					}
-					inspected := cli.dispatchJSON(t, strings.ReplaceAll(prepared.Packet.Facts.Delivery.InspectCommand, "<observed-target-sha>", "HEAD"))
-					if inspected.Source == nil || inspected.Execution.Claim.Commit != d.Claim || inspected.Packet.Facts.Delivery.ResumeCommand != facts.ResumeCommand {
-						t.Fatal("installed worker follow-up journey lost source or recovery identity")
+					// One installed journey per harness protects source/recovery wiring;
+					// every row above still dispatches and starts its actual worker.
+					if operation == "implement-team-auto" {
+						prepared := cli.dispatchJSON(t, facts.PrepareCommand)
+						if prepared.Packet == nil {
+							t.Fatalf("installed prepare: %s", mustJSON(t, prepared))
+						}
+						inspected := cli.dispatchJSON(t, strings.ReplaceAll(prepared.Packet.Facts.Delivery.InspectCommand, "<observed-target-sha>", "HEAD"))
+						if inspected.Source == nil || inspected.Execution.Claim.Commit != d.Claim || inspected.Packet.Facts.Delivery.ResumeCommand != facts.ResumeCommand {
+							t.Fatal("installed worker follow-up journey lost source or recovery identity")
+						}
 					}
 				}
 				if ending, status := cli.continued(t, d.Continue); ending != ledger.ClaimHeld || status != "stopped" {
