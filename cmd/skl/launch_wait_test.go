@@ -63,7 +63,7 @@ func TestWaitingDispatchRefreshesLaunchSettings(t *testing.T) {
 					fixture.misconfigure(t, fmt.Sprintf(`{"ledger":%q}`, source))
 				}
 				if tc.phase == "watchdog" {
-					fixture.commitLaunchAwaitingReview(t, source, target)
+					fixture.commitAwaitingReview(t, source, target)
 				} else {
 					state := deliveryPersistedState(t, fixture.clone)
 					state.Claim, state.State = nil, ledger.Merged
