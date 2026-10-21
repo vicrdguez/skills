@@ -30,7 +30,7 @@ func TestInstalledFamiliesDispatchWithRuntimeSettingsAndContinueSafely(t *testin
 				if watchdog {
 					f.commitReviewClaim(t, "main")
 					implementClaim = deliveryTrimmed(t, f.clone, "rev-parse", "HEAD")
-					f.commitLaunchAwaitingReview(t, source, target)
+					f.commitAwaitingReview(t, source, target)
 				}
 				entry := readFile(t, filepath.Join(home, fmt.Sprintf(entryPoints[harness], operation)))
 				wantModel, wantThinking := "configured-worker", "configured-thinking"

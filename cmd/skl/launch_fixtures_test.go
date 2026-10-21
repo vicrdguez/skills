@@ -65,10 +65,10 @@ func (f *ledgerFixture) commitReviewClaim(t *testing.T, targetBranch string) {
 	deliveryCommitState(t, f.clone, state)
 }
 
-// commitLaunchAwaitingReview preserves real source objects and exact historical
+// commitAwaitingReview preserves real source objects and exact historical
 // Claim/Contract references without running prepare and submit as incidental
 // setup. dispatch_test.go and delivery_test.go still exercise those transitions.
-func (f *ledgerFixture) commitLaunchAwaitingReview(t *testing.T, source, target string) {
+func (f *ledgerFixture) commitAwaitingReview(t *testing.T, source, target string) {
 	t.Helper()
 	claim := deliveryTrimmed(t, f.clone, "rev-parse", "HEAD")
 	state := deliveryPersistedState(t, f.clone)

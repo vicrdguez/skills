@@ -73,7 +73,7 @@ command under test. Both versions also created the source, local push shim and
 initial `main` push. Ready setup used acceptance before and
 `commitReadyProposal(singleSlice(...))` after. Review setup additionally used
 implement dispatch/handoff before and `commitReviewClaim` plus
-`commitLaunchAwaitingReview` after. Medians: ready **0.934s → 0.821s**; review
+`commitAwaitingReview` after. Medians: ready **0.934s → 0.821s**; review
 **2.590s → 1.045s**. Total traced Git built-ins over three ready and three review
 constructions fell **1,113 → 351**. The probe was temporary, not a new default test
 or benchmark framework; fixture work is kept separate from startup timings.

@@ -28,6 +28,7 @@ def summarize(path, top):
                 elif "/" not in test:
                     tests.append((event.get("Elapsed", 0), package, test, action))
     missing = started - packages.keys()
+    empty = not started
     failed = any(status == "fail" for status, _ in packages.values())
     counts = collections.Counter(test[3] for test in tests)
     print(f"\n{path}")
@@ -40,13 +41,15 @@ def summarize(path, top):
     print("Slowest top-level results (not additive; parents include children/waits):")
     for elapsed, package, test, status in sorted(tests, reverse=True)[:top]:
         print(f"  {elapsed:8.3f} {status:4} {package} {test}")
+    if empty:
+        print("EMPTY: no package start events")
     if missing:
         print(f"INCOMPLETE: no terminal event for {sorted(missing)}")
     if cached:
         print("CACHED RESULTS: not an uncached timing measurement")
     if failed:
         print("FAILED: not a passing suite measurement")
-    return not (missing or cached or failed)
+    return not (empty or missing or cached or failed)
 
 
 def main():

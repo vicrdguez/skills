@@ -37,7 +37,7 @@ func newReadinessFixture(t *testing.T) *autoMergeFixture {
 	runGit(t, fixture.clone, "add", path)
 	runGit(t, fixture.clone, "commit", "-q", "-m", "open readiness Proposal Branch")
 	fixture.commitReviewClaim(t, autoMergeBranch)
-	fixture.commitLaunchAwaitingReview(t, source, target)
+	fixture.commitAwaitingReview(t, source, target)
 	worktree := filepath.Join(source, ".worktrees", deliveryTestBranch)
 	runGit(t, source, "worktree", "add", "-q", worktree, deliveryTestBranch)
 	runGit(t, source, "push", "-q", "origin", deliveryTestBranch)
