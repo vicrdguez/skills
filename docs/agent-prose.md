@@ -64,7 +64,7 @@ The journey counts the Skill Resources every such run retrieves: Audit's smells 
 
 ## Goldens
 
-`TestAgentProseGoldens` in `cmd/skl/prose_golden_test.go` drives the `skl` CLI through one scripted journey against local Git fixtures. It records every ledger-path rendering a worker receives:
+`TestAgentProseGoldens` in `cmd/skl/prose_golden_test.go` schedules independent capture groups with native Go parallel subtests. Each group owns its apps, buffers and writable fixtures. It records every ledger-path rendering a worker receives:
 
 - Implement and Watchdog renderings, with their prepare and inspect continuations;
 - standalone skills, the Decision Inbox and its results;
@@ -73,11 +73,13 @@ The journey counts the Skill Resources every such run retrieves: Audit's smells 
 - the installed stubs and Harness Adapters;
 - the `AGENTS.md` block that setup writes.
 
-The CLI renders a Watchdog review before inspection resolves its scope, so its incremental and full sections never reach a worker through `skl`. `watchdog-repeat-incremental` and `watchdog-repeat-full` render those sections from the same Claim's facts with the scope inspection reported; every other golden is CLI output.
+The delivery group retains the causally ordered acceptance, implementation, rework, Decision Inbox and passing-review journey. Proposal Branch integration/conflict recovery, supervisor dispatch/continuation and amendments, standalone resources/installation/setup, and fresh Auto readiness recovery have separate minimal fixtures. The supervisor forge starts issue numbering three identities later to retain the existing issue bindings without creating unrelated ledger history.
 
-The test fails if a golden has no rendering, or if a rendering names a Skill Resource without a golden. Run-specific values are replaced with stable placeholders: temporary paths, commit identities (numbered by first appearance), the forge URL and timestamps.
+The CLI renders a Watchdog review before inspection resolves its scope, so its incremental and full sections never reach a worker through `skl`. `watchdog-repeat-incremental` and `watchdog-repeat-full` render those sections from the same Claim's facts with the scope inspection reported. `implement-start-reviewer` uses `setup.PresentDelivery` with a live initial Claim rather than replaying acquisition/release; `TestImplementChoicesRenderWhereTheyApplyAndCarryThroughResume` retains reviewer fact/option propagation through the real CLI. Standalone resources receive explicit bound inputs, independent of delivery history. All other captures retain their CLI, installation or setup seam.
 
-After an intended rendering change, regenerate the goldens and review the diff:
+An explicit, non-overlapping ownership manifest requires every group to produce all its assigned renderings. After the groups join, the test checks the union for stale/unowned goldens, duplicate renderings and Skill Resource references without coverage. Exact normalized comparisons, bound-value checks and emitted-command execution remain separate protections. Run-specific values are replaced with stable placeholders: temporary paths, commit identities (numbered by first appearance), the forge URL and timestamps.
+
+The existing cohesive invocation verifies every group; do not hand-select subtests for completeness verification. With `-update-prose`, the groups run serially for straightforward regeneration safety. After an intended rendering change, regenerate the goldens and review the diff:
 
 ```sh
 go test ./cmd/skl -run TestAgentProseGoldens -update-prose

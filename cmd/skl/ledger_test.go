@@ -137,11 +137,12 @@ func ledgerSnapshot(t *testing.T, root string) string {
 // forgeServer is a controllable forge for the ledger tests. It records the
 // bodies it received and can fail selected surfaces.
 type forgeServer struct {
-	server *httptest.Server
-	mu     sync.Mutex
-	issues []map[string]any // created issues in order
-	list   []map[string]any // listed open issues
-	fail   func(method, path string) int
+	server      *httptest.Server
+	mu          sync.Mutex
+	issues      []map[string]any // created issues in order
+	issueOffset int              // starting identity offset for independent golden journeys
+	list        []map[string]any // listed open issues
+	fail        func(method, path string) int
 	// drop simulates an unknown-outcome transport failure: the server acts
 	// but the caller receives a broken connection.
 	drop          func(method, path string) bool
@@ -193,7 +194,7 @@ func (f *forgeServer) handler() http.Handler {
 			_ = json.NewEncoder(response).Encode(f.list)
 		case request.Method == http.MethodPost && request.URL.Path == "/repos/acme/widgets/issues":
 			f.bodies = append(f.bodies, body)
-			number := len(f.issues) + 101
+			number := len(f.issues) + 101 + f.issueOffset
 			issue := map[string]any{"id": number + 1000, "number": number, "state": "open", "title": "", "body": ""}
 			_ = json.Unmarshal([]byte(body), &issue)
 			f.issues = append(f.issues, issue)

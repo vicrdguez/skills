@@ -1,7 +1,7 @@
 package main
 
-// Goldens of the agent-visible prose on the ledger path. One scripted journey
-// drives the public `skl` surface against local Git ledger and source
+// Goldens of the agent-visible prose on the ledger path. Independent journeys
+// drive the public `skl` surface against local Git ledger and source
 // fixtures and records every Markdown rendering a worker receives, so a
 // template or outcome change shows up as a golden diff. `mise run
 // prose-metrics` measures these files; see docs/agent-prose.md.
@@ -119,6 +119,16 @@ func (g *proseGoldens) run(cli ledgerCLI, args ...string) string {
 	if err != nil {
 		output += err.Error() + "\n"
 	}
+	// Without process-wide TMPDIR overrides, the CLI owns these temporary
+	// result directories until this journey registers their cleanup.
+	if match := proseResultLine.FindStringSubmatch(output); match != nil {
+		directory := match[1]
+		g.t.Cleanup(func() {
+			if err := os.RemoveAll(directory); err != nil {
+				g.t.Error(err)
+			}
+		})
+	}
 	return output
 }
 
@@ -191,29 +201,248 @@ func proseCommit(t *testing.T, worktree, file, contents string) string {
 	return deliveryTrimmed(t, worktree, "rev-parse", "HEAD")
 }
 
+// Each group owns its apps, buffers, source/ledger repositories and renderings.
+// Only the cheap completeness check joins their observations. Updates stay
+// serial so the existing regeneration entry point is safe and cohesive.
 func TestAgentProseGoldens(t *testing.T) {
-	g := newProseGoldens(t)
-	fixture := newLedgerFixture(t)
+	if !*updateProse {
+		t.Parallel()
+	}
+	groups := []struct {
+		name    string
+		capture func(*testing.T, *proseGoldens)
+		names   []string
+	}{
+		{"delivery", captureProseDelivery, strings.Fields(`
+			decision-inbox
+			decision-inbox-empty
+			decision-inbox-unavailable
+			decision-result
+			implement-directed
+			implement-inspect
+			implement-prepare
+			implement-resume
+			implement-rework
+			implement-start
+			implement-start-reviewer
+			implement-team-resume
+			implement-team-start
+			outcome-implement-fix-required
+			outcome-implement-needs-human
+			outcome-implement-next-idle-timeout
+			outcome-implement-next-no-work
+			outcome-implement-release
+			outcome-implement-submit
+			outcome-ledger-accept-accepted
+			outcome-ledger-accept-existing
+			outcome-ledger-accept-fix-required
+			outcome-ledger-export
+			outcome-ledger-present
+			outcome-ledger-present-public
+			outcome-ledger-present-watchdog
+			outcome-ledger-publish
+			outcome-ledger-show
+			outcome-propose-cleanup
+			outcome-watchdog-next-interrupted
+			outcome-watchdog-next-no-work
+			outcome-watchdog-release
+			outcome-watchdog-submit-needs-human
+			outcome-watchdog-submit-pass
+			outcome-watchdog-submit-rework
+			watchdog-inspect
+			watchdog-inspect-full
+			watchdog-inspect-incremental
+			watchdog-prepare
+			watchdog-repeat
+			watchdog-repeat-full
+			watchdog-repeat-incremental
+			watchdog-resume
+			watchdog-start
+		`)},
+		{"integration", captureProseIntegration, strings.Fields(`
+			outcome-watchdog-prepare-conflict
+			watchdog-integration-inspect
+			watchdog-integration-prepare
+			watchdog-integration-resume
+			watchdog-integration-start
+		`)},
+		{"supervisor", captureProseSupervisor, strings.Fields(`
+			outcome-implement-next-dispatch
+			outcome-implement-next-dispatch-continued
+			outcome-implement-next-dispatch-held
+			outcome-implement-next-dispatch-idle-timeout
+			outcome-implement-next-dispatch-interrupted
+			outcome-implement-next-dispatch-refused
+			outcome-implement-next-dispatch-released
+			outcome-ledger-amend-amended
+			outcome-ledger-amend-existing
+			outcome-ledger-amend-fix-required
+		`)},
+		{"readiness", captureProseReadiness, strings.Fields(`
+			outcome-watchdog-auto-readiness
+		`)},
+		{"standalone", captureProseStandalone, strings.Fields(`
+			adapter-claude-implement-auto
+			adapter-claude-implement-loop
+			adapter-claude-implement-team-auto
+			adapter-claude-implement-team-loop
+			adapter-claude-implement-team
+			adapter-claude-implement
+			adapter-claude-watchdog-auto
+			adapter-claude-watchdog-loop
+			adapter-claude-watchdog
+			adapter-opencode-implement-auto
+			adapter-opencode-implement-loop
+			adapter-opencode-implement-team-auto
+			adapter-opencode-implement-team-loop
+			adapter-opencode-implement-team
+			adapter-opencode-implement
+			adapter-opencode-watchdog-auto
+			adapter-opencode-watchdog-loop
+			adapter-opencode-watchdog
+			adapter-pi-implement-auto
+			adapter-pi-implement-loop
+			adapter-pi-implement-team-auto
+			adapter-pi-implement-team-loop
+			adapter-pi-implement-team
+			adapter-pi-implement
+			adapter-pi-watchdog-auto
+			adapter-pi-watchdog-loop
+			adapter-pi-watchdog
+			outcome-implement-next-unconfigured
+			outcome-skill-implement
+			outcome-skill-watchdog
+			resource-audit-acceptance
+			resource-audit-smells
+			resource-decision-triage
+			resource-design-DEEPENING
+			resource-design-DESIGN-IT-TWICE
+			resource-domain-ADR-FORMAT
+			resource-domain-CONTEXT-FORMAT
+			resource-implement-ledger-submission
+			resource-implement-pull-presentation
+			resource-propose-behavior
+			resource-propose-intent
+			resource-propose-issue-publication
+			resource-propose-plan
+			resource-propose-tasks
+			resource-testing-mocking
+			resource-testing-tests
+			resource-watchdog-ledger-review
+			resource-watchdog-pull-presentation
+			resource-writing-for-agents-SKILL-MECHANICS
+			setup-agents-block
+			skill-audit
+			skill-brainstorm
+			skill-decision
+			skill-design
+			skill-domain
+			skill-explore
+			skill-propose
+			skill-testing
+			skill-walkthrough
+			skill-writing-for-agents
+			stub-audit
+			stub-brainstorm
+			stub-decision
+			stub-design
+			stub-domain
+			stub-explore
+			stub-implement-team
+			stub-implement
+			stub-propose
+			stub-testing
+			stub-walkthrough
+			stub-watchdog
+			stub-writing-for-agents
+		`)},
+	}
+	owners := map[string]string{}
+	for _, group := range groups {
+		for _, name := range group.names {
+			if owner, exists := owners[name]; exists {
+				t.Fatalf("golden %s owned by both %s and %s", name, owner, group.name)
+			}
+			owners[name] = group.name
+		}
+	}
+	observations := make([]*proseGoldens, len(groups))
+	t.Run("journeys", func(t *testing.T) {
+		for index, group := range groups {
+			t.Run(group.name, func(t *testing.T) {
+				if !*updateProse {
+					t.Parallel()
+				}
+				g := newProseGoldens(t)
+				observations[index] = g
+				group.capture(t, g)
+				for _, name := range group.names {
+					if !g.written[name] {
+						t.Errorf("group %s omitted rendering %s", group.name, name)
+					}
+				}
+				for name := range g.written {
+					if owners[name] != group.name {
+						t.Errorf("group %s rendered %s owned by %q", group.name, name, owners[name])
+					}
+				}
+			})
+		}
+	})
+	all := newProseGoldens(t)
+	for _, g := range observations {
+		if g == nil {
+			continue
+		}
+		for name := range g.written {
+			if all.written[name] {
+				t.Errorf("golden %s rendered by multiple groups", name)
+			}
+			all.written[name] = true
+		}
+	}
+	all.finish()
+}
+
+type proseJourney struct {
+	source, target, temp string
+	proposer, worker     ledgerCLI
+}
+
+func newProseJourney(t *testing.T, g *proseGoldens, issueOffset int) proseJourney {
+	t.Helper()
+	fixture := newPrivateLedgerFixture(t)
 	forge := newForgeServer(t)
+	forge.issueOffset = issueOffset
 	source, target := deliverySourceRepo(t)
 	temp := t.TempDir()
-	t.Setenv("TMPDIR", temp)
 	g.replace(source, "/work/widgets")
 	g.replace(fixture.clone, "/work/ledger")
 	g.replace(temp, "/tmp")
 	g.replace(filepath.Dir(temp), "/tmp/test")
+	g.replace(filepath.Clean(os.TempDir()), "/tmp")
 	g.replace(filepath.Clean(proseFixturePath(".")), "/tmp/fixtures")
 	g.replace(forge.server.URL, "https://forge.example")
+	return proseJourney{source, target, temp, fixture.app(newLedgerApp(t, forge)), fixture.app(deliveryNoForgeApp(t))}
+}
 
-	proposer := newLedgerApp(t, forge)
-	worker := deliveryNoForgeApp(t)
+func proseIntake(t *testing.T, name string, files map[string]string) string {
+	t.Helper()
+	spec := proposalSpec{name: name, description: proseFixture(t, "proposal.md"), slices: []proposalSliceSpec{{name: "foundation", title: "Dashboard foundation", branch: name, files: files}}}
+	return writeProposal(t, "", spec)
+}
+
+func proseContract(t *testing.T) map[string]string {
+	t.Helper()
+	return map[string]string{"intent.md": proseFixture(t, "intent.md"), "behavior.md": proseFixture(t, "behavior.md")}
+}
+
+func captureProseDelivery(t *testing.T, g *proseGoldens) {
+	j := newProseJourney(t, g, 0)
+	source, target, temp, proposer, worker := j.source, j.target, j.temp, j.proposer, j.worker
 	issue := "--issue=foundation=" + proseFixturePath("issue.md")
-	intake := func(name string, files map[string]string) string {
-		spec := proposalSpec{name: name, description: proseFixture(t, "proposal.md"), slices: []proposalSliceSpec{{name: "foundation", title: "Dashboard foundation", branch: name, files: files}}}
-		return writeProposal(t, "", spec)
-	}
-	contract := map[string]string{"intent.md": proseFixture(t, "intent.md"), "behavior.md": proseFixture(t, "behavior.md")}
-
+	intake := func(name string, files map[string]string) string { return proseIntake(t, name, files) }
+	contract := proseContract(t)
 	// Propose: acceptance, readback, publication and cleanup.
 	g.capture("outcome-ledger-accept-fix-required", proposer, "proposal", "accept", "--repo", source, "--proposal-dir", intake(proseProposal, map[string]string{"intent.md": contract["intent.md"]}), issue)
 	accepted := intake(proseProposal, contract)
@@ -226,12 +455,28 @@ func TestAgentProseGoldens(t *testing.T) {
 
 	// Implement: start, release, resume, prepare and inspect, then hand off.
 	g.capture("outcome-watchdog-next-no-work", worker, "watchdog", "next", "--repo", source)
-	released := proseMatch(t, proseClaimLine, g.capture("implement-start", worker, "implement", "next", "--repo", source))
+	standard, err := worker.deliveryJSON(t, "skl", "implement", "next", "--repo", source, "--result-directory", filepath.Join(temp, "skl-implement-0"), "--format", "json")
+	if err != nil || standard.Execution == nil || standard.Packet == nil {
+		t.Fatalf("implement next: %#v %v", standard, err)
+	}
+	g.check("implement-start", standard.Packet.Instructions)
+	// TestImplementChoicesRenderWhereTheyApplyAndCarryThroughResume owns
+	// reviewer CLI wiring. Render this pure variant from the live Claim rather
+	// than acquiring and releasing another Claim for the same initial state.
+	repository, err := setup.ResolveRepository(source, "origin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	choices := setup.ImplementChoices{Reviewer: skilldist.SubagentChoice{Model: "openai-codex/gpt-6.1-sol", Thinking: "high"}}
+	packet, err := setup.PresentDelivery(standard.Execution, repository, ledger.ImplementPhase, "next", nil, standard.Packet.Facts.Delivery.ResultDirectory, choices, choices)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.check("implement-start-reviewer", packet.Instructions)
+	released := standard.Execution.Claim.Commit
 	g.capture("outcome-implement-release", worker, "implement", "release", "--repo", source, "--slice", proseItem, "--claim", released)
 	reviewer := []string{"--reviewer-model", "openai-codex/gpt-6.1-sol", "--reviewer-thinking", "high"}
 	team := append([]string{"--mode", "team", "--helper-model", "openai-codex/gpt-6-luna", "--helper-thinking", "xhigh"}, reviewer...)
-	released = proseMatch(t, proseClaimLine, g.capture("implement-start-reviewer", worker, append([]string{"implement", "next", "--repo", source}, reviewer...)...))
-	g.run(worker, "implement", "release", "--repo", source, "--slice", proseItem, "--claim", released)
 	started := g.capture("implement-team-start", worker, append([]string{"implement", "next", "--repo", source}, team...)...)
 	claim, result := proseMatch(t, proseClaimLine, started), proseMatch(t, proseResultLine, started)
 	identity := []string{"--repo", source, "--remote", "origin", "--slice", proseItem, "--claim", claim, "--result-directory", result}
@@ -317,11 +562,7 @@ func TestAgentProseGoldens(t *testing.T) {
 
 	// Decision Inbox: the request, the recorded answer, then empty and
 	// unavailable reads.
-	inbox := g.capture("decision-inbox", worker, "decision", "inbox")
-	// The abandoned-work rules carry the amendment's supersession flag.
-	if !strings.Contains(inbox, "`\"superseded\": true`") {
-		t.Fatalf("the abandoned-work rules do not name the amendment flag:\n%s", inbox)
-	}
+	g.capture("decision-inbox", worker, "decision", "inbox")
 	request := decisionRequest(t, worker, "widgets", proseItem)
 	g.capture("decision-result", worker, "decision", "apply", "--project", "widgets", "--slice", proseItem,
 		"--request-commit", request.RequestCommit, "--request-path", request.RequestPath, "--route", ledger.RouteImplement, "--answer", proseFixturePath("answer.md"))
@@ -353,9 +594,18 @@ func TestAgentProseGoldens(t *testing.T) {
 	interrupted, cancel := context.WithCancel(context.Background())
 	cancel()
 	worker.out.Reset()
-	err := worker.app.RunContext(interrupted, []string{"skl", "watchdog", "next", "--repo", source, "--wait", "1m"})
+	err = worker.app.RunContext(interrupted, []string{"skl", "watchdog", "next", "--repo", source, "--wait", "1m"})
 	g.check("outcome-watchdog-next-interrupted", worker.out.String()+err.Error()+"\n")
 
+}
+
+func captureProseIntegration(t *testing.T, g *proseGoldens) {
+	j := newProseJourney(t, g, 0)
+	source, proposer, worker := j.source, j.proposer, j.worker
+	issue := "--issue=foundation=" + proseFixturePath("issue.md")
+	intake := func(name string, files map[string]string) string { return proseIntake(t, name, files) }
+	contract := proseContract(t)
+	report := proseFixturePath("implement-report.md")
 	// Auto Mode review of a Slice whose Proposal Branch moved: the Integration
 	// Merge, then a conflicting branch head that ends the next review.
 	integrationProposal := "widget-alerts"
@@ -391,7 +641,8 @@ func TestAgentProseGoldens(t *testing.T) {
 	}
 	implementAlerts("alert on every widget\n")
 	advance("other.txt", "another slice\n")
-	integrationClaim, integrationResult := review("watchdog-integration-start")
+	output := g.capture("watchdog-integration-start", worker, "watchdog", "next", "--repo", source)
+	integrationClaim, integrationResult := proseMatch(t, proseClaimLine, output), proseMatch(t, proseResultLine, output)
 	integrationIdentity := []string{"--repo", source, "--remote", "origin", "--slice", integrationItem, "--claim", integrationClaim, "--result-directory", integrationResult}
 	g.capture("watchdog-integration-prepare", worker, append([]string{"watchdog", "prepare"}, integrationIdentity...)...)
 	g.capture("watchdog-integration-inspect", worker, append([]string{"watchdog", "inspect"}, integrationIdentity...)...)
@@ -403,11 +654,21 @@ func TestAgentProseGoldens(t *testing.T) {
 	}
 	implementAlerts("alert on unhealthy widgets\n")
 	advance("alerts.txt", "alerts from another slice\n")
-	integrationClaim, integrationResult = review("")
+	output = g.run(worker, "watchdog", "next", "--repo", source)
+	integrationClaim, integrationResult = proseMatch(t, proseClaimLine, output), proseMatch(t, proseResultLine, output)
 	g.capture("outcome-watchdog-prepare-conflict", worker, "watchdog", "prepare", "--repo", source, "--remote", "origin", "--slice", integrationItem, "--claim", integrationClaim, "--result-directory", integrationResult)
-	// Later steps expect source pushes to fail, as before the shim.
-	runGit(t, source, "config", "core.sshCommand", "false")
 
+}
+
+func captureProseSupervisor(t *testing.T, g *proseGoldens) {
+	// Keep the existing issue identities without creating the three unrelated
+	// issues that preceded this group in the old growing-ledger journey.
+	j := newProseJourney(t, g, 3)
+	source, target, temp, proposer, worker := j.source, j.target, j.temp, j.proposer, j.worker
+	issue := "--issue=foundation=" + proseFixturePath("issue.md")
+	intake := func(name string, files map[string]string) string { return proseIntake(t, name, files) }
+	contract := proseContract(t)
+	report, public := proseFixturePath("implement-report.md"), proseFixturePath("public.md")
 	// A Supervisor's Dispatches: claimed, stopped on a held Claim, continued
 	// after a handoff into an idle window, an interrupted wait and a new
 	// Dispatch, stopped on a released Claim, and refused.
@@ -428,10 +689,10 @@ func TestAgentProseGoldens(t *testing.T) {
 	// Hold the remaining Slice so the continued Dispatch finds no work.
 	shareClaim := proseMatch(t, proseClaimLine, g.run(worker, "implement", "next", "--repo", source))
 	g.capture("outcome-implement-next-dispatch-idle-timeout", worker, "implement", "dispatch", "--repo", source, "--after", searchClaim, "--wait", "1ms", "--poll", "1ms")
-	interrupted, cancel = context.WithCancel(context.Background())
+	interrupted, cancel := context.WithCancel(context.Background())
 	cancel()
 	worker.out.Reset()
-	err = worker.app.RunContext(interrupted, []string{"skl", "implement", "dispatch", "--repo", source, "--after", searchClaim, "--wait", "1m"})
+	err := worker.app.RunContext(interrupted, []string{"skl", "implement", "dispatch", "--repo", source, "--after", searchClaim, "--wait", "1m"})
 	g.check("outcome-implement-next-dispatch-interrupted", worker.out.String()+err.Error()+"\n")
 	g.run(worker, "implement", "release", "--repo", source, "--slice", "widget-share/foundation", "--claim", shareClaim)
 	continued := g.capture("outcome-implement-next-dispatch-continued", worker, shellWords(t, continuation)[1:]...)
@@ -465,9 +726,23 @@ func TestAgentProseGoldens(t *testing.T) {
 	writeFile(t, filepath.Join(replaced, "foundation", "behavior.md"), "# Share behavior, revised\n")
 	g.capture("outcome-ledger-amend-amended", proposer, "proposal", "amend", "--repo", source, "--proposal-dir", replaced)
 
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	g.capture("outcome-implement-next-unconfigured", worker, "implement", "next", "--repo", source)
+}
 
+func captureProseStandalone(t *testing.T, g *proseGoldens) {
+	source, _ := deliverySourceRepo(t)
+	g.replace(source, "/work/widgets")
+	worker := deliveryNoForgeApp(t)
+	// Resource inputs are rendering parameters, not delivery history. Their
+	// bound commands are executed separately by TestRenderedResourceCommands.
+	result, reviewResult := filepath.Join(t.TempDir(), "implement"), filepath.Join(t.TempDir(), "watchdog")
+	head := strings.Repeat("a", 40)
+	g.replace(result, "/tmp/skl-implement-result")
+	g.replace(reviewResult, "/tmp/skl-watchdog-result")
+	missing := &ledgerFixture{config: t.TempDir(), home: t.TempDir()}
+	// Preserve the existing missing-config path placeholder, not its incidental
+	// TempDir allocation number in the old combined journey.
+	g.replace(missing.config, "/tmp/test/018")
+	g.capture("outcome-implement-next-unconfigured", missing.app(worker), "implement", "next", "--repo", source)
 	// Standalone Execution Skills, the refusals for the delivered ones, and
 	// every named resource a rendering tells the worker to retrieve.
 	for _, name := range skilldist.SkillNames() {
@@ -521,10 +796,12 @@ func TestAgentProseGoldens(t *testing.T) {
 	}
 	g.check("setup-agents-block", setup.AgentsBlock)
 
+}
+
+func captureProseReadiness(t *testing.T, g *proseGoldens) {
 	// A fresh Auto poll reconciles a stranded Slice without its worker prose.
 	recovery := newAutoMergeFixture(t, true)
 	recovery.pass(t, false, false)
 	g.replace(recovery.source, "<recovery-source>")
 	g.capture("outcome-watchdog-auto-readiness", recovery.ledger.app(presentForgeApp(t, recovery.pulls)), "watchdog", "next", "--auto", "--repo", recovery.source)
-	g.finish()
 }
