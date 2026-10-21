@@ -25,7 +25,7 @@ func TestHarnessLaunchChoicesReachTheirRoles(t *testing.T) {
 			f := newPrivateLedgerFixture(t)
 			f.misconfigure(t, fmt.Sprintf(`{"ledger":%q,"harnesses":{"pi":{"implement":{"model":"pi-worker","thinking":"deep"},"reviewer":{"model":"pi-review","thinking":"review-deep"},"helper":{"model":"pi-helper","thinking":"helper-deep"}},"claude":{},"opencode":{"implement":{"model":"oc-worker"}},"codex":{"implement":{"model":"cx-worker"}}}}`, f.clone))
 			source, _ := deliverySourceRepo(t)
-			f.acceptDelivery(t, newForgeServer(t), source)
+			f.commitLaunchProposal(t, singleSlice(deliveryTestProposal))
 			cli := f.app(deliveryNoForgeApp(t))
 			d := cli.dispatched(t, "skl implement dispatch --repo "+source+" "+tc.flags)
 			if d.WorkerModel != tc.model || d.WorkerThinking != tc.thinking {
@@ -66,7 +66,7 @@ func TestStartupAndRecoveryRefreshDefaultsWithoutChangingRunningGuidance(t *test
 			}
 			configure("first")
 			source, target := deliverySourceRepo(t)
-			f.acceptDelivery(t, newForgeServer(t), source)
+			f.commitLaunchProposal(t, singleSlice(deliveryTestProposal))
 			cli := f.app(deliveryNoForgeApp(t))
 			flags := " --harness pi --mode team"
 			if explicit {
@@ -147,7 +147,7 @@ func TestEmptySessionChoicesStayInheritedAfterConfigurationEdit(t *testing.T) {
 	f := newPrivateLedgerFixture(t)
 	f.misconfigure(t, fmt.Sprintf(`{"ledger":%q,"harnesses":{"pi":{"implement":{},"watchdog":{},"helper":{},"reviewer":{}},"opencode":{},"claude":{},"codex":{}}}`, f.clone))
 	source, _ := deliverySourceRepo(t)
-	f.acceptDelivery(t, newForgeServer(t), source)
+	f.commitLaunchProposal(t, singleSlice(deliveryTestProposal))
 	cli := f.app(deliveryNoForgeApp(t))
 	d := cli.dispatched(t, "skl implement dispatch --repo "+source+" --harness pi --mode team")
 	session := cli.dispatchJSON(t, d.Worker)
@@ -171,24 +171,21 @@ func TestEmptySessionChoicesStayInheritedAfterConfigurationEdit(t *testing.T) {
 
 func TestLaunchConfigurationRefusalsDoNotClaimWork(t *testing.T) {
 	t.Parallel()
+	// Reuse only this test's private fixture, stopping at the first mutation.
+	f := newPrivateLedgerFixture(t)
+	source, _ := deliverySourceRepo(t)
+	f.commitLaunchProposal(t, singleSlice(deliveryTestProposal))
+	before := ledgerSnapshot(t, f.clone)
 	for _, config := range []string{
 		`{"pi":{"unknown":{}}}`, `{"other":{}}`, `{"pi":{"implement":{"extra":"x"}}}`, `{"pi":{"implement":{"model":3}}}`,
 	} {
-		t.Run(config, func(t *testing.T) {
-			t.Parallel()
-			f := newPrivateLedgerFixture(t)
-			f.misconfigure(t, fmt.Sprintf(`{"ledger":%q,"harnesses":%s}`, f.clone, config))
-			source, _ := deliverySourceRepo(t)
-			before := ledgerSnapshot(t, f.clone)
-			out := f.app(deliveryNoForgeApp(t)).dispatchJSON(t, "skl implement dispatch --repo "+source+" --harness pi")
-			if out.Status != "fix_required" || ledgerSnapshot(t, f.clone) != before {
-				t.Fatalf("invalid configuration claimed: %#v", out)
-			}
-		})
+		f.misconfigure(t, fmt.Sprintf(`{"ledger":%q,"harnesses":%s}`, f.clone, config))
+		out := f.app(deliveryNoForgeApp(t)).dispatchJSON(t, "skl implement dispatch --repo "+source+" --harness pi")
+		if out.Status != "fix_required" || ledgerSnapshot(t, f.clone) != before {
+			t.Fatalf("invalid configuration %s claimed: %#v", config, out)
+		}
 	}
-	f := newPrivateLedgerFixture(t)
-	source, _ := deliverySourceRepo(t)
-	before := ledgerSnapshot(t, f.clone)
+	f.misconfigure(t, fmt.Sprintf(`{"ledger":%q}`, f.clone))
 	out := f.app(deliveryNoForgeApp(t)).dispatchJSON(t, "skl implement dispatch --repo "+source+" --harness unknown")
 	if out.Status != "fix_required" || ledgerSnapshot(t, f.clone) != before {
 		t.Fatal("unknown selector did not refuse before claim")
