@@ -33,9 +33,7 @@ func TestWaitingDispatchRefreshesLaunchSettings(t *testing.T) {
 			source, target := deliverySourceRepo(t)
 			spec := dualSlice(deliveryTestProposal)
 			spec.depends = map[string][]string{"feature": {"foundation"}}
-			if accepted := fixture.app(newLedgerApp(t, newForgeServer(t))).accept(t, source, writeProposal(t, "", spec)); accepted.Status != "accepted" {
-				t.Fatal(accepted)
-			}
+			fixture.commitLaunchProposal(t, spec)
 			cli := fixture.app(deliveryNoForgeApp(t))
 			held, err := cli.deliveryJSON(t, "skl", "implement", "next", "--repo", source, "--format", "json")
 			if err != nil || held.Execution == nil {
@@ -65,8 +63,7 @@ func TestWaitingDispatchRefreshesLaunchSettings(t *testing.T) {
 					fixture.misconfigure(t, fmt.Sprintf(`{"ledger":%q}`, source))
 				}
 				if tc.phase == "watchdog" {
-					// Use another CLI instance while the waiting supervisor owns cli.out.
-					dispatchImplementHandoff(t, fixture.app(deliveryNoForgeApp(t)), source, target, held.Execution.Item, held.Execution.Claim.Commit)
+					fixture.commitLaunchAwaitingReview(t, source, target)
 				} else {
 					state := deliveryPersistedState(t, fixture.clone)
 					state.Claim, state.State = nil, ledger.Merged

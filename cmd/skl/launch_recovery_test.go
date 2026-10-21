@@ -21,7 +21,7 @@ func TestDirectWorkerStartupAndRecoveryUseCurrentRoleDefaults(t *testing.T) {
 			}
 			configure("first")
 			source, _ := deliverySourceRepo(t)
-			f.acceptDelivery(t, newForgeServer(t), source)
+			f.commitLaunchProposal(t, singleSlice(deliveryTestProposal))
 			cli := f.app(deliveryNoForgeApp(t))
 			first := cli.dispatchJSON(t, "skl implement next --repo "+source+" "+tc.flags).Packet.Facts.Delivery
 			wantModel := "first"
