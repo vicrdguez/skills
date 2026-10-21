@@ -23,12 +23,12 @@ func TestInstalledFamiliesDispatchWithRuntimeSettingsAndContinueSafely(t *testin
 				source, target := deliverySourceRepo(t)
 				routeSourcePushes(t, source)
 				runGit(t, source, "push", "-q", "origin", "main")
-				f.commitLaunchProposal(t, singleSlice(deliveryTestProposal))
+				f.commitReadyProposal(t, singleSlice(deliveryTestProposal))
 				cli := f.app(deliveryNoForgeApp(t))
 				watchdog := strings.HasPrefix(operation, "watchdog")
 				var implementClaim string
 				if watchdog {
-					f.commitLaunchReviewClaim(t)
+					f.commitReviewClaim(t, "main")
 					implementClaim = deliveryTrimmed(t, f.clone, "rev-parse", "HEAD")
 					f.commitLaunchAwaitingReview(t, source, target)
 				}

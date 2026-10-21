@@ -33,7 +33,7 @@ func TestWaitingDispatchRefreshesLaunchSettings(t *testing.T) {
 			source, target := deliverySourceRepo(t)
 			spec := dualSlice(deliveryTestProposal)
 			spec.depends = map[string][]string{"feature": {"foundation"}}
-			fixture.commitLaunchProposal(t, spec)
+			fixture.commitReadyProposal(t, spec)
 			cli := fixture.app(deliveryNoForgeApp(t))
 			held, err := cli.deliveryJSON(t, "skl", "implement", "next", "--repo", source, "--format", "json")
 			if err != nil || held.Execution == nil {

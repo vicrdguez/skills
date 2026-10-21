@@ -141,8 +141,10 @@ func browseDocumentsJSON(t *testing.T, app *stageApp, output *bytes.Buffer, args
 }
 
 func TestBrowseDocumentsExposeCurrentAndArchivedEvidenceReadOnly(t *testing.T) {
+	t.Parallel()
 	fixture := newBrowseDocumentsFixture(t)
 	app, output := browseApp(t)
+	fixture.ledger.bindApp(app)
 	cloneBefore := ledgerSnapshot(t, fixture.ledger.clone)
 	upstreamBefore := runGitOutput(t, fixture.ledger.upstream, "for-each-ref")
 	headBefore := runGitOutput(t, fixture.ledger.clone, "rev-parse", "HEAD")
@@ -250,8 +252,10 @@ func TestBrowseDocumentsExposeCurrentAndArchivedEvidenceReadOnly(t *testing.T) {
 }
 
 func TestBrowseDocumentsReportUnavailableOptionalReadFromTypedFact(t *testing.T) {
+	t.Parallel()
 	fixture := newBrowseDocumentsFixture(t)
 	app, output := browseApp(t)
+	fixture.ledger.bindApp(app)
 	path := "projects/widgets/proposals/orders/cancel/watchdog-report.md"
 	blob := strings.TrimSpace(runGitOutput(t, fixture.ledger.clone, "rev-parse", "HEAD:"+path))
 	objectPath := filepath.Join(fixture.ledger.clone, ".git", "objects", blob[:2], blob[2:])
@@ -279,8 +283,10 @@ func TestBrowseDocumentsReportUnavailableOptionalReadFromTypedFact(t *testing.T)
 }
 
 func TestBrowseDocumentsReportUnknownDecisionWhenStateIsMalformed(t *testing.T) {
+	t.Parallel()
 	fixture := newBrowseDocumentsFixture(t)
 	app, output := browseApp(t)
+	fixture.ledger.bindApp(app)
 	statePath := "projects/widgets/proposals/orders/cancel/state.json"
 	writeFile(t, filepath.Join(fixture.ledger.clone, filepath.FromSlash(statePath)), "{malformed state\n")
 	runGit(t, fixture.ledger.clone, "add", statePath)
@@ -305,8 +311,10 @@ func TestBrowseDocumentsReportUnknownDecisionWhenStateIsMalformed(t *testing.T) 
 }
 
 func TestBrowseDocumentFollowsExactReferenceAndPreservesLedgerShowRaw(t *testing.T) {
+	t.Parallel()
 	fixture := newBrowseDocumentsFixture(t)
 	app, output := browseApp(t)
+	fixture.ledger.bindApp(app)
 	cloneBefore := ledgerSnapshot(t, fixture.ledger.clone)
 	upstreamBefore := runGitOutput(t, fixture.ledger.upstream, "for-each-ref")
 
@@ -363,8 +371,10 @@ func TestBrowseDocumentFollowsExactReferenceAndPreservesLedgerShowRaw(t *testing
 }
 
 func TestBrowseDocumentExposesClaimInputsAsExactCLIFacts(t *testing.T) {
+	t.Parallel()
 	fixture := newBrowseDocumentsFixture(t)
 	app, output := browseApp(t)
+	fixture.ledger.bindApp(app)
 	statePath := "projects/widgets/proposals/orders/cancel/state.json"
 	intentPath := "projects/widgets/proposals/orders/cancel/intent.md"
 	input := ledger.Reference{Commit: fixture.acceptedRevision, Path: intentPath}
@@ -391,8 +401,10 @@ func TestBrowseDocumentExposesClaimInputsAsExactCLIFacts(t *testing.T) {
 }
 
 func TestBrowseVersionsListExactContentChangesAndSelectHistoricalCLIBytes(t *testing.T) {
+	t.Parallel()
 	fixture := newBrowseDocumentsFixture(t)
 	app, output := browseApp(t)
+	fixture.ledger.bindApp(app)
 	older := fixture.implementRevision
 	path := fixture.implementPath
 	metadataOnly := strings.Replace(runGitOutput(t, fixture.ledger.clone, "show", older+":"+path), "outcome: awaiting_review", "outcome: needs_human", 1)
@@ -425,8 +437,10 @@ func TestBrowseVersionsListExactContentChangesAndSelectHistoricalCLIBytes(t *tes
 }
 
 func TestBrowseDocumentsRequiresUnambiguousSelection(t *testing.T) {
-	newBrowseDocumentsFixture(t)
+	t.Parallel()
+	fixture := newBrowseDocumentsFixture(t)
 	app, output := browseApp(t)
+	fixture.ledger.bindApp(app)
 	for _, args := range [][]string{
 		{"documents", "--project", "widgets"},
 		{"documents", "--project", "widgets", "--proposal", "orders", "--slice", "orders/cancel"},

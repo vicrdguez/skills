@@ -56,10 +56,10 @@ func (c ledgerCLI) decisionJSON(t *testing.T, args ...string) decisionOutput {
 // decisionAccept accepts one proposal from a fresh checkout of a named source
 // repository. Two different repository names become two Projects in the same
 // configured ledger.
-func decisionAccept(t *testing.T, forge *forgeServer, owner, name string, spec proposalSpec) string {
+func (f *ledgerFixture) decisionAccept(t *testing.T, forge *forgeServer, owner, name string, spec proposalSpec) string {
 	t.Helper()
 	source := sourceRepository(t, owner, name)
-	accept := newLedgerApp(t, forge)
+	accept := f.app(newLedgerApp(t, forge))
 	outcome := accept.accept(t, source, writeProposal(t, "", spec))
 	if outcome.Status != "accepted" {
 		t.Fatalf("accept %s/%s/%s = %q", owner, name, spec.name, mustJSON(t, outcome))
@@ -176,10 +176,10 @@ func decisionCommitState(t *testing.T, clone, path string, mutate func(*ledger.S
 func TestDecisionInboxIsLedgerWideReadOnlyAndBound(t *testing.T) {
 	fixture := newLedgerFixture(t)
 	forge := newForgeServer(t)
-	widgetSource := decisionAccept(t, forge, "acme", "widgets", singleSlice("widget-work"))
-	gadgetSource := decisionAccept(t, forge, "acme", "gadgets", singleSlice("gadget-work"))
+	widgetSource := fixture.decisionAccept(t, forge, "acme", "widgets", singleSlice("widget-work"))
+	gadgetSource := fixture.decisionAccept(t, forge, "acme", "gadgets", singleSlice("gadget-work"))
 
-	cli := decisionReadOnlyApp(t)
+	cli := fixture.app(decisionReadOnlyApp(t))
 	widgetItem, _ := decisionPauseNext(t, cli, widgetSource)
 	gadgetItem, _ := decisionPauseNext(t, cli, gadgetSource)
 	before := ledgerSnapshot(t, fixture.clone)
@@ -240,12 +240,13 @@ func TestDecisionInboxIsLedgerWideReadOnlyAndBound(t *testing.T) {
 // ledger with no requests is empty, while an unusable configuration is
 // unavailable rather than an empty inbox.
 func TestDecisionInboxDistinguishesEmptyAndUnavailable(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	forge := newForgeServer(t)
-	decisionAccept(t, forge, "acme", "widgets", singleSlice("quiet-work"))
+	fixture.decisionAccept(t, forge, "acme", "widgets", singleSlice("quiet-work"))
 	before := ledgerSnapshot(t, fixture.clone)
 
-	cli := decisionReadOnlyApp(t)
+	cli := fixture.app(decisionReadOnlyApp(t))
 	empty := cli.decisionJSON(t, "skl", "decision", "inbox", "--format", "json")
 	if empty.Status != string(skilldist.DecisionEmpty) {
 		t.Fatalf("request-free ledger = %#v, want an empty inbox", empty)
@@ -271,12 +272,13 @@ func TestDecisionInboxDistinguishesEmptyAndUnavailable(t *testing.T) {
 // exact retry is recognized without disturbing later work, and a differing
 // replay is refused.
 func TestDecisionAppliesAtomicallyAndRetries(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	forge := newForgeServer(t)
-	source := decisionAccept(t, forge, "acme", "widgets", singleSlice("decision-work"))
-	decisionAccept(t, forge, "acme", "gadgets", singleSlice("other-work"))
+	source := fixture.decisionAccept(t, forge, "acme", "widgets", singleSlice("decision-work"))
+	fixture.decisionAccept(t, forge, "acme", "gadgets", singleSlice("other-work"))
 
-	cli := decisionReadOnlyApp(t)
+	cli := fixture.app(decisionReadOnlyApp(t))
 	item, _ := decisionPauseNext(t, cli, source)
 	request := decisionRequest(t, cli, "widgets", item)
 	contractPath := "projects/widgets/proposals/decision-work/foundation/behavior.md"
@@ -358,11 +360,12 @@ func TestDecisionAppliesAtomicallyAndRetries(t *testing.T) {
 // replacement request with identical prose is refused, and malformed scope or
 // route is refused without mutation.
 func TestDecisionRefusesReplacedRequestAndMalformedInput(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	forge := newForgeServer(t)
-	source := decisionAccept(t, forge, "acme", "widgets", singleSlice("replace-work"))
+	source := fixture.decisionAccept(t, forge, "acme", "widgets", singleSlice("replace-work"))
 
-	cli := decisionReadOnlyApp(t)
+	cli := fixture.app(decisionReadOnlyApp(t))
 	started := decisionSelect(t, cli, source)
 	item := started.Execution.Item
 	decisionPause(t, cli, source, item, started.Execution.Claim.Commit)
@@ -419,12 +422,13 @@ func TestDecisionRefusesReplacedRequestAndMalformedInput(t *testing.T) {
 // report partial results honestly, while a coupled set is refused whole rather
 // than silently split, and an exact coupled retry is recognized.
 func TestDecisionBatchIndependentAndCoupled(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	forge := newForgeServer(t)
-	widgetSource := decisionAccept(t, forge, "acme", "widgets", singleSlice("batch-work"))
-	gadgetSource := decisionAccept(t, forge, "acme", "gadgets", singleSlice("batch-other"))
+	widgetSource := fixture.decisionAccept(t, forge, "acme", "widgets", singleSlice("batch-work"))
+	gadgetSource := fixture.decisionAccept(t, forge, "acme", "gadgets", singleSlice("batch-other"))
 
-	cli := decisionReadOnlyApp(t)
+	cli := fixture.app(decisionReadOnlyApp(t))
 	widgetItem, _ := decisionPauseNext(t, cli, widgetSource)
 	gadgetItem, _ := decisionPauseNext(t, cli, gadgetSource)
 	widgetRequest := decisionRequest(t, cli, "widgets", widgetItem)
@@ -487,12 +491,13 @@ func TestDecisionBatchIndependentAndCoupled(t *testing.T) {
 // authoritative with an unavailable remote, and the pending replication is
 // reported instead of blocking the result.
 func TestDecisionPendingReplicationIsVisible(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	forge := newForgeServer(t)
-	source := decisionAccept(t, forge, "acme", "widgets", singleSlice("offline-work"))
-	other := decisionAccept(t, forge, "acme", "gadgets", singleSlice("offline-other"))
+	source := fixture.decisionAccept(t, forge, "acme", "widgets", singleSlice("offline-work"))
+	other := fixture.decisionAccept(t, forge, "acme", "gadgets", singleSlice("offline-other"))
 
-	cli := decisionReadOnlyApp(t)
+	cli := fixture.app(decisionReadOnlyApp(t))
 	item, _ := decisionPauseNext(t, cli, source)
 	otherItem, _ := decisionPauseNext(t, cli, other)
 	request := decisionRequest(t, cli, "widgets", item)
@@ -536,12 +541,13 @@ func TestDecisionPendingReplicationIsVisible(t *testing.T) {
 // answer and reference flow through worker startup, the handoff consumes it,
 // and the continuation keeps its route.
 func TestDecisionContinuationReachesWorkers(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	forge := newForgeServer(t)
 	source, target := deliverySourceRepo(t)
-	deliveryAcceptFixture(t, forge, source)
+	fixture.acceptDelivery(t, forge, source)
 
-	cli := decisionReadOnlyApp(t)
+	cli := fixture.app(decisionReadOnlyApp(t))
 	started := decisionSelect(t, cli, source)
 	decisionPause(t, cli, source, deliveryTestItem, started.Execution.Claim.Commit)
 	request := decisionRequest(t, cli, "widgets", deliveryTestItem)
@@ -634,11 +640,12 @@ func TestDecisionContinuationReachesWorkers(t *testing.T) {
 // automatic Rework after a human-directed third review fails at unchanged code.
 // A passing third review is covered by TestDeliveryCLIEndToEnd.
 func TestDecisionWatchdogContinuationAtSameCode(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	forge := newForgeServer(t)
 	source, target := deliverySourceRepo(t)
-	deliveryAcceptFixture(t, forge, source)
-	cli := decisionReadOnlyApp(t)
+	fixture.acceptDelivery(t, forge, source)
+	cli := fixture.app(decisionReadOnlyApp(t))
 
 	// Round 1: implementation at the prepared revision is reviewed as Rework.
 	started := decisionSelect(t, cli, source)
@@ -724,7 +731,8 @@ func TestDecisionWatchdogContinuationAtSameCode(t *testing.T) {
 // terminal and unclaimed, reports partial delivery, and never unblocks a
 // dependent.
 func TestDecisionRetirementGuardsPartialDelivery(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	forge := newForgeServer(t)
 
 	retiring := proposalSpec{
@@ -736,18 +744,18 @@ func TestDecisionRetirementGuardsPartialDelivery(t *testing.T) {
 			{name: "feature", title: "Feature", files: map[string]string{"intent.md": "# Feature\n", "behavior.md": "# Feature behavior\n"}},
 		},
 	}
-	decisionAccept(t, forge, "acme", "widgets", retiring)
+	fixture.decisionAccept(t, forge, "acme", "widgets", retiring)
 	dependent := singleSlice("dependent-proposal")
 	dependent.slices[0].branch = "dependent-foundation"
 	dependent.depends = map[string][]string{"foundation": {"proposals/retire-proposal/feature"}}
-	dependentSource := decisionAccept(t, forge, "acme", "widgets", dependent)
+	dependentSource := fixture.decisionAccept(t, forge, "acme", "widgets", dependent)
 
 	// Administrative fixture setup: the first slice was already delivered.
 	decisionCommitState(t, fixture.clone, decisionItemStatePath("widgets", "retire-proposal", "foundation"), func(state *ledger.SliceState) {
 		state.State = ledger.Merged
 	})
 
-	cli := decisionReadOnlyApp(t)
+	cli := fixture.app(decisionReadOnlyApp(t))
 	item, _ := decisionPauseNext(t, cli, dependentSource)
 	if item != "retire-proposal/feature" {
 		t.Fatalf("paused the wrong item %q", item)

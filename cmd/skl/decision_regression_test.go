@@ -11,10 +11,11 @@ import (
 )
 
 func TestDecisionExplicitEmptyProjectRefuses(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	forge := newForgeServer(t)
-	source := decisionAccept(t, forge, "acme", "widgets", singleSlice("empty-filter"))
-	cli := decisionReadOnlyApp(t)
+	source := fixture.decisionAccept(t, forge, "acme", "widgets", singleSlice("empty-filter"))
+	cli := fixture.app(decisionReadOnlyApp(t))
 	decisionPauseNext(t, cli, source)
 	before := ledgerSnapshot(t, fixture.clone)
 	out := cli.decisionJSON(t, "skl", "decision", "inbox", "--project=", "--format", "json")
@@ -27,10 +28,11 @@ func TestDecisionExplicitEmptyProjectRefuses(t *testing.T) {
 }
 
 func TestDecisionCoupledDuplicateItemsRefuse(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	forge := newForgeServer(t)
-	source := decisionAccept(t, forge, "acme", "widgets", singleSlice("duplicate-work"))
-	cli := decisionReadOnlyApp(t)
+	source := fixture.decisionAccept(t, forge, "acme", "widgets", singleSlice("duplicate-work"))
+	cli := fixture.app(decisionReadOnlyApp(t))
 	item, _ := decisionPauseNext(t, cli, source)
 	request := decisionRequest(t, cli, "widgets", item)
 	batch := filepath.Join(t.TempDir(), "decisions.json")
@@ -54,11 +56,12 @@ func TestDecisionCoupledDuplicateItemsRefuse(t *testing.T) {
 }
 
 func TestDecisionBatchReportsEarlierCommitAfterWriteFailure(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	forge := newForgeServer(t)
-	widgets := decisionAccept(t, forge, "acme", "widgets", singleSlice("first-work"))
-	gadgets := decisionAccept(t, forge, "acme", "gadgets", singleSlice("second-work"))
-	cli := decisionReadOnlyApp(t)
+	widgets := fixture.decisionAccept(t, forge, "acme", "widgets", singleSlice("first-work"))
+	gadgets := fixture.decisionAccept(t, forge, "acme", "gadgets", singleSlice("second-work"))
+	cli := fixture.app(decisionReadOnlyApp(t))
 	widgetItem, _ := decisionPauseNext(t, cli, widgets)
 	gadgetItem, _ := decisionPauseNext(t, cli, gadgets)
 	widgetRequest := decisionRequest(t, cli, "widgets", widgetItem)
@@ -91,10 +94,11 @@ func TestDecisionBatchReportsEarlierCommitAfterWriteFailure(t *testing.T) {
 }
 
 func TestDecisionRetrySurvivesCompetingReplication(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	forge := newForgeServer(t)
-	source := decisionAccept(t, forge, "acme", "widgets", singleSlice("competing-decision"))
-	cli := decisionReadOnlyApp(t)
+	source := fixture.decisionAccept(t, forge, "acme", "widgets", singleSlice("competing-decision"))
+	cli := fixture.app(decisionReadOnlyApp(t))
 	item, _ := decisionPauseNext(t, cli, source)
 	request := decisionRequest(t, cli, "widgets", item)
 	competitor := filepath.Join(t.TempDir(), "competitor")
@@ -129,13 +133,14 @@ func TestDecisionRetrySurvivesCompetingReplication(t *testing.T) {
 }
 
 func TestDecisionRetirementRefusesAllMerged(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	forge := newForgeServer(t)
-	decisionAccept(t, forge, "acme", "widgets", singleSlice("delivered-work"))
+	fixture.decisionAccept(t, forge, "acme", "widgets", singleSlice("delivered-work"))
 	decisionCommitState(t, fixture.clone, decisionItemStatePath("widgets", "delivered-work", "foundation"), func(state *ledger.SliceState) {
 		state.State = ledger.Merged
 	})
-	cli := decisionReadOnlyApp(t)
+	cli := fixture.app(decisionReadOnlyApp(t))
 	before := ledgerSnapshot(t, fixture.clone)
 	out := cli.decisionJSON(t, "skl", "proposal", "retire", "--project", "widgets", "--proposal", "delivered-work", "--format", "json")
 	if out.Status != string(skilldist.DecisionRefused) || !strings.Contains(out.Facts.Retirement.Reason, "no Superseded") {
