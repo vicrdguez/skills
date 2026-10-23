@@ -497,10 +497,11 @@ func presentGuided(t *testing.T, cli ledgerCLI, source string) *presentationGuid
 // leave it unchanged, as does human direction, and an implementation report's
 // own round zero never stands in for it.
 func TestPresentationAuthoringCarriesTheCompletedReviewCount(t *testing.T) {
-	newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	source, target := deliverySourceRepo(t)
-	deliveryAcceptFixture(t, newForgeServer(t), source)
-	offline := deliveryNoForgeApp(t)
+	fixture.acceptDelivery(t, newForgeServer(t), source)
+	offline := fixture.app(deliveryNoForgeApp(t))
 
 	// authoring runs a rendering's report resource command as printed.
 	authoring := func(started deliveryOutput, binds ...string) string {

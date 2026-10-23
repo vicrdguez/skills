@@ -71,9 +71,9 @@ A separate sequential, three-repetition setup-only probe timed from before
 `newPrivateLedgerFixture` through the completed fixture, without the installed
 command under test. Both versions also created the source, local push shim and
 initial `main` push. Ready setup used acceptance before and
-`commitLaunchProposal(singleSlice(...))` after. Review setup additionally used
-implement dispatch/handoff before and `commitLaunchReviewClaim` plus
-`commitLaunchAwaitingReview` after. Medians: ready **0.934s → 0.821s**; review
+`commitReadyProposal(singleSlice(...))` after. Review setup additionally used
+implement dispatch/handoff before and `commitReviewClaim` plus
+`commitAwaitingReview` after. Medians: ready **0.934s → 0.821s**; review
 **2.590s → 1.045s**. Total traced Git built-ins over three ready and three review
 constructions fell **1,113 → 351**. The probe was temporary, not a new default test
 or benchmark framework; fixture work is kept separate from startup timings.

@@ -38,11 +38,11 @@ func completionNextCLI(t *testing.T, app *stageApp, output *bytes.Buffer, phase,
 
 func completionDependencyFixture(t *testing.T, proposal, phase string) (*ledgerFixture, string, string) {
 	t.Helper()
-	fixture := newLedgerFixture(t)
+	fixture := newPrivateLedgerFixture(t)
 	source, target := deliverySourceRepo(t)
 	spec := dualSlice(proposal)
 	spec.depends = map[string][]string{"feature": {"foundation"}}
-	if accepted := newLedgerApp(t, newForgeServer(t)).accept(t, source, writeProposal(t, "", spec)); accepted.Status != "accepted" {
+	if accepted := fixture.app(newLedgerApp(t, newForgeServer(t))).accept(t, source, writeProposal(t, "", spec)); accepted.Status != "accepted" {
 		t.Fatalf("accept dependency fixture: %s", mustJSON(t, accepted))
 	}
 	attachFixture(t, fixture.clone, proposal)
@@ -115,14 +115,15 @@ func completionReadState(t *testing.T, clone, project, proposal, slice string) l
 	return state
 }
 
-func completionAppWithFactory(factory backendFactory) (*stageApp, *bytes.Buffer) {
+func (f *ledgerFixture) completionAppWithFactory(factory backendFactory) (*stageApp, *bytes.Buffer) {
 	var output bytes.Buffer
-	return newApp(factory, bytes.NewReader(nil), &output, &output), &output
+	return f.bindApp(newApp(factory, bytes.NewReader(nil), &output, &output)), &output
 }
 
 func TestNextCompletionRefreshEnablesImplementDependency(t *testing.T) {
+	t.Parallel()
 	fixture, source, _ := completionDependencyFixture(t, "implement-completion", ledger.ImplementPhase)
-	app, output := completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
+	app, output := fixture.completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/repos/acme/widgets/pulls/21" {
 			t.Errorf("unexpected forge request: %s %s", r.Method, r.URL.Path)
 			http.NotFound(w, r)
@@ -142,8 +143,9 @@ func TestNextCompletionRefreshEnablesImplementDependency(t *testing.T) {
 }
 
 func TestNextCompletionRefreshEnablesWatchdogDependency(t *testing.T) {
+	t.Parallel()
 	fixture, source, _ := completionDependencyFixture(t, "watchdog-completion", ledger.WatchdogPhase)
-	app, output := completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
+	app, output := fixture.completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/repos/acme/widgets/pulls/21" {
 			t.Errorf("unexpected forge request: %s %s", r.Method, r.URL.Path)
 			http.NotFound(w, r)
@@ -163,9 +165,10 @@ func TestNextCompletionRefreshEnablesWatchdogDependency(t *testing.T) {
 }
 
 func TestNextCompletionWaitRetryObservesMerge(t *testing.T) {
+	t.Parallel()
 	fixture, source, _ := completionDependencyFixture(t, "wait-completion", ledger.ImplementPhase)
 	var calls atomic.Int32
-	app, output := completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
+	app, output := fixture.completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/repos/acme/widgets/pulls/21" {
 			t.Errorf("unexpected forge request: %s %s", r.Method, r.URL.Path)
 			http.NotFound(w, r)
@@ -188,9 +191,10 @@ func TestNextCompletionWaitRetryObservesMerge(t *testing.T) {
 }
 
 func TestNextCompletionRefreshIsProjectWideAndKeepsSelectionPriority(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	source, _ := deliverySourceRepo(t)
-	cli := newLedgerApp(t, newForgeServer(t))
+	cli := fixture.app(newLedgerApp(t, newForgeServer(t)))
 	priority := singleSlice("a-priority")
 	priority.slices[0].branch = "priority"
 	if accepted := cli.accept(t, source, writeProposal(t, "", priority)); accepted.Status != "accepted" {
@@ -217,7 +221,7 @@ func TestNextCompletionRefreshIsProjectWideAndKeepsSelectionPriority(t *testing.
 
 	var mu sync.Mutex
 	var paths []string
-	app, output := completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
+	app, output := fixture.completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		paths = append(paths, r.URL.Path)
 		mu.Unlock()
@@ -262,11 +266,12 @@ func TestNextCompletionRefreshIsProjectWideAndKeepsSelectionPriority(t *testing.
 type completionNoObserveBackend struct{}
 
 func TestNextCompletionForgeFailureDoesNotBlockIndependentLocalClaim(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"construction", "capability", "read"} {
 		t.Run(mode, func(t *testing.T) {
-			fixture := newLedgerFixture(t)
+			fixture := newPrivateLedgerFixture(t)
 			source, _ := deliverySourceRepo(t)
-			cli := newLedgerApp(t, newForgeServer(t))
+			cli := fixture.app(newLedgerApp(t, newForgeServer(t)))
 			dependent := dualSlice("offline-dependent")
 			dependent.depends = map[string][]string{"feature": {"foundation"}}
 			if accepted := cli.accept(t, source, writeProposal(t, "", dependent)); accepted.Status != "accepted" {
@@ -296,7 +301,7 @@ func TestNextCompletionForgeFailureDoesNotBlockIndependentLocalClaim(t *testing.
 					return backend, nil
 				}
 			}
-			app, output := completionAppWithFactory(factory)
+			app, output := fixture.completionAppWithFactory(factory)
 			started := completionNextCLI(t, app, output, ledger.ImplementPhase, source)
 			if started.Status != ledger.WorkAvailable || started.Execution == nil || started.Execution.Item != "offline-local/foundation" {
 				t.Fatalf("forge %s prevented unrelated local work: %s", mode, mustJSON(t, started))
@@ -314,8 +319,9 @@ func TestNextCompletionForgeFailureDoesNotBlockIndependentLocalClaim(t *testing.
 }
 
 func TestNextCompletionCommitFailureDoesNotClaimUnrelatedLocalWork(t *testing.T) {
+	t.Parallel()
 	fixture, source, _ := completionDependencyFixture(t, "commit-failure", ledger.ImplementPhase)
-	cli := newLedgerApp(t, newForgeServer(t))
+	cli := fixture.app(newLedgerApp(t, newForgeServer(t)))
 	local := singleSlice("commit-failure-local")
 	local.slices[0].branch = "commit-failure-local"
 	if accepted := cli.accept(t, source, writeProposal(t, "", local)); accepted.Status != "accepted" {
@@ -329,7 +335,7 @@ func TestNextCompletionCommitFailureDoesNotClaimUnrelatedLocalWork(t *testing.T)
 	}
 
 	var calls atomic.Int32
-	app, output := completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
+	app, output := fixture.completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		if r.Method != http.MethodGet || r.URL.Path != "/repos/acme/widgets/pulls/21" {
 			t.Errorf("unexpected forge request: %s %s", r.Method, r.URL.Path)
@@ -355,6 +361,7 @@ func TestNextCompletionCommitFailureDoesNotClaimUnrelatedLocalWork(t *testing.T)
 }
 
 func TestNextCompletionUnsafeObservationDoesNotClaimDependency(t *testing.T) {
+	t.Parallel()
 	for _, scenario := range []string{"identity", "state interleave", "report interleave"} {
 		t.Run(scenario, func(t *testing.T) {
 			fixture, source, _ := completionDependencyFixture(t, "unsafe-completion", ledger.ImplementPhase)
@@ -365,7 +372,7 @@ func TestNextCompletionUnsafeObservationDoesNotClaimDependency(t *testing.T) {
 				runGit(t, fixture.clone, "commit", "-q", "-m", "initial blocker report")
 			}
 			var calls atomic.Int32
-			app, output := completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
+			app, output := fixture.completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
 				calls.Add(1)
 				if r.Method != http.MethodGet || r.URL.Path != "/repos/acme/widgets/pulls/21" {
 					t.Errorf("unexpected forge request: %s %s", r.Method, r.URL.Path)
@@ -406,16 +413,17 @@ func TestNextCompletionUnsafeObservationDoesNotClaimDependency(t *testing.T) {
 }
 
 func TestNextCompletionStoppedDispatchSkipsForgeObservation(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	source, _ := deliverySourceRepo(t)
-	cli := newLedgerApp(t, newForgeServer(t))
+	cli := fixture.app(newLedgerApp(t, newForgeServer(t)))
 	dependent := dualSlice("stopped-dependent")
 	dependent.depends = map[string][]string{"feature": {"foundation"}}
 	if accepted := cli.accept(t, source, writeProposal(t, "", dependent)); accepted.Status != "accepted" {
 		t.Fatalf("accept dependent proposal: %s", mustJSON(t, accepted))
 	}
 	var calls atomic.Int32
-	app, output := completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
+	app, output := fixture.completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		_, _ = fmt.Fprint(w, fixturePull("closed", "true", "accepted-head", "merge-head", "acme/widgets", "acme/widgets", "main"))
 	})

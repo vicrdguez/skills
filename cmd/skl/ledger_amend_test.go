@@ -829,9 +829,10 @@ func TestAmendSupersessionLeavesNoActiveSliceBehindIt(t *testing.T) {
 }
 
 func TestAmendSupersedingEverySliceMakesRetirementReachable(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	cli := newLedgerApp(t, newForgeServer(t))
+	cli := fixture.app(newLedgerApp(t, newForgeServer(t)))
 	spec := cleanupSpec("unstarted", "first", "second")
 	spec.depends["second"] = []string{"first"}
 	acceptSpec(t, cli, root, spec)
@@ -840,7 +841,7 @@ func TestAmendSupersedingEverySliceMakesRetirementReachable(t *testing.T) {
 	supersede(t, intake, "first", "second")
 	requireAmended(t, cli.amend(t, root, intake))
 
-	retired := decisionReadOnlyApp(t).decisionJSON(t, "skl", "proposal", "retire", "--project", "widgets", "--proposal", "unstarted", "--format", "json")
+	retired := fixture.app(decisionReadOnlyApp(t)).decisionJSON(t, "skl", "proposal", "retire", "--project", "widgets", "--proposal", "unstarted", "--format", "json")
 	if retired.Status != ledger.DecisionApplied || retired.Retirement == nil || !retired.Retirement.PartialDelivery ||
 		!equalStrings(retired.Retirement.Superseded, []string{"first", "second"}) {
 		t.Fatalf("retirement = %s", mustJSON(t, retired))
@@ -851,9 +852,10 @@ func TestAmendSupersedingEverySliceMakesRetirementReachable(t *testing.T) {
 }
 
 func TestAmendRefusesActiveSliceBehindArchivedSupersededSlice(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	cli := newLedgerApp(t, newForgeServer(t))
+	cli := fixture.app(newLedgerApp(t, newForgeServer(t)))
 	acceptSpec(t, cli, root, cleanupSpec("gone", "old"))
 	live := cleanupSpec("live", "x")
 	live.depends["x"] = []string{"proposals/gone/old"}
@@ -861,10 +863,10 @@ func TestAmendRefusesActiveSliceBehindArchivedSupersededSlice(t *testing.T) {
 	abandoned := exportedIntake(t, cli, root, "gone")
 	supersede(t, abandoned, "old")
 	requireAmended(t, cli.amend(t, root, abandoned))
-	if retired := decisionReadOnlyApp(t).decisionJSON(t, "skl", "proposal", "retire", "--project", "widgets", "--proposal", "gone", "--format", "json"); retired.Status != ledger.DecisionApplied {
+	if retired := fixture.app(decisionReadOnlyApp(t)).decisionJSON(t, "skl", "proposal", "retire", "--project", "widgets", "--proposal", "gone", "--format", "json"); retired.Status != ledger.DecisionApplied {
 		t.Fatalf("setup retirement = %s", mustJSON(t, retired))
 	}
-	outcome := runCleanup(t, offlineForge(t), root)
+	outcome := runCleanup(t, fixture.app(offlineForge(t)), root)
 	if _, archived := archivedNames(outcome)["gone"]; !archived {
 		t.Fatalf("setup did not archive gone: %s", mustJSON(t, outcome))
 	}

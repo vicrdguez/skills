@@ -278,7 +278,8 @@ func TestCleanupArchivesWholeTerminalProposals(t *testing.T) {
 	t.Parallel()
 	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	// Issue publication fails: archival needs no public forge state.
+	// Cleanup starts from committed accepted work; acceptance/publication is
+	// exercised below when checking archived identities and dependencies.
 	unavailable := newForgeServer(t)
 	unavailable.fail = func(string, string) int { return http.StatusServiceUnavailable }
 	accepting := fixture.app(newLedgerApp(t, unavailable))
@@ -288,8 +289,8 @@ func TestCleanupArchivesWholeTerminalProposals(t *testing.T) {
 			t.Fatalf("accept %s: %s", spec.name, mustJSON(t, outcome))
 		}
 	}
-	accept(cleanupSpec("widget", "core", "extra"))
-	accept(cleanupSpec("mixed", "kept", "dropped"))
+	fixture.commitReadyProposal(t, cleanupSpec("widget", "core", "extra"))
+	fixture.commitReadyProposal(t, cleanupSpec("mixed", "kept", "dropped"))
 	others := []struct {
 		name string
 		edit func(*ledger.SliceState)
@@ -306,7 +307,7 @@ func TestCleanupArchivesWholeTerminalProposals(t *testing.T) {
 		{"unknown-state", lifecycle("imaginary")},
 	}
 	for _, other := range others {
-		accept(cleanupSpec(other.name, "done", "other"))
+		fixture.commitReadyProposal(t, cleanupSpec(other.name, "done", "other"))
 		statusRecord(t, fixture.clone, other.name, "done", merged(""))
 		if other.edit != nil {
 			statusRecord(t, fixture.clone, other.name, "other", other.edit)
@@ -314,7 +315,7 @@ func TestCleanupArchivesWholeTerminalProposals(t *testing.T) {
 	}
 	consumer := cleanupSpec("consumer", "uses-widget", "uses-dropped")
 	consumer.depends = map[string][]string{"uses-widget": {"proposals/widget/core"}, "uses-dropped": {"proposals/mixed/dropped"}}
-	accept(consumer)
+	fixture.commitReadyProposal(t, consumer)
 
 	// widget: both slices Merged. Its implementation report changes after a
 	// Watchdog report cited the earlier version by exact commit and path.
@@ -459,12 +460,9 @@ func TestCleanupArchiveFailuresKeepOneCompleteProposal(t *testing.T) {
 	t.Parallel()
 	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	accepting := fixture.app(newLedgerApp(t, newForgeServer(t)))
 	names := []string{"collide", "hooked", "interrupted", "partial", "moded", "dirty", "staged", "renamed", "matching"}
 	for _, name := range names {
-		if outcome := accepting.accept(t, root, writeProposal(t, "", cleanupSpec(name, "only"))); outcome.Status != "accepted" {
-			t.Fatalf("accept %s: %s", name, mustJSON(t, outcome))
-		}
+		fixture.commitReadyProposal(t, cleanupSpec(name, "only"))
 		statusRecord(t, fixture.clone, name, "only", lifecycle(ledger.Superseded))
 	}
 	active := func(name string) string { return "projects/widgets/proposals/" + name }
@@ -772,11 +770,12 @@ func TestLedgerCleanupRemovesMergedSlashedBranch(t *testing.T) {
 }
 
 func TestCompletionObservationDoesNotArchive(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", singleSlice("observed")))
+	fixture.app(newLedgerApp(t, newForgeServer(t))).accept(t, root, writeProposal(t, "", singleSlice("observed")))
 	attachFixture(t, fixture.clone, "observed")
-	app, output := completionStatusApp(t, func(w http.ResponseWriter, _ *http.Request) {
+	app, output := fixture.completionStatusApp(t, func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = fmt.Fprint(w, fixturePull("closed", "true", "cccccccccccccccccccccccccccccccccccccccc", cleanupMergeCommit, "acme/widgets", "acme/widgets", "main"))
 	})
 	if got := runCompletionStatus(t, app, output, root); got.Items[0].State != ledger.Merged || !got.Proposals[0].Retireable {

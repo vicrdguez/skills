@@ -16,11 +16,11 @@ import (
 )
 
 func TestLedgerShowReportsTraversesExactLocalHistoryReadOnly(t *testing.T) {
-	t.Setenv("GIT_TERMINAL_PROMPT", "0")
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	forge := newForgeServer(t)
 	source, target := deliverySourceRepo(t)
-	deliveryAcceptFixture(t, forge, source)
+	fixture.acceptDelivery(t, forge, source)
 	acceptanceHead := deliveryTrimmed(t, fixture.clone, "rev-parse", "HEAD")
 
 	var factoryCalls int
@@ -29,7 +29,7 @@ func TestLedgerShowReportsTraversesExactLocalHistoryReadOnly(t *testing.T) {
 		factoryCalls++
 		return nil, errors.New("forge unavailable in report inspection test")
 	}, bytes.NewReader(nil), &output, &output)
-	cli := ledgerCLI{app: app, out: &output}
+	cli := fixture.app(ledgerCLI{app: app, out: &output})
 
 	// A Work Item is already enough to discover that neither report exists.
 	initialFactoryCalls := factoryCalls
@@ -81,7 +81,7 @@ func TestLedgerShowReportsTraversesExactLocalHistoryReadOnly(t *testing.T) {
 	// that must not disturb the current worker's reservation.
 	later := singleSlice("later-claim")
 	later.slices[0].branch = "later-branch"
-	if got := newLedgerApp(t, forge).accept(t, source, writeProposal(t, "", later)); got.Status != "accepted" {
+	if got := fixture.app(newLedgerApp(t, forge)).accept(t, source, writeProposal(t, "", later)); got.Status != "accepted" {
 		t.Fatalf("accept later Claim item: %s", mustJSON(t, got))
 	}
 	claim, err := cli.deliveryJSON(t, "skl", "implement", "next", "--repo", source, "--format", "json")

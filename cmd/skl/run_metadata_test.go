@@ -37,11 +37,11 @@ func runMetadataApp(t *testing.T) (ledgerCLI, *bytes.Buffer) {
 // ledger clone, a CLI with separate notices, and the source repository.
 func runMetadataSlice(t *testing.T) (fixture *ledgerFixture, cli ledgerCLI, notices *bytes.Buffer, source, target string) {
 	t.Helper()
-	fixture = newLedgerFixture(t)
-	forge := newForgeServer(t)
+	fixture = newPrivateLedgerFixture(t)
 	source, target = deliverySourceRepo(t)
-	deliveryAcceptFixture(t, forge, source)
+	fixture.commitReadyProposal(t, singleSlice(deliveryTestProposal))
 	cli, notices = runMetadataApp(t)
+	cli = fixture.app(cli)
 	return fixture, cli, notices, source, target
 }
 
@@ -53,8 +53,9 @@ func withBuildInfo(t *testing.T, info *debug.BuildInfo) {
 	t.Cleanup(func() { buildInfo = original })
 }
 
-// startRunImplementation claims and prepares implementation and commits one
-// source change, returning the Claim and the head to submit.
+// startRunImplementation claims work and commits the planned source branch.
+// Source preparation is incidental to metadata; delivery_test.go exercises
+// the real linked-worktree lifecycle.
 func startRunImplementation(t *testing.T, cli ledgerCLI, source string) (claim, head string) {
 	t.Helper()
 	started, err := cli.deliveryJSON(t, "skl", "implement", "next", "--repo", source, "--format", "json")
@@ -62,14 +63,9 @@ func startRunImplementation(t *testing.T, cli ledgerCLI, source string) (claim, 
 		t.Fatalf("implement next = %#v, err=%v", started, err)
 	}
 	claim = started.Execution.Claim.Commit
-	prepared, err := cli.deliveryJSON(t, "skl", "implement", "prepare", "--repo", source, "--slice", deliveryTestItem, "--claim", claim, "--format", "json")
-	if err != nil || prepared.Source == nil {
-		t.Fatalf("implement prepare = %#v, err=%v", prepared, err)
-	}
-	writeFile(t, filepath.Join(prepared.Source.Worktree, "change.txt"), "change\n")
-	runGit(t, prepared.Source.Worktree, "add", "change.txt")
-	runGit(t, prepared.Source.Worktree, "commit", "-q", "-m", "change")
-	return claim, deliveryTrimmed(t, prepared.Source.Worktree, "rev-parse", "HEAD")
+	worktree := filepath.Join(source, ".worktrees", deliveryTestBranch)
+	runGit(t, source, "worktree", "add", "-q", "-b", deliveryTestBranch, worktree)
+	return claim, proseCommit(t, worktree, "change.txt", "change\n")
 }
 
 func runFile(t *testing.T, contents string) string {
@@ -240,6 +236,7 @@ func TestRunMetadataProblemsNeverBlockTheHandoff(t *testing.T) {
 }
 
 func TestRunMetadataLeavesAuthoritativeRefusalsInPlace(t *testing.T) {
+	t.Parallel()
 	fixture, cli, _, source, target := runMetadataSlice(t)
 
 	claim, head := startRunImplementation(t, cli, source)
@@ -285,6 +282,7 @@ func TestRunMetadataRetryReturnsTheRecordedReport(t *testing.T) {
 }
 
 func TestSchemaOneReportIsConsumedUnchanged(t *testing.T) {
+	t.Parallel()
 	fixture, cli, _, source, target := runMetadataSlice(t)
 
 	state := deliveryPersistedState(t, fixture.clone)

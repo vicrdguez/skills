@@ -80,9 +80,16 @@ func newPrivateLedgerFixture(t *testing.T) *ledgerFixture {
 // app binds only selection: operations still read and validate real files at
 // their normal read points, including subsequent invocations and wait retries.
 func (f *ledgerFixture) app(cli ledgerCLI) ledgerCLI {
-	privateCLIHelp(cli.app)
-	cli.app.settingsLookup = f.lookup
+	f.bindApp(cli.app)
 	return cli
+}
+
+// bindApp applies the same private selection/help ownership to apps with
+// separate output buffers, including completion and browsing scenarios.
+func (f *ledgerFixture) bindApp(app *stageApp) *stageApp {
+	privateCLIHelp(app)
+	app.settingsLookup = f.lookup
+	return app
 }
 
 func (f *ledgerFixture) lookup(key string) string {
@@ -1380,7 +1387,8 @@ func TestUncertainIssueCreationIsReportedWithoutRetry(t *testing.T) {
 }
 
 func TestParentUncertaintyIsReportedWithoutRecord(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	forge := newForgeServer(t)
 	postCount := 0
@@ -1392,7 +1400,7 @@ func TestParentUncertaintyIsReportedWithoutRecord(t *testing.T) {
 		return postCount == 3 // the parent
 	}
 	directory := writeProposal(t, "", dualSlice("parent-uncertain"))
-	outcome := newLedgerApp(t, forge).accept(t, root, directory,
+	outcome := fixture.app(newLedgerApp(t, forge)).accept(t, root, directory,
 		"--issue=foundation="+writeTemp(t, t, "foundation body\n"),
 		"--issue=feature="+writeTemp(t, t, "feature body\n"),
 		"--parent-body="+writeTemp(t, t, "parent body\n"))
@@ -1409,10 +1417,11 @@ func TestParentUncertaintyIsReportedWithoutRecord(t *testing.T) {
 }
 
 func TestCompetingLedgerHistoryRequiresReconciliation(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	forge := newForgeServer(t)
-	cli := newLedgerApp(t, forge)
+	cli := fixture.app(newLedgerApp(t, forge))
 
 	spec := singleSlice("competing-work")
 	if outcome := cli.accept(t, root, writeProposal(t, "", spec)); outcome.Status != "accepted" {
@@ -1472,10 +1481,11 @@ func TestCompetingLedgerHistoryRequiresReconciliation(t *testing.T) {
 }
 
 func TestDirtyLedgerRefusalPreservesEdits(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	forge := newForgeServer(t)
-	cli := newLedgerApp(t, forge)
+	cli := fixture.app(newLedgerApp(t, forge))
 
 	spec := singleSlice("clean-work")
 	if outcome := cli.accept(t, root, writeProposal(t, "", spec)); outcome.Status != "accepted" {
@@ -1514,10 +1524,11 @@ func TestDirtyLedgerRefusalPreservesEdits(t *testing.T) {
 // Accepted work is delivered only through the private ledger authority.
 
 func TestLedgerWorkUsesPrivateDelivery(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	forge := newForgeServer(t)
-	cli := newLedgerApp(t, forge)
+	cli := fixture.app(newLedgerApp(t, forge))
 
 	if outcome := cli.accept(t, root, writeProposal(t, "", singleSlice("awaiting-delivery"))); outcome.Status != "accepted" {
 		t.Fatalf("acceptance failed: %s", mustJSON(t, outcome))
@@ -1728,10 +1739,11 @@ func TestConcurrentAcceptanceHelper(t *testing.T) {
 }
 
 func TestPublicationBookkeepingPreservesConcurrentStagedWork(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	forge := newForgeServer(t)
-	cli := newLedgerApp(t, forge)
+	cli := fixture.app(newLedgerApp(t, forge))
 	staged := false
 	forge.before = func(method, path string) {
 		if staged || method != http.MethodPost || path != "/repos/acme/widgets/issues" {
@@ -1776,9 +1788,10 @@ func TestPublicationBookkeepingPreservesConcurrentStagedWork(t *testing.T) {
 }
 
 func TestLedgerShowUsesOneCommittedRecord(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	cli := newLedgerApp(t, newForgeServer(t))
+	cli := fixture.app(newLedgerApp(t, newForgeServer(t)))
 	if outcome := cli.accept(t, root, writeProposal(t, "", singleSlice("committed-readback"))); outcome.Status != "accepted" {
 		t.Fatalf("acceptance failed: %s", mustJSON(t, outcome))
 	}
@@ -1797,10 +1810,11 @@ func TestLedgerShowUsesOneCommittedRecord(t *testing.T) {
 }
 
 func TestLedgerPushUsesCurrentBranchForTrackedDestination(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	runGit(t, fixture.clone, "switch", "-q", "-c", "local-ledger", "--track", "origin/main")
 	root := sourceRepository(t, "acme", "widgets")
-	outcome := newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", singleSlice("tracked-destination")))
+	outcome := fixture.app(newLedgerApp(t, newForgeServer(t))).accept(t, root, writeProposal(t, "", singleSlice("tracked-destination")))
 	if outcome.Status != "accepted" || outcome.Acceptance.Slices[0].PushStatus.Status != ledger.PushPushed {
 		t.Fatalf("tracked destination was not pushed honestly: %s", mustJSON(t, outcome))
 	}
@@ -1812,7 +1826,8 @@ func TestLedgerPushUsesCurrentBranchForTrackedDestination(t *testing.T) {
 }
 
 func TestLaterPublicationCompletesCurrentParentGrouping(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	forge := newForgeServer(t)
 	creates := 0
@@ -1829,7 +1844,7 @@ func TestLaterPublicationCompletesCurrentParentGrouping(t *testing.T) {
 		return 0
 	}
 	directory := writeProposal(t, "", dualSlice("grouping-retry"))
-	cli := newLedgerApp(t, forge)
+	cli := fixture.app(newLedgerApp(t, forge))
 	first := cli.accept(t, root, directory,
 		"--issue=foundation="+writeTemp(t, t, "foundation body\n"),
 		"--issue=feature="+writeTemp(t, t, "feature body\n"),
@@ -1889,13 +1904,14 @@ func TestLaterPublicationCompletesCurrentParentGrouping(t *testing.T) {
 }
 
 func TestFreshPublicationDoesNotAdoptPreexistingMatch(t *testing.T) {
-	newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	forge := newForgeServer(t)
 	forge.list = append(forge.list, map[string]any{
 		"id": 1777, "number": 777, "state": "open", "title": "Add foundation", "body": "same body\n",
 	})
-	outcome := newLedgerApp(t, forge).accept(t, root, writeProposal(t, "", singleSlice("fresh-publication")), issueFile(t, "foundation", "same body\n"))
+	outcome := fixture.app(newLedgerApp(t, forge)).accept(t, root, writeProposal(t, "", singleSlice("fresh-publication")), issueFile(t, "foundation", "same body\n"))
 	issue := outcome.Acceptance.Slices[0].Issue
 	if issue == nil || issue.Number == 777 || forge.createdCount() != 1 {
 		t.Fatalf("fresh publication adopted a pre-existing forge record: %s", mustJSON(t, outcome))
@@ -1903,7 +1919,8 @@ func TestFreshPublicationDoesNotAdoptPreexistingMatch(t *testing.T) {
 }
 
 func TestPushRaceRequiresReconciliation(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	competitor := filepath.Join(t.TempDir(), "competitor")
 	runGit(t, t.TempDir(), "clone", "-q", fixture.upstream, competitor)
@@ -1918,7 +1935,7 @@ func TestPushRaceRequiresReconciliation(t *testing.T) {
 	if err := os.Chmod(hook, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	outcome := newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", singleSlice("push-race")))
+	outcome := fixture.app(newLedgerApp(t, newForgeServer(t))).accept(t, root, writeProposal(t, "", singleSlice("push-race")))
 	if outcome.Acceptance.Slices[0].PushStatus.Status != ledger.PushReconciliation {
 		t.Fatalf("push race was misclassified: %s", mustJSON(t, outcome))
 	}
@@ -1932,7 +1949,8 @@ func TestPushRaceRequiresReconciliation(t *testing.T) {
 }
 
 func TestSuccessfulPushDescendantStillContainsAcceptedRevision(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	hook := filepath.Join(fixture.upstream, "hooks", "post-receive")
 	script := fmt.Sprintf(`#!/bin/sh
@@ -1946,7 +1964,7 @@ git --git-dir=%q update-ref "$ref" "$competing" "$new"
 	if err := os.Chmod(hook, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	outcome := newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", singleSlice("post-push-race")), issueFile(t, "foundation", "body\n"))
+	outcome := fixture.app(newLedgerApp(t, newForgeServer(t))).accept(t, root, writeProposal(t, "", singleSlice("post-push-race")), issueFile(t, "foundation", "body\n"))
 	push := outcome.Acceptance.Slices[0].PushStatus
 	if push.Status != ledger.PushPushed {
 		t.Fatalf("remote descendant containing the accepted revision was not counted as replicated: %s", mustJSON(t, outcome))
@@ -1961,7 +1979,8 @@ git --git-dir=%q update-ref "$ref" "$competing" "$new"
 }
 
 func TestBookkeepingPushRaceIsDurablyReconciliationRequired(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	competitor := filepath.Join(t.TempDir(), "competitor")
 	runGit(t, t.TempDir(), "clone", "-q", fixture.upstream, competitor)
@@ -1987,7 +2006,7 @@ rm -f "$0"
 	if err := os.Chmod(hook, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	outcome := newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", singleSlice("bookkeeping-race")), issueFile(t, "foundation", "body\n"))
+	outcome := fixture.app(newLedgerApp(t, newForgeServer(t))).accept(t, root, writeProposal(t, "", singleSlice("bookkeeping-race")), issueFile(t, "foundation", "body\n"))
 	push := outcome.Acceptance.Slices[0].PushStatus
 	if push == nil || push.Status != ledger.PushPushed || !strings.Contains(push.Detail, ledger.PushReconciliation) {
 		t.Fatalf("bookkeeping race was not reported distinctly from accepted-record replication: %s", mustJSON(t, outcome))
@@ -1999,35 +2018,36 @@ rm -f "$0"
 }
 
 func TestMalformedDocumentsAndGitInvalidBranchAreRefusedWhole(t *testing.T) {
+	t.Parallel()
 	t.Run("configuration trailing value", func(t *testing.T) {
-		fixture := newLedgerFixture(t)
+		fixture := newPrivateLedgerFixture(t)
 		root := sourceRepository(t, "acme", "widgets")
 		fixture.misconfigure(t, `{"ledger":"`+fixture.clone+`"} trailing`)
 		before := ledgerSnapshot(t, fixture.clone)
-		outcome := newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", singleSlice("bad-config")))
+		outcome := fixture.app(newLedgerApp(t, newForgeServer(t))).accept(t, root, writeProposal(t, "", singleSlice("bad-config")))
 		if outcome.Status != "fix_required" || !strings.Contains(outcome.Reason, "malformed") || ledgerSnapshot(t, fixture.clone) != before {
 			t.Fatalf("trailing configuration was accepted: %s", mustJSON(t, outcome))
 		}
 	})
 	t.Run("declaration trailing value", func(t *testing.T) {
-		fixture := newLedgerFixture(t)
+		fixture := newPrivateLedgerFixture(t)
 		root := sourceRepository(t, "acme", "widgets")
 		directory := writeProposal(t, "", singleSlice("bad-declaration"))
 		path := filepath.Join(directory, "proposal.json")
 		writeFile(t, path, readFileString(t, path)+` {"extra":true}`)
 		before := ledgerSnapshot(t, fixture.clone)
-		outcome := newLedgerApp(t, newForgeServer(t)).accept(t, root, directory)
+		outcome := fixture.app(newLedgerApp(t, newForgeServer(t))).accept(t, root, directory)
 		if outcome.Status != "fix_required" || !strings.Contains(outcome.Reason, "malformed") || ledgerSnapshot(t, fixture.clone) != before {
 			t.Fatalf("trailing declaration was accepted: %s", mustJSON(t, outcome))
 		}
 	})
 	t.Run("Git-invalid branch", func(t *testing.T) {
-		fixture := newLedgerFixture(t)
+		fixture := newPrivateLedgerFixture(t)
 		root := sourceRepository(t, "acme", "widgets")
 		spec := singleSlice("bad-branch")
 		spec.slices[0].branch = "bad."
 		before := ledgerSnapshot(t, fixture.clone)
-		outcome := newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", spec))
+		outcome := fixture.app(newLedgerApp(t, newForgeServer(t))).accept(t, root, writeProposal(t, "", spec))
 		if outcome.Status != "fix_required" || !strings.Contains(outcome.Reason, "invalid planned branch") || ledgerSnapshot(t, fixture.clone) != before {
 			t.Fatalf("Git-invalid branch was accepted: %s", mustJSON(t, outcome))
 		}
@@ -2070,10 +2090,11 @@ func decodeRecord(t *testing.T, contents string) map[string]any {
 }
 
 func TestExplicitPublicationAfterInterruptedAttemptAndLocalProgress(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	forge := newForgeServer(t)
-	cli := newLedgerApp(t, forge)
+	cli := fixture.app(newLedgerApp(t, forge))
 	if outcome := cli.accept(t, root, writeProposal(t, "", dualSlice("interrupted-work"))); outcome.Status != "accepted" {
 		t.Fatalf("acceptance failed: %s", mustJSON(t, outcome))
 	}
@@ -2156,11 +2177,12 @@ func TestExplicitPublicationAfterInterruptedAttemptAndLocalProgress(t *testing.T
 }
 
 func TestPublicationReportsSupersededAndConflictingAttachments(t *testing.T) {
+	t.Parallel()
 	t.Run("superseded selection", func(t *testing.T) {
-		fixture := newLedgerFixture(t)
+		fixture := newPrivateLedgerFixture(t)
 		root := sourceRepository(t, "acme", "widgets")
 		forge := newForgeServer(t)
-		cli := newLedgerApp(t, forge)
+		cli := fixture.app(newLedgerApp(t, forge))
 		cli.accept(t, root, writeProposal(t, "", dualSlice("superseded-work")))
 		featurePath := "projects/widgets/proposals/superseded-work/foundation/state.json"
 		// While the first slice is being created, another local writer
@@ -2195,10 +2217,10 @@ func TestPublicationReportsSupersededAndConflictingAttachments(t *testing.T) {
 	})
 
 	t.Run("conflicting attachment", func(t *testing.T) {
-		fixture := newLedgerFixture(t)
+		fixture := newPrivateLedgerFixture(t)
 		root := sourceRepository(t, "acme", "widgets")
 		forge := newForgeServer(t)
-		cli := newLedgerApp(t, forge)
+		cli := fixture.app(newLedgerApp(t, forge))
 		cli.accept(t, root, writeProposal(t, "", singleSlice("conflicting-work")))
 		statePath := "projects/widgets/proposals/conflicting-work/foundation/state.json"
 		forge.before = func(method, path string) {
@@ -2234,6 +2256,7 @@ func publishedSlice(t *testing.T, outcome *ledger.Acceptance, name string) *ledg
 }
 
 func TestGroupingRevalidatesSelectedRecords(t *testing.T) {
+	t.Parallel()
 	const proposalPath = "projects/widgets/proposals/group-check/"
 	clearIssue := func(slice string, issue any) func(t *testing.T, clone string) string {
 		return func(t *testing.T, clone string) string {
@@ -2273,10 +2296,10 @@ func TestGroupingRevalidatesSelectedRecords(t *testing.T) {
 		}, []string{"feature", "foundation"}, ledger.IssueFailed},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			fixture := newLedgerFixture(t)
+			fixture := newPrivateLedgerFixture(t)
 			root := sourceRepository(t, "acme", "widgets")
 			forge := newForgeServer(t)
-			cli := newLedgerApp(t, forge)
+			cli := fixture.app(newLedgerApp(t, forge))
 			accepted := cli.accept(t, root, writeProposal(t, "", dualSlice("group-check")),
 				issueFile(t, "feature", "feature\n"), issueFile(t, "foundation", "foundation\n"), "--parent-body="+writeTemp(t, t, "parent\n"))
 			if accepted.Acceptance == nil || accepted.Acceptance.ParentIssue == nil {
@@ -2321,10 +2344,10 @@ func TestGroupingRevalidatesSelectedRecords(t *testing.T) {
 	}
 
 	t.Run("new child superseded before grouping", func(t *testing.T) {
-		fixture := newLedgerFixture(t)
+		fixture := newPrivateLedgerFixture(t)
 		root := sourceRepository(t, "acme", "widgets")
 		forge := newForgeServer(t)
-		cli := newLedgerApp(t, forge)
+		cli := fixture.app(newLedgerApp(t, forge))
 		accepted := cli.accept(t, root, writeProposal(t, "", dualSlice("new-child-check")),
 			issueFile(t, "foundation", "foundation\n"), "--parent-body="+writeTemp(t, t, "parent\n"))
 		if accepted.Acceptance == nil || accepted.Acceptance.ParentIssue == nil {
@@ -2362,10 +2385,11 @@ func TestGroupingRevalidatesSelectedRecords(t *testing.T) {
 }
 
 func TestUpdateRetryStopsAfterSupersession(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	forge := newForgeServer(t)
-	cli := newLedgerApp(t, forge)
+	cli := fixture.app(newLedgerApp(t, forge))
 	accepted := cli.accept(t, root, writeProposal(t, "", singleSlice("retry-check")), issueFile(t, "foundation", "original\n"))
 	if accepted.Acceptance == nil || accepted.Acceptance.Slices[0].Issue == nil {
 		t.Fatalf("setup acceptance did not attach an issue: %s", mustJSON(t, accepted))
@@ -2405,12 +2429,13 @@ func TestUpdateRetryStopsAfterSupersession(t *testing.T) {
 }
 
 func TestPublicationRefusesAttachmentsOfAnotherRepository(t *testing.T) {
+	t.Parallel()
 	foreignIssue := map[string]any{"repository": "other/repository", "number": 777}
 	t.Run("issue and parent", func(t *testing.T) {
-		fixture := newLedgerFixture(t)
+		fixture := newPrivateLedgerFixture(t)
 		root := sourceRepository(t, "acme", "widgets")
 		forge := newForgeServer(t)
-		cli := newLedgerApp(t, forge)
+		cli := fixture.app(newLedgerApp(t, forge))
 		cli.accept(t, root, writeProposal(t, "", dualSlice("identity-check")))
 		proposalPath := "projects/widgets/proposals/identity-check/"
 		record := decodeRecord(t, readLedgerFile(t, fixture.clone, proposalPath+"foundation/state.json"))
@@ -2454,10 +2479,10 @@ func TestPublicationRefusesAttachmentsOfAnotherRepository(t *testing.T) {
 	})
 
 	t.Run("grouped child", func(t *testing.T) {
-		fixture := newLedgerFixture(t)
+		fixture := newPrivateLedgerFixture(t)
 		root := sourceRepository(t, "acme", "widgets")
 		forge := newForgeServer(t)
-		cli := newLedgerApp(t, forge)
+		cli := fixture.app(newLedgerApp(t, forge))
 		accepted := cli.accept(t, root, writeProposal(t, "", dualSlice("child-identity")),
 			issueFile(t, "feature", "feature\n"), issueFile(t, "foundation", "foundation\n"), "--parent-body="+writeTemp(t, t, "parent\n"))
 		parent := accepted.Acceptance.ParentIssue.Number
@@ -2483,14 +2508,15 @@ func TestPublicationRefusesAttachmentsOfAnotherRepository(t *testing.T) {
 }
 
 func TestMissingProseGuidesFreshAuthoring(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	// A fork checkout selects the upstream Project explicitly; every pointer
 	// must keep that selection rather than fall back to origin.
 	root := sourceRepository(t, "acme", "widgets")
 	runGit(t, root, "remote", "rename", "origin", "upstream")
 	runGit(t, root, "remote", "add", "origin", "git@github.com:other/widgets.git")
 	forge := newForgeServer(t)
-	cli := newLedgerApp(t, forge)
+	cli := fixture.app(newLedgerApp(t, forge))
 	outcome := cli.accept(t, root, writeProposal(t, "", dualSlice("lost-prose")), "--remote", "upstream")
 	if outcome.Status != "accepted" || forge.createdCount() != 0 {
 		t.Fatalf("acceptance without prose published or failed: %s", mustJSON(t, outcome))
@@ -2585,10 +2611,11 @@ func TestMissingProseGuidesFreshAuthoring(t *testing.T) {
 }
 
 func TestExplicitPublicationRefusesUnselectableInputs(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	forge := newForgeServer(t)
-	cli := newLedgerApp(t, forge)
+	cli := fixture.app(newLedgerApp(t, forge))
 	cli.accept(t, root, writeProposal(t, "", singleSlice("selected-work")))
 	head := strings.TrimSpace(runGitOutput(t, fixture.clone, "rev-parse", "HEAD"))
 	for _, tc := range []struct {
