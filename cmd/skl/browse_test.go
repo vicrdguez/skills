@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -17,7 +16,7 @@ import (
 // clone and pushes them, so any later push or commit would be observable.
 func browseFixture(t *testing.T) *ledgerFixture {
 	t.Helper()
-	fixture := newLedgerFixture(t)
+	fixture := newPrivateLedgerFixture(t)
 	records := map[string]string{
 		"projects/widgets/project.json":                   `{"repository": "acme/widgets"}`,
 		"projects/widgets/proposals/orders/proposal.json": `{"accepted": "2024-01-01T00:00:00Z", "parent_title": "Order cancellation"}`,
@@ -69,8 +68,10 @@ func browseQuery(t *testing.T, app *stageApp, output *bytes.Buffer, args ...stri
 }
 
 func TestBrowseQueriesReadCommittedRecordsWithoutSideEffects(t *testing.T) {
+	t.Parallel()
 	fixture := browseFixture(t)
 	app, output := browseApp(t)
+	fixture.bindApp(app)
 	clone, upstream := ledgerSnapshot(t, fixture.clone), runGitOutput(t, fixture.upstream, "for-each-ref")
 
 	projects := browseQuery(t, app, output, "projects")
@@ -118,11 +119,13 @@ func TestBrowseQueriesReadCommittedRecordsWithoutSideEffects(t *testing.T) {
 }
 
 func TestBrowseProposalShowsRecordedBranchAndLegacyAbsence(t *testing.T) {
+	t.Parallel()
 	fixture := browseFixture(t)
 	writeFile(t, filepath.Join(fixture.clone, "projects/widgets/proposals/orders/proposal.json"), `{"accepted":"2024-01-01T00:00:00Z","branch":"proposal/orders"}`)
 	runGit(t, fixture.clone, "add", "-A")
 	runGit(t, fixture.clone, "commit", "-q", "-m", "record proposal branch")
 	app, output := browseApp(t)
+	fixture.bindApp(app)
 	for _, tc := range []struct{ name, branch, text string }{
 		{"orders", "proposal/orders", "Proposal Branch: proposal/orders"},
 		{"legacy", "", "Proposal Branch: none"},
@@ -142,12 +145,14 @@ func TestBrowseProposalShowsRecordedBranchAndLegacyAbsence(t *testing.T) {
 }
 
 func TestBrowseCLISelectsArchivedLocationWhenNamesCollide(t *testing.T) {
+	t.Parallel()
 	fixture := browseFixture(t)
 	writeFile(t, filepath.Join(fixture.clone, "projects/widgets/archive/orders/proposal.json"), `{"accepted":"2023-01-01T00:00:00Z"}`)
 	writeFile(t, filepath.Join(fixture.clone, "projects/widgets/archive/orders/cancel/state.json"), `{"state":"merged","title":"Archived cancellation","branch":"old-cancel"}`)
 	runGit(t, fixture.clone, "add", "-A")
 	runGit(t, fixture.clone, "commit", "-q", "-m", "archived collision")
 	app, output := browseApp(t)
+	fixture.bindApp(app)
 	found := browseQuery(t, app, output, "slices", "--include-archived", "--search", "Archived cancellation")
 	if found.Slices.Matched != 1 || !found.Slices.Projects[0].Groups[0].Slices[0].Archived {
 		t.Fatalf("archive selection = %+v", found.Slices)
@@ -164,8 +169,10 @@ func TestBrowseCLISelectsArchivedLocationWhenNamesCollide(t *testing.T) {
 }
 
 func TestBrowseSlicesSelectsByIndependentFacts(t *testing.T) {
+	t.Parallel()
 	fixture := browseFixture(t)
 	app, output := browseApp(t)
+	fixture.bindApp(app)
 	clone := ledgerSnapshot(t, fixture.clone)
 	found := func(outcome browseOutcome) string {
 		t.Helper()
@@ -240,7 +247,8 @@ func TestBrowseSlicesSelectsByIndependentFacts(t *testing.T) {
 }
 
 func TestBrowseStartupSelection(t *testing.T) {
-	browseFixture(t)
+	t.Parallel()
+	fixture := browseFixture(t)
 	widgets := sourceRepository(t, "acme", "widgets")
 	unregistered := sourceRepository(t, "acme", "other")
 	ambiguous := sourceRepository(t, "acme", "widgets")
@@ -249,7 +257,7 @@ func TestBrowseStartupSelection(t *testing.T) {
 
 	view := func(explicit string, explicitSet bool, location string) tea.Model {
 		t.Helper()
-		model, err := startBrowser(os.Getenv, explicit, explicitSet, location)
+		model, err := startBrowser(fixture.lookup, explicit, explicitSet, location)
 		if err != nil {
 			t.Fatalf("start browser at %s: %v", location, err)
 		}
@@ -277,10 +285,11 @@ func TestBrowseStartupSelection(t *testing.T) {
 	shows(view("", false, unregistered), "Projects (2)", "no Project records acme/other")
 	shows(view("", false, ambiguous), "Projects (2)", "identifies no single GitHub repository")
 
-	if _, err := startBrowser(os.Getenv, "nope", true, widgets); err == nil || !strings.Contains(err.Error(), `unknown Project "nope"`) {
+	if _, err := startBrowser(fixture.lookup, "nope", true, widgets); err == nil || !strings.Contains(err.Error(), `unknown Project "nope"`) {
 		t.Fatalf("invalid explicit selection = %v", err)
 	}
 	app, output := browseApp(t)
+	fixture.bindApp(app)
 	if err := app.Run([]string{"skl", "browse", "--project", ""}); err == nil {
 		t.Fatalf("an empty explicit selection started browsing: %s", output)
 	}

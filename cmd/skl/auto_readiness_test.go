@@ -1,6 +1,7 @@
 package main
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -18,9 +19,45 @@ func (f *autoMergeFixture) pollReadiness(t *testing.T) deliveryOutput {
 	return out
 }
 
+// newReadinessFixture arranges real committed source/report history at the
+// recovery boundary. The Auto Mode lifecycle itself remains in auto_merge_test.go.
+func newReadinessFixture(t *testing.T) *autoMergeFixture {
+	t.Helper()
+	fixture := newPrivateLedgerFixture(t)
+	source, target := deliverySourceRepo(t)
+	bare := routeSourcePushes(t, source)
+	runGit(t, source, "push", "-q", "origin", "main", "main:refs/heads/"+autoMergeBranch)
+	fixture.commitReadyProposal(t, singleSlice(deliveryTestProposal))
+	path := filepath.Join(fixture.clone, "projects/widgets/proposals", deliveryTestProposal, "proposal.json")
+	meta := ledger.ProposalMeta{
+		Accepted: "2026-01-01T00:00:00Z", Branch: autoMergeBranch,
+		Target: &ledger.IntegrationTarget{Repository: "acme/widgets", Branch: autoMergeBranch},
+	}
+	writeFile(t, path, mustJSON(t, meta))
+	runGit(t, fixture.clone, "add", path)
+	runGit(t, fixture.clone, "commit", "-q", "-m", "open readiness Proposal Branch")
+	fixture.commitReviewClaim(t, autoMergeBranch)
+	fixture.commitAwaitingReview(t, source, target)
+	worktree := filepath.Join(source, ".worktrees", deliveryTestBranch)
+	runGit(t, source, "worktree", "add", "-q", worktree, deliveryTestBranch)
+	runGit(t, source, "push", "-q", "origin", deliveryTestBranch)
+	state := deliveryPersistedState(t, fixture.clone)
+	state.Submission = &ledger.ForgeAttachment{Repository: "acme/widgets", Number: 21}
+	deliveryCommitState(t, fixture.clone, state)
+	pulls := newPullServer(t, bare)
+	pulls.pulls[21] = map[string]any{
+		"branch": deliveryTestBranch, "base": autoMergeBranch,
+		"body": "Earlier implementation account", "title": "Implementation ready for review", "draft": true,
+	}
+	return &autoMergeFixture{
+		ledger: fixture, clone: fixture.clone, source: source, bare: bare,
+		pulls: pulls, cli: fixture.app(presentForgeApp(t, pulls)),
+	}
+}
+
 func TestAutoReadinessFreshPollRecoversDraftWithoutRepublishingProse(t *testing.T) {
 	t.Parallel()
-	f := newAutoMergeFixture(t, true)
+	f := newReadinessFixture(t)
 	passed := f.pass(t, false, false)
 	number := passed.Result.State.Submission.Number
 	f.pulls.mu.Lock()
@@ -64,7 +101,7 @@ func TestAutoReadinessFreshPollRecoversDraftWithoutRepublishingProse(t *testing.
 
 func TestAutoReadinessMissingAssociationRequiresExplicitRecovery(t *testing.T) {
 	t.Parallel()
-	f := newAutoMergeFixture(t, true)
+	f := newReadinessFixture(t)
 	f.pass(t, false, false)
 	state := deliveryPersistedState(t, f.clone)
 	state.Submission = nil
@@ -89,7 +126,7 @@ func TestAutoReadinessMissingAssociationRequiresExplicitRecovery(t *testing.T) {
 
 func TestAutoReadinessUncertainReadbackWaitsForALaterFreshPoll(t *testing.T) {
 	t.Parallel()
-	f := newAutoMergeFixture(t, true)
+	f := newReadinessFixture(t)
 	passed := f.pass(t, false, false)
 	f.pulls.mu.Lock()
 	f.pulls.failAfterReady = true
@@ -112,7 +149,7 @@ func TestAutoReadinessUncertainReadbackWaitsForALaterFreshPoll(t *testing.T) {
 
 func TestAutoReadinessRefusesRealSourceMovementDespiteExactAPIHead(t *testing.T) {
 	t.Parallel()
-	f := newAutoMergeFixture(t, true)
+	f := newReadinessFixture(t)
 	passed := f.pass(t, false, false)
 	approved := f.branchHead(t, deliveryTestBranch)
 	moved := deliveryTrimmed(t, f.bare, "-c", "user.name=Human", "-c", "user.email=human@example.com", "commit-tree", approved+"^{tree}", "-p", approved, "-m", "external move")
@@ -131,7 +168,7 @@ func TestAutoReadinessRefusesRealSourceMovementDespiteExactAPIHead(t *testing.T)
 
 func TestAutoReadinessUsesFinalIntegrationHeadNotReviewedImplementation(t *testing.T) {
 	t.Parallel()
-	f := newAutoMergeFixture(t, true)
+	f := newReadinessFixture(t)
 	implementation := f.branchHead(t, deliveryTestBranch)
 	base := f.branchHead(t, autoMergeBranch)
 	moved := deliveryTrimmed(t, f.bare, "-c", "user.name=Sibling", "-c", "user.email=sibling@example.com", "commit-tree", base+"^{tree}", "-p", base, "-m", "sibling")

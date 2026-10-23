@@ -42,7 +42,7 @@ func fixturePull(state, merged, head, merge, sourceRepo, targetRepo, targetBranc
 	return fmt.Sprintf(`{"number":21,"state":%q,"merged":%s,"merged_at":%s,"merge_commit_sha":%q,"head":{"ref":"foundation","sha":%q,"repo":{"full_name":%q}},"base":{"ref":%q,"repo":{"full_name":%q}}}`, state, merged, mergedAt, merge, head, sourceRepo, targetBranch, targetRepo)
 }
 
-func completionStatusApp(t *testing.T, response func(http.ResponseWriter, *http.Request)) (*stageApp, *bytes.Buffer) {
+func (f *ledgerFixture) completionStatusApp(t *testing.T, response func(http.ResponseWriter, *http.Request)) (*stageApp, *bytes.Buffer) {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(response))
 	t.Cleanup(server.Close)
@@ -52,7 +52,7 @@ func completionStatusApp(t *testing.T, response func(http.ResponseWriter, *http.
 		backend.BindRepository(repository)
 		return backend, nil
 	}, bytes.NewReader(nil), &output, &output)
-	return app, &output
+	return f.bindApp(app), &output
 }
 
 func runCompletionStatus(t *testing.T, app *stageApp, output *bytes.Buffer, repo string, options ...string) ledgerStatusOutcome {
@@ -79,11 +79,12 @@ func attachFixture(t *testing.T, clone, proposal string) {
 }
 
 func TestLedgerReconcileConfirmsExactMergeAndOfflineDependency(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	proposal := dualSlice("completion")
 	proposal.depends = map[string][]string{"feature": {"foundation"}}
-	if outcome := newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", proposal)); outcome.Status != "accepted" {
+	if outcome := fixture.app(newLedgerApp(t, newForgeServer(t))).accept(t, root, writeProposal(t, "", proposal)); outcome.Status != "accepted" {
 		t.Fatalf("accept: %s", mustJSON(t, outcome))
 	}
 	attachFixture(t, fixture.clone, "completion")
@@ -94,7 +95,7 @@ func TestLedgerReconcileConfirmsExactMergeAndOfflineDependency(t *testing.T) {
 	}
 	beforeSource := ledgerSnapshot(t, root)
 	requests := 0
-	app, output := completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
+	app, output := fixture.completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
 		requests++
 		if r.Method != "GET" || r.URL.Path != "/repos/acme/widgets/pulls/21" {
 			t.Errorf("unbounded forge request: %s %s", r.Method, r.URL.Path)
@@ -115,7 +116,7 @@ func TestLedgerReconcileConfirmsExactMergeAndOfflineDependency(t *testing.T) {
 	if second.Items[1].State != ledger.Merged || second.Items[0].Dependencies[0].State != ledger.Merged || requests != 1 || second.Proposals[0].FullyDelivered {
 		t.Fatalf("offline status or parent account: %+v", second)
 	}
-	selection := newLedgerApp(t, newForgeServer(t))
+	selection := fixture.app(newLedgerApp(t, newForgeServer(t)))
 	selection.out.Reset()
 	if err := selection.app.Run([]string{"skl", "implement", "next", "--repo", root, "--format", "json"}); err != nil || !strings.Contains(selection.out.String(), `"work_available"`) || !strings.Contains(selection.out.String(), "completion/feature") {
 		t.Fatalf("confirmed Merged blocker did not enable selection: %v %s", err, selection.out.String())
@@ -123,9 +124,10 @@ func TestLedgerReconcileConfirmsExactMergeAndOfflineDependency(t *testing.T) {
 }
 
 func TestLedgerReconcileSquashMergeRetainsReviewedInputsWithoutSourceObjects(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", singleSlice("history")))
+	fixture.app(newLedgerApp(t, newForgeServer(t))).accept(t, root, writeProposal(t, "", singleSlice("history")))
 	attachFixture(t, fixture.clone, "history")
 	const reviewed = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	const integratedTarget = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -167,7 +169,7 @@ func TestLedgerReconcileSquashMergeRetainsReviewedInputsWithoutSourceObjects(t *
 	writeFile(t, filepath.Join(fixture.clone, watchdogPath), string(watchdog))
 	runGit(t, fixture.clone, "add", watchdogPath)
 	runGit(t, fixture.clone, "commit", "-q", "-m", "watchdog fixture")
-	app, output := completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
+	app, output := fixture.completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprint(w, fixturePull("closed", "true", accepted, squash, "acme/widgets", "acme/widgets", "main"))
 	})
 	got := runCompletionStatus(t, app, output, root, "--slice", "history/foundation")
@@ -191,6 +193,7 @@ func TestLedgerReconcileSquashMergeRetainsReviewedInputsWithoutSourceObjects(t *
 }
 
 func TestLedgerReconcileUnmergedClosureAndUnknownIdentityCannotSatisfyBlocker(t *testing.T) {
+	t.Parallel()
 	for _, scenario := range []struct {
 		name, state, merged, head, sourceRepo, targetRepo, base, expected string
 	}{
@@ -204,13 +207,13 @@ func TestLedgerReconcileUnmergedClosureAndUnknownIdentityCannotSatisfyBlocker(t 
 		{"different number", "closed", "true", "human-head", "acme/widgets", "acme/widgets", "main", ledger.ReadyForMerge},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
-			fixture := newLedgerFixture(t)
+			fixture := newPrivateLedgerFixture(t)
 			root := sourceRepository(t, "acme", "widgets")
 			proposal := dualSlice("candidate")
 			proposal.depends = map[string][]string{"feature": {"foundation"}}
-			newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", proposal))
+			fixture.app(newLedgerApp(t, newForgeServer(t))).accept(t, root, writeProposal(t, "", proposal))
 			attachFixture(t, fixture.clone, "candidate")
-			app, output := completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
+			app, output := fixture.completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path != "/repos/acme/widgets/pulls/21" || r.Method != "GET" {
 					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 				}
@@ -224,7 +227,7 @@ func TestLedgerReconcileUnmergedClosureAndUnknownIdentityCannotSatisfyBlocker(t 
 			if got.Items[0].State != scenario.expected || (scenario.expected == ledger.ReadyForMerge) != (got.Items[0].Observation != "") {
 				t.Fatalf("incorrect terminal verdict for %s: %+v", scenario.name, got)
 			}
-			selection := newLedgerApp(t, newForgeServer(t))
+			selection := fixture.app(newLedgerApp(t, newForgeServer(t)))
 			selection.out.Reset()
 			if err := selection.app.Run([]string{"skl", "implement", "next", "--repo", root, "--format", "json"}); err != nil || strings.Contains(selection.out.String(), `"work_available"`) {
 				t.Fatalf("unmerged or uncertain blocker enabled dependent: %v %s", err, selection.out.String())
@@ -234,9 +237,10 @@ func TestLedgerReconcileUnmergedClosureAndUnknownIdentityCannotSatisfyBlocker(t 
 }
 
 func TestLedgerReconcileStaleSelectedClaimAndReportsRefusedWithoutRequeue(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", singleSlice("race")))
+	fixture.app(newLedgerApp(t, newForgeServer(t))).accept(t, root, writeProposal(t, "", singleSlice("race")))
 	attachFixture(t, fixture.clone, "race")
 	// A completed review and a new Claim are orthogonal to the terminal fact.
 	original := "review evidence\n"
@@ -244,7 +248,7 @@ func TestLedgerReconcileStaleSelectedClaimAndReportsRefusedWithoutRequeue(t *tes
 	writeFile(t, filepath.Join(fixture.clone, reportPath), original)
 	runGit(t, fixture.clone, "add", reportPath)
 	runGit(t, fixture.clone, "commit", "-q", "-m", "review fixture")
-	app, output := completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
+	app, output := fixture.completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
 		statusRecord(t, fixture.clone, "race", "foundation", func(state *ledger.SliceState) {
 			state.Claim = &ledger.Claim{Phase: ledger.ImplementPhase, Basis: "later-claim"}
 		})
@@ -256,7 +260,7 @@ func TestLedgerReconcileStaleSelectedClaimAndReportsRefusedWithoutRequeue(t *tes
 	}
 	// Now observe against current preconditions; recording external completion
 	// does not clear that Claim or rewrite the report.
-	secondApp, secondOutput := completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
+	secondApp, secondOutput := fixture.completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprint(w, fixturePull("closed", "true", "human-head", "merge-head", "acme/widgets", "acme/widgets", "main"))
 	})
 	second := runCompletionStatus(t, secondApp, secondOutput, root, "--slice", "race/foundation")
@@ -273,6 +277,7 @@ func TestLedgerReconcileStaleSelectedClaimAndReportsRefusedWithoutRequeue(t *tes
 // An externally completed item can retain a real acquisition Claim. Release is
 // explicit recovery, not another phase handoff or a return to worker selection.
 func TestLedgerReconcileTerminalClaimExplicitRelease(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, merged, terminal string
 		fullyDelivered         bool
@@ -281,9 +286,9 @@ func TestLedgerReconcileTerminalClaimExplicitRelease(t *testing.T) {
 		{"closed unmerged", "false", ledger.Superseded, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			fixture := newLedgerFixture(t)
+			fixture := newPrivateLedgerFixture(t)
 			root := sourceRepository(t, "acme", "widgets")
-			if accepted := newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", dualSlice("terminal-release"))); accepted.Status != "accepted" {
+			if accepted := fixture.app(newLedgerApp(t, newForgeServer(t))).accept(t, root, writeProposal(t, "", dualSlice("terminal-release"))); accepted.Status != "accepted" {
 				t.Fatalf("accept: %+v", accepted)
 			}
 			item := "terminal-release/foundation"
@@ -334,7 +339,7 @@ func TestLedgerReconcileTerminalClaimExplicitRelease(t *testing.T) {
 			writeFile(t, filepath.Join(root, "uncommitted-source-progress"), "do not touch\n")
 			sourceBefore := ledgerSnapshot(t, root)
 			calls := 0
-			app, output := completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
+			app, output := fixture.completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
 				calls++
 				if r.Method != http.MethodGet || r.URL.Path != "/repos/acme/widgets/pulls/21" {
 					t.Errorf("unexpected forge request: %s %s", r.Method, r.URL.Path)
@@ -350,7 +355,7 @@ func TestLedgerReconcileTerminalClaimExplicitRelease(t *testing.T) {
 			if completion == nil || completion.SourceHead != "accepted-head" || (tc.terminal == ledger.Merged && completion.MergeCommit != "merge-head") {
 				t.Fatalf("missing completion evidence: %+v", completion)
 			}
-			cli := newLedgerApp(t, newForgeServer(t))
+			cli := fixture.app(newLedgerApp(t, newForgeServer(t)))
 			runRelease := func(command, reference string) deliveryOutput {
 				t.Helper()
 				cli.out.Reset()
@@ -397,7 +402,7 @@ func TestLedgerReconcileTerminalClaimExplicitRelease(t *testing.T) {
 			if result := runRelease("resume", claim); result.Status != "fix_required" {
 				t.Fatalf("released terminal work resumed: %+v", result)
 			}
-			selection := newLedgerApp(t, newForgeServer(t))
+			selection := fixture.app(newLedgerApp(t, newForgeServer(t)))
 			selection.out.Reset()
 			if err := selection.app.Run([]string{"skl", "implement", "next", "--repo", root, "--format", "json"}); err != nil || !strings.Contains(selection.out.String(), `"no_work"`) {
 				t.Fatalf("terminal work returned to queue: %v %s", err, selection.out.String())
@@ -407,14 +412,15 @@ func TestLedgerReconcileTerminalClaimExplicitRelease(t *testing.T) {
 }
 
 func TestLedgerReconcileUnrelatedCommitAndReplicationFailure(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", dualSlice("unrelated")))
+	fixture.app(newLedgerApp(t, newForgeServer(t))).accept(t, root, writeProposal(t, "", dualSlice("unrelated")))
 	attachFixture(t, fixture.clone, "unrelated")
 	// The remote is unavailable, but another selected record's local write is
 	// not a stale-write conflict for the PR being observed.
 	runGit(t, fixture.clone, "remote", "set-url", "origin", filepath.Join(t.TempDir(), "offline"))
-	app, output := completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
+	app, output := fixture.completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
 		statusRecord(t, fixture.clone, "unrelated", "feature", func(state *ledger.SliceState) { state.Title = "Other work progressed" })
 		_, _ = fmt.Fprint(w, fixturePull("closed", "false", "last-head", "", "acme/widgets", "acme/widgets", "main"))
 	})
@@ -425,9 +431,10 @@ func TestLedgerReconcileUnrelatedCommitAndReplicationFailure(t *testing.T) {
 }
 
 func TestLedgerReconcileDoesNotClearNewerReplicationNote(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", singleSlice("replication-race")))
+	fixture.app(newLedgerApp(t, newForgeServer(t))).accept(t, root, writeProposal(t, "", singleSlice("replication-race")))
 	attachFixture(t, fixture.clone, "replication-race")
 	path := filepath.Join("projects", "widgets", "proposals", "replication-race", "foundation", "state.json")
 	temporary := filepath.Join(t.TempDir(), "state.json")
@@ -450,7 +457,7 @@ git -C %q commit -q -m 'newer replication note' -- "$p" 2>> %q
 	if err := os.Chmod(hookPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	app, output := completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
+	app, output := fixture.completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprint(w, fixturePull("closed", "false", "last-head", "", "acme/widgets", "acme/widgets", "main"))
 	})
 	got := runCompletionStatus(t, app, output, root, "--slice", "replication-race/foundation")
@@ -461,13 +468,14 @@ git -C %q commit -q -m 'newer replication note' -- "$p" 2>> %q
 }
 
 func TestLedgerReconcileUnavailableBlockerAndLocalReadScope(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
 	proposal := dualSlice("bounded")
 	proposal.depends = map[string][]string{"feature": {"foundation"}}
-	newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", proposal))
+	fixture.app(newLedgerApp(t, newForgeServer(t))).accept(t, root, writeProposal(t, "", proposal))
 	attachFixture(t, fixture.clone, "bounded")
-	app, output := completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
+	app, output := fixture.completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/repos/acme/widgets/pulls/21" || r.Method != "GET" {
 			t.Errorf("inventory or unrelated request: %s %s", r.Method, r.URL.Path)
 		}
@@ -477,7 +485,7 @@ func TestLedgerReconcileUnavailableBlockerAndLocalReadScope(t *testing.T) {
 	if blocked.Items[0].State != ledger.ReadyForMerge || !strings.Contains(blocked.Items[0].Observation, "unavailable") {
 		t.Fatalf("forge outage invented completion: %+v", blocked)
 	}
-	selection := newLedgerApp(t, newForgeServer(t))
+	selection := fixture.app(newLedgerApp(t, newForgeServer(t)))
 	selection.out.Reset()
 	if err := selection.app.Run([]string{"skl", "implement", "next", "--repo", root, "--format", "json"}); err != nil || strings.Contains(selection.out.String(), `"work_available"`) {
 		t.Fatalf("unknown blocker granted a Claim: %v %s", err, selection.out.String())
@@ -495,15 +503,16 @@ func TestLedgerReconcileUnavailableBlockerAndLocalReadScope(t *testing.T) {
 }
 
 func TestLedgerReconcileReportInterleaveRefusesStaleObservation(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", singleSlice("report-race")))
+	fixture.app(newLedgerApp(t, newForgeServer(t))).accept(t, root, writeProposal(t, "", singleSlice("report-race")))
 	attachFixture(t, fixture.clone, "report-race")
 	path := filepath.Join("projects", "widgets", "proposals", "report-race", "foundation", "implement-report.md")
 	writeFile(t, filepath.Join(fixture.clone, path), "earlier report\n")
 	runGit(t, fixture.clone, "add", path)
 	runGit(t, fixture.clone, "commit", "-q", "-m", "earlier report")
-	app, output := completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
+	app, output := fixture.completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
 		writeFile(t, filepath.Join(fixture.clone, path), "new report\n")
 		runGit(t, fixture.clone, "add", path)
 		runGit(t, fixture.clone, "commit", "-q", "-m", "later report")
@@ -516,15 +525,16 @@ func TestLedgerReconcileReportInterleaveRefusesStaleObservation(t *testing.T) {
 }
 
 func TestLedgerReconcileMixedParentRetirementAndMissingAttachment(t *testing.T) {
-	fixture := newLedgerFixture(t)
+	t.Parallel()
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", dualSlice("parent")))
+	fixture.app(newLedgerApp(t, newForgeServer(t))).accept(t, root, writeProposal(t, "", dualSlice("parent")))
 	statusRecord(t, fixture.clone, "parent", "foundation", func(state *ledger.SliceState) {
 		state.State = ledger.Merged
 		state.Completion = &ledger.TerminalEvidence{Submission: ledger.ForgeAttachment{Repository: "acme/widgets", Number: 21}, Target: ledger.IntegrationTarget{Repository: "acme/widgets", Branch: "main"}}
 	})
 	statusRecord(t, fixture.clone, "parent", "feature", func(state *ledger.SliceState) { state.State = ledger.Superseded })
-	app, output := completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
+	app, output := fixture.completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
 		t.Fatalf("terminal or unattached status called forge: %s", r.URL.Path)
 	})
 	mixed := runCompletionStatus(t, app, output, root)
@@ -558,7 +568,7 @@ func TestLedgerReconcileMixedParentRetirementAndMissingAttachment(t *testing.T) 
 	// A new local approval without a published PR is not abandonment.
 	unpublished := singleSlice("unpublished")
 	unpublished.slices[0].branch = "unpublished-branch"
-	if accepted := newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", unpublished)); accepted.Status != "accepted" {
+	if accepted := fixture.app(newLedgerApp(t, newForgeServer(t))).accept(t, root, writeProposal(t, "", unpublished)); accepted.Status != "accepted" {
 		t.Fatalf("accept unpublished: %s", mustJSON(t, accepted))
 	}
 	statusRecord(t, fixture.clone, "unpublished", "foundation", func(state *ledger.SliceState) { state.State = ledger.ReadyForMerge })
@@ -570,7 +580,7 @@ func TestLedgerReconcileMixedParentRetirementAndMissingAttachment(t *testing.T) 
 		state.Submission = &ledger.ForgeAttachment{Repository: "acme/widgets", Number: 21}
 		state.Target = &ledger.IntegrationTarget{Repository: "acme/widgets", Branch: "main"}
 	})
-	lateApp, lateOutput := completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
+	lateApp, lateOutput := fixture.completionStatusApp(t, func(w http.ResponseWriter, r *http.Request) {
 		body := fixturePull("closed", "true", "accepted-head", "merged-head", "acme/widgets", "acme/widgets", "main")
 		_, _ = fmt.Fprint(w, strings.Replace(body, `"ref":"foundation"`, `"ref":"unpublished-branch"`, 1))
 	})

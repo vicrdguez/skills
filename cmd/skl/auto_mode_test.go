@@ -24,11 +24,9 @@ func TestReconcileObservesHumanMergeIntoProposalBranch(t *testing.T) {
 	statusRecord(t, fixture.clone, "branch-status", "foundation", func(state *ledger.SliceState) {
 		state.Target.Branch = "proposal/branch-status"
 	})
-	app, output := completionStatusApp(t, func(w http.ResponseWriter, _ *http.Request) {
+	app, output := fixture.completionStatusApp(t, func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = fmt.Fprint(w, fixturePull("closed", "true", "accepted-head", "merge-head", "acme/widgets", "acme/widgets", "proposal/branch-status"))
 	})
-	privateCLIHelp(app)
-	app.settingsLookup = fixture.lookup
 	observed := runCompletionStatus(t, app, output, root, "--slice", "branch-status/foundation")
 	if len(observed.Items) != 1 || observed.Items[0].State != ledger.Merged || observed.Items[0].Completion == nil || observed.Items[0].Completion.Target.Branch != "proposal/branch-status" {
 		t.Fatalf("branch merge observation = %+v", observed)
@@ -144,9 +142,9 @@ func (f *proposalPullForge) serve(t *testing.T) func(http.ResponseWriter, *http.
 
 func openBranchStatusFixture(t *testing.T) (*ledgerFixture, string) {
 	t.Helper()
-	fixture := newLedgerFixture(t)
+	fixture := newPrivateLedgerFixture(t)
 	root := sourceRepository(t, "acme", "widgets")
-	if accepted := newLedgerApp(t, newForgeServer(t)).accept(t, root, writeProposal(t, "", singleSlice("branch-status"))); accepted.Status != "accepted" {
+	if accepted := fixture.app(newLedgerApp(t, newForgeServer(t))).accept(t, root, writeProposal(t, "", singleSlice("branch-status"))); accepted.Status != "accepted" {
 		t.Fatalf("accept: %s", mustJSON(t, accepted))
 	}
 	attachFixture(t, fixture.clone, "branch-status")
@@ -168,10 +166,12 @@ func openBranchStatusFixture(t *testing.T) (*ledgerFixture, string) {
 }
 
 func TestReconcilePresentsProposalSubmissionAndObservesItsMerge(t *testing.T) {
+	t.Parallel()
 	fixture, root := openBranchStatusFixture(t)
 	forge := &proposalPullForge{}
-	app, output := completionStatusApp(t, forge.serve(t))
+	app, output := fixture.completionStatusApp(t, forge.serve(t))
 	browser, browsed := browseApp(t)
+	fixture.bindApp(browser)
 	beforeLedger, beforeSource := ledgerSnapshot(t, fixture.clone), ledgerSnapshot(t, root)
 	local := browseQuery(t, browser, browsed, "slice", "--project", "widgets", "--slice", "branch-status/foundation")
 	if local.Slice.Lifecycle != "ready_for_merge" || ledgerSnapshot(t, fixture.clone) != beforeLedger {
@@ -218,6 +218,7 @@ func TestReconcilePresentsProposalSubmissionAndObservesItsMerge(t *testing.T) {
 		t.Fatalf("Proposal pull requests created = %d", forge.created)
 	}
 	browse, browsed := browseApp(t)
+	fixture.bindApp(browse)
 	if err := browse.Run([]string{"skl", "browse", "proposal", "--project", "widgets", "--proposal", "branch-status"}); err != nil {
 		t.Fatal(err)
 	}
@@ -229,9 +230,10 @@ func TestReconcilePresentsProposalSubmissionAndObservesItsMerge(t *testing.T) {
 }
 
 func TestReconcileReportsClosedProposalSubmissionWithoutRecording(t *testing.T) {
+	t.Parallel()
 	fixture, root := openBranchStatusFixture(t)
 	forge := &proposalPullForge{}
-	app, output := completionStatusApp(t, forge.serve(t))
+	app, output := fixture.completionStatusApp(t, forge.serve(t))
 	runCompletionStatus(t, app, output, root)
 	before := runGitOutput(t, fixture.clone, "rev-parse", "HEAD")
 	forge.mu.Lock()
@@ -252,9 +254,10 @@ func TestReconcileReportsClosedProposalSubmissionWithoutRecording(t *testing.T) 
 // A human who merges the Proposal Submission and retires before any status
 // observation is refused; the next status records the completion.
 func TestDecisionRetireObservesMergedProposalSubmission(t *testing.T) {
-	_, root := openBranchStatusFixture(t)
+	t.Parallel()
+	fixture, root := openBranchStatusFixture(t)
 	forge := &proposalPullForge{}
-	app, output := completionStatusApp(t, forge.serve(t))
+	app, output := fixture.completionStatusApp(t, forge.serve(t))
 	runCompletionStatus(t, app, output, root)
 	forge.mu.Lock()
 	forge.state, forge.merged = "closed", true

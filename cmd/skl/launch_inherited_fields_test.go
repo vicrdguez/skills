@@ -11,7 +11,7 @@ func TestMissingRoleFieldsStayInheritedUntilFreshRecovery(t *testing.T) {
 	f := newPrivateLedgerFixture(t)
 	f.misconfigure(t, fmt.Sprintf(`{"ledger":%q,"harnesses":{"pi":{"reviewer":{"model":"initial-review"},"helper":{"thinking":"initial-helper"}}}}`, f.clone))
 	source, _ := deliverySourceRepo(t)
-	f.commitLaunchProposal(t, singleSlice(deliveryTestProposal))
+	f.commitReadyProposal(t, singleSlice(deliveryTestProposal))
 	cli := f.app(deliveryNoForgeApp(t))
 	session := cli.dispatchJSON(t, "skl implement next --repo "+source+" --harness pi --mode team").Packet.Facts.Delivery
 	if session.Reviewer.Model != "initial-review" || session.Reviewer.Thinking != "" || session.Helper.Model != "" || session.Helper.Thinking != "initial-helper" {
